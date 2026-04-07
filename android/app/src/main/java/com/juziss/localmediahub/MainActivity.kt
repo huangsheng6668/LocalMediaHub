@@ -4,64 +4,126 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.juziss.localmediahub.data.FavoritesStore
+import com.juziss.localmediahub.data.MediaFile
+import com.juziss.localmediahub.ui.screen.BrowseScreen
+import com.juziss.localmediahub.ui.screen.ConnectionScreen
+import com.juziss.localmediahub.ui.screen.ImagePreviewScreen
+import com.juziss.localmediahub.ui.screen.VideoPlayerScreen
 import com.juziss.localmediahub.ui.theme.LocalMediaHubTheme
+import com.juziss.localmediahub.viewmodel.BrowseViewModel
+import com.juziss.localmediahub.viewmodel.BrowseViewModelFactory
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.decode.BitmapFactoryDecoder
+import com.juziss.localmediahub.native.NativeDecoderFactory
 
-class MainActivity : ComponentActivity() {
+class MainActivity : ComponentActivity(), ImageLoaderFactory {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             LocalMediaHubTheme {
-                MainScreen()
+                LocalMediaHubApp()
             }
         }
     }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MainScreen() {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("LocalMediaHub") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.primary,
-                )
-            )
-        }
-    ) { innerPadding ->
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            color = MaterialTheme.colorScheme.background
-        ) {
-            Text(
-                text = "Welcome to LocalMediaHub! Step 1 - Project Skeleton",
-                style = MaterialTheme.typography.headlineMedium
-            )
-        }
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .components {
+                add(NativeDecoderFactory.Factory())
+                add(BitmapFactoryDecoder.Factory())
+            }
+            .crossfade(true)
+            .build()
     }
 }
 
-@Preview(showBackground = true)
 @Composable
-fun MainScreenPreview() {
-    LocalMediaHubTheme {
-        MainScreen()
+fun LocalMediaHubApp() {
+    val navController = rememberNavController()
+
+    // Shared state for passing media data between screens
+    var currentVideoFile by remember { mutableStateOf<MediaFile?>(null) }
+    var currentVideoUrl by remember { mutableStateOf("") }
+
+    var currentImageFile by remember { mutableStateOf<MediaFile?>(null) }
+    var currentImageUrl by remember { mutableStateOf("") }
+    var imageList by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
+
+    val context = LocalContext.current
+    val favoritesStore = remember { FavoritesStore(context) }
+    val browseViewModel: BrowseViewModel = viewModel(
+        factory = BrowseViewModelFactory(favoritesStore),
+    )
+
+    NavHost(navController = navController, startDestination = "connection") {
+        composable("connection") {
+            ConnectionScreen(
+                onConnected = {
+                    navController.navigate("browse") {
+                        popUpTo("connection") { inclusive = false }
+                    }
+                },
+            )
+        }
+
+        composable("browse") {
+            BrowseScreen(
+                onFolderClick = { _, _ -> /* handled internally */ },
+                onVideoClick = { file ->
+                    currentVideoFile = file
+                    currentVideoUrl = browseViewModel.getVideoStreamUrl(file)
+                    navController.navigate("videoPlayer")
+                },
+                onImageClick = { file, images ->
+                    currentImageFile = file
+                    currentImageUrl = browseViewModel.getOriginalImageUrl(file)
+                    imageList = images
+                    navController.navigate("imagePreview")
+                },
+                viewModel = browseViewModel,
+            )
+        }
+
+        composable("videoPlayer") {
+            val file = currentVideoFile
+            if (file != null) {
+                VideoPlayerScreen(
+                    file = file,
+                    streamUrl = currentVideoUrl,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+        }
+
+        composable("imagePreview") {
+            val file = currentImageFile
+            if (file != null) {
+                ImagePreviewScreen(
+                    currentFile = file,
+                    imageUrl = currentImageUrl,
+                    imageList = imageList,
+                    onBack = { navController.popBackStack() },
+                    onNavigate = { newFile ->
+                        currentImageFile = newFile
+                        currentImageUrl = browseViewModel.getOriginalImageUrl(newFile)
+                    },
+                    getOriginalUrl = { mediaFile ->
+                        browseViewModel.getOriginalImageUrl(mediaFile)
+                    },
+                    getThumbnailUrl = { mediaFile ->
+                        browseViewModel.getThumbnailUrl(mediaFile)
+                    },
+                )
+            }
+        }
     }
 }
