@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.juziss.localmediahub.data.MediaFile
@@ -36,7 +37,10 @@ fun VideoPlayerScreen(
 ) {
     val context = LocalContext.current
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
+        val renderersFactory = DefaultRenderersFactory(context).apply {
+            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        }
+        ExoPlayer.Builder(context, renderersFactory).build().apply {
             val mediaItem = MediaItem.fromUri(streamUrl)
             setMediaItem(mediaItem)
             prepare()
