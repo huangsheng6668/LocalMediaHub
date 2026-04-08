@@ -3,10 +3,21 @@ server:
   port: 8000
 
 scan:
-  roots:
-    - "/path/to/your/media"
-  video_extensions: [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".ts"]
-  image_extensions: [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
+  video_extensions:
+    - ".mp4"
+    - ".mkv"
+    - ".avi"
+    - ".mov"
+    - ".wmv"
+    - ".flv"
+    - ".ts"
+  image_extensions:
+    - ".jpg"
+    - ".jpeg"
+    - ".png"
+    - ".gif"
+    - ".bmp"
+    - ".webp"
 
 thumbnail:
   cache_dir: ".cache/thumbnails"

@@ -85,6 +85,21 @@ class BrowseViewModel(
     private val _fileSortOrder = MutableStateFlow(SortOrder.NAME_ASC)
     val fileSortOrder: StateFlow<SortOrder> = _fileSortOrder.asStateFlow()
 
+    // ── Scroll position persistence ──────────────────────────
+    private val _scrollPositions = mutableMapOf<String, Int>()
+    private val _restoreScrollTo = MutableStateFlow<String?>(null)
+    val restoreScrollTo: StateFlow<String?> = _restoreScrollTo.asStateFlow()
+
+    fun saveScrollPosition(path: String, index: Int) {
+        if (index > 0) _scrollPositions[path] = index
+    }
+
+    fun getScrollPosition(path: String): Int = _scrollPositions[path] ?: 0
+
+    fun consumeRestoreScroll() {
+        _restoreScrollTo.value = null
+    }
+
     // ── Favorites ─────────────────────────────────────────────
 
     private val _favorites = MutableStateFlow<Set<String>>(emptySet())
@@ -178,6 +193,8 @@ class BrowseViewModel(
     /** Browse a system path (absolute path, any drive). */
     fun browseSystemPath(absolutePath: String, folderName: String) {
         viewModelScope.launch {
+            // Save current scroll position before navigating
+            saveScrollPosition(_currentPath.value, 0) // will be updated by UI
             _browseState.value = BrowseState.Loading
             _pathStack.value = _pathStack.value + _currentPath.value
             _currentPath.value = absolutePath
@@ -242,7 +259,6 @@ class BrowseViewModel(
         _pathStack.value = stack.dropLast(1)
 
         viewModelScope.launch {
-            _browseState.value = BrowseState.Loading
             _currentPath.value = previousPath
 
             if (previousPath.isEmpty()) {
@@ -263,6 +279,7 @@ class BrowseViewModel(
                             folders = applySortToFolders(data.folders),
                             files = applySortToFiles(data.files),
                         ))
+                        _restoreScrollTo.value = previousPath
                     }
                     is NetworkResult.Error -> {
                         _browseState.value = BrowseState.Error(result.message)
@@ -278,6 +295,7 @@ class BrowseViewModel(
                             folders = applySortToFolders(result.data.folders),
                             files = applySortToFiles(result.data.files),
                         ))
+                        _restoreScrollTo.value = previousPath
                     }
                     is NetworkResult.Error -> {
                         _browseState.value = BrowseState.Error(result.message)

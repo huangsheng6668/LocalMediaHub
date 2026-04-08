@@ -1,55 +1,76 @@
 # Claude Code Project Context: LocalMediaHub (C/S System)
 
-这是一个本地媒体资源管理系统。服务端运行在 PC 端，负责扫描和提供媒体流；客户端为原生 Android 应用，用于浏览和播放。
+本地媒体资源管理系统。服务端运行在 PC 端，负责扫描和提供媒体流；客户端为原生 Android 应用，用于浏览和播放。
 
 ## 技术栈
-- **Server (后端):** Python 3.10+ / FastAPI / Uvicorn
-- **Client (前端):** Android Native / Kotlin / Jetpack Compose
+- **Server:** Go 1.22+ / Echo v4 / System Tray
+- **Client:** Android Native / Kotlin / Jetpack Compose
 - **通信协议:** HTTP (REST API / Streaming)
-- **主要功能:** 本地文件系统扫描、视频流播放、图片预览
 
 ## 常用命令
 
-### Backend (Server)
-- **安装依赖:** `pip install fastapi uvicorn`
-- **启动服务:** `python main.py` 或 `uvicorn main:app --reload --host 0.0.0.0`
-- **测试接口:** `curl http://localhost:8000/docs`
+### Go Server (推荐)
+- **编译:** `cd server && go build -o LocalMediaHub.exe ./cmd/server`
+- **启动 (GUI 模式):** `./LocalMediaHub.exe`（双击即可，带系统托盘）
+- **启动 (无头模式):** `./LocalMediaHub.exe --headless`
+- **依赖代理:** `GOPROXY=https://goproxy.cn,direct go mod tidy`
 
 ### Frontend (Android)
-- **编译项目:** `./gradlew assembleDebug`
-- **运行单元测试:** `./gradlew test`
-- **连接真机/模拟器安装:** `./gradlew installDebug`
-- **Lint 检查:** `./gradlew lint`
+- **Debug:** `cd android && ./gradlew assembleDebug`
+- **Release:** `cd android && ./gradlew assembleRelease`
+- **APK 位置:** `android/app/build/outputs/apk/release/app-release.apk`
 
 ## 项目结构规范
-- `/server`: Python 后端源代码
-    - `main.py`: 程序入口
-    - `scanner.py`: 本地磁盘扫描逻辑
-    - `api/`: 路由定义
-- `/android`: Android Studio 项目根目录
-    - `app/src/main/java/.../ui/`: Compose 组件
-    - `app/src/main/java/.../network/`: Retrofit 接口定义
-    - `app/src/main/java/.../data/`: 模型类与仓库层
+- `/server`: Go 后端（当前主力版本）
+    - `cmd/server/main.go`: 程序入口
+    - `internal/config/`: 配置加载（YAML）
+    - `internal/models/`: 数据模型
+    - `internal/server/`: Echo 路由注册
+    - `internal/server/handler/`: 24 个 API handler
+    - `internal/server/middleware/`: CORS 中间件
+    - `internal/service/`: 业务逻辑（scanner, tags, streaming, thumbnail）
+    - `internal/mdns/`: mDNS 服务注册
+    - `internal/systray/`: 系统托盘（getlantern/systray）
+    - `internal/gui/`: GUI 模式入口
+    - `config.yaml`: 运行时配置
+- `/android`: Android Studio 项目
+    - `app/src/main/java/.../ui/screen/`: Compose 页面
+    - `app/src/main/java/.../viewmodel/`: ViewModel 层
+    - `app/src/main/java/.../network/`: Retrofit 接口
+    - `app/src/main/java/.../data/`: 模型与仓库层
 
 ## 编码规则
 
-### Python (Server)
-- 使用 **FastAPI** 异步 (`async def`) 处理 I/O 密集型任务（如文件扫描）。
-- 路径处理必须兼容 Windows/Linux（使用 `pathlib`）。
-- 视频播放需支持 **Range Requests** 以实现进度条拖动。
-- 遵循 PEP 8 规范，使用类型注解 (Type Hints)。
+### Go (Server)
+- Handler 层通过 `Handler` struct 持有服务依赖，不使用全局变量。
+- 路径安全：所有文件访问必须经过 `ValidatePath` 或 `isWithinRoots` 校验。
+- 列表返回用 `make([]T, 0)` 初始化，避免 JSON 序列化为 `null`。
+- 业务逻辑放在 `internal/service/`，handler 只做参数解析和响应。
 
 ### Kotlin (Android)
-- **UI:** 必须使用 **Jetpack Compose** 进行界面开发。
-- **架构:** 遵循 **MVVM** (Model-View-ViewModel) 模式。
-- **网络:** 使用 **Retrofit + OkHttp** 进行 API 调用。
-- **图片加载:** 推荐使用 **Coil** 加载网络/本地图片。
-- **视频播放:** 使用 **ExoPlayer (Media3)**。
-- 异步操作使用 **Coroutines** (协程)。
+- **UI:** Jetpack Compose，MVVM 架构。
+- **网络:** Retrofit + OkHttp。
+- **图片:** Coil（含 NativeDecoderFactory）。
+- **视频:** Media3 (ExoPlayer) + FFmpeg。
+- **异步:** Coroutines。
 
-## 核心逻辑定义
-1. **Server 权限:** Server 端需提供配置界面或配置文件，指定允许 App 访问的根文件夹路径。
-2. **发现机制:** 初期可手动输入 PC IP 地址，后期考虑集成 mDNS/NSD (Network Service Discovery) 自动发现服务端。
-3. **媒体处理:** 
-- 视频：直接通过 HTTP Stream 传输。
-- 图片：Server 端需提供缩略图生成接口（使用 Pillow），避免 App 端加载原图导致内存溢出。
+## Go Server 架构
+
+```
+main.go --headless?→ server.New(cfg) → headless 模式
+       └── GUI 模式 → gui.Run(cfg) → server + systray + 信号处理
+
+Server struct 持有:
+  - Scanner   (文件扫描，TTL 缓存)
+  - TagsService (JSON 持久化，RWMutex)
+  - StreamingService (Range 请求，64KB 分块)
+  - ThumbnailService (MD5 磁盘缓存，LANCZOS 缩放)
+
+Handler struct 接收所有 service 引用，方法挂在 struct 上。
+```
+
+## 核心功能
+1. **全盘浏览:** 自动检测 Windows 驱动器，浏览任意目录，只显示媒体文件
+2. **发现机制:** mDNS 注册 + Android NSD 自动发现
+3. **媒体处理:** 视频流传输（Range）、缩略图生成、标签系统
+4. **双模式:** GUI（系统托盘）或 headless（无窗口）

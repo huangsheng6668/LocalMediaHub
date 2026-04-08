@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
@@ -611,9 +612,31 @@ private fun BrowseContent(
     val gridState = rememberLazyGridState()
     val staggeredState = rememberLazyStaggeredGridState()
     val scope = rememberCoroutineScope()
+    val restorePath by viewModel.restoreScrollTo.collectAsState()
+    val currentPath by viewModel.currentPath.collectAsState()
 
     val images = files.filter { it.mediaType == "image" }
     val useStaggeredGrid = folders.isEmpty() && images.isNotEmpty()
+
+    // Save scroll position whenever it changes
+    LaunchedEffect(gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset) {
+        viewModel.saveScrollPosition(currentPath, gridState.firstVisibleItemIndex)
+    }
+
+    // Restore scroll position when navigating back
+    LaunchedEffect(restorePath) {
+        if (restorePath != null) {
+            val savedIndex = viewModel.getScrollPosition(restorePath!!)
+            if (savedIndex > 0) {
+                if (useStaggeredGrid) {
+                    staggeredState.scrollToItem(savedIndex)
+                } else {
+                    gridState.scrollToItem(savedIndex)
+                }
+            }
+            viewModel.consumeRestoreScroll()
+        }
+    }
 
     // Instant scroll to top when either sort order changes
     LaunchedEffect(folderSortOrder, fileSortOrder) {

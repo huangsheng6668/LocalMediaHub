@@ -1,0 +1,25 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Wails
+build/bin/
+
+# Go
+vendor/
+*.test
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+
+# Data
+.data/
+.cache/
+
+# Frontend
+frontend/node_modules/
+dist/
