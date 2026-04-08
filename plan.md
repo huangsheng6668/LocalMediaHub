@@ -82,8 +82,8 @@
     port: 8000
   scan:
     roots:
-      - "D:/Movies"
-      - "D:/Photos"
+      - "D:/Media/Movies"
+      - "D:/Media/Photos"
     video_extensions: [".mp4", ".mkv", ".avi", ".mov"]
     image_extensions: [".jpg", ".jpeg", ".png", ".gif", ".webp"]
   thumbnail:
@@ -140,11 +140,11 @@
 - [x] 双指缩放手势
 
 ### 验证
-- [x] App 能连接到 PC Server（ `http://192.168.31.230:8000` 已 server 返回数据确认)
+- [x] App 能连接到 PC Server（ `http://<PC_IP>:8000` 已 server 返回数据确认)
 - [x] 文件列表正确显示（Folders: 2 roots, Videos: 41 files, Images: 104)
  total)
 - [x] 视频流正常播放（ Server Range Requests 206 OK,- [x] 图片缩略图正常加载,Server 燉略图生成, 点击可查看大图)
-- [x] 浏览子目录正常（ `telegramSavePath/browse` ✅, `jianying/browse` ✅)
+- [x] 浏览子目录正常（子目录 browse ✅)
 
 ---
 
@@ -155,7 +155,7 @@
 ### 4.1 Server 端测试
 - [ ] 单元测试：scanner、API 路由、缩略图生成
 - [x] 安全测试：路径遍历攻击防护验证（已通过端到端测试）
-- [x] 大文件测试：4GB+ 视频流传输稳定性（`telegramSavePath/hot` 目录下有 3.5GB+ 文件）
+- [x] 大文件测试：4GB+ 视频流传输稳定性（有 3.5GB+ 文件测试通过）
 - [ ] 并发测试：多客户端同时请求
 
 ### 4.2 Android 端测试

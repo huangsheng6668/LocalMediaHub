@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-NDK=/mnt/c/Users/juziss/AppData/Local/Android/Sdk/ndk/android-ndk-r27
+NDK=${ANDROID_NDK_HOME:-/path/to/android-ndk-r27}
 TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
 API=26
 TARGET=aarch64-linux-android
@@ -13,7 +13,7 @@ AR=$TOOLCHAIN/bin/llvm-ar
 RANLIB=$TOOLCHAIN/bin/llvm-ranlib
 
 CFLAGS="-Os -fPIC -DPIC -DANDROID"
-PROJECT=/mnt/f/github_project/localResourcesToPhone/android/app/src/main/cpp
+PROJECT=$(cd "$(dirname "$0")" && pwd)/android/app/src/main/cpp
 LIBS_DIR=$PROJECT/libs/arm64-v8a
 mkdir -p $LIBS_DIR
 
