@@ -3,12 +3,20 @@ package com.juziss.localmediahub.network
 import com.juziss.localmediahub.data.BrowseResult
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.PaginatedMediaFiles
+import com.juziss.localmediahub.data.SearchResult
+import com.juziss.localmediahub.data.SystemBrowseResult
+import com.juziss.localmediahub.data.Tag
+import com.juziss.localmediahub.data.TagCreateRequest
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.*
 
 /**
  * Retrofit API interface matching all Server endpoints.
+ *
+ * Note: For endpoints with path parameters that may contain "/",
+ * we use @GET with a full relative URL (Retrofit supports this
+ * by appending the string directly to base URL).
  */
 interface MediaApi {
 
@@ -16,9 +24,9 @@ interface MediaApi {
     @GET("api/v1/folders")
     suspend fun getFolders(): List<Folder>
 
-    @GET("api/v1/folders/{path}/browse")
+    @GET
     suspend fun browseFolder(
-        @Path(value = "path", encoded = true) path: String,
+        @Url url: String,
     ): BrowseResult
 
     // ── Videos ────────────────────────────────────────────────
@@ -37,23 +45,57 @@ interface MediaApi {
 
     // ── Streaming / Thumbnails ────────────────────────────────
     @Streaming
-    @GET("api/v1/videos/{path}/stream")
+    @GET
     suspend fun streamVideo(
-        @Path(value = "path", encoded = true) path: String,
+        @Url url: String,
         @Header("Range") range: String? = null,
     ): Response<ResponseBody>
 
-    @GET("api/v1/images/{path}/thumbnail")
+    @GET
     suspend fun getThumbnail(
-        @Path(value = "path", encoded = true) path: String,
+        @Url url: String,
     ): ResponseBody
 
-    @GET("api/v1/images/{path}/original")
+    @GET
     suspend fun getOriginalImage(
-        @Path(value = "path", encoded = true) path: String,
+        @Url url: String,
     ): ResponseBody
 
     // ── Health check ──────────────────────────────────────────
     @GET(".")
     suspend fun healthCheck(): Response<Map<String, String>>
+
+    // ── System browse ─────────────────────────────────────────
+    @GET("api/v1/system/drives")
+    suspend fun getSystemDrives(): List<String>
+
+    @GET("api/v1/system/browse")
+    suspend fun browseSystemPath(@Query("path") path: String): SystemBrowseResult
+
+    // ── Search ──────────────────────────────────────────────
+    @GET("api/v1/search")
+    suspend fun search(
+        @Query("q") query: String,
+        @Query("path") path: String? = null,
+        @Query("limit") limit: Int = 50,
+    ): SearchResult
+
+    // ── Tags ──────────────────────────────────────────────
+    @GET("api/v1/tags")
+    suspend fun getTags(): List<Tag>
+
+    @POST("api/v1/tags")
+    suspend fun createTag(@Body request: TagCreateRequest): Tag
+
+    @DELETE
+    suspend fun deleteTag(@Url url: String): retrofit2.Response<Unit>
+
+    @POST
+    suspend fun tagFile(@Url url: String): Map<String, String>
+
+    @DELETE
+    suspend fun untagFile(@Url url: String): Map<String, String>
+
+    @GET
+    suspend fun getTaggedFiles(@Url url: String): List<String>
 }

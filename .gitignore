@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Server cache
+.cache/
+thumbnails/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Android
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/*.iml
+android/.idea/
+
+# Logs
+*.log
+
+# Environment
+.env
+
+# Signing / secrets
+*.jks
+*.keystore
+keystore.properties
+android/keystore.properties
+android/release-keystore.jks
+
+# Claude Code / AI
+.claude/
+
+# Server runtime data
+server/.data/
+server/=*
+
+# OS
+Thumbs.db
+Desktop.ini

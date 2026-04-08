@@ -9,16 +9,21 @@ import coil.request.Options
 import coil.size.Size
 import coil.size.pxOrElse
 
-class NativeDecoderFactory : Decoder {
+/**
+ * Coil Decoder that routes JPEG/WebP images to native decoding
+ * and falls back to BitmapFactory for other formats.
+ *
+ * Coil 2.x: Decoder.Factory receives the SourceResult and creates a Decoder.
+ * The Decoder.decode() reads from the source passed during Factory.create().
+ */
+class NativeDecoderFactory(
+    private val sourceResult: SourceResult,
+    private val size: Size,
+    private val options: Options,
+) : Decoder {
 
-    override fun key(): String = "NativeDecoder"
-
-    override suspend fun decode(
-        source: SourceResult,
-        size: Size,
-        options: Options
-    ): DecodeResult {
-        val bytes = source.source.source().buffer().readByteArray()
+    override suspend fun decode(): DecodeResult {
+        val bytes = sourceResult.source.source().buffer().readByteArray()
         val info = NativeImageDecoder.getImageInfo(bytes)
 
         val bitmap = when (info?.format) {
@@ -44,10 +49,9 @@ class NativeDecoderFactory : Decoder {
         override fun create(
             result: SourceResult,
             options: Options,
-            imageLoader: coil.ImageLoader
+            imageLoader: coil.ImageLoader,
         ): Decoder? {
             val bufferedSource = result.source.source().buffer()
-            // Peek header bytes without consuming them
             val header = try {
                 bufferedSource.peek().readByteArray(12)
             } catch (_: Exception) {
@@ -64,9 +68,9 @@ class NativeDecoderFactory : Decoder {
                     String(header, 8, 4) == "WEBP"
 
             return if (isJpeg || isWebp) {
-                NativeDecoderFactory()
+                NativeDecoderFactory(result, Size.ORIGINAL, options)
             } else {
-                null // Let Coil use default BitmapFactoryDecoder
+                null
             }
         }
     }

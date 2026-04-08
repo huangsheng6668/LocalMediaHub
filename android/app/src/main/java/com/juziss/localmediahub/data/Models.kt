@@ -28,6 +28,8 @@ data class Folder(
     val relativePath: String,
     @SerializedName("is_root")
     val isRoot: Boolean = false,
+    @SerializedName("modified_time")
+    val modifiedTime: String = "",
 )
 
 /**
@@ -50,5 +52,42 @@ data class PaginatedMediaFiles(
     @SerializedName("page_size")
     val pageSize: Int,
     @SerializedName("has_more")
-    val hasMore: Bool,
+    val hasMore: Boolean,
+)
+
+/**
+ * Matches server/models.py SearchResult
+ */
+data class SearchResult(
+    val query: String,
+    val folders: List<Folder>,
+    val files: List<MediaFile>,
+)
+
+/**
+ * Matches server/models.py FileTag
+ */
+data class Tag(
+    val id: String,
+    val name: String,
+    val color: String = "#808080",
+)
+
+/**
+ * Matches server/models.py TagCreateRequest
+ */
+data class TagCreateRequest(
+    val name: String,
+    val color: String = "#808080",
+)
+
+/**
+ * Result from system browse endpoint.
+ */
+data class SystemBrowseResult(
+    @SerializedName("current_path")
+    val currentPath: String? = null,
+    val drives: List<String>? = null,
+    val folders: List<Folder>,
+    val files: List<MediaFile>,
 )

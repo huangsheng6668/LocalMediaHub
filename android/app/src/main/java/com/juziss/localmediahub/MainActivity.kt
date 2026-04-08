@@ -55,7 +55,6 @@ fun LocalMediaHubApp() {
     var currentVideoUrl by remember { mutableStateOf("") }
 
     var currentImageFile by remember { mutableStateOf<MediaFile?>(null) }
-    var currentImageUrl by remember { mutableStateOf("") }
     var imageList by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
 
     val context = LocalContext.current
@@ -85,7 +84,6 @@ fun LocalMediaHubApp() {
                 },
                 onImageClick = { file, images ->
                     currentImageFile = file
-                    currentImageUrl = browseViewModel.getOriginalImageUrl(file)
                     imageList = images
                     navController.navigate("imagePreview")
                 },
@@ -94,10 +92,8 @@ fun LocalMediaHubApp() {
         }
 
         composable("videoPlayer") {
-            val file = currentVideoFile
-            if (file != null) {
+            if (currentVideoFile != null) {
                 VideoPlayerScreen(
-                    file = file,
                     streamUrl = currentVideoUrl,
                     onBack = { navController.popBackStack() },
                 )
@@ -109,18 +105,10 @@ fun LocalMediaHubApp() {
             if (file != null) {
                 ImagePreviewScreen(
                     currentFile = file,
-                    imageUrl = currentImageUrl,
                     imageList = imageList,
                     onBack = { navController.popBackStack() },
-                    onNavigate = { newFile ->
-                        currentImageFile = newFile
-                        currentImageUrl = browseViewModel.getOriginalImageUrl(newFile)
-                    },
                     getOriginalUrl = { mediaFile ->
                         browseViewModel.getOriginalImageUrl(mediaFile)
-                    },
-                    getThumbnailUrl = { mediaFile ->
-                        browseViewModel.getThumbnailUrl(mediaFile)
                     },
                 )
             }

@@ -8,6 +8,8 @@
 #include <android/bitmap.h>
 
 #include <jpeglib.h>
+#include <jerror.h>
+#include <setjmp.h>
 #include <webp/decode.h>
 
 #define LOG_TAG "NativeImageDecoder"
@@ -204,8 +206,28 @@ jobject createBitmapFromRGBA(
 }
 
 // ---------------------------------------------------------------------------
-// JPEG decoding (libjpeg-turbo)
+// JPEG decoding (libjpeg-turbo) with setjmp/longjmp error recovery
 // ---------------------------------------------------------------------------
+
+struct JpegErrorHandler {
+    struct jpeg_error_mgr base;
+    jmp_buf setjmpBuffer;
+    char lastMessage[JMSG_LENGTH_MAX];
+};
+
+static void jpegErrorCallback(j_common_ptr cinfo) {
+    auto *handler = reinterpret_cast<JpegErrorHandler *>(cinfo->err);
+    (*cinfo->err->format_message)(cinfo, handler->lastMessage);
+    LOGE("JPEG error: %s", handler->lastMessage);
+    longjmp(handler->setjmpBuffer, 1);
+}
+
+static void jpegOutputMessageCallback(j_common_ptr cinfo) {
+    auto *handler = reinterpret_cast<JpegErrorHandler *>(cinfo->err);
+    char buffer[JMSG_LENGTH_MAX];
+    (*cinfo->err->format_message)(cinfo, buffer);
+    LOGW("JPEG warning: %s", buffer);
+}
 
 /**
  * Decode a JPEG byte buffer to RGBA pixel data.
@@ -219,10 +241,21 @@ uint8_t *decodeJpegToRGBA(
     jpeg_decompress_struct cinfo;
     memset(&cinfo, 0, sizeof(cinfo));
 
-    struct jpeg_error_mgr jerr;
-    cinfo.err = jpeg_std_error(&jerr);
+    JpegErrorHandler jerr;
+    cinfo.err = jpeg_std_error(&jerr.base);
+    jerr.base.error_exit = jpegErrorCallback;
+    jerr.base.output_message = jpegOutputMessageCallback;
 
-    // Use setjmp/longjmp for error recovery so we can clean up on failure.
+    uint8_t *rgba = nullptr;
+
+    // setjmp returns 0 on first call, non-zero when longjmp'd from error handler.
+    if (setjmp(jerr.setjmpBuffer)) {
+        LOGE("JPEG decoding aborted due to error: %s", jerr.lastMessage);
+        if (rgba) { free(rgba); rgba = nullptr; }
+        jpeg_destroy_decompress(&cinfo);
+        return nullptr;
+    }
+
     jpeg_create_decompress(&cinfo);
     jpeg_mem_src(&cinfo, data, length);
 
@@ -232,7 +265,6 @@ uint8_t *decodeJpegToRGBA(
         return nullptr;
     }
 
-    // Request RGBA output — libjpeg will convert colorspace for us.
     cinfo.out_color_space = JCS_EXT_RGBA;
 
     if (!jpeg_start_decompress(&cinfo)) {
@@ -245,14 +277,13 @@ uint8_t *decodeJpegToRGBA(
     int height = static_cast<int>(cinfo.output_height);
     int rowStride = width * 4;
 
-    uint8_t *rgba = static_cast<uint8_t *>(malloc(width * height * 4));
+    rgba = static_cast<uint8_t *>(malloc(width * height * 4));
     if (!rgba) {
         LOGE("Failed to allocate RGBA buffer for JPEG decode");
         jpeg_destroy_decompress(&cinfo);
         return nullptr;
     }
 
-    // Read scanlines one at a time.
     while (cinfo.output_scanline < cinfo.output_height) {
         uint8_t *rowPtr = rgba + cinfo.output_scanline * rowStride;
         jpeg_read_scanlines(&cinfo, &rowPtr, 1);
@@ -481,20 +512,27 @@ Java_com_juziss_localmediahub_native_NativeImageDecoder_nativeGetImageInfo(
     if (format == FORMAT_JPEG) {
         jpeg_decompress_struct cinfo;
         memset(&cinfo, 0, sizeof(cinfo));
-        struct jpeg_error_mgr jerr;
-        cinfo.err = jpeg_std_error(&jerr);
+        JpegErrorHandler jerr;
+        cinfo.err = jpeg_std_error(&jerr.base);
+        jerr.base.error_exit = jpegErrorCallback;
+        jerr.base.output_message = jpegOutputMessageCallback;
 
-        jpeg_create_decompress(&cinfo);
-        jpeg_mem_src(&cinfo, rawData, length);
-
-        if (jpeg_read_header(&cinfo, TRUE) == JPEG_HEADER_OK) {
-            width  = static_cast<int>(cinfo.image_width);
-            height = static_cast<int>(cinfo.image_height);
+        if (setjmp(jerr.setjmpBuffer)) {
+            LOGW("nativeGetImageInfo: JPEG error: %s", jerr.lastMessage);
+            jpeg_destroy_decompress(&cinfo);
         } else {
-            LOGW("nativeGetImageInfo: jpeg_read_header failed");
-        }
+            jpeg_create_decompress(&cinfo);
+            jpeg_mem_src(&cinfo, rawData, length);
 
-        jpeg_destroy_decompress(&cinfo);
+            if (jpeg_read_header(&cinfo, TRUE) == JPEG_HEADER_OK) {
+                width  = static_cast<int>(cinfo.image_width);
+                height = static_cast<int>(cinfo.image_height);
+            } else {
+                LOGW("nativeGetImageInfo: jpeg_read_header failed");
+            }
+
+            jpeg_destroy_decompress(&cinfo);
+        }
     } else if (format == FORMAT_WEBP) {
         if (!WebPGetInfo(rawData, length, &width, &height)) {
             LOGW("nativeGetImageInfo: WebPGetInfo failed");

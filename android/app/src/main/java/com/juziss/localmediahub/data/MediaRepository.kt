@@ -1,5 +1,8 @@
 package com.juziss.localmediahub.data
 
+import com.juziss.localmediahub.data.SearchResult
+import com.juziss.localmediahub.data.Tag
+import com.juziss.localmediahub.data.TagCreateRequest
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.RetrofitClient
 import retrofit2.HttpException
@@ -13,14 +16,18 @@ class MediaRepository {
     private val api
         get() = RetrofitClient.api
 
+    private val baseUrl
+        get() = RetrofitClient.getBaseUrl()
+
     // ── Folders ───────────────────────────────────────────────
 
     suspend fun getFolders(): NetworkResult<List<Folder>> = safeApiCall {
         api.getFolders()
     }
 
-    suspend fun browseFolder(path: String): NetworkResult<BrowseResult> = safeApiCall {
-        api.browseFolder(path)
+    suspend fun browseFolder(relativePath: String): NetworkResult<BrowseResult> = safeApiCall {
+        val url = "$baseUrl/api/v1/folders/$relativePath/browse"
+        api.browseFolder(url)
     }
 
     // ── Videos ────────────────────────────────────────────────
@@ -41,6 +48,22 @@ class MediaRepository {
         api.getImages(page, pageSize)
     }
 
+    // ── Search ──────────────────────────────────────────────
+
+    suspend fun search(query: String, currentPath: String = ""): NetworkResult<SearchResult> = safeApiCall {
+        api.search(query, path = currentPath.ifEmpty { null })
+    }
+
+    // ── System browse ──────────────────────────────────────────
+
+    suspend fun getSystemDrives(): NetworkResult<List<String>> = safeApiCall {
+        api.getSystemDrives()
+    }
+
+    suspend fun browseSystemPath(path: String): NetworkResult<SystemBrowseResult> = safeApiCall {
+        api.browseSystemPath(path)
+    }
+
     // ── Health check ──────────────────────────────────────────
 
     suspend fun healthCheck(): NetworkResult<Map<String, String>> = try {
@@ -54,18 +77,65 @@ class MediaRepository {
         NetworkResult.Error(e.toUserMessage())
     }
 
+    // ── Tags ──────────────────────────────────────────────
+
+    suspend fun getTags(): NetworkResult<List<Tag>> = safeApiCall {
+        api.getTags()
+    }
+
+    suspend fun createTag(name: String, color: String = "#808080"): NetworkResult<Tag> = safeApiCall {
+        api.createTag(TagCreateRequest(name = name, color = color))
+    }
+
+    suspend fun deleteTag(tagId: String): NetworkResult<Unit> = try {
+        val response = api.deleteTag("$baseUrl/api/v1/tags/$tagId")
+        if (response.isSuccessful) {
+            NetworkResult.Success(Unit)
+        } else {
+            NetworkResult.Error("Failed to delete tag: ${response.code()}", response.code())
+        }
+    } catch (e: Exception) {
+        NetworkResult.Error(e.toUserMessage())
+    }
+
+    suspend fun tagFile(tagId: String, filePath: String): NetworkResult<Map<String, String>> = safeApiCall {
+        api.tagFile("$baseUrl/api/v1/tags/$tagId/files/$filePath")
+    }
+
+    suspend fun untagFile(tagId: String, filePath: String): NetworkResult<Map<String, String>> = safeApiCall {
+        api.untagFile("$baseUrl/api/v1/tags/$tagId/files/$filePath")
+    }
+
+    suspend fun getTaggedFiles(tagId: String): NetworkResult<List<String>> = safeApiCall {
+        api.getTaggedFiles("$baseUrl/api/v1/tags/$tagId/files")
+    }
+
     // ── URL builders ──────────────────────────────────────────
 
     fun getVideoStreamUrl(relativePath: String): String {
-        return "${RetrofitClient.getBaseUrl()}/api/v1/videos/$relativePath/stream"
+        return "$baseUrl/api/v1/videos/$relativePath/stream"
     }
 
     fun getThumbnailUrl(relativePath: String): String {
-        return "${RetrofitClient.getBaseUrl()}/api/v1/images/$relativePath/thumbnail"
+        return "$baseUrl/api/v1/images/$relativePath/thumbnail"
     }
 
     fun getOriginalImageUrl(relativePath: String): String {
-        return "${RetrofitClient.getBaseUrl()}/api/v1/images/$relativePath/original"
+        return "$baseUrl/api/v1/images/$relativePath/original"
+    }
+
+    // ── System URL builders (absolute paths) ──────────────────
+
+    fun getSystemVideoStreamUrl(absolutePath: String): String {
+        return "$baseUrl/api/v1/system/stream?path=${java.net.URLEncoder.encode(absolutePath, "UTF-8")}"
+    }
+
+    fun getSystemThumbnailUrl(absolutePath: String): String {
+        return "$baseUrl/api/v1/system/thumbnail?path=${java.net.URLEncoder.encode(absolutePath, "UTF-8")}"
+    }
+
+    fun getSystemOriginalImageUrl(absolutePath: String): String {
+        return "$baseUrl/api/v1/system/original?path=${java.net.URLEncoder.encode(absolutePath, "UTF-8")}"
     }
 
     // ── Helper ────────────────────────────────────────────────

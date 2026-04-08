@@ -1,20 +1,26 @@
 cmake_minimum_required(VERSION 3.22.1)
+project(native-image-decoder)
 
-# --- libjpeg-turbo ---
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(WITH_SIMD ON CACHE BOOL "" FORCE)
-set(WITH_TURBOJPEG OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjpeg-turbo libjpeg-turbo-build)
+# Pre-built static libraries from WSL cross-compilation
+# These are built separately and placed in libs/arm64-v8a/
 
-# --- libwebp ---
-set(WEBP_BUILD_CWEBP OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_DWEBP OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_WEBPINFO OFF CACHE BOOL "" FORCE)
-set(WEBP_BUILD_WEBPMUX OFF CACHE BOOL "" FORCE)
-set(WEBP_ENABLE_SIMD ON CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/libwebp libwebp-build)
+set(LIBS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libs/${ANDROID_ABI})
+
+# Import pre-built static libraries
+add_library(jpeg STATIC IMPORTED)
+set_target_properties(jpeg PROPERTIES
+    IMPORTED_LOCATION ${LIBS_DIR}/libjpeg.a
+)
+
+add_library(webp STATIC IMPORTED)
+set_target_properties(webp PROPERTIES
+    IMPORTED_LOCATION ${LIBS_DIR}/libwebp.a
+)
+
+add_library(webpdecoder STATIC IMPORTED)
+set_target_properties(webpdecoder PROPERTIES
+    IMPORTED_LOCATION ${LIBS_DIR}/libwebpdecoder.a
+)
 
 # --- JNI bridge library ---
 add_library(native-image-decoder SHARED jni/native_image_decoder.cpp)
@@ -31,4 +37,5 @@ target_link_libraries(native-image-decoder
     webpdecoder
     android
     log
+    jnigraphics
 )

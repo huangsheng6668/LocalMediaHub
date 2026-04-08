@@ -75,9 +75,10 @@ android {
     buildFeatures {
         compose = true
     }
+    // Native image decoder CMake build — uses pre-built static libs from cpp/libs/
     externalNativeBuild {
         cmake {
-            path = file("CMakeLists.txt")
+            path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
     }
@@ -124,7 +125,8 @@ dependencies {
     // Video player
     implementation("androidx.media3:media3-exoplayer:1.2.0")
     implementation("androidx.media3:media3-ui:1.2.0")
-    implementation("androidx.media3:media3-decoder-ffmpeg:1.2.0")
+    // FFmpeg extension: media3-decoder-ffmpeg is not published to Maven.
+    // libffmpeg.so is pre-built in jniLibs/arm64-v8a/ for future FFmpeg JNI bridge.
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
