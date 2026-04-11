@@ -154,7 +154,7 @@ thumbnail:
   max_size: 300
   format: "JPEG"
 
-# 系统浏览根目录（可选，限制 Android 端可访问的目录范围）
+# 系统浏览根目录（必须配置，限制 Android 端可访问的目录范围，不配置则什么都没有）
 system:
   allowed_roots:
     - "D:/Media"
