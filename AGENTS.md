@@ -1,5 +1,7 @@
 # Claude Code Project Context: LocalMediaHub (C/S System)
 
+GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
+
 本地媒体资源管理系统。服务端运行在 PC 端，负责扫描和提供媒体流；客户端为原生 Android 应用，用于浏览和播放。
 
 ## 技术栈
@@ -44,6 +46,7 @@
 ### Go (Server)
 - Handler 层通过 `Handler` struct 持有服务依赖，不使用全局变量。
 - 路径安全：所有文件访问必须经过 `ValidatePath` 或 `isWithinRoots` 校验。
+- **权限控制**: 目录访问受 `config.yaml` 中的 `system.allowed_roots` 限制（若配置）。
 - 列表返回用 `make([]T, 0)` 初始化，避免 JSON 序列化为 `null`。
 - 业务逻辑放在 `internal/service/`，handler 只做参数解析和响应。
 
@@ -74,3 +77,4 @@ Handler struct 接收所有 service 引用，方法挂在 struct 上。
 2. **发现机制:** mDNS 注册 + Android NSD 自动发现
 3. **媒体处理:** 视频流传输（Range）、缩略图生成、标签系统
 4. **双模式:** GUI（系统托盘）或 headless（无窗口）
+5. **同步政策**: 任何本地代码改动将自动同步推送至 GitHub `master` 分支。

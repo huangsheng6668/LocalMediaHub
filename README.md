@@ -1,5 +1,7 @@
 # LocalMediaHub
 
+GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMediaHub)
+
 将 PC 端的本地媒体资源（视频、图片）通过局域网串流到 Android 手机上浏览和播放。
 
 ## 系统架构
@@ -151,6 +153,12 @@ thumbnail:
   cache_dir: ".cache/thumbnails"
   max_size: 300
   format: "JPEG"
+
+# 系统浏览根目录（可选，限制 Android 端可访问的目录范围）
+system:
+  allowed_roots:
+    - "D:/Media"
+    - "E:/Videos"
 ```
 
 无需配置扫描目录，默认自动检测所有 Windows 驱动器。
@@ -167,7 +175,8 @@ APK 输出位置：`android/app/build/outputs/apk/`
 
 ### 4. 连接
 
-- **自动**: App 通过 NSD 自动发现局域网内的 Server（需同一 WiFi）
+- **自动**: App 通过 NSD 自动发现局域网内的 Server（需同一 WiFi）。
+  *注：Android 端需要 `CHANGE_WIFI_MULTICAST_STATE` 权限以确保发现成功。*
 - **手动**: 在 App 中输入 PC 的局域网 IP（如 `192.168.1.100:8000`）
 
 ## API 端点一览
@@ -228,6 +237,10 @@ bash build_native_libs.sh
 ```
 
 依赖：Android NDK r27+，目标架构 arm64-v8a。
+
+## 开发与同步
+
+本项目代码在本地修改后，将通过 Antigravity 助手自动同步到 GitHub 仓库。
 
 ## License
 
