@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -22,6 +23,9 @@ import com.juziss.localmediahub.viewmodel.BrowseViewModelFactory
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.BitmapFactoryDecoder
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
+import coil.request.CachePolicy
 import com.juziss.localmediahub.native.NativeDecoderFactory
 
 class MainActivity : ComponentActivity(), ImageLoaderFactory {
@@ -42,6 +46,20 @@ class MainActivity : ComponentActivity(), ImageLoaderFactory {
                 add(BitmapFactoryDecoder.Factory())
             }
             .crossfade(true)
+            .memoryCachePolicy(CachePolicy.ENABLED)
+            .memoryCache {
+                MemoryCache.Builder(this@MainActivity)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("coil"))
+                    .maxSizeBytes(100L * 1024 * 1024) // 100MB
+                    .build()
+            }
+            .respectCacheHeaders(false)
             .build()
     }
 }
@@ -51,11 +69,11 @@ fun LocalMediaHubApp() {
     val navController = rememberNavController()
 
     // Shared state for passing media data between screens
-    var currentVideoFile by remember { mutableStateOf<MediaFile?>(null) }
-    var currentVideoUrl by remember { mutableStateOf("") }
+    var currentVideoFile by rememberSaveable { mutableStateOf<MediaFile?>(null) }
+    var currentVideoUrl by rememberSaveable { mutableStateOf("") }
 
-    var currentImageFile by remember { mutableStateOf<MediaFile?>(null) }
-    var imageList by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
+    var currentImageFile by rememberSaveable { mutableStateOf<MediaFile?>(null) }
+    var imageList by rememberSaveable { mutableStateOf<List<MediaFile>>(emptyList()) }
 
     val context = LocalContext.current
     val favoritesStore = remember { FavoritesStore(context) }

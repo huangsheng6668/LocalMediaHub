@@ -166,3 +166,51 @@ func (s *TagsService) TagExists(tagID string) bool {
 	}
 	return false
 }
+
+// GetTagsForFiles returns a map from file path to tags for the given file paths.
+func (s *TagsService) GetTagsForFiles(filePaths []string) map[string][]models.FileTag {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[string][]models.FileTag)
+	for _, fp := range filePaths {
+		result[fp] = []models.FileTag{}
+	}
+
+	tagMap := make(map[string]models.FileTag)
+	for _, t := range s.data.Tags {
+		tagMap[t.ID] = t
+	}
+
+	for _, a := range s.data.Associations {
+		tag, ok := tagMap[a.TagID]
+		if !ok {
+			continue
+		}
+		if _, exists := result[a.FilePath]; exists {
+			result[a.FilePath] = append(result[a.FilePath], tag)
+		}
+	}
+	return result
+}
+
+// GetAllFileTags returns a map from file path to tags for all tagged files.
+func (s *TagsService) GetAllFileTags() map[string][]models.FileTag {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make(map[string][]models.FileTag)
+	tagMap := make(map[string]models.FileTag)
+	for _, t := range s.data.Tags {
+		tagMap[t.ID] = t
+	}
+
+	for _, a := range s.data.Associations {
+		tag, ok := tagMap[a.TagID]
+		if !ok {
+			continue
+		}
+		result[a.FilePath] = append(result[a.FilePath], tag)
+	}
+	return result
+}

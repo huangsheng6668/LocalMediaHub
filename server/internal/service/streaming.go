@@ -1,54 +1,53 @@
 package service
 
 import (
-	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 )
 
-type StreamingService struct {
-	chunkSize int64
-}
+type StreamingService struct{}
 
 func NewStreamingService() *StreamingService {
-	return &StreamingService{chunkSize: 64 * 1024}
+	return &StreamingService{}
 }
 
-type Range struct {
-	Start int64
-	End   int64
+// contentTypeFromExt returns a MIME type based on file extension.
+func contentTypeFromExt(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".mp4":
+		return "video/mp4"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".avi":
+		return "video/x-msvideo"
+	case ".mov":
+		return "video/quicktime"
+	case ".wmv":
+		return "video/x-ms-wmv"
+	case ".flv":
+		return "video/x-flv"
+	case ".webm":
+		return "video/webm"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		return "application/octet-stream"
+	}
 }
 
-func ParseRange(header string, fileSize int64) (Range, bool) {
-	re := regexp.MustCompile(`bytes=(\d*)-(\d*)`)
-	matches := re.FindStringSubmatch(header)
-	if len(matches) == 0 {
-		return Range{0, fileSize - 1}, false
-	}
-
-	var start, end int64
-	if matches[1] == "" {
-		start = 0
-	} else {
-		start, _ = strconv.ParseInt(matches[1], 10, 64)
-	}
-	if matches[2] == "" {
-		end = fileSize - 1
-	} else {
-		end, _ = strconv.ParseInt(matches[2], 10, 64)
-	}
-
-	if start >= fileSize || end >= fileSize {
-		return Range{0, fileSize - 1}, false
-	}
-	return Range{Start: start, End: end}, true
-}
-
+// ServeFile streams a file using http.ServeContent for proper Range, ETag,
+// If-Range, and Content-Type handling.
 func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, filePath string) error {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -60,54 +59,16 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 	if err != nil {
 		return err
 	}
-	fileSize := fi.Size()
 
-	contentType := "application/octet-stream"
-	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".mp4":
-		contentType = "video/mp4"
-	case ".mkv":
-		contentType = "video/x-matroska"
-	case ".avi":
-		contentType = "video/x-msvideo"
-	case ".mov":
-		contentType = "video/quicktime"
-	case ".jpg", ".jpeg":
-		contentType = "image/jpeg"
-	case ".png":
-		contentType = "image/png"
-	case ".gif":
-		contentType = "image/gif"
-	case ".webp":
-		contentType = "image/webp"
+	if fi.IsDir() {
+		return os.ErrNotExist
 	}
 
-	rangeHeader := r.Header.Get("Range")
-	if rangeHeader == "" {
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
-		w.Header().Set("Accept-Ranges", "bytes")
-		io.CopyN(w, f, fileSize)
-		return nil
-	}
+	// Set Content-Type explicitly so formats like .mkv and .webp work
+	// correctly on all platforms, regardless of the OS MIME registry.
+	w.Header().Set("Content-Type", contentTypeFromExt(filePath))
 
-	rng, ok := ParseRange(rangeHeader, fileSize)
-	if !ok {
-		return fmt.Errorf("invalid range")
-	}
-
-	w.WriteHeader(http.StatusPartialContent)
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", rng.Start, rng.End, fileSize))
-	w.Header().Set("Content-Length", strconv.FormatInt(rng.End-rng.Start+1, 10))
-	w.Header().Set("Accept-Ranges", "bytes")
-
-	_, err = f.Seek(rng.Start, io.SeekStart)
-	if err != nil {
-		return err
-	}
-	io.CopyN(w, f, rng.End-rng.Start+1)
+	http.ServeContent(w, r, filepath.Base(filePath), fi.ModTime(), f)
 	return nil
 }
 

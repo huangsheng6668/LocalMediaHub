@@ -87,3 +87,14 @@ func (h *Handler) GetTaggedFiles(c echo.Context) error {
 
 // ensure models import is used
 var _ models.FileTag
+
+// GetFileTags returns tags for all files, or specific files if paths are provided.
+func (h *Handler) GetFileTags(c echo.Context) error {
+	paths := c.QueryParams()["path"]
+	if len(paths) == 0 {
+		result := h.tags.GetAllFileTags()
+		return c.JSON(http.StatusOK, result)
+	}
+	result := h.tags.GetTagsForFiles(paths)
+	return c.JSON(http.StatusOK, result)
+}

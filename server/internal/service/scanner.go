@@ -1,7 +1,7 @@
 package service
 
 import (
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -52,11 +52,11 @@ func (s *Scanner) Scan(roots []string) ([]models.MediaFile, error) {
 
 	allFiles := make([]models.MediaFile, 0)
 	for _, root := range roots {
-		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
-			if info.IsDir() {
+			if d.IsDir() {
 				return nil
 			}
 			ext := strings.ToLower(filepath.Ext(path))
@@ -69,6 +69,12 @@ func (s *Scanner) Scan(roots []string) ([]models.MediaFile, error) {
 				return nil
 			}
 
+			// Only stat media files (not directories or non-media files)
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+
 			relPath := path
 			if strings.HasPrefix(path, root) {
 				relPath = strings.TrimPrefix(path, root)
@@ -78,7 +84,7 @@ func (s *Scanner) Scan(roots []string) ([]models.MediaFile, error) {
 			}
 
 			allFiles = append(allFiles, models.MediaFile{
-				Name:         info.Name(),
+				Name:         d.Name(),
 				Path:         path,
 				RelativePath: relPath,
 				Size:         info.Size(),

@@ -47,3 +47,11 @@ func (h *Handler) isMediaExt(ext string) bool {
 	}
 	return false
 }
+
+// mediaExtensions returns all allowed media extensions (video + image).
+func (h *Handler) mediaExtensions() []string {
+	exts := make([]string, 0, len(h.cfg.Scan.VideoExtensions)+len(h.cfg.Scan.ImageExtensions))
+	exts = append(exts, h.cfg.Scan.VideoExtensions...)
+	exts = append(exts, h.cfg.Scan.ImageExtensions...)
+	return exts
+}

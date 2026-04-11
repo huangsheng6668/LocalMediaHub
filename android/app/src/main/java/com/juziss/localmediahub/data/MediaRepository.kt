@@ -110,6 +110,10 @@ class MediaRepository {
         api.getTaggedFiles("$baseUrl/api/v1/tags/$tagId/files")
     }
 
+    suspend fun getFileTags(paths: List<String> = emptyList()): NetworkResult<Map<String, List<Tag>>> {
+        return safeApiCall { api.getFileTags(paths) }
+    }
+
     // ── URL builders ──────────────────────────────────────────
 
     fun getVideoStreamUrl(relativePath: String): String {

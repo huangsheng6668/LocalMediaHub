@@ -1,10 +1,13 @@
 package com.juziss.localmediahub.data
 
+import android.os.Parcelable
 import com.google.gson.annotations.SerializedName
+import kotlinx.parcelize.Parcelize
 
 /**
  * Matches server/models.py MediaFile
  */
+@Parcelize
 data class MediaFile(
     val name: String,
     val path: String,
@@ -16,7 +19,7 @@ data class MediaFile(
     @SerializedName("media_type")
     val mediaType: String,
     val extension: String,
-)
+) : Parcelable
 
 /**
  * Matches server/models.py Folder

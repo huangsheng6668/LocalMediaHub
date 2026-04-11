@@ -98,4 +98,8 @@ interface MediaApi {
 
     @GET
     suspend fun getTaggedFiles(@Url url: String): List<String>
+
+    // Batch endpoint: get tags for multiple files (or all files) in one call
+    @GET("api/v1/tags/file-tags")
+    suspend fun getFileTags(@Query("path") paths: List<String>): Map<String, List<Tag>>
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/localmediahub/server/internal/service"
 )
 
 func (h *Handler) GetDrives(c echo.Context) error {
@@ -38,6 +39,10 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 			"folders": []string{},
 			"files":   []string{},
 		})
+	}
+
+	if err := service.ValidateSystemBrowsePath(pathStr); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	}
 
 	fi, err := os.Stat(pathStr)
@@ -84,6 +89,10 @@ func (h *Handler) SystemThumbnail(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
 	}
 
+	if err := service.ValidateSystemPath(pathStr, h.mediaExtensions()); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
 	thumbPath, err := h.thumbnail.GenerateSystemThumbnail(pathStr)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -101,6 +110,10 @@ func (h *Handler) SystemOriginal(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
 	}
 
+	if err := service.ValidateSystemPath(pathStr, h.mediaExtensions()); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
 	return c.File(pathStr)
 }
 
@@ -108,6 +121,10 @@ func (h *Handler) SystemStream(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+	}
+
+	if err := service.ValidateSystemPath(pathStr, h.mediaExtensions()); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	}
 
 	if err := h.streaming.ServeFile(c.Response().Writer, c.Request(), pathStr); err != nil {

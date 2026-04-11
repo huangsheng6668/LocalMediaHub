@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/disintegration/imaging"
 )
@@ -30,14 +31,20 @@ func NewThumbnailService(cacheDir string, maxSize int, format string) (*Thumbnai
 	}, nil
 }
 
-func (s *ThumbnailService) GetThumbnailPath(sourcePath string) string {
-	hash := fmt.Sprintf("%x", md5.Sum([]byte(sourcePath)))
+func (s *ThumbnailService) GetThumbnailPath(sourcePath string, modTime time.Time) string {
+	key := sourcePath + "|" + modTime.Format(time.RFC3339Nano)
+	hash := fmt.Sprintf("%x", md5.Sum([]byte(key)))
 	return filepath.Join(s.cacheDir, hash+".jpg")
 }
 
 func (s *ThumbnailService) GenerateThumbnail(sourcePath string) (string, error) {
-	cachePath := s.GetThumbnailPath(sourcePath)
+	// Get file info for modTime-based cache key
+	fi, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", err
+	}
 
+	cachePath := s.GetThumbnailPath(sourcePath, fi.ModTime())
 	if _, err := os.Stat(cachePath); err == nil {
 		return cachePath, nil
 	}
@@ -47,7 +54,7 @@ func (s *ThumbnailService) GenerateThumbnail(sourcePath string) (string, error) 
 		return "", err
 	}
 
-	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Lanczos)
+	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
 
 	out, err := os.Create(cachePath)
 	if err != nil {
@@ -63,12 +70,19 @@ func (s *ThumbnailService) GenerateThumbnail(sourcePath string) (string, error) 
 }
 
 func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, error) {
+	// Get file info for modTime-based cache key
+	fi, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", err
+	}
+
 	systemCacheDir := filepath.Join(s.cacheDir, "system")
 	if err := os.MkdirAll(systemCacheDir, 0755); err != nil {
 		return "", err
 	}
 
-	hash := fmt.Sprintf("%x", md5.Sum([]byte(sourcePath)))
+	key := sourcePath + "|" + fi.ModTime().Format(time.RFC3339Nano)
+	hash := fmt.Sprintf("%x", md5.Sum([]byte(key)))
 	cachePath := filepath.Join(systemCacheDir, hash+".jpg")
 
 	if _, err := os.Stat(cachePath); err == nil {
@@ -80,7 +94,7 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 		return "", err
 	}
 
-	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Lanczos)
+	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
 
 	out, err := os.Create(cachePath)
 	if err != nil {

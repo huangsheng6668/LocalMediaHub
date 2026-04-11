@@ -68,7 +68,7 @@ class NativeDecoderFactory(
                     String(header, 8, 4) == "WEBP"
 
             return if (isJpeg || isWebp) {
-                NativeDecoderFactory(result, Size.ORIGINAL, options)
+                NativeDecoderFactory(result, options.size, options)
             } else {
                 null
             }

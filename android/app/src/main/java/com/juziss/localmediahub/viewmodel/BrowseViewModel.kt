@@ -414,11 +414,13 @@ class BrowseViewModel(
     private val _activeTagFilter = MutableStateFlow<Tag?>(null)
     val activeTagFilter: StateFlow<Tag?> = _activeTagFilter.asStateFlow()
 
+
     fun loadTags() {
         viewModelScope.launch {
             when (val result = repository.getTags()) {
                 is NetworkResult.Success -> {
                     _tags.value = result.data
+                    loadAllFileTags() // Preload all file-tag mappings
                 }
                 is NetworkResult.Error -> {}
                 is NetworkResult.Loading -> {}
@@ -476,37 +478,32 @@ class BrowseViewModel(
 
     fun loadFileTagsForFile(filePath: String) {
         viewModelScope.launch {
-            val allTags = _tags.value
-            if (allTags.isEmpty()) {
-                when (val result = repository.getTags()) {
-                    is NetworkResult.Success -> {
-                        val loadedTags = result.data
-                        loadFileTagsWithTags(filePath, loadedTags)
-                    }
-                    else -> {}
+            when (val result = repository.getFileTags(listOf(filePath))) {
+                is NetworkResult.Success -> {
+                    val current = _fileTags.value.toMutableMap()
+                    current[filePath] = result.data[filePath] ?: emptyList()
+                    _fileTags.value = current
                 }
-            } else {
-                loadFileTagsWithTags(filePath, allTags)
+                else -> {
+                    val current = _fileTags.value.toMutableMap()
+                    current[filePath] = emptyList()
+                    _fileTags.value = current
+                }
             }
         }
     }
 
-    private suspend fun loadFileTagsWithTags(filePath: String, allTags: List<Tag>) {
-        val tagsForFile = mutableListOf<Tag>()
-        for (tag in allTags) {
-            when (val filesResult = repository.getTaggedFiles(tag.id)) {
+    fun loadAllFileTags() {
+        viewModelScope.launch {
+            when (val result = repository.getFileTags()) {
                 is NetworkResult.Success -> {
-                    if (filePath in filesResult.data) {
-                        tagsForFile.add(tag)
-                    }
+                    _fileTags.value = result.data
                 }
                 else -> {}
             }
         }
-        val current = _fileTags.value.toMutableMap()
-        current[filePath] = tagsForFile
-        _fileTags.value = current
     }
+
 
     fun getTagsForFile(filePath: String): List<Tag> {
         return _fileTags.value[filePath] ?: emptyList()

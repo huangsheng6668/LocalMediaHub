@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"net/http"
 
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/gui"
@@ -44,8 +45,9 @@ func runHeadless(cfg *config.Config) {
 		log.Fatalf("Failed to create server: %v", err)
 	}
 
+	log.Printf("LocalMediaHub Server Initialized. LAN IP: %s", s.IP)
 	log.Printf("Starting LocalMediaHub on %s:%d (headless)", cfg.Server.Host, cfg.Server.Port)
-	if err := s.Start(); err != nil {
+	if err := s.Start(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)
 	}
 }

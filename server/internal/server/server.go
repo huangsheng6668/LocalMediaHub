@@ -89,6 +89,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	api.POST("/tags/:tag_id/files/*", h.AssociateTag)
 	api.DELETE("/tags/:tag_id/files/*", h.DisassociateTag)
 	api.GET("/tags/:tag_id/files", h.GetTaggedFiles)
+	api.GET("/tags/file-tags", h.GetFileTags)
 
 	// Admin
 	admin := api.Group("/admin")
@@ -121,16 +122,32 @@ func getLocalIP() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Prefer real private LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-	// Skip APIPA/link-local 169.254.x.x
+
+	var bestIP string
 	for _, addr := range addrs {
 		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
 			ip := ipNet.IP.To4()
+			// Skip APIPA
 			if ip[0] == 169 && ip[1] == 254 {
-				continue // skip APIPA
+				continue
 			}
-			return ip.String(), nil
+
+			// Prefer private LAN IPs
+			isPrivate := (ip[0] == 192 && ip[1] == 168) ||
+				(ip[0] == 10) ||
+				(ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31)
+
+			if isPrivate {
+				return ip.String(), nil
+			}
+			if bestIP == "" {
+				bestIP = ip.String()
+			}
 		}
+	}
+
+	if bestIP != "" {
+		return bestIP, nil
 	}
 	return "127.0.0.1", nil
 }
