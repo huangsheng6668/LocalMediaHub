@@ -55,6 +55,7 @@ android/release-keystore.jks
 
 # Server runtime data
 server/.data/
+server/config.yaml
 server/=*
 
 # OS
