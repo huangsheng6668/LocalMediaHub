@@ -63,7 +63,33 @@ func ValidateSystemBrowsePath(pathStr string) error {
 		return fmt.Errorf("invalid path: %w", err)
 	}
 
-	return checkBlocked(absPath)
+	if err := checkBlocked(absPath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ValidateSystemBrowseAllowed checks that the path is under one of the allowed roots.
+// If allowedRoots is empty, all paths are allowed (backward compatible).
+func ValidateSystemBrowseAllowed(pathStr string, allowedRoots []string) error {
+	if len(allowedRoots) == 0 {
+		return nil
+	}
+	absPath, err := filepath.Abs(filepath.Clean(pathStr))
+	if err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	for _, root := range allowedRoots {
+		absRoot, err := filepath.Abs(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(absPath, absRoot) || strings.HasPrefix(strings.ToLower(absPath), strings.ToLower(absRoot)+string(filepath.Separator)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("access denied: path outside allowed directories")
 }
 
 // checkBlocked returns an error if absPath falls inside a blocked directory.

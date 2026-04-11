@@ -23,3 +23,9 @@ thumbnail:
   cache_dir: ".cache/thumbnails"
   max_size: 300
   format: "JPEG"
+
+# System browse: restrict which directories are visible to the Android client.
+# If omitted or empty, falls back to scan.roots, then all drives.
+system:
+  allowed_roots:
+    - "/usr/media/path"

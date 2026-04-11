@@ -10,6 +10,7 @@ type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	Scan      ScanConfig      `yaml:"scan"`
 	Thumbnail ThumbnailConfig `yaml:"thumbnail"`
+	System    SystemConfig    `yaml:"system,omitempty"`
 }
 
 type ServerConfig struct {
@@ -42,6 +43,19 @@ type ThumbnailConfig struct {
 	CacheDir string `yaml:"cache_dir"`
 	MaxSize  int    `yaml:"max_size"`
 	Format   string `yaml:"format"`
+}
+
+type SystemConfig struct {
+	AllowedRoots []string `yaml:"allowed_roots,omitempty"`
+}
+
+// GetSystemAllowedRoots returns configured system browse roots.
+// If empty, falls back to scan.roots, then all drives.
+func (c *Config) GetSystemAllowedRoots() []string {
+	if len(c.System.AllowedRoots) > 0 {
+		return c.System.AllowedRoots
+	}
+	return c.Scan.GetRoots()
 }
 
 func Load(path string) (*Config, error) {

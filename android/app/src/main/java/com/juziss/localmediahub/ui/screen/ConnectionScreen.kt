@@ -31,6 +31,7 @@ fun ConnectionScreen(
     val savedPort by viewModel.savedPort.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
     val discoveryState by viewModel.discoveryState.collectAsState()
+    val scanProgress by viewModel.scanProgress.collectAsState()
 
     // Initialize with saved values
     LaunchedEffect(savedIp, savedPort) {
@@ -135,7 +136,7 @@ fun ConnectionScreen(
                         strokeWidth = 2.dp,
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scanning...")
+                    Text("Scanning... (${scanProgress.first}/${scanProgress.second})")
                 } else {
                     Icon(
                         Icons.Filled.Search,

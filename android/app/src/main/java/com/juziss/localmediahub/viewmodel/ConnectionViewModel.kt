@@ -10,12 +10,19 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.ServerConfig
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.RetrofitClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.util.concurrent.TimeUnit
 
 /**
  * ViewModel for the server connection screen.
@@ -38,6 +45,9 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _discoveryState = MutableStateFlow<DiscoveryState>(DiscoveryState.Idle)
     val discoveryState: StateFlow<DiscoveryState> = _discoveryState.asStateFlow()
+
+    private val _scanProgress = MutableStateFlow(0 to 0)
+    val scanProgress: StateFlow<Pair<Int, Int>> = _scanProgress.asStateFlow()
 
     private var nsdManager: NsdManager? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
@@ -88,84 +98,165 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Start mDNS service discovery for LocalMediaHub.
+     * Start auto-discovery: tries mDNS first, then falls back to HTTP LAN scan.
      */
     fun startDiscovery() {
         if (discoveryState.value is DiscoveryState.Scanning) return
 
-        val context = getApplication<Application>()
-        nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
-
         _discoveryState.value = DiscoveryState.Scanning
+        startNsdDiscovery()
+        startHttpScan()
+    }
 
-        discoveryListener = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(serviceType: String) {
-                _discoveryState.value = DiscoveryState.Scanning
-            }
-
-            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                nsdManager?.resolveService(serviceInfo, object : NsdManager.ResolveListener {
-                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                        _discoveryState.value = DiscoveryState.Error(
-                            "Failed to resolve service (error $errorCode)"
-                        )
-                    }
-
-                    override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                        val host = serviceInfo.host.hostAddress ?: return
-                        val port = serviceInfo.port
-                        _discoveryState.value = DiscoveryState.Found(host, port)
-                        stopDiscovery()
-                    }
-                })
-            }
-
-            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-                // No action needed
-            }
-
-            override fun onDiscoveryStopped(serviceType: String) {
-                if (_discoveryState.value is DiscoveryState.Scanning) {
-                    _discoveryState.value = DiscoveryState.NotFound
-                }
-            }
-
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                _discoveryState.value = DiscoveryState.Error(
-                    "Discovery failed to start (error $errorCode)"
-                )
-            }
-
-            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
-                // No action needed
-            }
+    /**
+     * Stop all discovery mechanisms.
+     */
+    fun stopDiscovery() {
+        stopNsdDiscovery()
+        if (_discoveryState.value is DiscoveryState.Scanning) {
+            _discoveryState.value = DiscoveryState.Idle
         }
+    }
 
+    // ── mDNS Discovery (best-effort, may not work on all networks) ──────
+
+    private fun startNsdDiscovery() {
         try {
+            val context = getApplication<Application>()
+            nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+
+            discoveryListener = object : NsdManager.DiscoveryListener {
+                override fun onDiscoveryStarted(serviceType: String) {}
+
+                override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                    nsdManager?.resolveService(serviceInfo, object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
+
+                        override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                            val host = serviceInfo.host.hostAddress ?: return
+                            val port = serviceInfo.port
+                            onServerFound(host, port)
+                        }
+                    })
+                }
+
+                override fun onServiceLost(serviceInfo: NsdServiceInfo) {}
+                override fun onDiscoveryStopped(serviceType: String) {}
+                override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                    stopNsdDiscovery()
+                }
+                override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
+            }
+
             nsdManager?.discoverServices(
                 SERVICE_TYPE,
                 NsdManager.PROTOCOL_DNS_SD,
                 discoveryListener
             )
-        } catch (e: Exception) {
-            _discoveryState.value = DiscoveryState.Error(
-                e.message ?: "Discovery failed"
-            )
+        } catch (_: Exception) {
+            // mDNS not available, HTTP scan will handle it
         }
     }
 
-    /**
-     * Stop an ongoing mDNS service discovery.
-     */
-    fun stopDiscovery() {
+    private fun stopNsdDiscovery() {
         try {
             discoveryListener?.let { nsdManager?.stopServiceDiscovery(it) }
-        } catch (_: Exception) {
-            // Already stopped or not started
+        } catch (_: Exception) {}
+        discoveryListener = null
+    }
+
+    // ── HTTP LAN Scan (reliable fallback) ───────────────────────────────
+
+    private fun startHttpScan() {
+        viewModelScope.launch {
+            val ownIp = getOwnLanIp() ?: run {
+                if (_discoveryState.value is DiscoveryState.Scanning) {
+                    _discoveryState.value = DiscoveryState.Error("Cannot determine local IP")
+                }
+                return@launch
+            }
+
+            val parts = ownIp.split(".")
+            if (parts.size != 4) {
+                if (_discoveryState.value is DiscoveryState.Scanning) {
+                    _discoveryState.value = DiscoveryState.Error("Invalid local IP: $ownIp")
+                }
+                return@launch
+            }
+            val subnet = "${parts[0]}.${parts[1]}.${parts[2]}"
+
+            // Scan common ports and the full /24 subnet concurrently
+            val scanClient = OkHttpClient.Builder()
+                .connectTimeout(800, TimeUnit.MILLISECONDS)
+                .readTimeout(800, TimeUnit.MILLISECONDS)
+                .build()
+
+            val total = 255
+            _scanProgress.value = 0 to total
+
+            var found = false
+
+            for (i in 1..255) {
+                if (found) break
+                val ip = "$subnet.$i"
+
+                launch(Dispatchers.IO) {
+                    try {
+                        val request = Request.Builder()
+                            .url("http://$ip:8000/")
+                            .get()
+                            .build()
+                        val response = scanClient.newCall(request).execute()
+                        val body = response.body?.string() ?: ""
+                        if (body.contains("LocalMediaHub")) {
+                            withContext(Dispatchers.Main) {
+                                onServerFound(ip, 8000)
+                            }
+                            found = true
+                        }
+                    } catch (_: Exception) {
+                        // Not our server or unreachable
+                    }
+                    withContext(Dispatchers.Main) {
+                        val current = _scanProgress.value
+                        _scanProgress.value = (current.first + 1) to total
+                    }
+                }
+            }
         }
-        if (_discoveryState.value is DiscoveryState.Scanning) {
-            _discoveryState.value = DiscoveryState.Idle
+    }
+
+    private fun onServerFound(host: String, port: Int) {
+        if (_discoveryState.value !is DiscoveryState.Scanning) return
+        _discoveryState.value = DiscoveryState.Found(host, port)
+        stopDiscovery()
+    }
+
+    private fun getOwnLanIp(): String? {
+        val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
+        for (intf in interfaces) {
+            for (addr in intf.inetAddresses) {
+                if (addr is Inet4Address && !addr.isLoopbackAddress) {
+                    val ip = addr.hostAddress ?: continue
+                    if (ip.startsWith("192.168.") || ip.startsWith("10.") ||
+                        ip.startsWith("172.16.") || ip.startsWith("172.17.") ||
+                        ip.startsWith("172.18.") || ip.startsWith("172.19.") ||
+                        ip.startsWith("172.2") || ip.startsWith("172.3")
+                    ) {
+                        return ip
+                    }
+                }
+            }
         }
+        // Fallback: return any non-loopback IPv4
+        for (intf in NetworkInterface.getNetworkInterfaces() ?: return null) {
+            for (addr in intf.inetAddresses) {
+                if (addr is Inet4Address && !addr.isLoopbackAddress) {
+                    return addr.hostAddress
+                }
+            }
+        }
+        return null
     }
 
     override fun onCleared() {
