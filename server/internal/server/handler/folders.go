@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/localmediahub/server/internal/models"
+	"github.com/localmediahub/server/internal/service"
 )
 
 func (h *Handler) GetFolders(c echo.Context) error {
@@ -19,9 +20,9 @@ func (h *Handler) GetFolders(c echo.Context) error {
 			continue
 		}
 		folders = append(folders, models.Folder{
-			Name:         fi.Name(),
+			Name:         folderDisplayName(root, fi.Name()),
 			Path:         root,
-			RelativePath: string(filepath.Separator),
+			RelativePath: root,
 			IsRoot:       true,
 			ModifiedTime: fi.ModTime(),
 		})
@@ -29,24 +30,32 @@ func (h *Handler) GetFolders(c echo.Context) error {
 	return c.JSON(http.StatusOK, folders)
 }
 
+func folderDisplayName(path string, name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" || trimmed == string(filepath.Separator) {
+		return filepath.Clean(path)
+	}
+	return name
+}
+
 func (h *Handler) BrowseFolder(c echo.Context) error {
-	pathStr := c.Param("*")
-	if pathStr == "" {
+	rawPath := c.Param("*")
+	if rawPath == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
 	}
+	pathStr, err := decodeWildcardPath(rawPath, "/browse")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 
-	pathStr = strings.ReplaceAll(pathStr, "%2F", "/")
+	pathStr, err = service.NormalizePath(pathStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 
-	valid := false
-	for _, root := range h.cfg.Scan.GetRoots() {
-		rel, err := filepath.Rel(root, pathStr)
-		if err != nil {
-			continue
-		}
-		if !strings.HasPrefix(rel, "..") {
-			valid = true
-			break
-		}
+	valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	if !valid {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": "path outside roots"})
@@ -72,8 +81,8 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 	videoExts := h.scanner.VideoExts()
 	imageExts := h.scanner.ImageExts()
 
-	var folders []models.Folder
-	var files []models.MediaFile
+	folders := make([]models.Folder, 0)
+	files := make([]models.MediaFile, 0)
 
 	for _, entry := range entries {
 		fullPath := filepath.Join(pathStr, entry.Name())
@@ -86,7 +95,7 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 			folders = append(folders, models.Folder{
 				Name:         entry.Name(),
 				Path:         fullPath,
-				RelativePath: strings.TrimPrefix(fullPath, filepath.Dir(pathStr)),
+				RelativePath: fullPath,
 				IsRoot:       false,
 				ModifiedTime: info.ModTime(),
 			})
@@ -104,7 +113,7 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 			files = append(files, models.MediaFile{
 				Name:         entry.Name(),
 				Path:         fullPath,
-				RelativePath: strings.TrimPrefix(fullPath, filepath.Dir(pathStr)),
+				RelativePath: fullPath,
 				Size:         info.Size(),
 				ModifiedTime: info.ModTime(),
 				MediaType:    mediaType,

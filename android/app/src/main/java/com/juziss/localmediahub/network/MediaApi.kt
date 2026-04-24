@@ -99,6 +99,9 @@ interface MediaApi {
     @GET
     suspend fun getTaggedFiles(@Url url: String): List<String>
 
+    @GET("api/v1/tags/{tagId}/media")
+    suspend fun getTaggedMedia(@Path("tagId") tagId: String): List<com.juziss.localmediahub.data.MediaFile>
+
     // Batch endpoint: get tags for multiple files (or all files) in one call
     @GET("api/v1/tags/file-tags")
     suspend fun getFileTags(@Query("path") paths: List<String>): Map<String, List<Tag>>

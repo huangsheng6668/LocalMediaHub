@@ -10,6 +10,9 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.ServerConfig
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.RetrofitClient
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -17,6 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -24,20 +29,25 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.TimeUnit
 
-/**
- * ViewModel for the server connection screen.
- */
+data class DiscoveredServer(
+    val ip: String,
+    val port: Int,
+)
+
 class ConnectionViewModel(application: Application) : AndroidViewModel(application) {
 
     private val serverConfig = ServerConfig(application)
     private val repository = MediaRepository()
 
-    // Saved IP & Port
     val savedIp = serverConfig.serverIp.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), ""
     )
     val savedPort = serverConfig.serverPort.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), "8000"
+    )
+
+    val knownServers = serverConfig.knownServers.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
@@ -48,6 +58,9 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _scanProgress = MutableStateFlow(0 to 0)
     val scanProgress: StateFlow<Pair<Int, Int>> = _scanProgress.asStateFlow()
+
+    private val _discoveredServers = MutableStateFlow<List<DiscoveredServer>>(emptyList())
+    val discoveredServers: StateFlow<List<DiscoveredServer>> = _discoveredServers.asStateFlow()
 
     private var nsdManager: NsdManager? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
@@ -86,8 +99,11 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /** Try to auto-connect using saved config. */
     fun tryAutoConnect() {
+        if (_connectionState.value is ConnectionState.Testing || _connectionState.value is ConnectionState.Connected) {
+            return
+        }
+
         viewModelScope.launch {
             val ip = savedIp.value
             val port = savedPort.value
@@ -97,20 +113,19 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Start auto-discovery: tries mDNS first, then falls back to HTTP LAN scan.
-     */
+    fun connectToDiscovered(server: DiscoveredServer) {
+        testConnection(server.ip, server.port.toString())
+    }
+
     fun startDiscovery() {
         if (discoveryState.value is DiscoveryState.Scanning) return
 
+        _discoveredServers.value = emptyList()
         _discoveryState.value = DiscoveryState.Scanning
         startNsdDiscovery()
         startHttpScan()
     }
 
-    /**
-     * Stop all discovery mechanisms.
-     */
     fun stopDiscovery() {
         stopNsdDiscovery()
         if (_discoveryState.value is DiscoveryState.Scanning) {
@@ -118,7 +133,7 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    // ── mDNS Discovery (best-effort, may not work on all networks) ──────
+    // ── mDNS Discovery ──────────────────────────────────────────────────
 
     private fun startNsdDiscovery() {
         try {
@@ -165,7 +180,7 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
         discoveryListener = null
     }
 
-    // ── HTTP LAN Scan (reliable fallback) ───────────────────────────────
+    // ── HTTP LAN Scan ───────────────────────────────────────────────────
 
     private fun startHttpScan() {
         viewModelScope.launch {
@@ -185,7 +200,6 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
             }
             val subnet = "${parts[0]}.${parts[1]}.${parts[2]}"
 
-            // Scan common ports and the full /24 subnet concurrently
             val scanClient = OkHttpClient.Builder()
                 .connectTimeout(800, TimeUnit.MILLISECONDS)
                 .readTimeout(800, TimeUnit.MILLISECONDS)
@@ -193,43 +207,61 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
 
             val total = 255
             _scanProgress.value = 0 to total
+            val concurrencyLimit = Semaphore(24)
 
-            var found = false
+            coroutineScope {
+                (1..255).map { i ->
+                    async(Dispatchers.IO) {
+                        concurrencyLimit.withPermit {
+                            try {
+                                if (_discoveryState.value !is DiscoveryState.Scanning) {
+                                    return@withPermit
+                                }
 
-            for (i in 1..255) {
-                if (found) break
-                val ip = "$subnet.$i"
+                                val ip = "$subnet.$i"
+                                val request = Request.Builder()
+                                    .url("http://$ip:8000/")
+                                    .get()
+                                    .build()
 
-                launch(Dispatchers.IO) {
-                    try {
-                        val request = Request.Builder()
-                            .url("http://$ip:8000/")
-                            .get()
-                            .build()
-                        val response = scanClient.newCall(request).execute()
-                        val body = response.body?.string() ?: ""
-                        if (body.contains("LocalMediaHub")) {
-                            withContext(Dispatchers.Main) {
-                                onServerFound(ip, 8000)
+                                scanClient.newCall(request).execute().use { response ->
+                                    val body = response.body?.string().orEmpty()
+                                    if (body.contains("LocalMediaHub")) {
+                                        withContext(Dispatchers.Main) {
+                                            onServerFound(ip, 8000)
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                // Not our server or unreachable.
+                            } finally {
+                                withContext(Dispatchers.Main) {
+                                    val current = _scanProgress.value
+                                    _scanProgress.value = (current.first + 1) to total
+                                }
                             }
-                            found = true
                         }
-                    } catch (_: Exception) {
-                        // Not our server or unreachable
                     }
-                    withContext(Dispatchers.Main) {
-                        val current = _scanProgress.value
-                        _scanProgress.value = (current.first + 1) to total
-                    }
+                }.awaitAll()
+            }
+
+            // Scan complete — finalize state with all discovered servers
+            if (_discoveryState.value is DiscoveryState.Scanning) {
+                val servers = _discoveredServers.value
+                _discoveryState.value = when {
+                    servers.isEmpty() -> DiscoveryState.NotFound
+                    else -> DiscoveryState.FoundMultiple(servers)
                 }
+                stopNsdDiscovery()
             }
         }
     }
 
     private fun onServerFound(host: String, port: Int) {
         if (_discoveryState.value !is DiscoveryState.Scanning) return
-        _discoveryState.value = DiscoveryState.Found(host, port)
-        stopDiscovery()
+        val current = _discoveredServers.value
+        if (current.any { it.ip == host && it.port == port }) return
+        _discoveredServers.value = current + DiscoveredServer(host, port)
     }
 
     private fun getOwnLanIp(): String? {
@@ -279,7 +311,7 @@ sealed class ConnectionState {
 sealed class DiscoveryState {
     data object Idle : DiscoveryState()
     data object Scanning : DiscoveryState()
-    data class Found(val host: String, val port: Int) : DiscoveryState()
+    data class FoundMultiple(val servers: List<DiscoveredServer>) : DiscoveryState()
     data object NotFound : DiscoveryState()
     data class Error(val message: String) : DiscoveryState()
 }

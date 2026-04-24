@@ -73,22 +73,5 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 }
 
 func (s *StreamingService) ValidatePath(filePath string, roots []string) (bool, error) {
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		return false, err
-	}
-	for _, root := range roots {
-		absRoot, err := filepath.Abs(root)
-		if err != nil {
-			continue
-		}
-		rel, err := filepath.Rel(absRoot, absPath)
-		if err != nil {
-			continue
-		}
-		if !strings.HasPrefix(rel, "..") {
-			return true, nil
-		}
-	}
-	return false, nil
+	return IsPathWithinRoots(filePath, roots)
 }

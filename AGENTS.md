@@ -20,6 +20,7 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
 ### Frontend (Android)
 - **Debug:** `cd android && ./gradlew assembleDebug`
 - **Release:** `cd android && ./gradlew assembleRelease`
+- **验证:** `cd android && ./gradlew testDebugUnitTest assembleDebug`
 - **APK 位置:** `android/app/build/outputs/apk/release/app-release.apk`
 
 ## 项目结构规范
@@ -37,9 +38,14 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
     - `config.yaml`: 运行时配置
 - `/android`: Android Studio 项目
     - `app/src/main/java/.../ui/screen/`: Compose 页面
+        - `HomeScreen.kt`: 首页聚合入口、最近活动、继续播放
+        - `ConnectionScreen.kt`: 自动重连 + NSD 发现连接流
+        - `BrowseScreen.kt`: 媒体浏览、筛选、滚动位置恢复
     - `app/src/main/java/.../viewmodel/`: ViewModel 层
+        - `HomeViewModel.kt`: 首页推荐与继续播放数据聚合
     - `app/src/main/java/.../network/`: Retrofit 接口
     - `app/src/main/java/.../data/`: 模型与仓库层
+        - `RecentActivityStore.kt`: 最近活动与浏览状态持久化
 
 ## 编码规则
 
@@ -75,6 +81,9 @@ Handler struct 接收所有 service 引用，方法挂在 struct 上。
 ## 核心功能
 1. **全盘浏览:** 自动检测 Windows 驱动器，浏览任意目录，只显示媒体文件
 2. **发现机制:** mDNS 注册 + Android NSD 自动发现
-3. **媒体处理:** 视频流传输（Range）、缩略图生成、标签系统
-4. **双模式:** GUI（系统托盘）或 headless（无窗口）
-5. **同步政策**: 任何本地代码改动将自动同步推送至 GitHub `master` 分支。
+3. **首页体验:** Android 首页聚合 Libraries、最近活动、继续播放、收藏和标签集合
+4. **浏览恢复:** 记录最近浏览路径、滚动位置和最近打开媒体，支持一键回到上次上下文
+5. **媒体处理:** 视频流传输（Range）、缩略图生成、标签系统、标签下媒体聚合
+6. **受限系统浏览:** `/api/v1/system/*` 仅允许访问 `config.yaml` 中 `system.allowed_roots` 范围
+7. **双模式:** GUI（系统托盘）或 headless（无窗口）
+8. **同步政策**: 任何本地代码改动将自动同步推送至 GitHub `master` 分支。

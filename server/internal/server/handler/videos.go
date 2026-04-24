@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -47,8 +46,10 @@ func (h *Handler) GetVideos(c echo.Context) error {
 }
 
 func (h *Handler) StreamVideo(c echo.Context) error {
-	pathStr := c.Param("*")
-	pathStr = strings.ReplaceAll(pathStr, "%2F", "/")
+	pathStr, err := decodeWildcardPath(c.Param("*"), "/stream")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 
 	valid, err := h.streaming.ValidatePath(pathStr, h.cfg.Scan.GetRoots())
 	if err != nil || !valid {

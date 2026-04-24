@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -85,6 +87,44 @@ func (h *Handler) GetTaggedFiles(c echo.Context) error {
 	return c.JSON(http.StatusOK, files)
 }
 
+func (h *Handler) GetTaggedMedia(c echo.Context) error {
+	tagID := c.Param("tag_id")
+	if !h.tags.TagExists(tagID) {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
+	}
+
+	taggedPaths := h.tags.GetFilesForTag(tagID)
+	if len(taggedPaths) == 0 {
+		return c.JSON(http.StatusOK, []models.MediaFile{})
+	}
+
+	cachedFiles, err := h.scanner.GetCached(h.cfg.Scan.GetRoots())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	byPath := make(map[string]models.MediaFile, len(cachedFiles))
+	for _, file := range cachedFiles {
+		byPath[file.Path] = file
+	}
+
+	result := make([]models.MediaFile, 0, len(taggedPaths))
+	for _, taggedPath := range taggedPaths {
+		if cached, ok := byPath[taggedPath]; ok {
+			cached.RelativePath = cached.Path
+			result = append(result, cached)
+			continue
+		}
+
+		fallback, ok := h.buildTaggedMediaFallback(taggedPath)
+		if ok {
+			result = append(result, fallback)
+		}
+	}
+
+	return c.JSON(http.StatusOK, result)
+}
+
 // ensure models import is used
 var _ models.FileTag
 
@@ -97,4 +137,32 @@ func (h *Handler) GetFileTags(c echo.Context) error {
 	}
 	result := h.tags.GetTagsForFiles(paths)
 	return c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) buildTaggedMediaFallback(pathStr string) (models.MediaFile, bool) {
+	info, err := os.Stat(pathStr)
+	if err != nil || info.IsDir() {
+		return models.MediaFile{}, false
+	}
+
+	ext := strings.ToLower(filepath.Ext(pathStr))
+	mediaType := ""
+	switch {
+	case h.scanner.VideoExts()[ext]:
+		mediaType = "video"
+	case h.scanner.ImageExts()[ext]:
+		mediaType = "image"
+	default:
+		return models.MediaFile{}, false
+	}
+
+	return models.MediaFile{
+		Name:         filepath.Base(pathStr),
+		Path:         pathStr,
+		RelativePath: pathStr,
+		Size:         info.Size(),
+		ModifiedTime: info.ModTime(),
+		MediaType:    mediaType,
+		Extension:    ext,
+	}, true
 }

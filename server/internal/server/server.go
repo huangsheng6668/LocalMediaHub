@@ -76,8 +76,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	// Images
 	api.GET("/images", h.GetImages)
-	api.GET("/images/*", h.GetThumbnail)
-	api.GET("/images/*/original", h.GetOriginal)
+	api.GET("/images/*", h.GetImageAsset)
 
 	// Search
 	api.GET("/search", h.Search)
@@ -89,6 +88,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	api.POST("/tags/:tag_id/files/*", h.AssociateTag)
 	api.DELETE("/tags/:tag_id/files/*", h.DisassociateTag)
 	api.GET("/tags/:tag_id/files", h.GetTaggedFiles)
+	api.GET("/tags/:tag_id/media", h.GetTaggedMedia)
 	api.GET("/tags/file-tags", h.GetFileTags)
 
 	// Admin
@@ -104,6 +104,12 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	sys.GET("/thumbnail", h.SystemThumbnail)
 	sys.GET("/original", h.SystemOriginal)
 	sys.GET("/stream", h.SystemStream)
+
+	// Unified absolute-path media access
+	media := api.Group("/media")
+	media.GET("/thumbnail", h.MediaThumbnail)
+	media.GET("/original", h.MediaOriginal)
+	media.GET("/stream", h.MediaStream)
 
 	// Admin page
 }

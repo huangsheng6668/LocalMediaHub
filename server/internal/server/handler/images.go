@@ -46,9 +46,19 @@ func (h *Handler) GetImages(c echo.Context) error {
 	})
 }
 
+func (h *Handler) GetImageAsset(c echo.Context) error {
+	rawPath := c.Param("*")
+	if strings.HasSuffix(rawPath, "/original") {
+		return h.GetOriginal(c)
+	}
+	return h.GetThumbnail(c)
+}
+
 func (h *Handler) GetThumbnail(c echo.Context) error {
-	pathStr := c.Param("*")
-	pathStr = strings.ReplaceAll(pathStr, "%2F", "/")
+	pathStr, err := decodeWildcardPath(c.Param("*"), "/thumbnail")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 
 	valid, err := h.thumbnail.ValidatePath(pathStr, h.cfg.Scan.GetRoots())
 	if err != nil || !valid {
@@ -67,8 +77,10 @@ func (h *Handler) GetThumbnail(c echo.Context) error {
 }
 
 func (h *Handler) GetOriginal(c echo.Context) error {
-	pathStr := c.Param("*")
-	pathStr = strings.ReplaceAll(pathStr, "%2F", "/")
+	pathStr, err := decodeWildcardPath(c.Param("*"), "/original")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
 
 	valid, err := h.streaming.ValidatePath(pathStr, h.cfg.Scan.GetRoots())
 	if err != nil || !valid {

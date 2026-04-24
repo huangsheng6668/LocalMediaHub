@@ -186,12 +186,12 @@
 - [x] Android：NSD (Network Service Discovery) 扫描
 - [x] 自动发现局域网内的 Server，无需手动输入 IP
 
-- [x] Server 配置界面（Web 管理页面 `/admin`）
+- [x] Server 配置 API（`/api/v1/admin/*`）
 
 ### 5.2 Server 配置界面
-- [x] Web 管理页面（内嵌在 FastAPI 中 `/admin`）
-- [x] 在线修改扫描目录
-- [x] 扫描任务管理（启动/停止/进度）
+- [x] 配置读取 API
+- [x] 在线修改扫描目录 API
+- [x] 触发重扫描 API
 
 ### 5.3 其他增强
 - [x] 搜索功能（按文件名搜索，当前目录）
@@ -259,7 +259,7 @@ implementation("androidx.datastore:datastore-preferences:1.0.0")
 - **排序功能**： BrowseScreen TopAppBar 下拉菜单，支持按名称/大小/时间排序
 - **收藏功能**： DataStore 持久化，BrowseScreen 收藏按钮，支持筛选只显示收藏文件
 - **mDNS 服务发现**： Server 端 zeroconf 注册，Android NSD 扫描，自动发现服务
-- **Server 配置 UI**： `/admin` Web 管理页面，可修改扫描目录/触发重扫描
+- **Server 配置 API**： `/api/v1/admin/*` 可修改扫描目录并触发重扫描
 - **文件分类标签**： Server JSON 存储 + Android 长按打标签 + 标签筛选
 
  **视频字幕支持**已跳过（用户确认不需要)。

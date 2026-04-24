@@ -57,6 +57,8 @@ private data class GestureIndicator(
 @Composable
 fun VideoPlayerScreen(
     streamUrl: String,
+    initialPositionMs: Long = 0L,
+    onProgress: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -71,6 +73,7 @@ fun VideoPlayerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
+            onProgress(exoPlayer.currentPosition, exoPlayer.duration)
             exoPlayer.release()
             (context as? Activity)?.requestedOrientation =
                 ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -80,6 +83,12 @@ fun VideoPlayerScreen(
     // Auto-rotate based on video aspect ratio
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    onProgress(exoPlayer.duration, exoPlayer.duration)
+                }
+            }
+
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 if (videoSize.width > 0 && videoSize.height > 0) {
                     val activity = context as? Activity ?: return
@@ -93,6 +102,21 @@ fun VideoPlayerScreen(
         }
         exoPlayer.addListener(listener)
         onDispose { exoPlayer.removeListener(listener) }
+    }
+
+    LaunchedEffect(exoPlayer, initialPositionMs) {
+        if (initialPositionMs > 0L) {
+            exoPlayer.seekTo(initialPositionMs)
+        }
+    }
+
+    LaunchedEffect(exoPlayer) {
+        while (true) {
+            delay(5_000)
+            if (exoPlayer.duration > 0L) {
+                onProgress(exoPlayer.currentPosition, exoPlayer.duration)
+            }
+        }
     }
 
     // Handle system back button

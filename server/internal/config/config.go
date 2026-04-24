@@ -50,12 +50,12 @@ type SystemConfig struct {
 }
 
 // GetSystemAllowedRoots returns configured system browse roots.
-// If empty, falls back to scan.roots, then all drives.
+// If empty, system browse is disabled until explicitly configured.
 func (c *Config) GetSystemAllowedRoots() []string {
 	if len(c.System.AllowedRoots) > 0 {
 		return c.System.AllowedRoots
 	}
-	return c.Scan.GetRoots()
+	return []string{}
 }
 
 func Load(path string) (*Config, error) {
@@ -66,6 +66,9 @@ func Load(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	if len(cfg.Scan.Roots) == 0 && len(cfg.System.AllowedRoots) > 0 {
+		cfg.Scan.Roots = append([]string(nil), cfg.System.AllowedRoots...)
 	}
 	return &cfg, nil
 }

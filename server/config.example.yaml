@@ -25,7 +25,7 @@ thumbnail:
   format: "JPEG"
 
 # System browse: restrict which directories are visible to the Android client.
-# If omitted or empty, falls back to scan.roots, then all drives.
+# If omitted or empty, /api/v1/system/* browsing is disabled.
 system:
   allowed_roots:
     - "/usr/media/path"

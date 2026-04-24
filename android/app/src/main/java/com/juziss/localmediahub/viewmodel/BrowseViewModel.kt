@@ -4,10 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.juziss.localmediahub.data.BrowseResult
+import com.juziss.localmediahub.data.FavoriteMediaEntry
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.MediaRepository
+import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.SearchResult
 import com.juziss.localmediahub.data.SystemBrowseResult
 import com.juziss.localmediahub.data.Tag
@@ -59,6 +61,7 @@ private fun compareNatural(a: String, b: String): Int {
 
 class BrowseViewModel(
     private val favoritesStore: FavoritesStore? = null,
+    private val recentActivityStore: RecentActivityStore? = null,
 ) : ViewModel() {
 
     private val repository = MediaRepository()
@@ -108,6 +111,8 @@ class BrowseViewModel(
     private val _favoriteFiles = MutableStateFlow<List<MediaFile>>(emptyList())
     val favoriteFiles: StateFlow<List<MediaFile>> = _favoriteFiles.asStateFlow()
 
+    private val _favoriteAccessModes = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+
     private val _showFavoritesOnly = MutableStateFlow(false)
     val showFavoritesOnly: StateFlow<Boolean> = _showFavoritesOnly.asStateFlow()
 
@@ -123,6 +128,11 @@ class BrowseViewModel(
                     _favoriteFiles.value = files
                 }
             }
+            viewModelScope.launch {
+                store.favoriteEntries.collect { entries ->
+                    _favoriteAccessModes.value = entries.associateFavoriteModes()
+                }
+            }
         }
     }
 
@@ -130,10 +140,10 @@ class BrowseViewModel(
         return relativePath in _favorites.value
     }
 
-    fun toggleFavorite(file: MediaFile) {
+    fun toggleFavorite(file: MediaFile, isSystemBrowse: Boolean = _isSystemBrowse.value) {
         favoritesStore?.let { store ->
             viewModelScope.launch {
-                store.toggleFavorite(file)
+                store.toggleFavorite(file, isSystemBrowse)
             }
         }
     }
@@ -156,6 +166,7 @@ class BrowseViewModel(
         viewModelScope.launch {
             _browseState.value = BrowseState.Loading
             _isSystemBrowse.value = false
+            _activeTagFilter.value = null
             when (val result = repository.getFolders()) {
                 is NetworkResult.Success -> {
                     _browseState.value = BrowseState.RootFolders(result.data)
@@ -175,6 +186,7 @@ class BrowseViewModel(
         viewModelScope.launch {
             _browseState.value = BrowseState.Loading
             _isSystemBrowse.value = true
+            _activeTagFilter.value = null
             when (val result = repository.getSystemDrives()) {
                 is NetworkResult.Success -> {
                     val drives = result.data
@@ -205,6 +217,11 @@ class BrowseViewModel(
                     val data = result.data
                     _rawFolders.value = data.folders
                     _rawFiles.value = data.files
+                    recentActivityStore?.saveLastBrowseLocation(
+                        path = absolutePath,
+                        title = folderName,
+                        isSystemBrowse = true,
+                    )
                     _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
                         currentPath = data.currentPath,
                         drives = data.drives,
@@ -231,6 +248,11 @@ class BrowseViewModel(
                 is NetworkResult.Success -> {
                     _rawFolders.value = result.data.folders
                     _rawFiles.value = result.data.files
+                    recentActivityStore?.saveLastBrowseLocation(
+                        path = relativePath,
+                        title = folderName,
+                        isSystemBrowse = false,
+                    )
                     _browseState.value = BrowseState.Browsed(result.data.copy(
                         folders = applySortToFolders(result.data.folders),
                         files = applySortToFiles(result.data.files),
@@ -248,6 +270,10 @@ class BrowseViewModel(
     fun navigateBack() {
         val stack = _pathStack.value
         if (stack.isEmpty()) {
+            if (_browseState.value is BrowseState.TagCollection) {
+                loadRoots()
+                return
+            }
             if (_isSystemBrowse.value) {
                 loadSystemDrives()
             } else {
@@ -350,6 +376,12 @@ class BrowseViewModel(
                     files = sortedFiles,
                 ))
             }
+            is BrowseState.TagCollection -> {
+                _browseState.value = BrowseState.TagCollection(
+                    title = state.title,
+                    files = sortedFiles,
+                )
+            }
             else -> {}
         }
     }
@@ -380,27 +412,31 @@ class BrowseViewModel(
     }
 
     fun getVideoStreamUrl(file: MediaFile): String {
-        return if (_isSystemBrowse.value) {
-            repository.getSystemVideoStreamUrl(file.path)
-        } else {
-            repository.getVideoStreamUrl(file.relativePath)
-        }
+        return repository.getMediaStreamUrl(file.path)
     }
 
     fun getThumbnailUrl(file: MediaFile): String {
-        return if (_isSystemBrowse.value) {
-            repository.getSystemThumbnailUrl(file.path)
-        } else {
-            repository.getThumbnailUrl(file.relativePath)
-        }
+        return repository.getMediaThumbnailUrl(file.path)
     }
 
     fun getOriginalImageUrl(file: MediaFile): String {
-        return if (_isSystemBrowse.value) {
-            repository.getSystemOriginalImageUrl(file.path)
-        } else {
-            repository.getOriginalImageUrl(file.relativePath)
-        }
+        return repository.getMediaOriginalImageUrl(file.path)
+    }
+
+    fun isFavoriteSystemBrowse(file: MediaFile): Boolean {
+        return _favoriteAccessModes.value[file.relativePath] == true
+    }
+
+    fun getFavoriteVideoStreamUrl(file: MediaFile): String {
+        return repository.getMediaStreamUrl(file.path)
+    }
+
+    fun getFavoriteThumbnailUrl(file: MediaFile): String {
+        return repository.getMediaThumbnailUrl(file.path)
+    }
+
+    fun getFavoriteOriginalImageUrl(file: MediaFile): String {
+        return repository.getMediaOriginalImageUrl(file.path)
     }
 
     // ── Tags ──────────────────────────────────────────────
@@ -430,7 +466,7 @@ class BrowseViewModel(
 
     fun createTag(name: String, color: String = "#808080") {
         viewModelScope.launch {
-            when (val result = repository.createTag(name, color)) {
+            when (repository.createTag(name, color)) {
                 is NetworkResult.Success -> {
                     loadTags()
                 }
@@ -442,7 +478,7 @@ class BrowseViewModel(
 
     fun deleteTag(tagId: String) {
         viewModelScope.launch {
-            when (val result = repository.deleteTag(tagId)) {
+            when (repository.deleteTag(tagId)) {
                 is NetworkResult.Success -> {
                     loadTags()
                 }
@@ -457,6 +493,7 @@ class BrowseViewModel(
             when (repository.tagFile(tagId, filePath)) {
                 is NetworkResult.Success -> {
                     loadFileTagsForFile(filePath)
+                    currentCollectionTag()?.let { openCollection(it) }
                 }
                 is NetworkResult.Error -> {}
                 is NetworkResult.Loading -> {}
@@ -469,6 +506,7 @@ class BrowseViewModel(
             when (repository.untagFile(tagId, filePath)) {
                 is NetworkResult.Success -> {
                     loadFileTagsForFile(filePath)
+                    currentCollectionTag()?.let { openCollection(it) }
                 }
                 is NetworkResult.Error -> {}
                 is NetworkResult.Loading -> {}
@@ -513,6 +551,37 @@ class BrowseViewModel(
         _activeTagFilter.value = tag
     }
 
+    fun openCollection(tag: Tag) {
+        viewModelScope.launch {
+            _browseState.value = BrowseState.Loading
+            _showFavoritesOnly.value = false
+            _activeTagFilter.value = tag
+            _currentPath.value = ""
+            _pathStack.value = emptyList()
+            _isSystemBrowse.value = false
+
+            when (val result = repository.getTaggedMedia(tag.id)) {
+                is NetworkResult.Success -> {
+                    _rawFolders.value = emptyList()
+                    _rawFiles.value = result.data
+                    _browseState.value = BrowseState.TagCollection(
+                        title = tag.name,
+                        files = applySortToFiles(result.data),
+                    )
+                }
+                is NetworkResult.Error -> {
+                    _browseState.value = BrowseState.Error(result.message)
+                }
+                is NetworkResult.Loading -> {}
+            }
+        }
+    }
+
+    fun currentCollectionTag(): Tag? {
+        val active = _browseState.value as? BrowseState.TagCollection ?: return null
+        return _activeTagFilter.value?.takeIf { it.name == active.title }
+    }
+
     fun filterFilesByTag(files: List<MediaFile>): List<MediaFile> {
         val activeTag = _activeTagFilter.value ?: return files
         val taggedPaths = _fileTags.value.entries
@@ -555,6 +624,12 @@ class BrowseViewModel(
         _searchQuery.value = ""
         _searchState.value = SearchState.Idle
     }
+
+    fun isSystemBrowseMode(): Boolean = _isSystemBrowse.value
+}
+
+private fun List<FavoriteMediaEntry>.associateFavoriteModes(): Map<String, Boolean> {
+    return associate { entry -> entry.file.relativePath to entry.isSystemBrowse }
 }
 
 /**
@@ -562,10 +637,11 @@ class BrowseViewModel(
  */
 class BrowseViewModelFactory(
     private val favoritesStore: FavoritesStore,
+    private val recentActivityStore: RecentActivityStore,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return BrowseViewModel(favoritesStore) as T
+        return BrowseViewModel(favoritesStore, recentActivityStore) as T
     }
 }
 
@@ -576,6 +652,7 @@ sealed class BrowseState {
     data class SystemDrives(val drives: List<String>) : BrowseState()
     data class SystemBrowsed(val result: SystemBrowseResult) : BrowseState()
     data class Browsed(val result: BrowseResult) : BrowseState()
+    data class TagCollection(val title: String, val files: List<MediaFile>) : BrowseState()
     data class Error(val message: String) : BrowseState()
 }
 

@@ -33,21 +33,25 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 | 搜索 | 按文件名递归搜索，支持限定目录范围 |
 | mDNS 发现 | 局域网服务注册，Android NSD 自动发现 |
 | 双模式运行 | GUI 模式（系统托盘）或 headless 模式（无窗口） |
-| 安全防护 | 路径遍历攻击防护（ValidatePath + isWithinRoots） |
+| 安全防护 | 路径遍历攻击防护（ValidatePath + isWithinRoots），系统浏览受 `system.allowed_roots` 限制 |
 | 媒体过滤 | 仅显示配置文件中指定的视频/图片扩展名文件 |
 
 ### Android 端
 
 | 功能 | 说明 |
 |------|------|
-| 文件浏览器 | 网格/瀑布流视图，子目录浏览，滚动位置记忆 |
+| 首页层 | 启动后进入 Home 页面，聚合库入口、最近打开、继续播放、收藏和标签集合概览 |
+| 库入口 | 将配置的媒体根目录作为 Libraries 展示，减少直接面对原始路径 |
+| 文件浏览器 | 网格/瀑布流视图，子目录浏览，滚动位置与上次浏览路径记忆 |
 | 视频播放 | Media3 (ExoPlayer)，全屏切换，手势控制 |
 | 图片预览 | 全屏查看，左右滑动，双指缩放 |
 | 搜索 | 按文件名搜索，限定当前目录 |
 | 排序 | 按名称/大小/时间/数字排序（文件夹和文件独立排序） |
 | 收藏 | DataStore 持久化，筛选只看收藏 |
-| 标签 | 长按打标签，按标签筛选 |
-| 自动发现 | NSD 扫描局域网 mDNS 服务，无需手动输入 IP |
+| 标签与集合 | 长按打标签，首页直接进入标签集合并查看标签下媒体 |
+| 继续播放 | 记录视频播放进度，首页一键从上次中断位置继续 |
+| 最近项目 | 记录最近打开的媒体和最近浏览位置，一键回到最近使用内容 |
+| 自动连接 | 优先尝试上次成功连接的服务端，失败后自动回退到 NSD 局域网发现 |
 | 原生解码 | NDK/CMake 编译的 JPEG/WebP 原生解码器，提升图片加载性能 |
 | FFmpeg 扩展 | 预编译 FFmpeg 库，支持更多视频格式 |
 
@@ -154,14 +158,16 @@ thumbnail:
   max_size: 300
   format: "JPEG"
 
-# 系统浏览根目录（必须配置，限制 Android 端可访问的目录范围，不配置则什么都没有）
+# 系统浏览根目录（必须显式配置；未配置时 Android 端 system browse 不可用）
 system:
   allowed_roots:
     - "D:/Media"
     - "E:/Videos"
 ```
 
-无需配置扫描目录，默认自动检测所有 Windows 驱动器。
+`system.allowed_roots` 只影响 `/api/v1/system/*` 这组受限系统浏览接口。
+
+常规媒体扫描根目录 `scan.roots` 仍可省略，此时服务端会自动检测 Windows 驱动器。
 
 ### 3. 编译 Android 客户端
 
@@ -169,13 +175,14 @@ system:
 cd android
 ./gradlew assembleDebug      # Debug 版本
 ./gradlew assembleRelease     # Release 版本
+./gradlew testDebugUnitTest assembleDebug  # 推荐在交付前执行
 ```
 
 APK 输出位置：`android/app/build/outputs/apk/`
 
 ### 4. 连接
 
-- **自动**: App 通过 NSD 自动发现局域网内的 Server（需同一 WiFi）。
+- **自动**: App 会优先尝试上次成功连接的 Server；如果不可用，再通过 NSD 自动发现局域网内的 Server（需同一 WiFi）。
   *注：Android 端需要 `CHANGE_WIFI_MULTICAST_STATE` 权限以确保发现成功。*
 - **手动**: 在 App 中输入 PC 的局域网 IP（如 `192.168.1.100:8000`）
 
@@ -202,23 +209,24 @@ APK 输出位置：`android/app/build/outputs/apk/`
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/search` | 搜索文件 |
+| GET | `/api/v1/search` | 搜索文件和目录，支持 `path` 限定作用域 |
 | GET | `/api/v1/tags` | 标签列表 |
 | POST | `/api/v1/tags` | 创建标签 |
 | DELETE | `/api/v1/tags/{id}` | 删除标签 |
 | POST | `/api/v1/tags/{id}/files/{path}` | 给文件打标签 |
 | DELETE | `/api/v1/tags/{id}/files/{path}` | 移除文件标签 |
 | GET | `/api/v1/tags/{id}/files` | 获取标签下的文件 |
+| GET | `/api/v1/tags/file-tags` | 批量获取文件标签映射 |
 
 ### 系统浏览
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/v1/system/drives` | 系统驱动器列表 |
-| GET | `/api/v1/system/browse` | 全盘目录浏览 |
+| GET | `/api/v1/system/drives` | 已配置的 system roots 列表 |
+| GET | `/api/v1/system/browse` | 在 `system.allowed_roots` 范围内浏览目录 |
 | GET | `/api/v1/system/thumbnail` | 系统级缩略图 |
 | GET | `/api/v1/system/stream` | 系统级视频流 |
-| GET | `/api/v1/system/images/original` | 系统级原图 |
+| GET | `/api/v1/system/original` | 系统级原图 |
 
 ### 管理
 
@@ -227,6 +235,8 @@ APK 输出位置：`android/app/build/outputs/apk/`
 | GET | `/api/v1/admin/config` | 获取配置 |
 | PUT | `/api/v1/admin/config` | 更新扫描目录 |
 | POST | `/api/v1/admin/scan/trigger` | 触发全量重扫描 |
+
+当前 `/admin` 仅提供 JSON API，没有独立完成的 Web 管理页面。
 
 ## 原生库编译 (可选)
 
@@ -240,7 +250,7 @@ bash build_native_libs.sh
 
 ## 开发与同步
 
-本项目代码在本地修改后，将通过 Antigravity 助手自动同步到 GitHub 仓库。
+本项目代码在本地修改后，会自动同步推送到 GitHub 仓库 `master` 分支。
 
 ## License
 

@@ -29,6 +29,7 @@ internal fun FavoritesContent(
     onImageClick: (MediaFile, List<MediaFile>) -> Unit,
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
+    getThumbnailUrl: (MediaFile) -> String,
     modifier: Modifier = Modifier,
     viewModel: BrowseViewModel,
 ) {
@@ -67,7 +68,7 @@ internal fun FavoritesContent(
         WaterfallImageGrid(
             images = images,
             onImageClick = { file -> onImageClick(file, favoriteFiles) },
-            getThumbnailUrl = viewModel::getThumbnailUrl,
+            getThumbnailUrl = getThumbnailUrl,
             isFavorite = { isFavorite(it) },
             onToggleFavorite = { onToggleFavorite(it) },
             modifier = modifier,
@@ -90,7 +91,7 @@ internal fun FavoritesContent(
                     )
                     "image" -> ImageCard(
                         file = file,
-                        thumbnailUrl = viewModel.getThumbnailUrl(file),
+                        thumbnailUrl = getThumbnailUrl(file),
                         isFavorite = isFavorite(file.relativePath),
                         onToggleFavorite = { onToggleFavorite(file) },
                         onClick = { onImageClick(file, favoriteFiles) },

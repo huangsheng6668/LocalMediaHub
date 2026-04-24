@@ -26,7 +26,7 @@ class MediaRepository {
     }
 
     suspend fun browseFolder(relativePath: String): NetworkResult<BrowseResult> = safeApiCall {
-        val url = "$baseUrl/api/v1/folders/$relativePath/browse"
+        val url = "$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/browse"
         api.browseFolder(url)
     }
 
@@ -99,15 +99,19 @@ class MediaRepository {
     }
 
     suspend fun tagFile(tagId: String, filePath: String): NetworkResult<Map<String, String>> = safeApiCall {
-        api.tagFile("$baseUrl/api/v1/tags/$tagId/files/$filePath")
+        api.tagFile("$baseUrl/api/v1/tags/$tagId/files/${normalizeRoutePath(filePath)}")
     }
 
     suspend fun untagFile(tagId: String, filePath: String): NetworkResult<Map<String, String>> = safeApiCall {
-        api.untagFile("$baseUrl/api/v1/tags/$tagId/files/$filePath")
+        api.untagFile("$baseUrl/api/v1/tags/$tagId/files/${normalizeRoutePath(filePath)}")
     }
 
     suspend fun getTaggedFiles(tagId: String): NetworkResult<List<String>> = safeApiCall {
         api.getTaggedFiles("$baseUrl/api/v1/tags/$tagId/files")
+    }
+
+    suspend fun getTaggedMedia(tagId: String): NetworkResult<List<MediaFile>> = safeApiCall {
+        api.getTaggedMedia(tagId)
     }
 
     suspend fun getFileTags(paths: List<String> = emptyList()): NetworkResult<Map<String, List<Tag>>> {
@@ -117,15 +121,27 @@ class MediaRepository {
     // ── URL builders ──────────────────────────────────────────
 
     fun getVideoStreamUrl(relativePath: String): String {
-        return "$baseUrl/api/v1/videos/$relativePath/stream"
+        return "$baseUrl/api/v1/videos/${normalizeRoutePath(relativePath)}/stream"
     }
 
     fun getThumbnailUrl(relativePath: String): String {
-        return "$baseUrl/api/v1/images/$relativePath/thumbnail"
+        return "$baseUrl/api/v1/images/${normalizeRoutePath(relativePath)}/thumbnail"
     }
 
     fun getOriginalImageUrl(relativePath: String): String {
-        return "$baseUrl/api/v1/images/$relativePath/original"
+        return "$baseUrl/api/v1/images/${normalizeRoutePath(relativePath)}/original"
+    }
+
+    fun getMediaStreamUrl(absolutePath: String): String {
+        return "$baseUrl/api/v1/media/stream?path=${java.net.URLEncoder.encode(absolutePath, "UTF-8")}"
+    }
+
+    fun getMediaThumbnailUrl(absolutePath: String): String {
+        return "$baseUrl/api/v1/media/thumbnail?path=${java.net.URLEncoder.encode(absolutePath, "UTF-8")}"
+    }
+
+    fun getMediaOriginalImageUrl(absolutePath: String): String {
+        return "$baseUrl/api/v1/media/original?path=${java.net.URLEncoder.encode(absolutePath, "UTF-8")}"
     }
 
     // ── System URL builders (absolute paths) ──────────────────

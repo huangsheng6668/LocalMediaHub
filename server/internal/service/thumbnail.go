@@ -8,7 +8,6 @@ import (
 	_ "image/png"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/disintegration/imaging"
@@ -110,24 +109,7 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 }
 
 func (s *ThumbnailService) ValidatePath(filePath string, roots []string) (bool, error) {
-	absPath, err := filepath.Abs(filePath)
-	if err != nil {
-		return false, err
-	}
-	for _, root := range roots {
-		absRoot, err := filepath.Abs(root)
-		if err != nil {
-			continue
-		}
-		rel, err := filepath.Rel(absRoot, absPath)
-		if err != nil {
-			continue
-		}
-		if !strings.HasPrefix(rel, "..") {
-			return true, nil
-		}
-	}
-	return false, nil
+	return IsPathWithinRoots(filePath, roots)
 }
 
 // DecodeImage decodes an image file and returns the Go image object.
