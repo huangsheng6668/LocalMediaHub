@@ -74,7 +74,7 @@ fun DownloadsScreen(
                 }
             }
         }
-        Pair(folders.sorted(), files)
+        Pair(folders.sorted(), files.sortedBy { it.file.name })
     }
     val (foldersAtLevel, filesAtLevel) = itemsAtCurrentLevel
 
