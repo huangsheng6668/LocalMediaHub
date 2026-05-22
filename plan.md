@@ -141,9 +141,8 @@
 
 ### 验证
 - [x] App 能连接到 PC Server（ `http://<PC_IP>:8000` 已 server 返回数据确认)
-- [x] 文件列表正确显示（Folders: 2 roots, Videos: 41 files, Images: 104)
- total)
-- [x] 视频流正常播放（ Server Range Requests 206 OK,- [x] 图片缩略图正常加载,Server 燉略图生成, 点击可查看大图)
+- [x] 文件列表正确显示（Folders: 2 roots, Videos: 41 files, Images: 104 total)
+- [x] 视频流正常播放（ Server Range Requests 206 OK, 图片缩略图正常加载, Server 缩略图生成, 点击可查看大图)
 - [x] 浏览子目录正常（子目录 browse ✅)
 
 ---
@@ -272,10 +271,99 @@ implementation("androidx.datastore:datastore-preferences:1.0.0")
 
 ---
 
+## 阶段六：系统性能与体验深度优化方案
+
+**目标：** 针对 Go Server 端的并发访问、缩略图计算开销，以及 Android 端的列表滑动流畅度、内存占用和连接韧性进行深度优化，提升整体系统在多文件、大并发和复杂局域网环境下的性能与稳定性。
+
+### 6.1 Go Server 端优化（并发与性能）
+
+#### 6.1.1 扫描器并发化（Concurrent Scan）
+- **痛点分析：** 现有的 `Scanner.Scan` 在扫描多个 roots 路径时，是单线程串行调用 `filepath.WalkDir` 的，并且在扫描过程中全程持有全局排他写锁 `s.mu.Lock()`。若扫描目录包含数万个媒体文件，会导致其他读取/请求接口长时间挂起。
+- **优化方案：** 
+  - 引入 `golang.org/x/sync/errgroup`。在扫描多个根目录时，为每个根目录分配一个独立的 Goroutine 协程进行并行 WalkDir。
+  - 在并行 Walk 过程中使用局部切片（Thread-local Slice）收集结果，最后合并到一个总切片中。
+  - 仅在合并完成后，获取全局锁 `s.mu.Lock()` 进行极速写入更新缓存，缩短写锁持有时间至微秒级。
+
+#### 6.1.2 缓存击穿与雪崩防护（Cache Stampede Protection）
+- **痛点分析：** 当扫描缓存过期后（TTL = 60s），如果有多个并发接口请求获取媒体列表，它们会同时检测到缓存失效，并同时释放读锁、争抢写锁并并行触发物理磁盘扫描。这在多设备、高并发时会导致磁盘 I/O 瞬间飙升。
+- **优化方案：**
+  - 引入 Go 标准库的 `golang.org/x/sync/singleflight`。
+  - 在 `GetCached` 中检测到缓存失效时，通过 `singleflight.Group` 合并并发请求。
+  - 保证对于相同的扫描 roots 请求，同一时间仅有一个 Goroutine 执行真实的物理磁盘 WalkDir 操作，其余并发等待的请求直接复用该次执行的返回结果，彻底解决 Thundering Herd（惊群）和 Cache Stampede 问题。
+
+#### 6.1.3 缩略图生成限流与队列（Thumbnail Throttling）
+- **痛点分析：** 当 Android 端的网格列表快速滚动时，会发起数十甚至上百个并发缩略图请求。因为图片解码 (imaging.Open) 和缩略图计算 (imaging.Thumbnail) 是高度 CPU 密集的，如果不做控制，会导致瞬间 CPU 100% 满载、响应超时甚至由于内存瞬间申请过多导致 Go 进程被 Windows 强制杀死或引发 GC 卡顿。
+- **优化方案：**
+  - 在 `ThumbnailService` 中引入一个大小可配置的并发信号量（如 `chan struct{}` 构成的 Semaphore，推荐并发量为 `runtime.NumCPU()`）。
+  - 对正在生成缩略图的请求进行严格并发数限制。当并发量达到上限时，后续请求在通道上挂起排队，而不是疯狂创建解码协程。
+  - 提供缩略图预生成机制：在 `Scanner` 扫描完成后，可异步在后台以低优先级（Low Priority/Worker Pool）对未缓存的媒体生成缩略图，提升首次浏览的体验。
+
+---
+
+### 6.2 Android 客户端优化（流畅度与内存）
+
+#### 6.2.1 Lazy List 渲染优化（Key & Recomposition）
+- **痛点分析：** 随着扫描文件增多，BrowseScreen 网格列表或 HomeScreen 列表在滚动时可能出现轻微掉帧。由于未定义 `key`，任何局部变更（如某项打上了标签、被收藏）都会导致整个 Lazy 列表所有 Item 进行不必要的重新绘制与 Recomposition。
+- **优化方案：**
+  - 在 `LazyVerticalGrid` 和 `LazyColumn` 的 `items` 声明中，显式指定唯一稳定的 `key`（如 `key = { it.path }`），并设定 `contentType`（如 `contentType = { it.mediaType }`），促使 Compose 高效复用列表 Item 的视图结构。
+  - 将 UI 层的排序、过滤、标签匹配逻辑全部移至 ViewModel 中，在 `Dispatchers.Default` 线程池异步计算后暴露为 LiveData/Flow。严禁在 Compose 渲染层（List Row 中）直接执行字符串匹配或复杂的过滤计算，确保 UI 渲染的纯粹与极致高效。
+
+#### 6.2.2 Coil 图片加载内存与缓存调优
+- **痛点分析：** 大量的高清图片直接加载进内存可能导致 JVM 频繁发生 GC，甚至触发 OutOfMemory (OOM)。
+- **优化方案：**
+  - 在 `Application` 初始化时，为 Coil 配置自定义 `ImageLoader`。
+  - 调优内存缓存：限制内存缓存占用 JVM 堆内存最大为 15%，启用 `bitmapPool` 提高图片对象复用率。
+  - 调优磁盘缓存：在局域网下，限制 Disk Cache 大小为 100MB，防止缩略图缓存过度增长。
+  - 对 Coil 启用 `.crossfade(true)`，为缩略图渐现渲染提供 200ms 的平滑过渡动画，消除图片闪现的生硬感。
+
+#### 6.2.3 ExoPlayer 缓存与生命周期安全
+- **痛点分析：** 视频播放器如果未在 Activity/Fragment 生命周期暂停（如进入后台或锁屏）时及时释放，会持续占用解码硬件资源和内存。同时，弱 WiFi 环境下大文件视频播放容易频繁缓冲。
+- **优化方案：**
+  - 将 ExoPlayer 的生命周期与 Compose Lifecycle 彻底绑定。在 `DisposableEffect` 中监听 `Lifecycle.Event.ON_PAUSE` 或 `ON_STOP` 时自动释放/暂停播放器。
+  - 自定义 ExoPlayer `DefaultLoadControl` 缓冲区大小：
+    - 将 `minBufferMs` 从默认 of 15s 降低为 2-3s（局域网下带宽极佳，较低的启动缓冲能实现“秒播”）。
+    - 将 `maxBufferMs` 设为 30s，在后台持续缓冲。
+
+---
+
+### 6.3 网络与局域网韧性优化（Connection Resilience）
+
+#### 6.3.1 NSD mDNS 连接稳定性锁（WifiMulticastLock）
+- **痛点分析：** Android 设备由于系统的电源管理或厂商定制的省电策略，往往会在后台或熄屏时过滤掉局域网内的组播包，导致 NSD (Network Service Discovery) 服务发现随机性失效，无法搜索到局域网内的 Go 服务端。
+- **优化方案：**
+  - 在执行 mDNS 自动搜索前，从 `WifiManager` 申请 `WifiMulticastLock`：
+    ```kotlin
+    val wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    val multicastLock = wifiManager.createMulticastLock("LocalMediaHubLock")
+    multicastLock.acquire()
+    ```
+  - 保证在搜索完毕或 ViewModel 销毁时，及时释放该锁，兼顾服务发现的“高成功率”与设备“低功耗”的平衡。
+
+#### 6.3.2 OkHttpClient HTTP/2 局域网高并发连接复用
+- **痛点分析：** 网格列表中快速加载上百张缩略图时，如果 OkHttp 仍在使用 HTTP/1.1，会创建大量 TCP 连接，造成极高的连接建立开销。
+- **优化方案：**
+  - 在 `RetrofitClient` 配置中，显式声明 OkHttpClient 支持 `Protocol.HTTP_2` 和 `Protocol.HTTP_1_1`。
+  - 在 Go Server 端，配置 Echo / Standard HTTP 开启 HTTP/2 传输。利用多路复用（Multiplexing）技术，使得 Android 端只需通过单一 TCP 连接就能并发地流水线式拉取大量缩略图，大幅度降低网络 RTT（往返时延）并减少握手损耗。
+
+---
+
+## 优化实施验证路线图
+
+1. **第一阶段：Go Server 并发与防击穿重构**
+   - 验证手段：使用 `ab` 或 `wrk` 工具进行多客户端并发扫描请求（`/api/v1/folders/browse` 和 `/api/v1/videos`），观察 CPU 和内存曲线是否稳定，确保无 Race Conditions。
+2. **第二阶段：Go Server 缩略图 CPU 并发限制**
+   - 验证手段：局域网内使用 Android App 狂划图片列表，观察 Go Server 进程的线程数和 CPU 占用率是否符合预期，确认没有瞬间暴涨导致系统卡死。
+3. **第三阶段：Android Compose Lazy List 滑动帧率验证**
+   - 验证手段：开启 Android 开发者选项中的“Profile GPU Rendering”（GPU 呈现模式分析），观察柱状图是否在 16ms/60fps (或 90fps/120fps) 的基准线以下，验证滑动流畅度。
+4. **第四阶段：局域网连接与协议复用验证**
+   - 验证手段：在 Android 端抓包或通过 Fiddler/Charles 观察连接建立情况，确认大批量缩略图请求走的是 HTTP/2 多路复用，并且 TCP 连接保持复用状态。
+
+---
+
 ## 风险与注意事项
 
-1. **路径安全**：Server 必须严格校验请求路径，防止通过 `../` 访问未授权文件
-2. **大文件传输**：视频文件可能超过 4GB，注意内存管理和分块大小
-3. **跨平台路径**：Server 在 Windows 上开发，使用 `pathlib` 确保兼容
-4. **网络环境**：局域网传输，注意 WiFi 稳定性和带宽限制
-5. **缩略图缓存**：需要定期清理策略，避免磁盘空间耗尽
+1. **路径安全**：Server 必须严格校验请求路径，防止通过 `../` 访问未授权文件。
+2. **大文件传输**：视频文件可能超过 4GB，注意内存管理和分块大小。
+3. **并发同步**：并发扫描和 singleflight 引入了多协程竞争，必须确保读写锁的正确匹配，防止锁死或脏读。
+4. **网络环境**：局域网传输，注意 WiFi 稳定性和带宽限制，多路复用虽然好，但在网络质量极差时可能会触发重传阻塞。
+5. **缩略图缓存**：需要定期清理策略，避免磁盘空间耗尽。
