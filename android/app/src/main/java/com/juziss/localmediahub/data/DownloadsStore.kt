@@ -91,4 +91,36 @@ class DownloadsStore(private val context: Context) {
             }
         }
     }
+
+    /** Remove multiple downloaded files from downloads list and delete the files. */
+    suspend fun removeDownloads(relativePaths: List<String>) {
+        context.dataStore.edit { preferences ->
+            val current = preferences[downloadsKey] ?: emptySet()
+            val pathsSet = relativePaths.toSet()
+            val matchesToRemove = mutableSetOf<String>()
+            val localPathsToDelete = mutableListOf<String>()
+
+            for (json in current) {
+                try {
+                    val entry = gson.fromJson(json, DownloadEntry::class.java)
+                    if (entry.file.relativePath in pathsSet) {
+                        matchesToRemove.add(json)
+                        localPathsToDelete.add(entry.localPath)
+                    }
+                } catch (_: Exception) {
+                    // skip
+                }
+            }
+
+            if (matchesToRemove.isNotEmpty()) {
+                preferences[downloadsKey] = current - matchesToRemove
+                for (path in localPathsToDelete) {
+                    val file = File(path)
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                }
+            }
+        }
+    }
 }

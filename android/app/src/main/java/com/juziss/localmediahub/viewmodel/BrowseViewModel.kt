@@ -83,6 +83,12 @@ class BrowseViewModel(
         }
     }
 
+    fun removeDownloads(relativePaths: List<String>) {
+        viewModelScope.launch {
+            downloadsStore?.removeDownloads(relativePaths)
+        }
+    }
+
     private val repository = MediaRepository()
 
     private val _browseState = MutableStateFlow<BrowseState>(BrowseState.Idle)

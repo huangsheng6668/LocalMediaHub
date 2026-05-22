@@ -46,6 +46,7 @@ fun DownloadsScreen(
 ) {
     val downloads by viewModel.downloadedFiles.collectAsState(initial = emptyList())
     var selectedEntryForDelete by remember { mutableStateOf<DownloadEntry?>(null) }
+    var selectedFolderForDelete by remember { mutableStateOf<String?>(null) }
     var currentPath by remember { mutableStateOf(emptyList<String>()) }
 
     // Intercept hardware system back button if we are inside a subfolder
@@ -281,7 +282,8 @@ fun DownloadsScreen(
                             name = folderName,
                             itemCount = count,
                             totalSizeString = sizeStr,
-                            onClick = { currentPath = currentPath + folderName }
+                            onClick = { currentPath = currentPath + folderName },
+                            onLongClick = { selectedFolderForDelete = folderName }
                         )
                     }
 
@@ -335,6 +337,44 @@ fun DownloadsScreen(
             }
         )
     }
+
+    selectedFolderForDelete?.let { folderName ->
+        val folderFiles = remember(downloads, currentPath, folderName) {
+            val targetPath = currentPath + folderName
+            downloads.filter { entry ->
+                val segments = entry.file.relativePath
+                    .split('/', '\\')
+                    .filter { it.isNotEmpty() }
+                segments.size > targetPath.size &&
+                        segments.take(targetPath.size) == targetPath
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { selectedFolderForDelete = null },
+            title = { Text("Delete Downloaded Folder?") },
+            text = { Text("This will permanently delete the folder \"$folderName\" and its ${folderFiles.size} offline files from your device's local storage.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val relativePaths = folderFiles.map { it.file.relativePath }
+                        viewModel.removeDownloads(relativePaths)
+                        selectedFolderForDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Delete All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedFolderForDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -344,13 +384,14 @@ private fun FolderItemCard(
     itemCount: Int,
     totalSizeString: String,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = {}
+                onLongClick = onLongClick
             ),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
