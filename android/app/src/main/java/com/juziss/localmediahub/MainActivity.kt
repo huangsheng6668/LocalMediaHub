@@ -11,6 +11,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.PlaybackProgressEntry
@@ -22,6 +23,7 @@ import com.juziss.localmediahub.ui.screen.ConnectionScreen
 import com.juziss.localmediahub.ui.screen.HomeScreen
 import com.juziss.localmediahub.ui.screen.ImagePreviewScreen
 import com.juziss.localmediahub.ui.screen.VideoPlayerScreen
+import com.juziss.localmediahub.ui.screen.DownloadsScreen
 import com.juziss.localmediahub.ui.theme.LocalMediaHubTheme
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.viewmodel.BrowseViewModelFactory
@@ -55,18 +57,21 @@ fun LocalMediaHubApp() {
     var currentImageFile by remember { mutableStateOf<MediaFile?>(null) }
     var imageList by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
     var currentImageUsesSystemUrl by remember { mutableStateOf(false) }
-
+    var currentImageIsLocal by remember { mutableStateOf(false) }
+ 
     val context = LocalContext.current
     val favoritesStore = remember { FavoritesStore(context) }
     val recentActivityStore = remember { RecentActivityStore(context) }
     val serverConfig = remember { ServerConfig(context) }
+    val downloadsStore = remember { DownloadsStore(context) }
     val appScope = rememberCoroutineScope()
     val browseViewModel: BrowseViewModel = viewModel(
-        factory = BrowseViewModelFactory(favoritesStore, recentActivityStore),
+        factory = BrowseViewModelFactory(favoritesStore, recentActivityStore, downloadsStore),
     )
     val homeViewModel: HomeViewModel = viewModel(
         factory = HomeViewModelFactory(favoritesStore, recentActivityStore, serverConfig),
     )
+    val downloadedEntries by browseViewModel.downloadedFiles.collectAsState(initial = emptyList())
 
     NavHost(navController = navController, startDestination = "connection") {
         composable("connection") {
@@ -76,6 +81,9 @@ fun LocalMediaHubApp() {
                         popUpTo("connection") { inclusive = false }
                     }
                 },
+                onBrowseOffline = {
+                    navController.navigate("downloads")
+                }
             )
         }
 
@@ -130,6 +138,7 @@ fun LocalMediaHubApp() {
                             currentImageFile = file
                             imageList = images
                             currentImageUsesSystemUrl = entry.isSystemBrowse
+                            currentImageIsLocal = false
                         },
                     )
                 },
@@ -150,6 +159,7 @@ fun LocalMediaHubApp() {
                         currentImageFile = file
                         imageList = listOf(file)
                         currentImageUsesSystemUrl = homeViewModel.isFavoriteSystemBrowse(file)
+                        currentImageIsLocal = false
                         navController.navigate("imagePreview")
                     }
                 },
@@ -159,6 +169,23 @@ fun LocalMediaHubApp() {
                     }
                     navController.navigate("connection") {
                         popUpTo(0) { inclusive = true }
+                    }
+                },
+                downloadedEntries = downloadedEntries,
+                onOpenDownloads = { navController.navigate("downloads") },
+                onDownloadClick = { entry ->
+                    if (entry.file.mediaType == "video") {
+                        currentVideoFile = entry.file
+                        currentVideoUrl = "file://${entry.localPath}"
+                        currentVideoUsesSystemUrl = false
+                        currentVideoStartPositionMs = 0L
+                        navController.navigate("videoPlayer")
+                    } else {
+                        currentImageFile = entry.file
+                        imageList = listOf(entry.file)
+                        currentImageIsLocal = true
+                        currentImageUsesSystemUrl = false
+                        navController.navigate("imagePreview")
                     }
                 },
                 viewModel = homeViewModel,
@@ -191,6 +218,7 @@ fun LocalMediaHubApp() {
                     currentImageFile = file
                     imageList = images
                     currentImageUsesSystemUrl = browseViewModel.isSystemBrowseMode()
+                    currentImageIsLocal = false
                     navController.navigate("imagePreview")
                 },
                 onFavoriteVideoClick = { file, isSystemBrowse ->
@@ -216,6 +244,7 @@ fun LocalMediaHubApp() {
                     currentImageFile = file
                     imageList = images
                     currentImageUsesSystemUrl = isSystemBrowse
+                    currentImageIsLocal = false
                     navController.navigate("imagePreview")
                 },
                 viewModel = browseViewModel,
@@ -253,7 +282,14 @@ fun LocalMediaHubApp() {
                     imageList = imageList,
                     onBack = { navController.popBackStack() },
                     getOriginalUrl = { mediaFile ->
-                        if (currentImageUsesSystemUrl) {
+                        if (currentImageIsLocal) {
+                            val localEntry = downloadedEntries.find { it.file.relativePath == mediaFile.relativePath }
+                            if (localEntry != null) {
+                                "file://${localEntry.localPath}"
+                            } else {
+                                ""
+                            }
+                        } else if (currentImageUsesSystemUrl) {
                             browseViewModel.getFavoriteOriginalImageUrl(mediaFile)
                         } else {
                             browseViewModel.getOriginalImageUrl(mediaFile)
@@ -261,6 +297,27 @@ fun LocalMediaHubApp() {
                     },
                 )
             }
+        }
+ 
+        composable("downloads") {
+            DownloadsScreen(
+                onBack = { navController.popBackStack() },
+                onVideoClick = { file, localPath ->
+                    currentVideoFile = file
+                    currentVideoUrl = "file://$localPath"
+                    currentVideoUsesSystemUrl = false
+                    currentVideoStartPositionMs = 0L
+                    navController.navigate("videoPlayer")
+                },
+                onImageClick = { file, _ ->
+                    currentImageFile = file
+                    imageList = listOf(file)
+                    currentImageUsesSystemUrl = false
+                    currentImageIsLocal = true
+                    navController.navigate("imagePreview")
+                },
+                viewModel = browseViewModel
+            )
         }
     }
 }

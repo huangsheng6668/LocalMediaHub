@@ -13,6 +13,8 @@ import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.SearchResult
 import com.juziss.localmediahub.data.SystemBrowseResult
 import com.juziss.localmediahub.data.Tag
+import com.juziss.localmediahub.data.DownloadsStore
+import com.juziss.localmediahub.data.DownloadEntry
 import com.juziss.localmediahub.network.NetworkResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -70,7 +72,16 @@ private fun compareNatural(a: String, b: String): Int {
 class BrowseViewModel(
     private val favoritesStore: FavoritesStore? = null,
     private val recentActivityStore: RecentActivityStore? = null,
+    private val downloadsStore: DownloadsStore? = null,
 ) : ViewModel() {
+
+    val downloadedFiles = downloadsStore?.downloadedFiles ?: kotlinx.coroutines.flow.emptyFlow()
+
+    fun removeDownload(file: MediaFile) {
+        viewModelScope.launch {
+            downloadsStore?.removeDownload(file.relativePath)
+        }
+    }
 
     private val repository = MediaRepository()
 
@@ -503,6 +514,9 @@ class BrowseViewModel(
 
             val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             downloadManager.enqueue(request)
+            viewModelScope.launch {
+                downloadsStore?.addDownload(file)
+            }
             Toast.makeText(context, "Started downloading ${file.name}", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(context, "Failed to download: ${e.message}", Toast.LENGTH_LONG).show()
@@ -797,10 +811,11 @@ private fun List<FavoriteMediaEntry>.associateFavoriteModes(): Map<String, Boole
 class BrowseViewModelFactory(
     private val favoritesStore: FavoritesStore,
     private val recentActivityStore: RecentActivityStore,
+    private val downloadsStore: DownloadsStore,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return BrowseViewModel(favoritesStore, recentActivityStore) as T
+        return BrowseViewModel(favoritesStore, recentActivityStore, downloadsStore) as T
     }
 }
 

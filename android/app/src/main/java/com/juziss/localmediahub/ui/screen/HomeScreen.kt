@@ -52,10 +52,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.juziss.localmediahub.data.DownloadEntry
 import com.juziss.localmediahub.data.LastBrowseLocation
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.PlaybackProgressEntry
@@ -77,6 +81,9 @@ fun HomeScreen(
     onOpenRecentMedia: (RecentMediaEntry) -> Unit,
     onFavoriteClick: (MediaFile) -> Unit = {},
     onDisconnect: () -> Unit = {},
+    downloadedEntries: List<DownloadEntry> = emptyList(),
+    onOpenDownloads: () -> Unit = {},
+    onDownloadClick: (DownloadEntry) -> Unit = {},
     viewModel: HomeViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -153,6 +160,8 @@ fun HomeScreen(
                     uiState = uiState,
                     onResumeBrowse = onResumeBrowse,
                     onOpenFavorites = onOpenFavorites,
+                    downloadCount = downloadedEntries.size,
+                    onOpenDownloads = onOpenDownloads,
                 )
             }
 
@@ -258,6 +267,25 @@ fun HomeScreen(
                 }
             }
 
+            if (downloadedEntries.isNotEmpty()) {
+                item {
+                    SectionHeader(
+                        title = "Offline Downloads",
+                        subtitle = "Play downloaded files on your device offline",
+                    )
+                }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(downloadedEntries.take(10), key = { "home-download-${it.file.relativePath}" }) { entry ->
+                            DownloadedPreviewCard(
+                                entry = entry,
+                                onClick = { onDownloadClick(entry) },
+                            )
+                        }
+                    }
+                }
+            }
+ 
             uiState.errorMessage?.let { message ->
                 item {
                     StatusNoticeCard(message = message)
@@ -273,6 +301,8 @@ private fun HeroCard(
     uiState: HomeUiState,
     onResumeBrowse: (LastBrowseLocation) -> Unit,
     onOpenFavorites: () -> Unit,
+    downloadCount: Int,
+    onOpenDownloads: () -> Unit,
 ) {
     ElevatedCard(
         colors = CardDefaults.elevatedCardColors(
@@ -306,6 +336,7 @@ private fun HeroCard(
                 HeroMetric(label = "Collections", value = uiState.collections.size.toString())
                 HeroMetric(label = "Continue", value = uiState.continueWatching.size.toString())
                 HeroMetric(label = "Recent", value = uiState.recentMedia.size.toString())
+                HeroMetric(label = "Downloads", value = downloadCount.toString())
             }
 
             Surface(
@@ -393,6 +424,11 @@ private fun HeroCard(
                     Icon(Icons.Filled.Favorite, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Open Favorites")
+                }
+                OutlinedButton(onClick = onOpenDownloads) {
+                    Icon(Icons.Filled.Folder, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Local Downloads")
                 }
             }
         }
@@ -769,4 +805,80 @@ private fun formatTime(ms: Long): String {
 
 private fun condenseServerLabel(serverLabel: String): String {
     return serverLabel.removePrefix("http://").removePrefix("https://")
+}
+
+@Composable
+private fun DownloadedPreviewCard(
+    entry: DownloadEntry,
+    onClick: () -> Unit,
+) {
+    ElevatedCard(
+        onClick = onClick,
+        modifier = Modifier.width(184.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Column {
+            if (entry.file.mediaType == "image") {
+                AsyncImage(
+                    model = "file://${entry.localPath}",
+                    contentDescription = entry.file.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(124.dp),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(124.dp)
+                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Movie,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(34.dp),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+            }
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = if (entry.file.mediaType == "image") "Image" else "Video",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = entry.file.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "Offline Download",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
+        }
+    }
 }
