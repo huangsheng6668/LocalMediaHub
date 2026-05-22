@@ -347,23 +347,66 @@ implementation("androidx.datastore:datastore-preferences:1.0.0")
 
 ---
 
+### 6.4 远程 PC 文件与目录删除支持 (Remote PC File & Directory Deletion Support)
+
+**目标：** 在保障系统路径安全和防误删的前提下，支持在 Android 手机上长按或通过操作菜单永久删除 PC 服务端上的文件与目录。
+
+#### 6.4.1 Go Server 端安全删除接口
+- **痛点/安全分析：** 远程删除是极高危的操作，一旦存在路径遍历漏洞或越权访问，可能导致 PC 端的系统关键目录被恶意清空。
+- **设计与安全方案：**
+  - **路由注册：** 注册 `DELETE /api/v1/system/delete` 接口。
+  - **双重路径校验（防御性设计）：**
+    - 使用 `service.NormalizePath` 规范化输入的目标路径。
+    - 校验该路径是否在 `scanRoots` 或 `systemAllowedRoots` 的子路径中（强阻断对根目录本身的删除）。
+    - 拒绝任何包含 blocked 关键字（如 `windows`、`system32` 等）的路径。
+  - **物理删除逻辑：**
+    - 检查路径是否存在，若是文件，调用 `os.Remove(path)`。
+    - 若是目录，为了防止超大规模的递归删除带来灾难性后果，需限制仅当客户端显式传递 `recursive=true` 参数时才调用 `os.RemoveAll(path)` 递归删除，否则只允许删除空目录，保障物理安全。
+  - **缓存与状态同步：** 删除成功后，Go 后端必须立即调用 `s.InvalidateCache()` 废弃扫描器的文件缓存，确保后续所有的浏览拉取结果实时刷新。
+
+#### 6.4.2 Android 客户端 UI 与交互逻辑
+- **设计与交互方案：**
+  - **操作入口：** 在 `BrowseScreen.kt` 网格项（或 `BrowseContent.kt` 列表项）添加长按手势（LongPress）或三点操作按钮，弹出下拉动作菜单（DropdownMenu / BottomSheet），显示 “删除” (Delete) 选项。
+  - **防误删确认弹窗（AlertDialog）：**
+    - 点击删除选项后，必须展示强警告二次确认对话框。
+    - 对话框文案：“确定要从 PC 端永久删除 [文件/目录名称] 吗？此操作将无法恢复！”
+    - 选项：“取消”（默认聚焦）与“确认删除”（红色警告样式）。
+  - **网络层封装（Retrofit）：**
+    - 在 `MediaApi.kt` 中添加对应的 Retrofit 契约定义：
+      ```kotlin
+      @DELETE("api/v1/system/delete")
+      suspend fun deletePath(
+          @Query("path") path: String, 
+          @Query("recursive") recursive: Boolean
+      ): Response<ResponseBody>
+      ```
+  - **界面状态即时刷新：**
+    - 删除成功后，客户端弹出 “删除成功” 的 Toast，并立即触发 Local list 的重绘或发起数据刷新拉取，确保 UI 上的删除表现灵敏且无延迟。
+
+---
+
 ## 优化实施验证路线图
 
 1. **第一阶段：Go Server 并发与防击穿重构**
    - 验证手段：使用 `ab` 或 `wrk` 工具进行多客户端并发扫描请求（`/api/v1/folders/browse` 和 `/api/v1/videos`），观察 CPU 和内存曲线是否稳定，确保无 Race Conditions。
 2. **第二阶段：Go Server 缩略图 CPU 并发限制**
-   - 验证手段：局域网内使用 Android App 狂划图片列表，观察 Go Server 进程的线程数和 CPU 占用率是否符合预期，确认没有瞬间暴涨导致系统卡死。
+   - 验证手段：局域网内使用 Android App 狂划图片列表，观察 Go Server 进程的线程数 and CPU 占用率是否符合预期，确认没有瞬间暴涨导致系统卡死。
 3. **第三阶段：Android Compose Lazy List 滑动帧率验证**
    - 验证手段：开启 Android 开发者选项中的“Profile GPU Rendering”（GPU 呈现模式分析），观察柱状图是否在 16ms/60fps (或 90fps/120fps) 的基准线以下，验证滑动流畅度。
 4. **第四阶段：局域网连接与协议复用验证**
    - 验证手段：在 Android 端抓包或通过 Fiddler/Charles 观察连接建立情况，确认大批量缩略图请求走的是 HTTP/2 多路复用，并且 TCP 连接保持复用状态。
+5. **第五阶段：远程删除功能安全性与一致性验证**
+   - 验证手段：
+     1. 安全黑盒测试：输入非授权路径（如 `C:\Windows\system32` 或 `..\..\etc\passwd` 等），验证 Go Server 接口是否坚定返回 `403 Forbidden`。
+     2. 物理删除测试：在 Android App 上触发删除 PC 上的某个测试媒体文件或测试文件夹，验证 PC 上该路径是否确实被移除，且 App 端的浏览列表即时移除了对应节点。
 
 ---
 
 ## 风险与注意事项
 
-1. **路径安全**：Server 必须严格校验请求路径，防止通过 `../` 访问未授权文件。
+1. **路径安全**：Server 必须严格校验请求路径，防止通过 `../` 访问未授权文件。对于高风险的远程物理删除操作，必须实施最严苛的子路径判定，严禁删除根目录。
 2. **大文件传输**：视频文件可能超过 4GB，注意内存管理和分块大小。
 3. **并发同步**：并发扫描和 singleflight 引入了多协程竞争，必须确保读写锁的正确匹配，防止锁死或脏读。
 4. **网络环境**：局域网传输，注意 WiFi 稳定性和带宽限制，多路复用虽然好，但在网络质量极差时可能会触发重传阻塞。
 5. **缩略图缓存**：需要定期清理策略，避免磁盘空间耗尽。
+6. **误删风险**：PC 端物理删除操作是永久且不可逆的（局域网删除不经过系统回收站）。Android 客户端必须严格限制交互确认流程；Go 服务端必须杜绝系统核心路径的任何写操作。
