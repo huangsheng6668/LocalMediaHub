@@ -309,9 +309,9 @@ fun LocalMediaHubApp() {
                     currentVideoStartPositionMs = 0L
                     navController.navigate("videoPlayer")
                 },
-                onImageClick = { file, _ ->
+                onImageClick = { file, images ->
                     currentImageFile = file
-                    imageList = listOf(file)
+                    imageList = images
                     currentImageUsesSystemUrl = false
                     currentImageIsLocal = true
                     navController.navigate("imagePreview")

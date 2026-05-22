@@ -41,7 +41,7 @@ import java.util.*
 fun DownloadsScreen(
     onBack: () -> Unit,
     onVideoClick: (MediaFile, String) -> Unit,
-    onImageClick: (MediaFile, String) -> Unit,
+    onImageClick: (MediaFile, List<MediaFile>) -> Unit,
     viewModel: BrowseViewModel,
 ) {
     val downloads by viewModel.downloadedFiles.collectAsState(initial = emptyList())
@@ -293,7 +293,11 @@ fun DownloadsScreen(
                                 if (entry.file.mediaType == "video") {
                                     onVideoClick(entry.file, entry.localPath)
                                 } else {
-                                    onImageClick(entry.file, entry.localPath)
+                                    val imagesAtLevel = filesAtLevel
+                                        .filter { it.file.mediaType == "image" }
+                                        .map { it.file }
+                                        .sortedBy { it.name }
+                                    onImageClick(entry.file, imagesAtLevel)
                                 }
                             },
                             onDeleteClick = {
