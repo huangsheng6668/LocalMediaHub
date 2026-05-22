@@ -35,6 +35,18 @@ class MediaRepository {
         api.getFolderFilesRecursive(url)
     }
 
+    suspend fun downloadFolderZip(relativePath: String): NetworkResult<okhttp3.ResponseBody> = try {
+        val url = "$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/download"
+        val response = api.downloadFolderZip(url)
+        if (response.isSuccessful && response.body() != null) {
+            NetworkResult.Success(response.body()!!)
+        } else {
+            NetworkResult.Error("Server returned code ${response.code()}", response.code())
+        }
+    } catch (e: Exception) {
+        NetworkResult.Error(e.toUserMessage())
+    }
+
     // ── Videos ────────────────────────────────────────────────
 
     suspend fun getVideos(

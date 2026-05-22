@@ -34,6 +34,12 @@ interface MediaApi {
         @Url url: String,
     ): List<com.juziss.localmediahub.data.MediaFile>
 
+    @Streaming
+    @GET
+    suspend fun downloadFolderZip(
+        @Url url: String,
+    ): Response<ResponseBody>
+
     // ── Videos ────────────────────────────────────────────────
     @GET("api/v1/videos")
     suspend fun getVideos(

@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"archive/zip"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,6 +45,10 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 	rawPath := c.Param("*")
 	if rawPath == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+	}
+
+	if strings.HasSuffix(rawPath, "/download") {
+		return h.DownloadFolderZip(c)
 	}
 
 	if strings.HasSuffix(rawPath, "/files") {
@@ -163,4 +170,84 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 		Folders:     folders,
 		Files:       files,
 	})
+}
+
+func (h *Handler) DownloadFolderZip(c echo.Context) error {
+	rawPath := c.Param("*")
+	pathStr, err := decodeWildcardPath(rawPath, "/download")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	pathStr, err = service.NormalizePath(pathStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
+	if err != nil || !valid {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "access denied"})
+	}
+
+	fi, err := os.Stat(pathStr)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "path not found"})
+		}
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if !fi.IsDir() {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "not a directory"})
+	}
+
+	c.Response().Header().Set(echo.HeaderContentType, "application/zip")
+	c.Response().Header().Set(echo.HeaderContentDisposition, fmt.Sprintf("attachment; filename=%q.zip", filepath.Base(pathStr)))
+	c.Response().WriteHeader(http.StatusOK)
+
+	zipWriter := zip.NewWriter(c.Response().Writer)
+	defer zipWriter.Close()
+
+	videoExts := h.scanner.VideoExts()
+	imageExts := h.scanner.ImageExts()
+
+	err = filepath.Walk(pathStr, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(info.Name()))
+		if !videoExts[ext] && !imageExts[ext] {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(filepath.Dir(pathStr), filePath)
+		if err != nil {
+			return err
+		}
+		relPath = filepath.ToSlash(relPath)
+
+		fileToZip, err := os.Open(filePath)
+		if err != nil {
+			return err
+		}
+		defer fileToZip.Close()
+
+		writer, err := zipWriter.Create(relPath)
+		if err != nil {
+			return err
+		}
+
+		_, err = io.Copy(writer, fileToZip)
+		return err
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

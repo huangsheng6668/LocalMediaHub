@@ -28,6 +28,12 @@ import android.net.Uri
 import android.os.Environment
 import android.webkit.MimeTypeMap
 import android.widget.Toast
+import java.io.File
+import java.io.FileOutputStream
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipEntry
 
 enum class SortOrder(val label: String) {
     NAME_ASC("Name A-Z"),
@@ -532,33 +538,113 @@ class BrowseViewModel(
     fun downloadFolder(context: Context, folder: Folder) {
         viewModelScope.launch {
             try {
-                when (val result = repository.getFolderFilesRecursive(folder.relativePath)) {
-                    is NetworkResult.Success -> {
-                        val files = result.data
-                        if (files.isEmpty()) {
-                            Toast.makeText(context, "No media files found in this folder.", Toast.LENGTH_SHORT).show()
-                            return@launch
-                        }
-                        Toast.makeText(
-                            context,
-                            "Started downloading ${files.size} files from folder \"${folder.name}\"...",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        files.forEach { file ->
-                            downloadFile(context, file)
+                // 1. Fetch metadata first
+                Toast.makeText(context, "Preparing to download folder \"${folder.name}\"...", Toast.LENGTH_SHORT).show()
+                val metadataResult = repository.getFolderFilesRecursive(folder.relativePath)
+                if (metadataResult !is NetworkResult.Success) {
+                    val errorMsg = (metadataResult as? NetworkResult.Error)?.message ?: "Unknown error"
+                    Toast.makeText(context, "Failed to get folder metadata: $errorMsg", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                
+                val filesMetadata = metadataResult.data
+                if (filesMetadata.isEmpty()) {
+                    Toast.makeText(context, "No media files found in this folder.", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                // 2. Request the dynamic ZIP stream
+                val zipResult = repository.downloadFolderZip(folder.relativePath)
+                if (zipResult !is NetworkResult.Success) {
+                    val errorMsg = (zipResult as? NetworkResult.Error)?.message ?: "Unknown error"
+                    Toast.makeText(context, "Failed to stream folder zip: $errorMsg", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+
+                Toast.makeText(context, "Downloading and extracting \"${folder.name}\" in background...", Toast.LENGTH_SHORT).show()
+
+                withContext(Dispatchers.IO) {
+                    val responseBody = zipResult.data
+                    val tempFile = File(context.cacheDir, "temp_folder_download_${System.currentTimeMillis()}.zip")
+                    
+                    // Save response stream to a temporary ZIP file
+                    responseBody.byteStream().use { inputStream ->
+                        FileOutputStream(tempFile).use { outputStream ->
+                            val buffer = ByteArray(8 * 1024)
+                            var bytesRead: Int
+                            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                                outputStream.write(buffer, 0, bytesRead)
+                            }
                         }
                     }
-                    is NetworkResult.Error -> {
-                        Toast.makeText(
-                            context,
-                            "Failed to get folder files: ${result.message}",
-                            Toast.LENGTH_LONG
-                        ).show()
+
+                    // Extract ZIP archive to scoped app directory
+                    val destDirectory = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "LocalMediaHub")
+                    if (!destDirectory.exists()) {
+                        destDirectory.mkdirs()
                     }
-                    else -> {}
+
+                    val incomingEntries = mutableListOf<DownloadEntry>()
+
+                    ZipInputStream(BufferedInputStream(tempFile.inputStream())).use { zipInputStream ->
+                        var zipEntry: ZipEntry? = zipInputStream.nextEntry
+                        val buffer = ByteArray(8 * 1024)
+
+                        while (zipEntry != null) {
+                            if (!zipEntry.isDirectory) {
+                                // Re-create intermediate parent directories if any
+                                val extractedFile = File(destDirectory, zipEntry.name)
+                                extractedFile.parentFile?.mkdirs()
+
+                                FileOutputStream(extractedFile).use { outputStream ->
+                                    var len: Int
+                                    while (zipInputStream.read(buffer).also { len = it } > 0) {
+                                        outputStream.write(buffer, 0, len)
+                                    }
+                                }
+
+                                // Match extracted file against pre-fetched metadata by matching names
+                                val entryFileName = File(zipEntry.name).name
+                                val matchedMetadata = filesMetadata.find { 
+                                    it.name.equals(entryFileName, ignoreCase = true) 
+                                }
+
+                                if (matchedMetadata != null) {
+                                    incomingEntries.add(
+                                        DownloadEntry(
+                                            file = matchedMetadata,
+                                            localPath = extractedFile.absolutePath,
+                                            addedAt = System.currentTimeMillis()
+                                        )
+                                    )
+                                }
+                            }
+                            zipInputStream.closeEntry()
+                            zipEntry = zipInputStream.nextEntry
+                        }
+                    }
+
+                    // Delete the temporary ZIP archive
+                    if (tempFile.exists()) {
+                        tempFile.delete()
+                    }
+
+                    // Register all files inside DownloadsStore in one bulk transaction
+                    if (incomingEntries.isNotEmpty() && downloadsStore != null) {
+                        downloadsStore.addDownloads(incomingEntries)
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Successfully downloaded & extracted ${incomingEntries.size} files!", Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "No matching files extracted.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             } catch (e: Exception) {
-                Toast.makeText(context, "Failed to download folder: ${e.message}", Toast.LENGTH_LONG).show()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Failed to download folder: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }

@@ -123,4 +123,24 @@ class DownloadsStore(private val context: Context) {
             }
         }
     }
+
+    /** Add multiple files to downloads list. */
+    suspend fun addDownloads(entries: List<DownloadEntry>) {
+        context.dataStore.edit { preferences ->
+            val current = preferences[downloadsKey] ?: emptySet()
+            val incomingPaths = entries.map { it.file.relativePath }.toSet()
+            
+            val filtered = current.filterNot { json ->
+                try {
+                    val existing = gson.fromJson(json, DownloadEntry::class.java)
+                    existing.file.relativePath in incomingPaths
+                } catch (_: Exception) {
+                    false
+                }
+            }.toSet()
+            
+            val newJsons = entries.map { gson.toJson(it) }
+            preferences[downloadsKey] = filtered + newJsons
+        }
+    }
 }
