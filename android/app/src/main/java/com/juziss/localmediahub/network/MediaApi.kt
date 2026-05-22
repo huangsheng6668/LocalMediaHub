@@ -29,6 +29,11 @@ interface MediaApi {
         @Url url: String,
     ): BrowseResult
 
+    @GET
+    suspend fun getFolderFilesRecursive(
+        @Url url: String,
+    ): List<com.juziss.localmediahub.data.MediaFile>
+
     // ── Videos ────────────────────────────────────────────────
     @GET("api/v1/videos")
     suspend fun getVideos(

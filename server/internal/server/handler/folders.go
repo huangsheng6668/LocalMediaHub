@@ -43,6 +43,42 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 	if rawPath == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
 	}
+
+	if strings.HasSuffix(rawPath, "/files") {
+		pathStr, err := decodeWildcardPath(rawPath, "/files")
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+
+		pathStr, err = service.NormalizePath(pathStr)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+
+		valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+		if !valid {
+			return c.JSON(http.StatusForbidden, map[string]string{"error": "path outside roots"})
+		}
+
+		files, err := h.scanner.GetCached(h.cfg.Scan.GetRoots())
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+
+		matchedFiles := make([]models.MediaFile, 0)
+		for _, file := range files {
+			ok, err := service.IsPathWithinRoots(file.Path, []string{pathStr})
+			if err == nil && ok {
+				matchedFiles = append(matchedFiles, file)
+			}
+		}
+
+		return c.JSON(http.StatusOK, matchedFiles)
+	}
+
 	pathStr, err := decodeWildcardPath(rawPath, "/browse")
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})

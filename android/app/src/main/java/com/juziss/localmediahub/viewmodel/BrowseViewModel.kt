@@ -523,6 +523,40 @@ class BrowseViewModel(
         }
     }
 
+    fun downloadFolder(context: Context, folder: Folder) {
+        viewModelScope.launch {
+            try {
+                when (val result = repository.getFolderFilesRecursive(folder.relativePath)) {
+                    is NetworkResult.Success -> {
+                        val files = result.data
+                        if (files.isEmpty()) {
+                            Toast.makeText(context, "No media files found in this folder.", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+                        Toast.makeText(
+                            context,
+                            "Started downloading ${files.size} files from folder \"${folder.name}\"...",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        files.forEach { file ->
+                            downloadFile(context, file)
+                        }
+                    }
+                    is NetworkResult.Error -> {
+                        Toast.makeText(
+                            context,
+                            "Failed to get folder files: ${result.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    else -> {}
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to download folder: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     // ── Tags ──────────────────────────────────────────────
 
     private val _tags = MutableStateFlow<List<Tag>>(emptyList())

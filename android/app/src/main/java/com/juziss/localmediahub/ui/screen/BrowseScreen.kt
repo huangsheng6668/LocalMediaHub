@@ -380,6 +380,20 @@ fun BrowseScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             TextButton(
                                 onClick = {
+                                    viewModel.downloadFolder(context, item)
+                                    itemForActions = null
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Start,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Download Folder Content")
+                                }
+                            }
+                            TextButton(
+                                onClick = {
                                     itemToDelete = item
                                     showDeleteConfirm = true
                                     deleteRecursive = true

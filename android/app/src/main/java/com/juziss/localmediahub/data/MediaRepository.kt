@@ -30,6 +30,11 @@ class MediaRepository {
         api.browseFolder(url)
     }
 
+    suspend fun getFolderFilesRecursive(relativePath: String): NetworkResult<List<MediaFile>> = safeApiCall {
+        val url = "$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/files"
+        api.getFolderFilesRecursive(url)
+    }
+
     // ── Videos ────────────────────────────────────────────────
 
     suspend fun getVideos(

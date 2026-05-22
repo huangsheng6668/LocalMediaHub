@@ -221,3 +221,60 @@ func TestBrowseFolderRouteDecodesEncodedUnicodePath(t *testing.T) {
 		t.Fatalf("expected status 200 for encoded unicode browse request, got %d with body %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestBrowseFolderRecursiveFiles(t *testing.T) {
+	root := t.TempDir()
+	childDir := filepath.Join(root, "cats")
+	if err := os.MkdirAll(childDir, 0o755); err != nil {
+		t.Fatalf("failed to create child dir: %v", err)
+	}
+	subChildDir := filepath.Join(childDir, "subcats")
+	if err := os.MkdirAll(subChildDir, 0o755); err != nil {
+		t.Fatalf("failed to create subchild dir: %v", err)
+	}
+
+	file1 := filepath.Join(childDir, "cat1.mp4")
+	if err := os.WriteFile(file1, []byte("video1"), 0o644); err != nil {
+		t.Fatalf("failed to create file1: %v", err)
+	}
+	file2 := filepath.Join(subChildDir, "cat2.jpg")
+	if err := os.WriteFile(file2, []byte("image2"), 0o644); err != nil {
+		t.Fatalf("failed to create file2: %v", err)
+	}
+
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{root},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+	}
+
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions), nil, nil, nil)
+	e := echo.New()
+	e.GET("/api/v1/folders/*", h.BrowseFolder)
+
+	// Trigger initial scan so files are cached in memory
+	_, err := h.scanner.Scan(cfg.Scan.GetRoots())
+	if err != nil {
+		t.Fatalf("failed to scan roots: %v", err)
+	}
+
+	encodedPath := strings.ReplaceAll(url.PathEscape(filepath.ToSlash(childDir)), "%2F", "/")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders/"+encodedPath+"/files", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d with body %s", rec.Code, rec.Body.String())
+	}
+
+	var files []models.MediaFile
+	if err := json.Unmarshal(rec.Body.Bytes(), &files); err != nil {
+		t.Fatalf("failed to decode files list: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Fatalf("expected 2 recursive files under 'cats', got %d", len(files))
+	}
+}
