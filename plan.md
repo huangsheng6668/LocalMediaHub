@@ -297,22 +297,23 @@ implementation("androidx.datastore:datastore-preferences:1.0.0")
   - 在 `ThumbnailService` 中引入一个大小可配置的并发信号量（如 `chan struct{}` 构成的 Semaphore，推荐并发量为 `runtime.NumCPU()`）。
   - 对正在生成缩略图的请求进行严格并发数限制。当并发量达到上限时，后续请求在通道上挂起排队，而不是疯狂创建解码协程。
   - 提供缩略图预生成机制：在 `Scanner` 扫描完成后，可异步在后台以低优先级（Low Priority/Worker Pool）对未缓存的媒体生成缩略图，提升首次浏览的体验。
+  - **预生成生命周期管理：** 预生成任务必须接受 `context.Context` 控制。当用户通过 Admin API 触发重扫描（`POST /admin/scan/trigger`）或配置变更时，旧的预生成任务应被 `context.Cancel()` 终止，避免无效工作堆积和资源浪费。
 
 ---
 
 ### 6.2 Android 客户端优化（流畅度与内存）
 
-#### 6.2.1 Lazy List 渲染优化（Key & Recomposition）
-- **痛点分析：** 随着扫描文件增多，BrowseScreen 网格列表或 HomeScreen 列表在滚动时可能出现轻微掉帧。由于未定义 `key`，任何局部变更（如某项打上了标签、被收藏）都会导致整个 Lazy 列表所有 Item 进行不必要的重新绘制与 Recomposition。
+#### 6.2.1 Lazy List 渲染优化（contentType & Recomposition）
+- **现状分析：** 代码中所有 `LazyVerticalGrid`、`LazyVerticalStaggeredGrid` 的 `items` 已正确设置了稳定的 `key`（如 `key = { it.path }`、`key = { it.relativePath }`），基础的列表复用已到位。但当前缺少 `contentType` 声明，导致 Compose 在混合列表（文件夹 + 视频 + 图片）中无法按类型复用 Item 布局结构，存在不必要的布局重建开销。
 - **优化方案：**
-  - 在 `LazyVerticalGrid` 和 `LazyColumn` 的 `items` 声明中，显式指定唯一稳定的 `key`（如 `key = { it.path }`），并设定 `contentType`（如 `contentType = { it.mediaType }`），促使 Compose 高效复用列表 Item 的视图结构。
+  - 在所有 `items` 声明中补充 `contentType` 参数（如 `contentType = { it.mediaType }` 或按 Folder/File 区分），使 Compose 能够按内容类型精确复用 Item 视图树，减少混合列表滚动时的布局重建。
   - 将 UI 层的排序、过滤、标签匹配逻辑全部移至 ViewModel 中，在 `Dispatchers.Default` 线程池异步计算后暴露为 LiveData/Flow。严禁在 Compose 渲染层（List Row 中）直接执行字符串匹配或复杂的过滤计算，确保 UI 渲染的纯粹与极致高效。
 
 #### 6.2.2 Coil 图片加载内存与缓存调优
 - **痛点分析：** 大量的高清图片直接加载进内存可能导致 JVM 频繁发生 GC，甚至触发 OutOfMemory (OOM)。
 - **优化方案：**
   - 在 `Application` 初始化时，为 Coil 配置自定义 `ImageLoader`。
-  - 调优内存缓存：限制内存缓存占用 JVM 堆内存最大为 15%，启用 `bitmapPool` 提高图片对象复用率。
+  - 调优内存缓存：通过 `MemoryCache.Builder` 设置 `maxSizePercent(0.15)` 限制内存缓存占 JVM 堆内存最大 15%。
   - 调优磁盘缓存：在局域网下，限制 Disk Cache 大小为 100MB，防止缩略图缓存过度增长。
   - 对 Coil 启用 `.crossfade(true)`，为缩略图渐现渲染提供 200ms 的平滑过渡动画，消除图片闪现的生硬感。
 
@@ -339,11 +340,13 @@ implementation("androidx.datastore:datastore-preferences:1.0.0")
     ```
   - 保证在搜索完毕或 ViewModel 销毁时，及时释放该锁，兼顾服务发现的“高成功率”与设备“低功耗”的平衡。
 
-#### 6.3.2 OkHttpClient HTTP/2 局域网高并发连接复用
-- **痛点分析：** 网格列表中快速加载上百张缩略图时，如果 OkHttp 仍在使用 HTTP/1.1，会创建大量 TCP 连接，造成极高的连接建立开销。
+#### 6.3.2 OkHttpClient 连接池调优（Connection Pool Tuning）
+- **痛点分析：** 网格列表中快速加载上百张缩略图时，默认的 OkHttp 连接池（`maxIdleConnections=5`，`keepAliveDuration=5min`）可能不足以支撑高并发的缩略图请求，导致频繁的 TCP 连接建立与销毁开销。
+- **技术约束：** HTTP/2 多路复用要求 TLS 加密传输（h2 over TLS），而当前 Go Server 监听明文 HTTP（`0.0.0.0:8000`），Android 端通过 `http://<IP>:8000` 连接。在不引入自签名证书的局域网场景下，HTTP/2 不可行。
 - **优化方案：**
-  - 在 `RetrofitClient` 配置中，显式声明 OkHttpClient 支持 `Protocol.HTTP_2` 和 `Protocol.HTTP_1_1`。
-  - 在 Go Server 端，配置 Echo / Standard HTTP 开启 HTTP/2 传输。利用多路复用（Multiplexing）技术，使得 Android 端只需通过单一 TCP 连接就能并发地流水线式拉取大量缩略图，大幅度降低网络 RTT（往返时延）并减少握手损耗。
+  - 在 `RetrofitClient` 的 `OkHttpClient.Builder()` 中显式配置连接池参数：`connectionPool(ConnectionPool(maxIdleConnections = 15, keepAliveDuration = 5, TimeUnit.MINUTES))`，增大空闲连接上限以适配缩略图并发场景。
+  - 确保 Go Server 端 Echo 的 `Keep-Alive` 保持开启（Go `net/http` 默认开启），使 Android 端在 HTTP/1.1 下也能高效复用已建立的 TCP 连接，避免重复握手。
+  - **未来可选升级路径：** 若后续需要 HTTP/2，可在 Go Server 启用 TLS（`e.StartTLS`）+ 自签名证书，并在 Android 端配置 `network_security_config.xml` 信任该证书。
 
 ---
 
@@ -354,15 +357,18 @@ implementation("androidx.datastore:datastore-preferences:1.0.0")
 #### 6.4.1 Go Server 端安全删除接口
 - **痛点/安全分析：** 远程删除是极高危的操作，一旦存在路径遍历漏洞或越权访问，可能导致 PC 端的系统关键目录被恶意清空。
 - **设计与安全方案：**
-  - **路由注册：** 注册 `DELETE /api/v1/system/delete` 接口。
-  - **双重路径校验（防御性设计）：**
+  - **全局开关（Kill-Switch）：** 在 `config.yaml` 的 `system` 段新增 `enable_delete: false` 配置项（默认关闭），对应 `SystemConfig` 结构体增加 `EnableDelete bool` 字段。Handler 在处理删除请求时，首先检查此开关，若未显式开启则直接返回 `403 Forbidden: delete not enabled`。用户必须手动编辑配置文件开启此高危功能。
+  - **路由注册：** 注册 `POST /api/v1/system/delete` 接口（使用 POST 而非 DELETE，原因：路径中可能包含特殊字符如 `#`、`&`、中文，放在 Query 参数中需要额外 URL 编码处理，且某些代理/网关会将 URL 含 Query 参数记录到访问日志中，导致敏感路径泄露。POST + JSON Body 更安全）。
+  - **三重路径校验（防御性设计）：**
     - 使用 `service.NormalizePath` 规范化输入的目标路径。
-    - 校验该路径是否在 `scanRoots` 或 `systemAllowedRoots` 的子路径中（强阻断对根目录本身的删除）。
+    - 校验该路径是否在 `scanRoots` 或 `systemAllowedRoots` 的**严格子路径**中（强阻断对根目录本身的删除——即 `rel != "."` 时才允许）。
     - 拒绝任何包含 blocked 关键字（如 `windows`、`system32` 等）的路径。
   - **物理删除逻辑：**
     - 检查路径是否存在，若是文件，调用 `os.Remove(path)`。
     - 若是目录，为了防止超大规模的递归删除带来灾难性后果，需限制仅当客户端显式传递 `recursive=true` 参数时才调用 `os.RemoveAll(path)` 递归删除，否则只允许删除空目录，保障物理安全。
-  - **缓存与状态同步：** 删除成功后，Go 后端必须立即调用 `s.InvalidateCache()` 废弃扫描器的文件缓存，确保后续所有的浏览拉取结果实时刷新。
+  - **缓存与状态同步：** 删除成功后，Go 后端必须：
+    1. 立即调用 `scanner.InvalidateCache()` 废弃扫描器的文件缓存，确保后续浏览拉取结果实时刷新。
+    2. 调用 `TagsService` 清理已删除路径的所有标签关联记录（若删除的是文件，清理该 `filePath` 的关联；若删除的是目录，清理该目录前缀下所有 `filePath` 的关联），防止 `tags.json` 中产生孤儿数据（Dead Reference），避免按标签浏览时返回已不存在的文件。
 
 #### 6.4.2 Android 客户端 UI 与交互逻辑
 - **设计与交互方案：**
@@ -372,12 +378,13 @@ implementation("androidx.datastore:datastore-preferences:1.0.0")
     - 对话框文案：“确定要从 PC 端永久删除 [文件/目录名称] 吗？此操作将无法恢复！”
     - 选项：“取消”（默认聚焦）与“确认删除”（红色警告样式）。
   - **网络层封装（Retrofit）：**
-    - 在 `MediaApi.kt` 中添加对应的 Retrofit 契约定义：
+    - 在 `MediaApi.kt` 中添加对应的 Retrofit 契约定义（使用 POST + JSON Body，与 Server 端 POST 路由对应）：
       ```kotlin
-      @DELETE("api/v1/system/delete")
+      data class DeleteRequest(val path: String, val recursive: Boolean = false)
+
+      @POST("api/v1/system/delete")
       suspend fun deletePath(
-          @Query("path") path: String, 
-          @Query("recursive") recursive: Boolean
+          @Body request: DeleteRequest
       ): Response<ResponseBody>
       ```
   - **界面状态即时刷新：**
@@ -393,8 +400,8 @@ implementation("androidx.datastore:datastore-preferences:1.0.0")
    - 验证手段：局域网内使用 Android App 狂划图片列表，观察 Go Server 进程的线程数 and CPU 占用率是否符合预期，确认没有瞬间暴涨导致系统卡死。
 3. **第三阶段：Android Compose Lazy List 滑动帧率验证**
    - 验证手段：开启 Android 开发者选项中的“Profile GPU Rendering”（GPU 呈现模式分析），观察柱状图是否在 16ms/60fps (或 90fps/120fps) 的基准线以下，验证滑动流畅度。
-4. **第四阶段：局域网连接与协议复用验证**
-   - 验证手段：在 Android 端抓包或通过 Fiddler/Charles 观察连接建立情况，确认大批量缩略图请求走的是 HTTP/2 多路复用，并且 TCP 连接保持复用状态。
+4. **第四阶段：局域网连接池复用验证**
+   - 验证手段：在 Android 端抓包或通过 Fiddler/Charles 观察连接建立情况，确认大批量缩略图请求在 HTTP/1.1 Keep-Alive 下高效复用 TCP 连接，连接数稳定在连接池上限附近而非持续创建新连接。
 5. **第五阶段：远程删除功能安全性与一致性验证**
    - 验证手段：
      1. 安全黑盒测试：输入非授权路径（如 `C:\Windows\system32` 或 `..\..\etc\passwd` 等），验证 Go Server 接口是否坚定返回 `403 Forbidden`。
