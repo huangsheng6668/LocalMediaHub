@@ -30,6 +30,7 @@ internal fun FavoritesContent(
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
     getThumbnailUrl: (MediaFile) -> String,
+    onFileLongClick: (MediaFile) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: BrowseViewModel,
 ) {
@@ -71,6 +72,7 @@ internal fun FavoritesContent(
             getThumbnailUrl = getThumbnailUrl,
             isFavorite = { isFavorite(it) },
             onToggleFavorite = { onToggleFavorite(it) },
+            onFileLongClick = onFileLongClick,
             modifier = modifier,
         )
     } else {
@@ -88,6 +90,7 @@ internal fun FavoritesContent(
                         isFavorite = isFavorite(file.relativePath),
                         onToggleFavorite = { onToggleFavorite(file) },
                         onClick = { onVideoClick(file) },
+                        onLongClick = { onFileLongClick(file) },
                     )
                     "image" -> ImageCard(
                         file = file,
@@ -95,6 +98,7 @@ internal fun FavoritesContent(
                         isFavorite = isFavorite(file.relativePath),
                         onToggleFavorite = { onToggleFavorite(file) },
                         onClick = { onImageClick(file, favoriteFiles) },
+                        onLongClick = { onFileLongClick(file) },
                     )
                 }
             }
@@ -112,6 +116,7 @@ internal fun SearchContent(
     onImageClick: (MediaFile) -> Unit,
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
+    onFileLongClick: (MediaFile) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: BrowseViewModel,
 ) {
@@ -162,6 +167,7 @@ internal fun SearchContent(
                                 isFavorite = isFavorite(file.relativePath),
                                 onToggleFavorite = { onToggleFavorite(file) },
                                 onClick = { onVideoClick(file) },
+                                onLongClick = { onFileLongClick(file) },
                             )
                             "image" -> ImageCard(
                                 file = file,
@@ -169,6 +175,7 @@ internal fun SearchContent(
                                 isFavorite = isFavorite(file.relativePath),
                                 onToggleFavorite = { onToggleFavorite(file) },
                                 onClick = { onImageClick(file) },
+                                onLongClick = { onFileLongClick(file) },
                             )
                         }
                     }

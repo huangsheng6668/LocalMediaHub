@@ -339,6 +339,20 @@ fun BrowseScreen(
                             }
                             TextButton(
                                 onClick = {
+                                    viewModel.downloadFile(context, item)
+                                    itemForActions = null
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Start,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Download File")
+                                }
+                            }
+                            TextButton(
+                                onClick = {
                                     itemToDelete = item
                                     showDeleteConfirm = true
                                     itemForActions = null
@@ -519,6 +533,7 @@ fun BrowseScreen(
                 },
                 onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
                 isFavorite = { relativePath -> relativePath in favorites },
+                onFileLongClick = { file -> itemForActions = file },
                 modifier = Modifier.padding(innerPadding),
                 viewModel = viewModel,
             )
@@ -551,6 +566,7 @@ fun BrowseScreen(
                     onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
                     isFavorite = { relativePath -> relativePath in favorites },
                     getThumbnailUrl = viewModel::getFavoriteThumbnailUrl,
+                    onFileLongClick = { file -> itemForActions = file },
                     modifier = Modifier.weight(1f),
                     viewModel = viewModel,
                 )

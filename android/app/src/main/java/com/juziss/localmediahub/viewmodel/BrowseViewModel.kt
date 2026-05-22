@@ -20,6 +20,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.webkit.MimeTypeMap
+import android.widget.Toast
 
 enum class SortOrder(val label: String) {
     NAME_ASC("Name A-Z"),
@@ -471,6 +477,36 @@ class BrowseViewModel(
 
     fun getFavoriteOriginalImageUrl(file: MediaFile): String {
         return repository.getMediaOriginalImageUrl(file.path)
+    }
+
+    fun downloadFile(context: Context, file: MediaFile) {
+        try {
+            val url = if (file.mediaType == "video") {
+                getVideoStreamUrl(file)
+            } else {
+                getOriginalImageUrl(file)
+            }
+
+            val request = DownloadManager.Request(Uri.parse(url))
+                .setTitle(file.name)
+                .setDescription("Downloading media file")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, file.name)
+
+            val extension = MimeTypeMap.getFileExtensionFromUrl(url) ?: file.extension
+            if (!extension.isNullOrEmpty()) {
+                val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase())
+                if (mimeType != null) {
+                    request.setMimeType(mimeType)
+                }
+            }
+
+            val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            downloadManager.enqueue(request)
+            Toast.makeText(context, "Started downloading ${file.name}", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(context, "Failed to download: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     // ── Tags ──────────────────────────────────────────────
