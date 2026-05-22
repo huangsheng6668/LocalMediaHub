@@ -190,6 +190,7 @@ internal fun BrowseContent(
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
     onFileLongClick: (MediaFile) -> Unit = {},
+    onFolderLongClick: (Folder) -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: BrowseViewModel,
 ) {
@@ -254,10 +255,14 @@ internal fun BrowseContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                items(folders, key = { it.path }) { folder ->
-                    FolderCard(folder = folder, onClick = { onFolderClick(folder) })
+                items(folders, key = { it.path }, contentType = { "folder" }) { folder ->
+                    FolderCard(
+                        folder = folder,
+                        onClick = { onFolderClick(folder) },
+                        onLongClick = { onFolderLongClick(folder) },
+                    )
                 }
-                items(files, key = { it.relativePath }) { file ->
+                items(files, key = { it.relativePath }, contentType = { it.mediaType }) { file ->
                     when (file.mediaType) {
                         "video" -> VideoCard(
                             file = file,

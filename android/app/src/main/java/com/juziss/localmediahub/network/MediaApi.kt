@@ -105,4 +105,12 @@ interface MediaApi {
     // Batch endpoint: get tags for multiple files (or all files) in one call
     @GET("api/v1/tags/file-tags")
     suspend fun getFileTags(@Query("path") paths: List<String>): Map<String, List<Tag>>
+
+    @POST("api/v1/system/delete")
+    suspend fun deletePath(@Body request: DeleteRequest): Response<ResponseBody>
 }
+
+data class DeleteRequest(
+    val path: String,
+    val recursive: Boolean = false
+)

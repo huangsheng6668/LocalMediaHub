@@ -43,14 +43,20 @@ internal fun FavoriteToggleIcon(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun FolderCard(
     folder: Folder,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
     ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),

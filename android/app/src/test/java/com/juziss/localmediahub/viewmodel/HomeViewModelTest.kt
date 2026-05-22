@@ -37,6 +37,7 @@ class HomeViewModelTest {
         Dispatchers.setMain(dispatcher)
         context = ApplicationProvider.getApplicationContext<Context>()
             ?: RuntimeEnvironment.getApplication()
+        deleteDatastoreFiles()
         serverConfig = ServerConfig(context)
         resetRetrofitClient()
     }
@@ -44,12 +45,21 @@ class HomeViewModelTest {
     @After
     fun tearDown() = runTest {
         resetRetrofitClient()
+        deleteDatastoreFiles()
         Dispatchers.resetMain()
+    }
+
+    private fun deleteDatastoreFiles() {
+        try {
+            val datastoreDir = context.filesDir.resolve("datastore")
+            if (datastoreDir.exists()) {
+                datastoreDir.deleteRecursively()
+            }
+        } catch (_: Exception) {}
     }
 
     @Test
     fun `saved server config initializes retrofit before first refresh`() = runTest(dispatcher) {
-        serverConfig.clearConfig()
         serverConfig.saveServerConfig("127.0.0.1", "1")
 
         val viewModel = HomeViewModel(

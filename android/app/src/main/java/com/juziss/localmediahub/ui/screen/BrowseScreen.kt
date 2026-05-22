@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -20,7 +21,9 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -37,6 +40,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -267,6 +275,219 @@ fun BrowseScreen(
             }
         }
     ) { innerPadding ->
+        var itemForActions by remember { mutableStateOf<Any?>(null) }
+        var itemToDelete by remember { mutableStateOf<Any?>(null) }
+        var showDeleteConfirm by remember { mutableStateOf(false) }
+        var deleteRecursive by remember { mutableStateOf(true) }
+        val context = LocalContext.current
+        val deleteState by viewModel.deleteState.collectAsState()
+
+        LaunchedEffect(deleteState) {
+            when (val state = deleteState) {
+                is com.juziss.localmediahub.viewmodel.DeleteState.Success -> {
+                    Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                    viewModel.clearDeleteState()
+                    itemToDelete = null
+                    showDeleteConfirm = false
+                }
+                is com.juziss.localmediahub.viewmodel.DeleteState.Error -> {
+                    Toast.makeText(context, "Error: ${state.message}", Toast.LENGTH_LONG).show()
+                    viewModel.clearDeleteState()
+                }
+                else -> {}
+            }
+        }
+
+        // Action Sheet / Dialog for Long-press options
+        if (itemForActions != null) {
+            val item = itemForActions!!
+            AlertDialog(
+                onDismissRequest = { itemForActions = null },
+                title = {
+                    Text(
+                        text = "Options",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (item is MediaFile) {
+                            Text(
+                                text = item.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            TextButton(
+                                onClick = {
+                                    showTagMenuForFile = item
+                                    itemForActions = null
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Start,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Manage Tags")
+                                }
+                            }
+                            TextButton(
+                                onClick = {
+                                    itemToDelete = item
+                                    showDeleteConfirm = true
+                                    itemForActions = null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Start,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Delete File Permanently")
+                                }
+                            }
+                        } else if (item is com.juziss.localmediahub.data.Folder) {
+                            Text(
+                                text = item.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            TextButton(
+                                onClick = {
+                                    itemToDelete = item
+                                    showDeleteConfirm = true
+                                    deleteRecursive = true
+                                    itemForActions = null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.Start,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Delete Folder Permanently")
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { itemForActions = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Delete Confirmation Dialog
+        if (showDeleteConfirm && itemToDelete != null) {
+            val item = itemToDelete!!
+            val name = when (item) {
+                is MediaFile -> item.name
+                is com.juziss.localmediahub.data.Folder -> item.name
+                else -> ""
+            }
+            val isFolder = item is com.juziss.localmediahub.data.Folder
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = {
+                    Text(
+                        text = if (isFolder) "Delete Folder" else "Delete File",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Are you sure you want to permanently delete \"$name\"? This action cannot be undone.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        if (isFolder) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { deleteRecursive = !deleteRecursive }
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Checkbox(
+                                    checked = deleteRecursive,
+                                    onCheckedChange = { deleteRecursive = it }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Delete recursively (required if folder is not empty)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val path = when (item) {
+                                is MediaFile -> item.path
+                                is com.juziss.localmediahub.data.Folder -> item.path
+                                else -> ""
+                            }
+                            if (path.isNotEmpty()) {
+                                viewModel.deletePath(path, if (isFolder) deleteRecursive else false)
+                            }
+                        },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Loading Overlay for Deletion
+        if (deleteState is com.juziss.localmediahub.viewmodel.DeleteState.Loading) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("Deleting...") },
+                text = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Text("Please wait while resources are cleaned up.")
+                    }
+                },
+                confirmButton = {}
+            )
+        }
+
         val taggedFile = showTagMenuForFile
         if (taggedFile != null) {
             TagMenuDialog(
@@ -445,7 +666,8 @@ fun BrowseScreen(
                         },
                         onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
                         isFavorite = { relativePath -> relativePath in favorites },
-                        onFileLongClick = { file -> showTagMenuForFile = file },
+                        onFileLongClick = { file -> itemForActions = file },
+                        onFolderLongClick = { folder -> itemForActions = folder },
                         modifier = Modifier.weight(1f),
                         viewModel = viewModel,
                     )
@@ -495,7 +717,8 @@ fun BrowseScreen(
                         },
                         onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
                         isFavorite = { relativePath -> relativePath in favorites },
-                        onFileLongClick = { file -> showTagMenuForFile = file },
+                        onFileLongClick = { file -> itemForActions = file },
+                        onFolderLongClick = { folder -> itemForActions = folder },
                         modifier = Modifier.weight(1f),
                         viewModel = viewModel,
                     )
@@ -537,7 +760,7 @@ fun BrowseScreen(
                             },
                             onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
                             isFavorite = { relativePath -> relativePath in favorites },
-                            onFileLongClick = { file -> showTagMenuForFile = file },
+                            onFileLongClick = { file -> itemForActions = file },
                             modifier = Modifier.weight(1f),
                             viewModel = viewModel,
                         )

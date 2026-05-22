@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.juziss.localmediahub.data.MediaRepository
@@ -64,6 +65,30 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
 
     private var nsdManager: NsdManager? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    private fun acquireMulticastLock() {
+        try {
+            if (multicastLock == null) {
+                val context = getApplication<Application>()
+                val wifiManager = context.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                multicastLock = wifiManager.createMulticastLock("LocalMediaHubMulticastLock").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            multicastLock?.acquire()
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseMulticastLock() {
+        try {
+            multicastLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                }
+            }
+        } catch (_: Exception) {}
+    }
 
     fun testConnection(ip: String, port: String) {
         if (ip.isBlank()) {
@@ -120,6 +145,7 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
     fun startDiscovery() {
         if (discoveryState.value is DiscoveryState.Scanning) return
 
+        acquireMulticastLock()
         _discoveredServers.value = emptyList()
         _discoveryState.value = DiscoveryState.Scanning
         startNsdDiscovery()
@@ -128,6 +154,7 @@ class ConnectionViewModel(application: Application) : AndroidViewModel(applicati
 
     fun stopDiscovery() {
         stopNsdDiscovery()
+        releaseMulticastLock()
         if (_discoveryState.value is DiscoveryState.Scanning) {
             _discoveryState.value = DiscoveryState.Idle
         }

@@ -1,25 +1,31 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/localmediahub/server/internal/config"
+	"github.com/localmediahub/server/internal/models"
 	"github.com/localmediahub/server/internal/server/handler"
 	"github.com/localmediahub/server/internal/server/middleware"
 	"github.com/localmediahub/server/internal/service"
 )
 
 type Server struct {
-	Echo      *echo.Echo
-	Config    *config.Config
-	IP        string
-	Scanner   *service.Scanner
-	Tags      *service.TagsService
-	Streaming *service.StreamingService
-	Thumbnail *service.ThumbnailService
+	Echo         *echo.Echo
+	Config       *config.Config
+	IP           string
+	Scanner      *service.Scanner
+	Tags         *service.TagsService
+	Streaming    *service.StreamingService
+	Thumbnail    *service.ThumbnailService
+	preGenCtx    context.Context
+	preGenCancel context.CancelFunc
+	preGenMu     sync.Mutex
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -50,6 +56,18 @@ func New(cfg *config.Config) (*Server, error) {
 		Tags:      tagsService,
 		Streaming: streamingService,
 		Thumbnail: thumbnailService,
+	}
+
+	scanner.OnScanComplete = func(files []models.MediaFile) {
+		s.preGenMu.Lock()
+		if s.preGenCancel != nil {
+			s.preGenCancel()
+		}
+		var ctx context.Context
+		ctx, s.preGenCancel = context.WithCancel(context.Background())
+		s.preGenMu.Unlock()
+
+		s.Thumbnail.PreGenerateThumbnails(files, ctx)
 	}
 
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService)
@@ -104,6 +122,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	sys.GET("/thumbnail", h.SystemThumbnail)
 	sys.GET("/original", h.SystemOriginal)
 	sys.GET("/stream", h.SystemStream)
+	sys.POST("/delete", h.DeletePath)
 
 	// Unified absolute-path media access
 	media := api.Group("/media")

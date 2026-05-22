@@ -50,12 +50,18 @@ class ServerConfig(private val context: Context) {
 
     suspend fun saveServerConfig(ip: String, port: String) {
         val url = "http://$ip:$port"
+        val server = KnownServer(ip, port)
         context.dataStore.edit { prefs ->
             prefs[KEY_SERVER_IP] = ip
             prefs[KEY_SERVER_PORT] = port
             prefs[KEY_SERVER_URL] = url
+
+            val current = decodeKnownServers(prefs[KEY_KNOWN_SERVERS])
+            val updated = (listOf(server) + current.filterNot {
+                it.ip == server.ip && it.port == server.port
+            }).take(10)
+            prefs[KEY_KNOWN_SERVERS] = gson.toJson(updated)
         }
-        saveKnownServer(KnownServer(ip, port))
     }
 
     suspend fun saveKnownServer(server: KnownServer) {

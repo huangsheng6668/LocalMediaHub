@@ -35,9 +35,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
@@ -62,12 +66,37 @@ fun VideoPlayerScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            val mediaItem = MediaItem.fromUri(streamUrl)
-            setMediaItem(mediaItem)
-            prepare()
-            playWhenReady = true
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                2500, // minBufferMs
+                30000, // maxBufferMs
+                1500, // bufferForPlaybackMs
+                2000 // bufferForPlaybackAfterRebufferMs
+            )
+            .build()
+
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .build().apply {
+                val mediaItem = MediaItem.fromUri(streamUrl)
+                setMediaItem(mediaItem)
+                prepare()
+                playWhenReady = true
+            }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) {
+                exoPlayer.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 

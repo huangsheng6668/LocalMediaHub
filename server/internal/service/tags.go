@@ -214,3 +214,29 @@ func (s *TagsService) GetAllFileTags() map[string][]models.FileTag {
 	}
 	return result
 }
+
+func (s *TagsService) CleanDeletedPath(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normPath := filepath.Clean(path)
+
+	newAssocs := make([]models.FileAssociation, 0, len(s.data.Associations))
+	changed := false
+	for _, a := range s.data.Associations {
+		assocPath := filepath.Clean(a.FilePath)
+		isSub := strings.HasPrefix(assocPath, normPath+string(filepath.Separator))
+		isExact := assocPath == normPath
+		if isExact || isSub {
+			changed = true
+			continue
+		}
+		newAssocs = append(newAssocs, a)
+	}
+
+	if changed {
+		s.data.Associations = newAssocs
+		return s.Save()
+	}
+	return nil
+}

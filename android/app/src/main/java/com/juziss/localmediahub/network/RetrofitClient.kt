@@ -1,5 +1,6 @@
 package com.juziss.localmediahub.network
 
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -43,6 +44,7 @@ object RetrofitClient {
 
         val client = OkHttpClient.Builder()
             .addInterceptor(logging)
+            .connectionPool(ConnectionPool(15, 5, TimeUnit.MINUTES))
             .connectTimeout(DEFAULT_TIMEOUT, TimeUnit.SECONDS)
             .readTimeout(DEFAULT_TIMEOUT, TimeUnit.SECONDS)
             .writeTimeout(DEFAULT_TIMEOUT, TimeUnit.SECONDS)

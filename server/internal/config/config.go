@@ -47,6 +47,7 @@ type ThumbnailConfig struct {
 
 type SystemConfig struct {
 	AllowedRoots []string `yaml:"allowed_roots,omitempty"`
+	EnableDelete bool     `yaml:"enable_delete,omitempty"`
 }
 
 // GetSystemAllowedRoots returns configured system browse roots.

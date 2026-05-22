@@ -28,15 +28,7 @@ import com.juziss.localmediahub.viewmodel.BrowseViewModelFactory
 import com.juziss.localmediahub.viewmodel.HomeViewModel
 import com.juziss.localmediahub.viewmodel.HomeViewModelFactory
 import kotlinx.coroutines.launch
-import coil.ImageLoader
-import coil.ImageLoaderFactory
-import coil.decode.BitmapFactoryDecoder
-import coil.disk.DiskCache
-import coil.memory.MemoryCache
-import coil.request.CachePolicy
-import com.juziss.localmediahub.native.NativeDecoderFactory
-
-class MainActivity : ComponentActivity(), ImageLoaderFactory {
+class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -45,30 +37,6 @@ class MainActivity : ComponentActivity(), ImageLoaderFactory {
                 LocalMediaHubApp()
             }
         }
-    }
-
-    override fun newImageLoader(): ImageLoader {
-        return ImageLoader.Builder(this)
-            .components {
-                add(NativeDecoderFactory.Factory())
-                add(BitmapFactoryDecoder.Factory())
-            }
-            .crossfade(true)
-            .memoryCachePolicy(CachePolicy.ENABLED)
-            .memoryCache {
-                MemoryCache.Builder(this@MainActivity)
-                    .maxSizePercent(0.25)
-                    .build()
-            }
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .diskCache {
-                DiskCache.Builder()
-                    .directory(cacheDir.resolve("coil"))
-                    .maxSizeBytes(100L * 1024 * 1024) // 100MB
-                    .build()
-            }
-            .respectCacheHeaders(false)
-            .build()
     }
 }
 

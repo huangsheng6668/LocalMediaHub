@@ -118,6 +118,24 @@ class MediaRepository {
         return safeApiCall { api.getFileTags(paths) }
     }
 
+    suspend fun deletePath(path: String, recursive: Boolean): NetworkResult<String> = try {
+        val response = api.deletePath(com.juziss.localmediahub.network.DeleteRequest(path, recursive))
+        if (response.isSuccessful) {
+            NetworkResult.Success("Deleted successfully")
+        } else {
+            val errorBody = response.errorBody()?.string()
+            val errorMsg = try {
+                val json = com.google.gson.JsonParser.parseString(errorBody).asJsonObject
+                json.get("error")?.asString ?: "Unknown error"
+            } catch (e: Exception) {
+                "Failed with code ${response.code()}"
+            }
+            NetworkResult.Error(errorMsg, response.code())
+        }
+    } catch (e: Exception) {
+        NetworkResult.Error(e.toUserMessage())
+    }
+
     // ── URL builders ──────────────────────────────────────────
 
     fun getVideoStreamUrl(relativePath: String): String {

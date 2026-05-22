@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -177,4 +178,112 @@ func (h *Handler) SystemStream(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return nil
+}
+
+type DeleteRequest struct {
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive"`
+}
+
+func (h *Handler) isAllowedToDelete(pathStr string) error {
+	absPath, err := service.NormalizePath(pathStr)
+	if err != nil {
+		return err
+	}
+
+	lowerPath := strings.ToLower(absPath)
+	blockedPaths := []string{
+		"windows", "winnt", "system32", "syswow64", "$recycle.bin", "system volume information",
+		"program files", "program files (x86)", "users", "boot",
+	}
+	for _, blocked := range blockedPaths {
+		sep := string(filepath.Separator)
+		if strings.Contains(lowerPath, sep+blocked+sep) || strings.Contains(lowerPath, sep+blocked) {
+			return fmt.Errorf("access denied: restricted directory")
+		}
+	}
+
+	scanRoots := h.cfg.Scan.GetRoots()
+	allowedRoots := h.cfg.GetSystemAllowedRoots()
+
+	var allRoots []string
+	allRoots = append(allRoots, scanRoots...)
+	allRoots = append(allRoots, allowedRoots...)
+
+	isWithin := false
+	for _, root := range allRoots {
+		absRoot, err := service.NormalizePath(root)
+		if err != nil {
+			continue
+		}
+
+		rel, err := filepath.Rel(absRoot, absPath)
+		if err != nil {
+			continue
+		}
+
+		if rel == "." {
+			return fmt.Errorf("access denied: cannot delete a root directory")
+		}
+
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			isWithin = true
+		}
+	}
+
+	if !isWithin {
+		return fmt.Errorf("access denied: path outside allowed directories")
+	}
+
+	return nil
+}
+
+func (h *Handler) DeletePath(c echo.Context) error {
+	if !h.cfg.System.EnableDelete {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "remote deletion is disabled on the server"})
+	}
+
+	var req DeleteRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	if req.Path == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+	}
+
+	absPath, err := service.NormalizePath(req.Path)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	if err := h.isAllowedToDelete(absPath); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
+	fi, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "path not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	if fi.IsDir() {
+		if !req.Recursive {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot delete a non-empty directory without recursive flag"})
+		}
+		if err := os.RemoveAll(absPath); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to delete directory: %v", err)})
+		}
+	} else {
+		if err := os.Remove(absPath); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to delete file: %v", err)})
+		}
+	}
+
+	_ = h.tags.CleanDeletedPath(absPath)
+	h.scanner.InvalidateCache()
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "deleted successfully"})
 }

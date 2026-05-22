@@ -14,6 +14,8 @@ import com.juziss.localmediahub.data.SearchResult
 import com.juziss.localmediahub.data.SystemBrowseResult
 import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.network.NetworkResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -222,11 +224,17 @@ class BrowseViewModel(
                         title = folderName,
                         isSystemBrowse = true,
                     )
+                    val sortedFolders = withContext(Dispatchers.Default) {
+                        applySortToFolders(data.folders)
+                    }
+                    val sortedFiles = withContext(Dispatchers.Default) {
+                        applySortToFiles(data.files)
+                    }
                     _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
                         currentPath = data.currentPath,
                         drives = data.drives,
-                        folders = applySortToFolders(data.folders),
-                        files = applySortToFiles(data.files),
+                        folders = sortedFolders,
+                        files = sortedFiles,
                     ))
                 }
                 is NetworkResult.Error -> {
@@ -253,9 +261,15 @@ class BrowseViewModel(
                         title = folderName,
                         isSystemBrowse = false,
                     )
+                    val sortedFolders = withContext(Dispatchers.Default) {
+                        applySortToFolders(result.data.folders)
+                    }
+                    val sortedFiles = withContext(Dispatchers.Default) {
+                        applySortToFiles(result.data.files)
+                    }
                     _browseState.value = BrowseState.Browsed(result.data.copy(
-                        folders = applySortToFolders(result.data.folders),
-                        files = applySortToFiles(result.data.files),
+                        folders = sortedFolders,
+                        files = sortedFiles,
                     ))
                 }
                 is NetworkResult.Error -> {
@@ -299,11 +313,17 @@ class BrowseViewModel(
                         val data = result.data
                         _rawFolders.value = data.folders
                         _rawFiles.value = data.files
+                        val sortedFolders = withContext(Dispatchers.Default) {
+                            applySortToFolders(data.folders)
+                        }
+                        val sortedFiles = withContext(Dispatchers.Default) {
+                            applySortToFiles(data.files)
+                        }
                         _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
                             currentPath = data.currentPath,
                             drives = data.drives,
-                            folders = applySortToFolders(data.folders),
-                            files = applySortToFiles(data.files),
+                            folders = sortedFolders,
+                            files = sortedFiles,
                         ))
                         _restoreScrollTo.value = previousPath
                     }
@@ -317,9 +337,15 @@ class BrowseViewModel(
                     is NetworkResult.Success -> {
                         _rawFolders.value = result.data.folders
                         _rawFiles.value = result.data.files
+                        val sortedFolders = withContext(Dispatchers.Default) {
+                            applySortToFolders(result.data.folders)
+                        }
+                        val sortedFiles = withContext(Dispatchers.Default) {
+                            applySortToFiles(result.data.files)
+                        }
                         _browseState.value = BrowseState.Browsed(result.data.copy(
-                            folders = applySortToFolders(result.data.folders),
-                            files = applySortToFiles(result.data.files),
+                            folders = sortedFolders,
+                            files = sortedFiles,
                         ))
                         _restoreScrollTo.value = previousPath
                     }
@@ -338,22 +364,26 @@ class BrowseViewModel(
         _folderSortOrder.value = order
         val rawFolders = _rawFolders.value
         if (rawFolders.isEmpty()) return
-        val sortedFolders = applySortToFolders(rawFolders)
-        when (val state = _browseState.value) {
-            is BrowseState.Browsed -> {
-                _browseState.value = BrowseState.Browsed(
-                    state.result.copy(folders = sortedFolders)
-                )
+        viewModelScope.launch {
+            val sortedFolders = withContext(Dispatchers.Default) {
+                applySortToFolders(rawFolders)
             }
-            is BrowseState.SystemBrowsed -> {
-                _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
-                    currentPath = state.result.currentPath,
-                    drives = state.result.drives,
-                    folders = sortedFolders,
-                    files = state.result.files,
-                ))
+            when (val state = _browseState.value) {
+                is BrowseState.Browsed -> {
+                    _browseState.value = BrowseState.Browsed(
+                        state.result.copy(folders = sortedFolders)
+                    )
+                }
+                is BrowseState.SystemBrowsed -> {
+                    _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
+                        currentPath = state.result.currentPath,
+                        drives = state.result.drives,
+                        folders = sortedFolders,
+                        files = state.result.files,
+                    ))
+                }
+                else -> {}
             }
-            else -> {}
         }
     }
 
@@ -361,28 +391,32 @@ class BrowseViewModel(
         _fileSortOrder.value = order
         val rawFiles = _rawFiles.value
         if (rawFiles.isEmpty()) return
-        val sortedFiles = applySortToFiles(rawFiles)
-        when (val state = _browseState.value) {
-            is BrowseState.Browsed -> {
-                _browseState.value = BrowseState.Browsed(
-                    state.result.copy(files = sortedFiles)
-                )
+        viewModelScope.launch {
+            val sortedFiles = withContext(Dispatchers.Default) {
+                applySortToFiles(rawFiles)
             }
-            is BrowseState.SystemBrowsed -> {
-                _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
-                    currentPath = state.result.currentPath,
-                    drives = state.result.drives,
-                    folders = state.result.folders,
-                    files = sortedFiles,
-                ))
+            when (val state = _browseState.value) {
+                is BrowseState.Browsed -> {
+                    _browseState.value = BrowseState.Browsed(
+                        state.result.copy(files = sortedFiles)
+                    )
+                }
+                is BrowseState.SystemBrowsed -> {
+                    _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
+                        currentPath = state.result.currentPath,
+                        drives = state.result.drives,
+                        folders = state.result.folders,
+                        files = sortedFiles,
+                    ))
+                }
+                is BrowseState.TagCollection -> {
+                    _browseState.value = BrowseState.TagCollection(
+                        title = state.title,
+                        files = sortedFiles,
+                    )
+                }
+                else -> {}
             }
-            is BrowseState.TagCollection -> {
-                _browseState.value = BrowseState.TagCollection(
-                    title = state.title,
-                    files = sortedFiles,
-                )
-            }
-            else -> {}
         }
     }
 
@@ -564,9 +598,12 @@ class BrowseViewModel(
                 is NetworkResult.Success -> {
                     _rawFolders.value = emptyList()
                     _rawFiles.value = result.data
+                    val sortedFiles = withContext(Dispatchers.Default) {
+                        applySortToFiles(result.data)
+                    }
                     _browseState.value = BrowseState.TagCollection(
                         title = tag.name,
-                        files = applySortToFiles(result.data),
+                        files = sortedFiles,
                     )
                 }
                 is NetworkResult.Error -> {
@@ -626,6 +663,92 @@ class BrowseViewModel(
     }
 
     fun isSystemBrowseMode(): Boolean = _isSystemBrowse.value
+
+    // ── Deletion Flow ─────────────────────────────────────────
+
+    private val _deleteState = MutableStateFlow<DeleteState>(DeleteState.Idle)
+    val deleteState: StateFlow<DeleteState> = _deleteState.asStateFlow()
+
+    fun clearDeleteState() {
+        _deleteState.value = DeleteState.Idle
+    }
+
+    fun deletePath(path: String, recursive: Boolean) {
+        viewModelScope.launch {
+            _deleteState.value = DeleteState.Loading
+            when (val result = repository.deletePath(path, recursive)) {
+                is NetworkResult.Success -> {
+                    _deleteState.value = DeleteState.Success(result.data)
+                    refreshCurrentDirectory()
+                }
+                is NetworkResult.Error -> {
+                    _deleteState.value = DeleteState.Error(result.message)
+                }
+                is NetworkResult.Loading -> {}
+            }
+        }
+    }
+
+    fun refreshCurrentDirectory() {
+        val path = _currentPath.value
+        val state = _browseState.value
+        viewModelScope.launch {
+            if (state is BrowseState.TagCollection) {
+                val tag = _activeTagFilter.value
+                if (tag != null) {
+                    openCollection(tag)
+                }
+                return@launch
+            }
+
+            if (_isSystemBrowse.value) {
+                if (path.isEmpty()) {
+                    loadSystemDrives()
+                } else {
+                    when (val result = repository.browseSystemPath(path)) {
+                        is NetworkResult.Success -> {
+                            val data = result.data
+                            _rawFolders.value = data.folders
+                            _rawFiles.value = data.files
+                            val sortedFolders = withContext(Dispatchers.Default) { applySortToFolders(data.folders) }
+                            val sortedFiles = withContext(Dispatchers.Default) { applySortToFiles(data.files) }
+                            _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
+                                currentPath = data.currentPath,
+                                drives = data.drives,
+                                folders = sortedFolders,
+                                files = sortedFiles,
+                            ))
+                        }
+                        is NetworkResult.Error -> {
+                            _browseState.value = BrowseState.Error(result.message)
+                        }
+                        else -> {}
+                    }
+                }
+            } else {
+                if (path.isEmpty()) {
+                    loadRoots()
+                } else {
+                    when (val result = repository.browseFolder(path)) {
+                        is NetworkResult.Success -> {
+                            _rawFolders.value = result.data.folders
+                            _rawFiles.value = result.data.files
+                            val sortedFolders = withContext(Dispatchers.Default) { applySortToFolders(result.data.folders) }
+                            val sortedFiles = withContext(Dispatchers.Default) { applySortToFiles(result.data.files) }
+                            _browseState.value = BrowseState.Browsed(result.data.copy(
+                                folders = sortedFolders,
+                                files = sortedFiles,
+                            ))
+                        }
+                        is NetworkResult.Error -> {
+                            _browseState.value = BrowseState.Error(result.message)
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+    }
 }
 
 private fun List<FavoriteMediaEntry>.associateFavoriteModes(): Map<String, Boolean> {
@@ -661,4 +784,11 @@ sealed class SearchState {
     data object Loading : SearchState()
     data class Results(val result: SearchResult) : SearchState()
     data class Error(val message: String) : SearchState()
+}
+
+sealed class DeleteState {
+    data object Idle : DeleteState()
+    data object Loading : DeleteState()
+    data class Success(val message: String) : DeleteState()
+    data class Error(val message: String) : DeleteState()
 }

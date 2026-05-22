@@ -24,8 +24,8 @@ class RoutePathTest {
     }
 
     @Test
-    fun `shouldAttemptAutoConnect stays off on launch even when a saved server exists`() {
-        assertFalse(
+    fun `shouldAttemptAutoConnect triggers on launch when a saved server exists`() {
+        assertTrue(
             shouldAttemptAutoConnect(
                 savedIp = "192.168.1.10",
                 autoConnectAttempted = false,
