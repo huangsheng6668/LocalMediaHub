@@ -25,6 +25,8 @@ thumbnails/
 
 # Android
 .gradle/
+.gradle-user/
+android/.gradle-user/
 build/
 app/build/
 local.properties
