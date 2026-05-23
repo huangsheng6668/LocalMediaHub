@@ -42,10 +42,9 @@ class DownloadsStore(private val context: Context) {
     }
 
     /** Add a file to downloads list. */
-    suspend fun addDownload(file: MediaFile) {
-        val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val localFile = File(publicDir, file.name)
-        val entry = DownloadEntry(file, localFile.absolutePath)
+    suspend fun addDownload(file: MediaFile, customPath: String? = null) {
+        val path = customPath ?: File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), file.name).absolutePath
+        val entry = DownloadEntry(file, path)
         
         context.dataStore.edit { preferences ->
             val current = preferences[downloadsKey] ?: emptySet()

@@ -47,6 +47,17 @@ class MediaRepository {
         NetworkResult.Error(e.toUserMessage())
     }
 
+    suspend fun downloadFileStream(url: String): NetworkResult<okhttp3.ResponseBody> = try {
+        val response = api.streamVideo(url, null)
+        if (response.isSuccessful && response.body() != null) {
+            NetworkResult.Success(response.body()!!)
+        } else {
+            NetworkResult.Error("Server returned code ${response.code()}", response.code())
+        }
+    } catch (e: Exception) {
+        NetworkResult.Error(e.toUserMessage())
+    }
+
     // ── Videos ────────────────────────────────────────────────
 
     suspend fun getVideos(

@@ -236,7 +236,12 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 		}
 		defer fileToZip.Close()
 
-		writer, err := zipWriter.Create(relPath)
+		header := &zip.FileHeader{
+			Name:     relPath,
+			Method:   zip.Store,
+			Modified: info.ModTime(),
+		}
+		writer, err := zipWriter.CreateHeader(header)
 		if err != nil {
 			return err
 		}

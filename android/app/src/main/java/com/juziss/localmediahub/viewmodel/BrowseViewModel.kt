@@ -503,74 +503,33 @@ class BrowseViewModel(
     }
 
     fun downloadFile(context: Context, file: MediaFile) {
-        try {
-            val url = if (file.mediaType == "video") {
-                getVideoStreamUrl(file)
-            } else {
-                getOriginalImageUrl(file)
-            }
-
-            val request = DownloadManager.Request(Uri.parse(url))
-                .setTitle(file.name)
-                .setDescription("Downloading media file")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, file.name)
-
-            val extension = MimeTypeMap.getFileExtensionFromUrl(url) ?: file.extension
-            if (!extension.isNullOrEmpty()) {
-                val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase())
-                if (mimeType != null) {
-                    request.setMimeType(mimeType)
-                }
-            }
-
-            val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            downloadManager.enqueue(request)
-            viewModelScope.launch {
-                downloadsStore?.addDownload(file)
-            }
-            Toast.makeText(context, "Started downloading ${file.name}", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Toast.makeText(context, "Failed to download: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    fun downloadFolder(context: Context, folder: Folder) {
         viewModelScope.launch {
             try {
-                // 1. Fetch metadata first
-                Toast.makeText(context, "Preparing to download folder \"${folder.name}\"...", Toast.LENGTH_SHORT).show()
-                val metadataResult = repository.getFolderFilesRecursive(folder.relativePath)
-                if (metadataResult !is NetworkResult.Success) {
-                    val errorMsg = (metadataResult as? NetworkResult.Error)?.message ?: "Unknown error"
-                    Toast.makeText(context, "Failed to get folder metadata: $errorMsg", Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-                
-                val filesMetadata = metadataResult.data
-                if (filesMetadata.isEmpty()) {
-                    Toast.makeText(context, "No media files found in this folder.", Toast.LENGTH_SHORT).show()
-                    return@launch
+                Toast.makeText(context, "开始下载 ${file.name}...", Toast.LENGTH_SHORT).show()
+                val url = if (file.mediaType == "video") {
+                    getVideoStreamUrl(file)
+                } else {
+                    getOriginalImageUrl(file)
                 }
 
-                // 2. Request the dynamic ZIP stream
-                val zipResult = repository.downloadFolderZip(folder.relativePath)
-                if (zipResult !is NetworkResult.Success) {
-                    val errorMsg = (zipResult as? NetworkResult.Error)?.message ?: "Unknown error"
-                    Toast.makeText(context, "Failed to stream folder zip: $errorMsg", Toast.LENGTH_LONG).show()
+                val downloadResult = repository.downloadFileStream(url)
+                if (downloadResult !is NetworkResult.Success) {
+                    val errorMsg = (downloadResult as? NetworkResult.Error)?.message ?: "未知错误"
+                    Toast.makeText(context, "下载失败: $errorMsg", Toast.LENGTH_LONG).show()
                     return@launch
                 }
-
-                Toast.makeText(context, "Downloading and extracting \"${folder.name}\" in background...", Toast.LENGTH_SHORT).show()
 
                 withContext(Dispatchers.IO) {
-                    val responseBody = zipResult.data
-                    val tempFile = File(context.cacheDir, "temp_folder_download_${System.currentTimeMillis()}.zip")
+                    val responseBody = downloadResult.data
+                    val destDirectory = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "LocalMediaHub")
+                    if (!destDirectory.exists()) {
+                        destDirectory.mkdirs()
+                    }
+                    val localFile = File(destDirectory, file.name)
                     
-                    // Save response stream to a temporary ZIP file
                     responseBody.byteStream().use { inputStream ->
-                        FileOutputStream(tempFile).use { outputStream ->
-                            val buffer = ByteArray(8 * 1024)
+                        FileOutputStream(localFile).use { outputStream ->
+                            val buffer = ByteArray(128 * 1024) // 128KB buffer for blazing fast transfer!
                             var bytesRead: Int
                             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                                 outputStream.write(buffer, 0, bytesRead)
@@ -578,7 +537,51 @@ class BrowseViewModel(
                         }
                     }
 
-                    // Extract ZIP archive to scoped app directory
+                    // Register download entry in DataStore
+                    downloadsStore?.addDownload(file, localFile.absolutePath)
+                    
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "${file.name} 下载成功！", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "下载失败: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    fun downloadFolder(context: Context, folder: Folder) {
+        viewModelScope.launch {
+            try {
+                // 1. Fetch metadata first
+                Toast.makeText(context, "正在读取目录 \"${folder.name}\" 结构...", Toast.LENGTH_SHORT).show()
+                val metadataResult = repository.getFolderFilesRecursive(folder.relativePath)
+                if (metadataResult !is NetworkResult.Success) {
+                    val errorMsg = (metadataResult as? NetworkResult.Error)?.message ?: "未知错误"
+                    Toast.makeText(context, "读取结构失败: $errorMsg", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                
+                val filesMetadata = metadataResult.data
+                if (filesMetadata.isEmpty()) {
+                    Toast.makeText(context, "该目录下没有找到可下载的媒体资源", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                // 2. Request the dynamic ZIP stream
+                val zipResult = repository.downloadFolderZip(folder.relativePath)
+                if (zipResult !is NetworkResult.Success) {
+                    val errorMsg = (zipResult as? NetworkResult.Error)?.message ?: "未知错误"
+                    Toast.makeText(context, "连接服务端失败: $errorMsg", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+
+                Toast.makeText(context, "开始流式极速下载并解压 \"${folder.name}\"...", Toast.LENGTH_SHORT).show()
+
+                withContext(Dispatchers.IO) {
+                    val responseBody = zipResult.data
                     val destDirectory = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "LocalMediaHub")
                     if (!destDirectory.exists()) {
                         destDirectory.mkdirs()
@@ -586,9 +589,10 @@ class BrowseViewModel(
 
                     val incomingEntries = mutableListOf<DownloadEntry>()
 
-                    ZipInputStream(BufferedInputStream(tempFile.inputStream())).use { zipInputStream ->
+                    // High-speed direct stream extraction without cache files
+                    ZipInputStream(BufferedInputStream(responseBody.byteStream())).use { zipInputStream ->
                         var zipEntry: ZipEntry? = zipInputStream.nextEntry
-                        val buffer = ByteArray(8 * 1024)
+                        val buffer = ByteArray(64 * 1024) // 64KB buffer for direct stream extraction
 
                         while (zipEntry != null) {
                             if (!zipEntry.isDirectory) {
@@ -624,26 +628,21 @@ class BrowseViewModel(
                         }
                     }
 
-                    // Delete the temporary ZIP archive
-                    if (tempFile.exists()) {
-                        tempFile.delete()
-                    }
-
                     // Register all files inside DownloadsStore in one bulk transaction
                     if (incomingEntries.isNotEmpty() && downloadsStore != null) {
                         downloadsStore.addDownloads(incomingEntries)
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "Successfully downloaded & extracted ${incomingEntries.size} files!", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "成功下载并流式提取了 ${incomingEntries.size} 个媒体文件！", Toast.LENGTH_LONG).show()
                         }
                     } else {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "No matching files extracted.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "未找到有效的多媒体提取文件", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Failed to download folder: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "下载目录失败: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
