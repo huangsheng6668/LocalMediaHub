@@ -84,8 +84,8 @@ internal fun FolderGrid(
     if (folders.isEmpty()) {
         GridEmptyState(
             icon = Icons.Filled.FolderOff,
-            title = "No folders found",
-            message = "This location does not contain any subfolders to browse right now.",
+            title = "未发现文件夹",
+            message = "当前目录下没有包含任何子文件夹。",
             modifier = modifier,
         )
         return
@@ -113,8 +113,8 @@ internal fun SystemDrivesContent(
     if (drives.isEmpty()) {
         GridEmptyState(
             icon = Icons.Filled.Storage,
-            title = "No drives found",
-            message = "LocalMediaHub could not detect available drives on this device path view.",
+            title = "未发现磁盘驱动器",
+            message = "LocalMediaHub 在此系统视图下未检测到可用的磁盘驱动器。",
             modifier = modifier,
         )
         return
@@ -155,7 +155,7 @@ internal fun SystemDrivesContent(
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                             Text(
-                                text = "Drive root",
+                                text = "磁盘根目录",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
                             )
@@ -166,7 +166,7 @@ internal fun SystemDrivesContent(
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        text = "Browse the full device path from this root.",
+                        text = "从此根目录浏览完整的系统路径。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

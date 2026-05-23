@@ -1,5 +1,5 @@
 package com.juziss.localmediahub.ui.screen
-
+ 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Bookmarks
@@ -69,7 +71,7 @@ import com.juziss.localmediahub.viewmodel.CollectionSummary
 import com.juziss.localmediahub.viewmodel.HomeUiState
 import com.juziss.localmediahub.viewmodel.HomeViewModel
 import com.juziss.localmediahub.viewmodel.LibrarySummary
-
+ 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun HomeScreen(
@@ -87,16 +89,16 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-
+ 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("LocalMediaHub")
+                        Text("LocalMediaHub", fontWeight = FontWeight.Bold)
                         Text(
-                            text = "Your private media hub",
+                            text = "您的私人媒体资源管理中心",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -104,12 +106,12 @@ fun HomeScreen(
                 },
                 actions = {
                     IconButton(onClick = viewModel::refresh) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Filled.Refresh, contentDescription = "刷新")
                     }
                     IconButton(onClick = onDisconnect) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "Disconnect",
+                            contentDescription = "断开连接",
                             tint = MaterialTheme.colorScheme.error,
                         )
                     }
@@ -134,11 +136,11 @@ fun HomeScreen(
                 ) {
                     CircularProgressIndicator()
                     Text(
-                        text = "Refreshing your media hub",
+                        text = "正在载入媒体资源中...",
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        text = "Pulling libraries, collections, and recent activity.",
+                        text = "正在同步您电脑端的共享媒体库、收藏集以及最近活动。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -146,7 +148,7 @@ fun HomeScreen(
             }
             return@Scaffold
         }
-
+ 
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -164,18 +166,18 @@ fun HomeScreen(
                     onOpenDownloads = onOpenDownloads,
                 )
             }
-
+ 
             if (uiState.libraries.isEmpty() && uiState.errorMessage == null) {
                 item {
                     EmptyHomeStateCard()
                 }
             }
-
+ 
             if (uiState.libraries.isNotEmpty()) {
                 item {
                     SectionHeader(
-                        title = "Libraries",
-                        subtitle = "${uiState.libraries.size} server roots ready to browse",
+                        title = "本地共享媒体库",
+                        subtitle = "${uiState.libraries.size} 个服务器共享盘符已就绪",
                     )
                 }
                 item {
@@ -186,12 +188,12 @@ fun HomeScreen(
                     }
                 }
             }
-
+ 
             if (uiState.collections.isNotEmpty()) {
                 item {
                     SectionHeader(
-                        title = "Collections",
-                        subtitle = "Jump into your tagged groups without drilling through folders",
+                        title = "主题收藏集",
+                        subtitle = "通过标签一键直达，无需层层翻找文件夹",
                     )
                 }
                 item {
@@ -208,12 +210,12 @@ fun HomeScreen(
                     }
                 }
             }
-
+ 
             if (uiState.continueWatching.isNotEmpty()) {
                 item {
                     SectionHeader(
-                        title = "Continue Watching",
-                        subtitle = "Pick up unfinished videos from the exact timestamp you left",
+                        title = "继续播放",
+                        subtitle = "继续播放未看完的视频，精确恢复上次的播放进度",
                     )
                 }
                 item {
@@ -227,12 +229,12 @@ fun HomeScreen(
                     }
                 }
             }
-
+ 
             if (uiState.recentMedia.isNotEmpty()) {
                 item {
                     SectionHeader(
-                        title = "Recent",
-                        subtitle = "Fast re-entry to the media you opened most recently",
+                        title = "最近浏览",
+                        subtitle = "快速重新打开您最近浏览过的视频或图片",
                     )
                 }
                 item {
@@ -247,12 +249,12 @@ fun HomeScreen(
                     }
                 }
             }
-
+ 
             if (uiState.favoriteFiles.isNotEmpty()) {
                 item {
                     SectionHeader(
-                        title = "Favorites",
-                        subtitle = "Pinned files that deserve one-tap access",
+                        title = "我的最爱",
+                        subtitle = "固定您最喜爱的媒体，一键快捷开启",
                     )
                 }
                 item {
@@ -266,12 +268,12 @@ fun HomeScreen(
                     }
                 }
             }
-
+ 
             if (downloadedEntries.isNotEmpty()) {
                 item {
                     SectionHeader(
-                        title = "Offline Downloads",
-                        subtitle = "Play downloaded files on your device offline",
+                        title = "离线下载内容",
+                        subtitle = "随时随地离线播放存储在设备上的已下载媒体",
                     )
                 }
                 item {
@@ -294,7 +296,7 @@ fun HomeScreen(
         }
     }
 }
-
+ 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HeroCard(
@@ -305,43 +307,66 @@ private fun HeroCard(
     onOpenDownloads: () -> Unit,
 ) {
     ElevatedCard(
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            containerColor = Color.Transparent,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                    )
+                ),
+                shape = RoundedCornerShape(24.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(24.dp)
+            )
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Back to your media, without the drive-letter hunt.",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
+                text = "轻松直达您的媒体，告别繁琐的磁盘翻找。",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             Text(
                 text = if (uiState.serverLabel.isNotBlank()) {
-                    "Connected to ${condenseServerLabel(uiState.serverLabel)}. Everything below is ready for a quick jump."
+                    "已成功连接至 ${condenseServerLabel(uiState.serverLabel)}。以下所有内容均已同步，点击可直接进入。"
                 } else {
-                    "Your phone is ready to reconnect with LocalMediaHub and resume where you left off."
+                    "等待下一次连接，随时从您上次停留的播放进度恢复。"
                 },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-
+ 
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                HeroMetric(label = "Libraries", value = uiState.libraries.size.toString())
-                HeroMetric(label = "Collections", value = uiState.collections.size.toString())
-                HeroMetric(label = "Continue", value = uiState.continueWatching.size.toString())
-                HeroMetric(label = "Recent", value = uiState.recentMedia.size.toString())
-                HeroMetric(label = "Downloads", value = downloadCount.toString())
+                HeroMetric(label = "共享库", value = uiState.libraries.size.toString())
+                HeroMetric(label = "收藏集", value = uiState.collections.size.toString())
+                HeroMetric(label = "再播放", value = uiState.continueWatching.size.toString())
+                HeroMetric(label = "最近", value = uiState.recentMedia.size.toString())
+                HeroMetric(label = "离线", value = downloadCount.toString())
             }
-
+ 
             Surface(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                )
             ) {
                 Row(
                     modifier = Modifier
@@ -357,11 +382,12 @@ private fun HeroCard(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Current connection",
+                            text = "当前服务器连接",
                             style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = uiState.serverLabel.ifBlank { "Waiting for your next connection" },
+                            text = uiState.serverLabel.ifBlank { "等待下一次连接" },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -370,11 +396,15 @@ private fun HeroCard(
                     }
                 }
             }
-
+ 
             uiState.lastBrowseLocation?.let { location ->
                 Surface(
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                    shape = MaterialTheme.shapes.large,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                    )
                 ) {
                     Row(
                         modifier = Modifier
@@ -390,8 +420,9 @@ private fun HeroCard(
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Last location",
+                                text = "上次浏览位置",
                                 style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = location.title,
@@ -400,7 +431,7 @@ private fun HeroCard(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                text = if (location.isSystemBrowse) "Device path" else "Library browse",
+                                text = if (location.isSystemBrowse) "系统盘符路径" else "媒体库共享目录",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -408,33 +439,42 @@ private fun HeroCard(
                     }
                 }
             }
-
+ 
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 uiState.lastBrowseLocation?.let { location ->
-                    FilledTonalButton(onClick = { onResumeBrowse(location) }) {
+                    FilledTonalButton(
+                        onClick = { onResumeBrowse(location) },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
                         Icon(Icons.Filled.History, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Resume ${location.title}")
+                        Text("继续浏览 ${location.title}")
                     }
                 }
-                OutlinedButton(onClick = onOpenFavorites) {
+                OutlinedButton(
+                    onClick = onOpenFavorites,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
                     Icon(Icons.Filled.Favorite, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Open Favorites")
+                    Text("查看我的最爱")
                 }
-                OutlinedButton(onClick = onOpenDownloads) {
+                OutlinedButton(
+                    onClick = onOpenDownloads,
+                    shape = RoundedCornerShape(10.dp)
+                ) {
                     Icon(Icons.Filled.Folder, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Local Downloads")
+                    Text("离线已下载")
                 }
             }
         }
     }
 }
-
+ 
 @Composable
 private fun HeroMetric(
     label: String,
@@ -442,7 +482,11 @@ private fun HeroMetric(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-        shape = MaterialTheme.shapes.medium,
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+        )
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -452,6 +496,7 @@ private fun HeroMetric(
             Text(
                 text = value,
                 style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
             )
             Text(
@@ -462,7 +507,7 @@ private fun HeroMetric(
         }
     }
 }
-
+ 
 @Composable
 private fun SectionHeader(
     title: String,
@@ -472,7 +517,7 @@ private fun SectionHeader(
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
         )
         Text(
             text = subtitle,
@@ -481,7 +526,7 @@ private fun SectionHeader(
         )
     }
 }
-
+ 
 @Composable
 private fun LibraryCard(
     library: LibrarySummary,
@@ -490,9 +535,11 @@ private fun LibraryCard(
     ElevatedCard(
         onClick = onClick,
         modifier = Modifier.width(232.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -500,21 +547,21 @@ private fun LibraryCard(
         ) {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.medium,
+                shape = RoundedCornerShape(8.dp),
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
                         Icons.Filled.Folder,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(16.dp),
                     )
                     Text(
-                        text = "Library root",
+                        text = "共享根目录",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -523,6 +570,7 @@ private fun LibraryCard(
             Text(
                 text = library.name,
                 style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -536,7 +584,7 @@ private fun LibraryCard(
             HorizontalDivider()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Open library",
+                    text = "打开共享库",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -551,7 +599,7 @@ private fun LibraryCard(
         }
     }
 }
-
+ 
 @Composable
 private fun CollectionChip(
     collection: CollectionSummary,
@@ -567,9 +615,10 @@ private fun CollectionChip(
                 modifier = Modifier.size(18.dp),
             )
         },
+        shape = RoundedCornerShape(12.dp)
     )
 }
-
+ 
 @Composable
 private fun ContinueWatchingCard(
     entry: PlaybackProgressEntry,
@@ -578,9 +627,11 @@ private fun ContinueWatchingCard(
     ElevatedCard(
         onClick = onClick,
         modifier = Modifier.width(232.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -596,14 +647,16 @@ private fun ContinueWatchingCard(
                     tint = MaterialTheme.colorScheme.secondary,
                 )
                 Text(
-                    text = "Continue watching",
+                    text = "继续播放",
                     style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }
             Text(
                 text = entry.file.name,
                 style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -617,14 +670,14 @@ private fun ContinueWatchingCard(
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                text = if (entry.isSystemBrowse) "Resume from device path" else "Resume from library",
+                text = if (entry.isSystemBrowse) "恢复播放系统路径" else "恢复播放共享库",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
-
+ 
 @Composable
 private fun RecentMediaCard(
     entry: RecentMediaEntry,
@@ -634,15 +687,18 @@ private fun RecentMediaCard(
     ElevatedCard(
         onClick = onClick,
         modifier = Modifier.width(184.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Column {
             if (entry.file.mediaType == "image") {
                 AsyncImage(
                     model = getThumbnailUrl(entry),
                     contentDescription = entry.file.name,
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(124.dp),
@@ -652,11 +708,11 @@ private fun RecentMediaCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(124.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        Icons.Filled.Storage,
+                        Icons.Filled.Movie,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(34.dp),
@@ -668,8 +724,9 @@ private fun RecentMediaCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = if (entry.file.mediaType == "image") "Image" else "Video",
+                    text = if (entry.file.mediaType == "image") "图片" else "视频",
                     style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
@@ -679,7 +736,7 @@ private fun RecentMediaCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = if (entry.isSystemBrowse) "From device path" else "From library",
+                    text = if (entry.isSystemBrowse) "来自系统盘符" else "来自共享库",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -687,7 +744,7 @@ private fun RecentMediaCard(
         }
     }
 }
-
+ 
 @Composable
 private fun FavoritePreviewCard(
     file: MediaFile,
@@ -696,9 +753,11 @@ private fun FavoritePreviewCard(
     ElevatedCard(
         onClick = onClick,
         modifier = Modifier.width(184.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -712,8 +771,9 @@ private fun FavoritePreviewCard(
             Spacer(modifier = Modifier.width(10.dp))
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "Favorited",
+                    text = "已收藏",
                     style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.error,
                 )
                 Text(
@@ -730,13 +790,15 @@ private fun FavoritePreviewCard(
         }
     }
 }
-
+ 
 @Composable
 private fun EmptyHomeStateCard() {
     ElevatedCard(
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Column(
             modifier = Modifier
@@ -745,21 +807,23 @@ private fun EmptyHomeStateCard() {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "No libraries are available yet",
+                text = "未发现共享媒体库",
                 style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Expose at least one media root from the server, then refresh this page to start browsing.",
+                text = "请在电脑端 LocalMediaHub 设置并开启至少一个共享媒体库，然后刷新当前页面。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
-
+ 
 @Composable
 private fun StatusNoticeCard(message: String) {
     Card(
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
         ),
@@ -769,8 +833,9 @@ private fun StatusNoticeCard(message: String) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = "Server sync needs attention",
+                text = "同步出现异常",
                 style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Text(
@@ -781,16 +846,16 @@ private fun StatusNoticeCard(message: String) {
         }
     }
 }
-
+ 
 private fun progressFraction(positionMs: Long, durationMs: Long): Float {
     if (durationMs <= 0L) return 0f
     return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
 }
-
+ 
 private fun formatProgressLabel(positionMs: Long, durationMs: Long): String {
     return "${formatTime(positionMs)} / ${formatTime(durationMs)}"
 }
-
+ 
 private fun formatTime(ms: Long): String {
     val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
     val hours = totalSeconds / 3600L
@@ -802,11 +867,11 @@ private fun formatTime(ms: Long): String {
         "%d:%02d".format(minutes, seconds)
     }
 }
-
+ 
 private fun condenseServerLabel(serverLabel: String): String {
     return serverLabel.removePrefix("http://").removePrefix("https://")
 }
-
+ 
 @Composable
 private fun DownloadedPreviewCard(
     entry: DownloadEntry,
@@ -815,9 +880,11 @@ private fun DownloadedPreviewCard(
     ElevatedCard(
         onClick = onClick,
         modifier = Modifier.width(184.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Column {
             if (entry.file.mediaType == "image") {
@@ -834,7 +901,7 @@ private fun DownloadedPreviewCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(124.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -863,8 +930,9 @@ private fun DownloadedPreviewCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = if (entry.file.mediaType == "image") "Image" else "Video",
+                    text = if (entry.file.mediaType == "image") "图片" else "视频",
                     style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
@@ -874,8 +942,9 @@ private fun DownloadedPreviewCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "Offline Download",
+                    text = "离线下载",
                     style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }

@@ -36,14 +36,14 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipEntry
 
 enum class SortOrder(val label: String) {
-    NAME_ASC("Name A-Z"),
-    NAME_DESC("Name Z-A"),
-    NUMERIC_ASC("Number 1→9"),
-    NUMERIC_DESC("Number 9→1"),
-    SIZE_ASC("Smallest first"),
-    SIZE_DESC("Largest first"),
-    TIME_ASC("Oldest first"),
-    TIME_DESC("Newest first"),
+    NAME_ASC("按名称升序 (A-Z)"),
+    NAME_DESC("按名称降序 (Z-A)"),
+    NUMERIC_ASC("按数字升序 (1→9)"),
+    NUMERIC_DESC("按数字降序 (9→1)"),
+    SIZE_ASC("文件从小到大"),
+    SIZE_DESC("文件从大到小"),
+    TIME_ASC("修改时间从旧到新"),
+    TIME_DESC("修改时间从新到旧"),
 }
 
 /** Extract leading number from a string like "007_gjco" → 7.0, "abc" → null */

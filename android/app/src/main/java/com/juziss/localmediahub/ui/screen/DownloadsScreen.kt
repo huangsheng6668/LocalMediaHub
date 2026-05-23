@@ -1,5 +1,5 @@
 package com.juziss.localmediahub.ui.screen
-
+ 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -9,6 +9,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -35,7 +37,7 @@ import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
-
+ 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun DownloadsScreen(
@@ -48,17 +50,17 @@ fun DownloadsScreen(
     var selectedEntryForDelete by remember { mutableStateOf<DownloadEntry?>(null) }
     var selectedFolderForDelete by remember { mutableStateOf<String?>(null) }
     var currentPath by remember { mutableStateOf(emptyList<String>()) }
-
+ 
     // Intercept hardware system back button if we are inside a subfolder
     BackHandler(enabled = currentPath.isNotEmpty()) {
         currentPath = currentPath.dropLast(1)
     }
-
+ 
     // Filter subfolders and files at the current dynamic path level
     val itemsAtCurrentLevel = remember(downloads, currentPath) {
         val folders = mutableSetOf<String>()
         val files = mutableListOf<DownloadEntry>()
-
+ 
         for (entry in downloads) {
             val segments = entry.file.relativePath
                 .split('/', '\\')
@@ -78,16 +80,16 @@ fun DownloadsScreen(
         Pair(folders.sorted(), files.sortedBy { it.file.name })
     }
     val (foldersAtLevel, filesAtLevel) = itemsAtCurrentLevel
-
+ 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Local Downloads")
+                        Text("离线已下载", fontWeight = FontWeight.Bold)
                         Text(
-                            text = "Offline media library",
+                            text = "设备本地离线媒体库",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -103,7 +105,7 @@ fun DownloadsScreen(
                     }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = "返回",
                             tint = MaterialTheme.colorScheme.onBackground,
                         )
                     }
@@ -137,9 +139,9 @@ fun DownloadsScreen(
                             modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp)
                         ) {
                             Text(
-                                text = "Root",
+                                text = "根目录",
                                 style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
+                                fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -172,7 +174,7 @@ fun DownloadsScreen(
                     }
                 }
             }
-
+ 
             // Main Contents
             if (downloads.isEmpty()) {
                 Box(
@@ -191,12 +193,12 @@ fun DownloadsScreen(
                             modifier = Modifier.size(64.dp)
                         )
                         Text(
-                            text = "No Offline Downloads",
+                            text = "暂无离线下载内容",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "Download videos or images from your server to access them offline anytime.",
+                            text = "您可以在浏览共享媒体库时，长按文件并选择“下载到本地”，以便随时在此离线播放和浏览。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -221,12 +223,12 @@ fun DownloadsScreen(
                             modifier = Modifier.size(64.dp)
                         )
                         Text(
-                            text = "This Folder is Empty",
+                            text = "此文件夹为空",
                             style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "All downloaded files in this directory have been removed.",
+                            text = "当前目录下的所有已下载文件均已被移除。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -235,9 +237,10 @@ fun DownloadsScreen(
                             onClick = { currentPath = currentPath.dropLast(1) },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary
-                            )
+                            ),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("Go to Parent Folder")
+                            Text("返回上一级文件夹")
                         }
                     }
                 }
@@ -277,7 +280,7 @@ fun DownloadsScreen(
                             }
                             Pair(fileCount, formattedSize)
                         }
-
+ 
                         FolderItemCard(
                             name = folderName,
                             itemCount = count,
@@ -286,7 +289,7 @@ fun DownloadsScreen(
                             onLongClick = { selectedFolderForDelete = folderName }
                         )
                     }
-
+ 
                     // 2. Render Media Files
                     items(filesAtLevel, key = { it.file.relativePath }) { entry ->
                         DownloadItemCard(
@@ -311,12 +314,13 @@ fun DownloadsScreen(
             }
         }
     }
-
+ 
     selectedEntryForDelete?.let { entry ->
         AlertDialog(
             onDismissRequest = { selectedEntryForDelete = null },
-            title = { Text("Delete Downloaded File?") },
-            text = { Text("This will permanently delete \"${entry.file.name}\" from your device's local storage.") },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("删除本地已下载文件？", fontWeight = FontWeight.Bold) },
+            text = { Text("这将从您手机的本地存储中永久删除文件 \"${entry.file.name}\"，该操作不可撤销。") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -327,17 +331,17 @@ fun DownloadsScreen(
                         contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Text("Delete")
+                    Text("确认删除")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { selectedEntryForDelete = null }) {
-                    Text("Cancel")
+                    Text("取消")
                 }
             }
         )
     }
-
+ 
     selectedFolderForDelete?.let { folderName ->
         val folderFiles = remember(downloads, currentPath, folderName) {
             val targetPath = currentPath + folderName
@@ -349,11 +353,12 @@ fun DownloadsScreen(
                         segments.take(targetPath.size) == targetPath
             }
         }
-
+ 
         AlertDialog(
             onDismissRequest = { selectedFolderForDelete = null },
-            title = { Text("Delete Downloaded Folder?") },
-            text = { Text("This will permanently delete the folder \"$folderName\" and its ${folderFiles.size} offline files from your device's local storage.") },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("删除本地已下载文件夹？", fontWeight = FontWeight.Bold) },
+            text = { Text("这将从您手机的本地存储中永久删除文件夹 \"$folderName\" 及其包含的 ${folderFiles.size} 个离线媒体文件，该操作不可撤销。") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -365,18 +370,18 @@ fun DownloadsScreen(
                         contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Text("Delete All")
+                    Text("全部删除")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { selectedFolderForDelete = null }) {
-                    Text("Cancel")
+                    Text("取消")
                 }
             }
         )
     }
 }
-
+ 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun FolderItemCard(
@@ -393,9 +398,11 @@ private fun FolderItemCard(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Row(
             modifier = Modifier
@@ -406,7 +413,7 @@ private fun FolderItemCard(
             Box(
                 modifier = Modifier
                     .size(56.dp)
-                    .clip(MaterialTheme.shapes.medium)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
@@ -417,9 +424,9 @@ private fun FolderItemCard(
                     modifier = Modifier.size(28.dp)
                 )
             }
-
+ 
             Spacer(modifier = Modifier.width(16.dp))
-
+ 
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -427,7 +434,7 @@ private fun FolderItemCard(
                 Text(
                     text = name,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
@@ -437,7 +444,7 @@ private fun FolderItemCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (itemCount == 1) "1 item" else "$itemCount items",
+                        text = "${itemCount} 个文件",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -453,9 +460,9 @@ private fun FolderItemCard(
                     )
                 }
             }
-
+ 
             Spacer(modifier = Modifier.width(8.dp))
-
+ 
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
@@ -465,7 +472,7 @@ private fun FolderItemCard(
         }
     }
 }
-
+ 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DownloadItemCard(
@@ -477,7 +484,7 @@ private fun DownloadItemCard(
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
         sdf.format(Date(entry.addedAt))
     }
-
+ 
     val fileSize = remember(entry.localPath) {
         val file = File(entry.localPath)
         if (file.exists()) {
@@ -490,10 +497,10 @@ private fun DownloadItemCard(
                 "${sizeBytes / 1024} KB"
             }
         } else {
-            "Unknown size"
+            "未知大小"
         }
     }
-
+ 
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -501,9 +508,11 @@ private fun DownloadItemCard(
                 onClick = onClick,
                 onLongClick = onDeleteClick
             ),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
     ) {
         Row(
             modifier = Modifier
@@ -514,7 +523,7 @@ private fun DownloadItemCard(
             Box(
                 modifier = Modifier
                     .size(72.dp)
-                    .clip(MaterialTheme.shapes.medium)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.secondaryContainer),
                 contentAlignment = Alignment.Center
             ) {
@@ -547,9 +556,9 @@ private fun DownloadItemCard(
                     }
                 }
             }
-
+ 
             Spacer(modifier = Modifier.width(16.dp))
-
+ 
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -557,13 +566,13 @@ private fun DownloadItemCard(
                 Text(
                     text = entry.file.name,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (entry.file.mediaType == "video") "Video" else "Image",
+                    text = if (entry.file.mediaType == "video") "视频" else "图片",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold
@@ -589,13 +598,13 @@ private fun DownloadItemCard(
                     )
                 }
             }
-
+ 
             Spacer(modifier = Modifier.width(8.dp))
-
+ 
             IconButton(onClick = onDeleteClick) {
                 Icon(
                     Icons.Filled.Delete,
-                    contentDescription = "Delete",
+                    contentDescription = "删除",
                     tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
                 )
             }

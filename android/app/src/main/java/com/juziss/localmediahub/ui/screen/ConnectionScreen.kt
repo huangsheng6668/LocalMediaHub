@@ -1,5 +1,5 @@
 package com.juziss.localmediahub.ui.screen
-
+ 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -53,6 +56,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -62,7 +66,7 @@ import com.juziss.localmediahub.viewmodel.ConnectionViewModel
 import com.juziss.localmediahub.viewmodel.DiscoveredServer
 import com.juziss.localmediahub.viewmodel.DiscoveryState
 import com.juziss.localmediahub.viewmodel.shouldAttemptAutoConnect
-
+ 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectionScreen(
@@ -74,26 +78,26 @@ fun ConnectionScreen(
     var port by remember { mutableStateOf("8000") }
     var autoConnectAttempted by rememberSaveable { mutableStateOf(false) }
     var showServerSelection by remember { mutableStateOf(false) }
-
+ 
     val savedIp by viewModel.savedIp.collectAsState()
     val savedPort by viewModel.savedPort.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
     val discoveryState by viewModel.discoveryState.collectAsState()
     val scanProgress by viewModel.scanProgress.collectAsState()
     val discoveredServers by viewModel.discoveredServers.collectAsState()
-
+ 
     LaunchedEffect(savedIp, savedPort, connectionState) {
         if (ip.isEmpty() && savedIp.isNotEmpty()) {
             ip = savedIp
             port = savedPort
         }
-
+ 
         if (shouldAttemptAutoConnect(savedIp, autoConnectAttempted, connectionState)) {
             autoConnectAttempted = true
             viewModel.tryAutoConnect()
         }
     }
-
+ 
     LaunchedEffect(discoveryState) {
         val state = discoveryState
         if (state is DiscoveryState.FoundMultiple) {
@@ -104,22 +108,22 @@ fun ConnectionScreen(
             }
         }
     }
-
+ 
     LaunchedEffect(connectionState) {
         if (connectionState is ConnectionState.Connected) {
             onConnected()
         }
     }
-
+ 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Connect")
+                        Text("连接到服务器", fontWeight = FontWeight.Bold)
                         Text(
-                            text = "Pair with your PC media server",
+                            text = "配对并连接您的 PC 媒体服务器",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -145,7 +149,7 @@ fun ConnectionScreen(
                 savedPort = savedPort,
                 isAutoConnecting = autoConnectAttempted && connectionState is ConnectionState.Testing,
             )
-
+ 
             DiscoveryCard(
                 discoveryState = discoveryState,
                 discoveredCount = discoveredServers.size,
@@ -153,7 +157,7 @@ fun ConnectionScreen(
                 onStartDiscovery = { viewModel.startDiscovery() },
                 onViewServers = { showServerSelection = true },
             )
-
+ 
             ManualConnectionCard(
                 ip = ip,
                 port = port,
@@ -162,13 +166,13 @@ fun ConnectionScreen(
                 onPortChange = { port = it },
                 onConnect = { viewModel.testConnection(ip, port) },
             )
-
+ 
             when (connectionState) {
                 is ConnectionState.Testing -> {
                     StatusCard(
                         icon = Icons.Filled.Storage,
-                        title = "Checking server health",
-                        message = "Trying to reach LocalMediaHub and save this server for next time.",
+                        title = "正在检测服务器状态",
+                        message = "正在尝试连接 LocalMediaHub，连接成功后将自动保存该服务器。",
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
@@ -176,8 +180,8 @@ fun ConnectionScreen(
                 is ConnectionState.Connected -> {
                     StatusCard(
                         icon = Icons.Filled.CheckCircle,
-                        title = "Connection ready",
-                        message = "Connected to ${(connectionState as ConnectionState.Connected).serverUrl}",
+                        title = "连接已准备就绪",
+                        message = "已成功连接至 ${(connectionState as ConnectionState.Connected).serverUrl}",
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
@@ -185,7 +189,7 @@ fun ConnectionScreen(
                 is ConnectionState.Error -> {
                     StatusCard(
                         icon = Icons.Filled.Error,
-                        title = "Connection failed",
+                        title = "连接失败",
                         message = (connectionState as ConnectionState.Error).message,
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -193,13 +197,13 @@ fun ConnectionScreen(
                 }
                 ConnectionState.Idle -> Unit
             }
-
+ 
             when (val state = discoveryState) {
                 is DiscoveryState.NotFound -> {
                     StatusCard(
                         icon = Icons.Filled.Search,
-                        title = "No server found",
-                        message = "The scan finished without finding LocalMediaHub on this network. You can still connect manually.",
+                        title = "未发现可用服务器",
+                        message = "局域网扫描结束，未发现运行中的 LocalMediaHub 服务。您仍然可以使用手动输入 IP 地址进行连接。",
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                         contentColor = MaterialTheme.colorScheme.onSurface,
                     )
@@ -207,7 +211,7 @@ fun ConnectionScreen(
                 is DiscoveryState.Error -> {
                     StatusCard(
                         icon = Icons.Filled.Error,
-                        title = "Discovery hit a problem",
+                        title = "自动发现服务遇到问题",
                         message = state.message,
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -216,11 +220,11 @@ fun ConnectionScreen(
                 is DiscoveryState.FoundMultiple -> {
                     StatusCard(
                         icon = Icons.Filled.CheckCircle,
-                        title = "${state.servers.size} server(s) found",
+                        title = "发现 ${state.servers.size} 个可用服务器",
                         message = if (state.servers.size == 1) {
-                            "Found LocalMediaHub at ${state.servers.first().ip}:${state.servers.first().port}. Connecting..."
+                            "在 ${state.servers.first().ip}:${state.servers.first().port} 发现 LocalMediaHub 服务器。正在连接..."
                         } else {
-                            "Found ${state.servers.size} servers. Tap \"View servers\" to select one."
+                            "发现 ${state.servers.size} 个服务器。点击 \"查看服务器\" 选择一个连接。"
                         },
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -229,14 +233,21 @@ fun ConnectionScreen(
                 DiscoveryState.Idle,
                 DiscoveryState.Scanning -> Unit
             }
-
+ 
             Spacer(modifier = Modifier.height(8.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(4.dp))
-
+ 
             ElevatedCard(
                 onClick = onBrowseOffline,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(16.dp)
+                    ),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.elevatedCardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 ),
@@ -256,13 +267,13 @@ fun ConnectionScreen(
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Browse Offline Downloads",
+                            text = "浏览离线下载内容",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            text = "Play downloaded videos or view images without connecting to a server.",
+                            text = "无网状态下直接播放已下载的视频或浏览图片。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                         )
@@ -270,7 +281,7 @@ fun ConnectionScreen(
                 }
             }
         }
-
+ 
         if (showServerSelection && discoveredServers.isNotEmpty()) {
             ServerSelectionSheet(
                 servers = discoveredServers,
@@ -285,7 +296,7 @@ fun ConnectionScreen(
         }
     }
 }
-
+ 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ServerSelectionSheet(
@@ -294,7 +305,7 @@ private fun ServerSelectionSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
-
+ 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -307,15 +318,16 @@ private fun ServerSelectionSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Select Server",
+                text = "选择服务器",
                 style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
             )
             Text(
-                text = "${servers.size} LocalMediaHub server(s) found on this network.",
+                text = "在当前局域网中发现 ${servers.size} 个 LocalMediaHub 服务器。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-
+ 
             servers.forEach { server ->
                 ElevatedCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -356,14 +368,14 @@ private fun ServerSelectionSheet(
                     }
                 }
             }
-
+ 
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text("Cancel")
+                Text("取消")
             }
         }
     }
 }
-
+ 
 @Composable
 private fun ConnectionHeroCard(
     savedIp: String,
@@ -371,32 +383,56 @@ private fun ConnectionHeroCard(
     isAutoConnecting: Boolean,
 ) {
     ElevatedCard(
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            containerColor = Color.Transparent,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                    )
+                ),
+                shape = RoundedCornerShape(24.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(24.dp)
+            )
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = "Bring your phone onto the same network as your PC and LocalMediaHub will do the rest.",
-                style = MaterialTheme.typography.headlineSmall,
+                text = "将您的手机与电脑连接至同一局域网，LocalMediaHub 将自动完成其余工作。",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
             )
             Text(
                 text = if (savedIp.isNotBlank()) {
-                    "We will try your last server first, and you can always scan or edit the address below."
+                    "我们将优先尝试连接上次使用的服务器，您也可以随时进行局域网扫描或手动输入。"
                 } else {
-                    "Start with auto-discovery for the smooth path, or enter the server address manually."
+                    "推荐使用自动搜索连接，或在下方手动输入服务器地址。"
                 },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-
+ 
             if (savedIp.isNotBlank()) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
-                    shape = MaterialTheme.shapes.large,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                    )
                 ) {
                     Row(
                         modifier = Modifier
@@ -412,8 +448,9 @@ private fun ConnectionHeroCard(
                         )
                         Column {
                             Text(
-                                text = "Last used server",
+                                text = "上次使用的服务器",
                                 style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = "$savedIp:$savedPort",
@@ -424,18 +461,19 @@ private fun ConnectionHeroCard(
                     }
                 }
             }
-
+ 
             if (isAutoConnecting) {
                 Text(
-                    text = "Auto-connect is in progress using your saved server.",
+                    text = "正在尝试自动连接保存的服务器...",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
     }
 }
-
+ 
 @Composable
 private fun DiscoveryCard(
     discoveryState: DiscoveryState,
@@ -445,20 +483,28 @@ private fun DiscoveryCard(
     onViewServers: () -> Unit,
 ) {
     ElevatedCard(
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.border(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(16.dp)
+        )
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                text = "Find on this network",
+                text = "局域网自动搜索",
                 style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Scan your LAN for LocalMediaHub servers and fill the address automatically.",
+                text = "自动扫描当前局域网以寻找运行中的 LocalMediaHub 服务端并自动完成配对。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -470,6 +516,7 @@ private fun DiscoveryCard(
                     onClick = onStartDiscovery,
                     modifier = Modifier.weight(1f),
                     enabled = discoveryState !is DiscoveryState.Scanning,
+                    shape = RoundedCornerShape(10.dp)
                 ) {
                     if (discoveryState is DiscoveryState.Scanning) {
                         CircularProgressIndicator(
@@ -477,24 +524,25 @@ private fun DiscoveryCard(
                             strokeWidth = 2.dp,
                         )
                         Spacer(modifier = Modifier.size(8.dp))
-                        Text("Scanning...")
+                        Text("正在扫描...")
                     } else {
                         Icon(Icons.Filled.Search, contentDescription = null)
                         Spacer(modifier = Modifier.size(8.dp))
-                        Text("Scan network")
+                        Text("扫描局域网")
                     }
                 }
-
+ 
                 if (discoveredCount > 1) {
                     Button(
                         onClick = onViewServers,
                         modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("View servers ($discoveredCount)")
+                        Text("查看可用服务器 ($discoveredCount)")
                     }
                 }
             }
-
+ 
             if (discoveryState is DiscoveryState.Scanning) {
                 val total = scanProgress.second.coerceAtLeast(1)
                 val progress = scanProgress.first.toFloat() / total.toFloat()
@@ -508,13 +556,13 @@ private fun DiscoveryCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            text = "Checked ${scanProgress.first} of ${scanProgress.second} addresses",
+                            text = "已检查 ${scanProgress.first} / ${scanProgress.second} 个 IP 地址",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         if (discoveredCount > 0) {
                             Text(
-                                text = "$discoveredCount found",
+                                text = "已发现 $discoveredCount 个",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                             )
@@ -525,7 +573,7 @@ private fun DiscoveryCard(
         }
     }
 }
-
+ 
 @Composable
 private fun ManualConnectionCard(
     ip: String,
@@ -536,20 +584,28 @@ private fun ManualConnectionCard(
     onConnect: () -> Unit,
 ) {
     ElevatedCard(
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.border(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(16.dp)
+        )
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                text = "Manual connection",
+                text = "手动输入连接",
                 style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Use your PC's LAN IP and the LocalMediaHub port if discovery misses it.",
+                text = "若自动扫描未能发现，请输入您电脑的局域网 IP 地址和 LocalMediaHub 运行端口。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -557,32 +613,35 @@ private fun ManualConnectionCard(
             OutlinedTextField(
                 value = ip,
                 onValueChange = onIpChange,
-                label = { Text("Server IP address") },
+                label = { Text("服务器 IP 地址") },
                 placeholder = { Text("192.168.1.100") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 isError = connectionState is ConnectionState.Error,
                 supportingText = {
-                    Text("Usually the IPv4 address of the PC running LocalMediaHub.")
+                    Text("通常为运行 LocalMediaHub 服务端的电脑局域网 IPv4 地址。")
                 },
+                shape = RoundedCornerShape(10.dp)
             )
             OutlinedTextField(
                 value = port,
                 onValueChange = onPortChange,
-                label = { Text("Port") },
+                label = { Text("运行端口") },
                 placeholder = { Text("8000") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 supportingText = {
-                    Text("Leave this as 8000 unless you changed the server config.")
+                    Text("若未修改服务端配置文件，请保持默认的 8000 端口。")
                 },
+                shape = RoundedCornerShape(10.dp)
             )
             Button(
                 onClick = onConnect,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = connectionState !is ConnectionState.Testing,
+                shape = RoundedCornerShape(10.dp)
             ) {
                 if (connectionState is ConnectionState.Testing) {
                     CircularProgressIndicator(
@@ -591,15 +650,15 @@ private fun ManualConnectionCard(
                         strokeWidth = 2.dp,
                     )
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("Connecting...")
+                    Text("正在连接...")
                 } else {
-                    Text("Connect to server")
+                    Text("手动连接服务器")
                 }
             }
         }
     }
 }
-
+ 
 @Composable
 private fun StatusCard(
     icon: ImageVector,
@@ -609,6 +668,7 @@ private fun StatusCard(
     contentColor: androidx.compose.ui.graphics.Color,
 ) {
     ElevatedCard(
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = containerColor,
         ),
@@ -625,6 +685,7 @@ private fun StatusCard(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
                     color = contentColor,
                 )
                 Text(

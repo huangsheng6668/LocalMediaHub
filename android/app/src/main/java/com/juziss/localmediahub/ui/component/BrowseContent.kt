@@ -1,5 +1,5 @@
 package com.juziss.localmediahub.ui.component
-
+ 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -21,7 +21,7 @@ import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.viewmodel.SearchState
 import kotlinx.coroutines.launch
-
+ 
 @Composable
 internal fun FavoritesContent(
     favoriteFiles: List<MediaFile>,
@@ -48,13 +48,13 @@ internal fun FavoritesContent(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    "No favorites yet",
+                    "暂无收藏内容",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Tap the heart icon on any file to add it here",
+                    "在浏览媒体文件时点击右上角的爱心图标即可将其添加到这里",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -62,9 +62,9 @@ internal fun FavoritesContent(
         }
         return
     }
-
+ 
     val images = favoriteFiles.filter { it.mediaType == "image" }
-
+ 
     if (images.isNotEmpty() && favoriteFiles.all { it.mediaType == "image" }) {
         WaterfallImageGrid(
             images = images,
@@ -105,7 +105,7 @@ internal fun FavoritesContent(
         }
     }
 }
-
+ 
 @Composable
 internal fun SearchContent(
     searchState: SearchState,
@@ -124,7 +124,7 @@ internal fun SearchContent(
         is SearchState.Idle -> {
             Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    if (searchQuery.isEmpty()) "Type to search" else "Searching...",
+                    if (searchQuery.isEmpty()) "请输入搜索关键词" else "正在搜索中...",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -147,7 +147,7 @@ internal fun SearchContent(
             val result = (searchState as SearchState.Results).result
             if (result.folders.isEmpty() && result.files.isEmpty()) {
                 Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No results for \"$searchQuery\"", style = MaterialTheme.typography.bodyLarge)
+                    Text("没有找到与 \"$searchQuery\" 相关的搜索结果", style = MaterialTheme.typography.bodyLarge)
                 }
             } else {
                 LazyVerticalGrid(
@@ -184,7 +184,7 @@ internal fun SearchContent(
         }
     }
 }
-
+ 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun BrowseContent(
@@ -208,15 +208,15 @@ internal fun BrowseContent(
     val scope = rememberCoroutineScope()
     val restorePath by viewModel.restoreScrollTo.collectAsState()
     val currentPath by viewModel.currentPath.collectAsState()
-
+ 
     val images = files.filter { it.mediaType == "image" }
     val useStaggeredGrid = folders.isEmpty() && images.isNotEmpty()
-
+ 
     // Save scroll position whenever it changes
     LaunchedEffect(gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset) {
         viewModel.saveScrollPosition(currentPath, gridState.firstVisibleItemIndex)
     }
-
+ 
     // Restore scroll position when navigating back
     LaunchedEffect(restorePath) {
         if (restorePath != null) {
@@ -231,7 +231,7 @@ internal fun BrowseContent(
             viewModel.consumeRestoreScroll()
         }
     }
-
+ 
     // Instant scroll to top when either sort order changes
     LaunchedEffect(folderSortOrder, fileSortOrder) {
         if (useStaggeredGrid) {
@@ -240,7 +240,7 @@ internal fun BrowseContent(
             gridState.scrollToItem(0)
         }
     }
-
+ 
     Box(modifier = modifier.fillMaxSize()) {
         if (useStaggeredGrid) {
             WaterfallImageGrid(
@@ -290,7 +290,7 @@ internal fun BrowseContent(
                 }
             }
         }
-
+ 
         // Floating scroll buttons
         if (files.isNotEmpty() || folders.isNotEmpty()) {
             Column(
@@ -311,7 +311,7 @@ internal fun BrowseContent(
                 ) {
                     Icon(
                         Icons.Filled.KeyboardArrowUp,
-                        contentDescription = "Scroll to top",
+                        contentDescription = "回到顶部",
                         modifier = Modifier.size(24.dp),
                     )
                 }
@@ -332,7 +332,7 @@ internal fun BrowseContent(
                 ) {
                     Icon(
                         Icons.Filled.KeyboardArrowDown,
-                        contentDescription = "Scroll to bottom",
+                        contentDescription = "滚到底部",
                         modifier = Modifier.size(24.dp),
                     )
                 }

@@ -23,7 +23,7 @@ internal fun TagFilterBar(
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(
-            text = "Tags",
+            text = "文件标签",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -75,14 +75,14 @@ internal fun TagMenuDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Tags for ${file.name}",
+                text = "${file.name} 的标签列表",
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         },
         text = {
             if (tags.isEmpty()) {
-                Text("No tags created yet. Create tags first.")
+                Text("尚无已创建的标签。请先在服务端或首页创建标签。")
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     tags.forEach { tag ->
@@ -130,7 +130,7 @@ internal fun TagMenuDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done")
+                Text("完成")
             }
         },
     )

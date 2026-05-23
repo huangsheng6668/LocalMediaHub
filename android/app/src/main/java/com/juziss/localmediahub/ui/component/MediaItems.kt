@@ -1,9 +1,11 @@
 package com.juziss.localmediahub.ui.component
-
+ 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -19,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
-
+ 
 @Composable
 internal fun FavoriteToggleIcon(
     isFavorite: Boolean,
@@ -32,7 +34,7 @@ internal fun FavoriteToggleIcon(
     ) {
         Icon(
             imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-            contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+            contentDescription = if (isFavorite) "取消收藏" else "添加收藏",
             tint = if (isFavorite) {
                 MaterialTheme.colorScheme.error
             } else {
@@ -42,7 +44,7 @@ internal fun FavoriteToggleIcon(
         )
     }
 }
-
+ 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun FolderCard(
@@ -57,9 +59,15 @@ internal fun FolderCard(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
+        elevation = CardDefaults.elevatedCardElevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 6.dp,
+            hoveredElevation = 4.dp
+        )
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -67,21 +75,21 @@ internal fun FolderCard(
         ) {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.medium,
+                shape = RoundedCornerShape(8.dp),
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
                         Icons.Filled.Folder,
-                        contentDescription = "Folder",
-                        modifier = Modifier.size(18.dp),
+                        contentDescription = "文件夹",
+                        modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                     Text(
-                        text = "Folder",
+                        text = "文件夹",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -94,14 +102,14 @@ internal fun FolderCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "Open and browse media inside",
+                text = "打开并浏览内部媒体资源",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
-
+ 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun VideoCard(
@@ -111,48 +119,74 @@ internal fun VideoCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
 ) {
-    Card(
+    ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.elevatedCardElevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 6.dp
+        ),
     ) {
         Box {
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(
-                    Icons.Filled.Movie,
-                    contentDescription = "Video",
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.tertiary,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    shape = CircleShape,
+                    modifier = Modifier.size(60.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.Movie,
+                            contentDescription = "视频",
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = file.name,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.titleSmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
-                Text(
-                    text = file.extension.uppercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(4.dp),
+                ) {
+                    Text(
+                        text = file.extension.uppercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
             FavoriteToggleIcon(
                 isFavorite = isFavorite,
                 onClick = onToggleFavorite,
-                modifier = Modifier.align(Alignment.TopEnd),
+                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
             )
         }
     }
 }
-
+ 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ImageCard(
@@ -163,40 +197,57 @@ internal fun ImageCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
 ) {
-    Card(
+    ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.elevatedCardElevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 6.dp
+        ),
     ) {
         Box {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                AsyncImage(
-                    model = thumbnailUrl,
-                    contentDescription = file.name,
+            Column {
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(120.dp),
-                    contentScale = ContentScale.Crop,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = file.name,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
+                        .height(124.dp)
+                ) {
+                    AsyncImage(
+                        model = thumbnailUrl,
+                        contentDescription = file.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = file.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "图片 · ${file.extension.uppercase()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             FavoriteToggleIcon(
                 isFavorite = isFavorite,
                 onClick = onToggleFavorite,
-                modifier = Modifier.align(Alignment.TopEnd),
+                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
             )
         }
     }
