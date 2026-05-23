@@ -318,8 +318,13 @@ internal fun BrowseContent(
                 FloatingActionButton(
                     onClick = {
                         scope.launch {
-                            if (useStaggeredGrid) staggeredState.scrollToItem(Int.MAX_VALUE)
-                            else gridState.scrollToItem(Int.MAX_VALUE)
+                            if (useStaggeredGrid) {
+                                val lastIndex = (images.size - 1).coerceAtLeast(0)
+                                staggeredState.scrollToItem(lastIndex)
+                            } else {
+                                val lastIndex = (folders.size + files.size - 1).coerceAtLeast(0)
+                                gridState.scrollToItem(lastIndex)
+                            }
                         }
                     },
                     modifier = Modifier.size(40.dp),
