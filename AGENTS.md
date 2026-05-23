@@ -87,3 +87,5 @@ Handler struct 接收所有 service 引用，方法挂在 struct 上。
 6. **受限系统浏览:** `/api/v1/system/*` 仅允许访问 `config.yaml` 中 `system.allowed_roots` 范围
 7. **双模式:** GUI（系统托盘）或 headless（无窗口）
 8. **同步政策**: 任何本地代码改动将自动同步推送至 GitHub `master` 分支。
+9. **中文汉化与视觉美观度优化**: 深度汉化原生 Android 界面所有硬编码文案。引入柔和的线性色彩渐变（Linear Gradients）与高阶毛玻璃面板拟态（Glassmorphism）胶囊，为多媒体和文件夹卡片引入精致超细描边及按压阻尼动态立体悬浮效果。
+
