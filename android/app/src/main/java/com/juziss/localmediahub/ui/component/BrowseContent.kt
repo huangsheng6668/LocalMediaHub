@@ -20,6 +20,7 @@ import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.viewmodel.SearchState
+import com.juziss.localmediahub.viewmodel.SortOrder
 import kotlinx.coroutines.launch
  
 @Composable
@@ -212,9 +213,21 @@ internal fun BrowseContent(
     val images = files.filter { it.mediaType == "image" }
     val useStaggeredGrid = folders.isEmpty() && images.isNotEmpty()
  
-    // Save scroll position whenever it changes
-    LaunchedEffect(gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset) {
-        viewModel.saveScrollPosition(currentPath, gridState.firstVisibleItemIndex)
+    // Save scroll position whenever it changes (supporting both grid and staggered waterfall grids)
+    LaunchedEffect(
+        gridState.firstVisibleItemIndex,
+        gridState.firstVisibleItemScrollOffset,
+        staggeredState.firstVisibleItemIndex,
+        staggeredState.firstVisibleItemScrollOffset,
+        useStaggeredGrid,
+        currentPath
+    ) {
+        val index = if (useStaggeredGrid) {
+            staggeredState.firstVisibleItemIndex
+        } else {
+            gridState.firstVisibleItemIndex
+        }
+        viewModel.saveScrollPosition(currentPath, index)
     }
  
     // Restore scroll position when navigating back
@@ -232,13 +245,20 @@ internal fun BrowseContent(
         }
     }
  
-    // Instant scroll to top when either sort order changes
+    // Scroll to top ONLY when sort order actually changes (avoiding initial composition reset)
+    var lastFolderSortOrder by remember { mutableStateOf<SortOrder?>(null) }
+    var lastFileSortOrder by remember { mutableStateOf<SortOrder?>(null) }
     LaunchedEffect(folderSortOrder, fileSortOrder) {
-        if (useStaggeredGrid) {
-            staggeredState.scrollToItem(0)
-        } else {
-            gridState.scrollToItem(0)
+        if (lastFolderSortOrder != null && lastFolderSortOrder != folderSortOrder) {
+            if (useStaggeredGrid) staggeredState.scrollToItem(0)
+            else gridState.scrollToItem(0)
         }
+        if (lastFileSortOrder != null && lastFileSortOrder != fileSortOrder) {
+            if (useStaggeredGrid) staggeredState.scrollToItem(0)
+            else gridState.scrollToItem(0)
+        }
+        lastFolderSortOrder = folderSortOrder
+        lastFileSortOrder = fileSortOrder
     }
  
     Box(modifier = modifier.fillMaxSize()) {
