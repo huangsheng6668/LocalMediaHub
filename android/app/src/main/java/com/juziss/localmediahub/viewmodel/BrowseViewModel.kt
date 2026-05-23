@@ -34,6 +34,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 
 enum class SortOrder(val label: String) {
     NAME_ASC("按名称升序 (A-Z)"),
@@ -589,42 +590,58 @@ class BrowseViewModel(
 
                     val incomingEntries = mutableListOf<DownloadEntry>()
 
-                    // High-speed direct stream extraction without cache files
-                    ZipInputStream(BufferedInputStream(responseBody.byteStream())).use { zipInputStream ->
-                        var zipEntry: ZipEntry? = zipInputStream.nextEntry
-                        val buffer = ByteArray(64 * 1024) // 64KB buffer for direct stream extraction
-
-                        while (zipEntry != null) {
-                            if (!zipEntry.isDirectory) {
-                                // Re-create intermediate parent directories if any
-                                val extractedFile = File(destDirectory, zipEntry.name)
-                                extractedFile.parentFile?.mkdirs()
-
-                                FileOutputStream(extractedFile).use { outputStream ->
-                                    var len: Int
-                                    while (zipInputStream.read(buffer).also { len = it } > 0) {
-                                        outputStream.write(buffer, 0, len)
-                                    }
-                                }
-
-                                // Match extracted file against pre-fetched metadata by matching names
-                                val entryFileName = File(zipEntry.name).name
-                                val matchedMetadata = filesMetadata.find { 
-                                    it.name.equals(entryFileName, ignoreCase = true) 
-                                }
-
-                                if (matchedMetadata != null) {
-                                    incomingEntries.add(
-                                        DownloadEntry(
-                                            file = matchedMetadata,
-                                            localPath = extractedFile.absolutePath,
-                                            addedAt = System.currentTimeMillis()
-                                        )
-                                    )
+                    // Safe stream extraction via a temp zip file to bypass Java's ZipInputStream limitation with Stored files
+                    val tempFile = File(context.cacheDir, "download_temp_${System.currentTimeMillis()}.zip")
+                    try {
+                        responseBody.byteStream().use { inputStream ->
+                            FileOutputStream(tempFile).use { outputStream ->
+                                val buffer = ByteArray(128 * 1024)
+                                var bytesRead: Int
+                                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                                    outputStream.write(buffer, 0, bytesRead)
                                 }
                             }
-                            zipInputStream.closeEntry()
-                            zipEntry = zipInputStream.nextEntry
+                        }
+
+                        ZipFile(tempFile).use { zipFile ->
+                            val entries = zipFile.entries()
+                            val buffer = ByteArray(64 * 1024)
+                            while (entries.hasMoreElements()) {
+                                val zipEntry = entries.nextElement()
+                                if (!zipEntry.isDirectory) {
+                                    val extractedFile = File(destDirectory, zipEntry.name)
+                                    extractedFile.parentFile?.mkdirs()
+
+                                    zipFile.getInputStream(zipEntry).use { zipInputStream ->
+                                        FileOutputStream(extractedFile).use { outputStream ->
+                                            var len: Int
+                                            while (zipInputStream.read(buffer).also { len = it } > 0) {
+                                                outputStream.write(buffer, 0, len)
+                                            }
+                                        }
+                                    }
+
+                                    // Match extracted file against pre-fetched metadata by matching names
+                                    val entryFileName = File(zipEntry.name).name
+                                    val matchedMetadata = filesMetadata.find { 
+                                        it.name.equals(entryFileName, ignoreCase = true) 
+                                    }
+
+                                    if (matchedMetadata != null) {
+                                        incomingEntries.add(
+                                            DownloadEntry(
+                                                file = matchedMetadata,
+                                                localPath = extractedFile.absolutePath,
+                                                addedAt = System.currentTimeMillis()
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        if (tempFile.exists()) {
+                            tempFile.delete()
                         }
                     }
 
