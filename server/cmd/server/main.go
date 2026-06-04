@@ -35,7 +35,10 @@ func main() {
 	if headless {
 		runHeadless(cfg)
 	} else {
-		if !isInteractiveSession() {
+		if !isSystraySupported() {
+			log.Println("Warning: System tray is not supported in this build (requires Windows with CGO enabled). Automatically falling back to headless mode.")
+			runHeadless(cfg)
+		} else if !isInteractiveSession() {
 			log.Println("Warning: Non-interactive window station or headless environment detected. Automatically falling back to headless mode.")
 			runHeadless(cfg)
 		} else {
