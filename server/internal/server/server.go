@@ -86,6 +86,10 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	api := s.Echo.Group("/api/v1")
 
+	api.GET("/health", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
+
 	// Folders
 	api.GET("/folders", h.GetFolders)
 	api.GET("/folders/*", h.BrowseFolder)

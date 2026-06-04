@@ -73,7 +73,7 @@ interface MediaApi {
     ): ResponseBody
 
     // ── Health check ──────────────────────────────────────────
-    @GET(".")
+    @GET("api/v1/health")
     suspend fun healthCheck(): Response<Map<String, String>>
 
     // ── System browse ─────────────────────────────────────────
