@@ -710,11 +710,17 @@ function renderBrowserList() {
     // 1. Folders
     state.currentFolders.forEach(folder => {
         html += `
-            <div class="media-card" onclick="browsePath('${folder.path.replace(/\\/g, '/')}')">
-                <div class="card-preview">
+            <div class="media-card">
+                <div class="card-preview" onclick="browsePath('${folder.path.replace(/\\/g, '/')}')">
                     <span class="card-preview-icon">📁</span>
                 </div>
-                <div class="card-details">
+                
+                <!-- Action Hover overlay icons for folder -->
+                <div class="card-actions-overlay">
+                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" onclick="event.stopPropagation(); deleteFolder(${JSON.stringify(folder).replace(/"/g, '&quot;')})">🗑️</button>` : ''}
+                </div>
+                
+                <div class="card-details" onclick="browsePath('${folder.path.replace(/\\/g, '/')}')">
                     <div class="card-title" title="${folder.name}">${folder.name}</div>
                     <div class="card-meta">
                         <span>文件夹</span>
@@ -1153,6 +1159,46 @@ async function deleteMediaFile(file) {
             } else if (state.activeTab === 'dashboard') {
                 initDashboard();
             }
+        } else {
+            showToast(`删除失败: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        showToast('请求删除接口错误', 'error');
+    }
+}
+
+// Delete folder from filesystem recursively
+async function deleteFolder(folder) {
+    if (!state.enableDelete) {
+        showToast('服务端已禁用删除功能', 'error');
+        return;
+    }
+    if (folder.is_root) {
+        showToast('无法删除根共享目录', 'error');
+        return;
+    }
+    
+    if (!confirm(`⚠️ 警告：确定要彻底删除该文件夹及其中所有内容吗？\n此操作将递归删除文件夹下所有文件，且不可逆！\n\n文件夹：${folder.name}`)) {
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${state.apiBase}/api/v1/system/delete`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                path: folder.path,
+                recursive: true
+            })
+        });
+        
+        const data = await res.json();
+        if (res.ok) {
+            showToast('文件夹删除成功', 'success');
+            // Reload folder contents
+            browsePath(state.currentPath);
         } else {
             showToast(`删除失败: ${data.error}`, 'error');
         }
