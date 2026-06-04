@@ -865,10 +865,14 @@ class BrowseViewModel(
         _deleteState.value = DeleteState.Idle
     }
 
+    suspend fun deletePathSync(path: String, recursive: Boolean): NetworkResult<String> {
+        return repository.deletePath(path, recursive)
+    }
+
     fun deletePath(path: String, recursive: Boolean) {
         viewModelScope.launch {
             _deleteState.value = DeleteState.Loading
-            when (val result = repository.deletePath(path, recursive)) {
+            when (val result = deletePathSync(path, recursive)) {
                 is NetworkResult.Success -> {
                     _deleteState.value = DeleteState.Success(result.data)
                     refreshCurrentDirectory()

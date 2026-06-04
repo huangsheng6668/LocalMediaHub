@@ -23,6 +23,9 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -67,9 +70,11 @@ fun VideoPlayerScreen(
     initialPositionMs: Long = 0L,
     onProgress: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     onBack: () -> Unit,
+    onDelete: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val exoPlayer = remember {
         val loadControl = DefaultLoadControl.Builder()
@@ -448,12 +453,29 @@ fun VideoPlayerScreen(
             )
         }
 
-        // Transcoding Toggle Button
-        Box(
+        // Top Right Action Buttons (Delete & Transcoding Toggle)
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 8.dp, end = 16.dp)
+                .padding(top = 8.dp, end = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            if (onDelete != null) {
+                IconButton(
+                    onClick = { showDeleteConfirm = true },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = Color.Red
+                    )
+                }
+            }
+
             var isTranscodingEnabled by remember { mutableStateOf(streamUrl.contains("transcode=true")) }
             Button(
                 onClick = {
@@ -483,6 +505,38 @@ fun VideoPlayerScreen(
                     fontWeight = FontWeight.Bold
                 )
             }
+        }
+
+        // Delete Confirmation Dialog inside video player screen
+        if (showDeleteConfirm && onDelete != null) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                shape = RoundedCornerShape(20.dp),
+                title = {
+                    Text("确认彻底删除？", fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Text("您确定要从服务端永久删除该视频文件吗？此操作不可逆！")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showDeleteConfirm = false
+                            onDelete()
+                        },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = Color.Red
+                        )
+                    ) {
+                        Text("确认删除")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text("取消")
+                    }
+                }
+            )
         }
     }
 }

@@ -253,6 +253,7 @@ fun LocalMediaHubApp() {
 
         composable("videoPlayer") {
             if (currentVideoFile != null) {
+                val context = androidx.compose.ui.platform.LocalContext.current
                 VideoPlayerScreen(
                     streamUrl = currentVideoUrl,
                     initialPositionMs = currentVideoStartPositionMs,
@@ -270,6 +271,28 @@ fun LocalMediaHubApp() {
                         }
                     },
                     onBack = { navController.popBackStack() },
+                    onDelete = {
+                        val file = currentVideoFile
+                        if (file != null) {
+                            appScope.launch {
+                                when (val result = browseViewModel.deletePathSync(file.path, false)) {
+                                    is com.juziss.localmediahub.network.NetworkResult.Success -> {
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            android.widget.Toast.makeText(context, "文件已成功删除", android.widget.Toast.LENGTH_SHORT).show()
+                                            navController.popBackStack()
+                                            browseViewModel.refreshCurrentDirectory()
+                                        }
+                                    }
+                                    is com.juziss.localmediahub.network.NetworkResult.Error -> {
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            android.widget.Toast.makeText(context, "删除失败: ${result.message}", android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                    }
                 )
             }
         }
