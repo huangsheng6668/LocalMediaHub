@@ -109,6 +109,10 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 		_, copyErr := io.Copy(w, stdout)
 		waitErr := cmd.Wait()
 
+		if r.Context().Err() != nil {
+			return nil
+		}
+
 		if copyErr != nil {
 			return copyErr
 		}
@@ -141,3 +145,40 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 func (s *StreamingService) ValidatePath(filePath string, roots []string) (bool, error) {
 	return IsPathWithinRoots(filePath, roots)
 }
+
+func (s *StreamingService) GetVideoDuration(filePath string) (float64, error) {
+	ffprobeCmd := "ffprobe"
+	if s.ffmpegPath != "" {
+		dir := filepath.Dir(s.ffmpegPath)
+		base := filepath.Base(s.ffmpegPath)
+		if strings.Contains(base, "ffmpeg") {
+			ffprobeName := strings.Replace(base, "ffmpeg", "ffprobe", 1)
+			derived := filepath.Join(dir, ffprobeName)
+			if _, err := exec.LookPath(derived); err == nil {
+				ffprobeCmd = derived
+			}
+		}
+	}
+
+	args := []string{
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		filePath,
+	}
+
+	cmd := exec.Command(ffprobeCmd, args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("ffprobe error: %w", err)
+	}
+
+	durationStr := strings.TrimSpace(string(out))
+	var duration float64
+	if _, err := fmt.Sscanf(durationStr, "%f", &duration); err != nil {
+		return 0, fmt.Errorf("failed to parse duration %q: %w", durationStr, err)
+	}
+
+	return duration, nil
+}
+

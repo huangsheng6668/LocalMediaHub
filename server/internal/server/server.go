@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/labstack/echo/v4"
+	echoMw "github.com/labstack/echo/v4/middleware"
 
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/models"
@@ -79,6 +80,7 @@ func New(cfg *config.Config) (*Server, error) {
 }
 
 func (s *Server) registerRoutes(h *handler.Handler) {
+	s.Echo.Use(echoMw.Logger())
 	s.Echo.Use(middleware.CORS())
 
 	// Static Web UI Assets
@@ -135,6 +137,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	media.GET("/thumbnail", h.MediaThumbnail)
 	media.GET("/original", h.MediaOriginal)
 	media.GET("/stream", h.MediaStream)
+	media.GET("/duration", h.MediaDuration)
 
 	// Admin page
 }

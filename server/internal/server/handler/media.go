@@ -62,3 +62,24 @@ func (h *Handler) MediaStream(c echo.Context) error {
 	}
 	return nil
 }
+
+func (h *Handler) MediaDuration(c echo.Context) error {
+	pathStr := c.QueryParam("path")
+	if pathStr == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+	}
+
+	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions); err != nil {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	}
+
+	duration, err := h.streaming.GetVideoDuration(pathStr)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"duration": duration,
+	})
+}
+

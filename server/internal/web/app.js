@@ -26,7 +26,9 @@ const state = {
     
     // Transcode flag for video player
     useTranscode: false,
-    playingFile: null
+    playingFile: null,
+    videoDuration: 0,
+    transcodeStartOffset: 0
 };
 
 // DOM Elements
@@ -83,6 +85,15 @@ const elements = {
     videoModalTitle: document.getElementById('video-modal-title'),
     btnVideoTranscode: document.getElementById('btn-video-transcode'),
     btnCloseVideoModal: document.getElementById('btn-close-video-modal'),
+    
+    // Custom controls
+    videoControlsOverlay: document.getElementById('video-controls-overlay'),
+    videoProgress: document.getElementById('video-progress'),
+    btnVideoPlayPause: document.getElementById('btn-video-play-pause'),
+    videoTimeDisplay: document.getElementById('video-time-display'),
+    btnVideoMute: document.getElementById('btn-video-mute'),
+    videoVolume: document.getElementById('video-volume'),
+    btnVideoFullscreen: document.getElementById('btn-video-fullscreen'),
     
     modalImagePreview: document.getElementById('modal-image-preview'),
     lightboxImg: document.getElementById('lightbox-img'),
@@ -256,6 +267,8 @@ function setupEventListeners() {
         elements.videoPlayer.src = '';
         elements.modalVideoPlayer.classList.remove('active');
         state.playingFile = null;
+        state.videoDuration = 0;
+        state.transcodeStartOffset = 0;
     });
 
     // Transcode Video toggle inside video modal
@@ -263,16 +276,21 @@ function setupEventListeners() {
         if (!state.playingFile) return;
         state.useTranscode = !state.useTranscode;
         
-        const currentPos = elements.videoPlayer.currentTime;
+        const absolutePos = state.transcodeStartOffset + elements.videoPlayer.currentTime;
+        
         let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}`;
+        if (state.isSystemBrowse) {
+            url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}`;
+        }
         
         if (state.useTranscode) {
-            url += `&transcode=true&start=${Math.floor(currentPos)}`;
+            state.transcodeStartOffset = Math.floor(absolutePos);
+            url += `&transcode=true&start=${state.transcodeStartOffset}`;
             elements.btnVideoTranscode.classList.add('active');
             elements.btnVideoTranscode.textContent = '转码中';
             showToast('🔧 已切换至 H.264 兼容性实时转码输出', 'success');
         } else {
-            // Native stream
+            state.transcodeStartOffset = 0;
             elements.btnVideoTranscode.classList.remove('active');
             elements.btnVideoTranscode.textContent = '原画';
             showToast('🚀 已切换至极速原文件直通流', 'success');
@@ -280,8 +298,167 @@ function setupEventListeners() {
         
         elements.videoPlayer.src = url;
         elements.videoPlayer.load();
+        
+        if (!state.useTranscode) {
+            // Seek native player after loadedmetadata
+            elements.videoPlayer.addEventListener('loadedmetadata', function seekOnLoad() {
+                elements.videoPlayer.currentTime = absolutePos;
+                elements.videoPlayer.removeEventListener('loadedmetadata', seekOnLoad);
+            });
+        }
+        
         elements.videoPlayer.play();
     });
+
+    // Custom controls: Play / Pause toggle
+    const togglePlayPause = () => {
+        if (elements.videoPlayer.paused) {
+            elements.videoPlayer.play();
+            elements.btnVideoPlayPause.textContent = '⏸';
+        } else {
+            elements.videoPlayer.pause();
+            elements.btnVideoPlayPause.textContent = '▶';
+        }
+    };
+    elements.btnVideoPlayPause.addEventListener('click', togglePlayPause);
+    elements.videoPlayer.addEventListener('click', togglePlayPause);
+    
+    // Sync play/pause state to button text
+    elements.videoPlayer.addEventListener('play', () => {
+        elements.btnVideoPlayPause.textContent = '⏸';
+    });
+    elements.videoPlayer.addEventListener('pause', () => {
+        elements.btnVideoPlayPause.textContent = '▶';
+    });
+
+    // Custom controls: Progress Bar Seek
+    elements.videoProgress.addEventListener('input', (e) => {
+        const targetTime = parseFloat(e.target.value);
+        if (state.useTranscode) {
+            state.transcodeStartOffset = Math.floor(targetTime);
+            let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}`;
+            if (state.isSystemBrowse) {
+                url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}`;
+            }
+            elements.videoPlayer.src = url;
+            elements.videoPlayer.load();
+            elements.videoPlayer.play();
+        } else {
+            elements.videoPlayer.currentTime = targetTime;
+        }
+    });
+
+    // Custom controls: Timeupdate synchronization
+    elements.videoPlayer.addEventListener('timeupdate', () => {
+        if (!state.playingFile) return;
+        const currentAbsoluteTime = state.transcodeStartOffset + elements.videoPlayer.currentTime;
+        
+        // Update progress bar value (unless user is dragging it)
+        if (document.activeElement !== elements.videoProgress) {
+            elements.videoProgress.value = currentAbsoluteTime;
+        }
+        
+        // Update time display text
+        elements.videoTimeDisplay.textContent = `${formatTime(currentAbsoluteTime)} / ${formatTime(state.videoDuration)}`;
+    });
+
+    // Custom controls: Volume Bar
+    elements.videoVolume.addEventListener('input', (e) => {
+        const vol = parseFloat(e.target.value);
+        elements.videoPlayer.volume = vol;
+        elements.videoPlayer.muted = (vol === 0);
+        elements.btnVideoMute.textContent = vol === 0 ? '🔇' : '🔊';
+    });
+
+    // Custom controls: Mute Button
+    elements.btnVideoMute.addEventListener('click', () => {
+        elements.videoPlayer.muted = !elements.videoPlayer.muted;
+        if (elements.videoPlayer.muted) {
+            elements.btnVideoMute.textContent = '🔇';
+            elements.videoVolume.value = 0;
+        } else {
+            elements.btnVideoMute.textContent = '🔊';
+            elements.videoVolume.value = elements.videoPlayer.volume;
+        }
+    });
+
+    // Custom controls: Fullscreen Button
+    elements.btnVideoFullscreen.addEventListener('click', () => {
+        const container = elements.videoPlayer.parentElement; // .video-player-wrapper
+        if (!document.fullscreenElement) {
+            container.requestFullscreen().catch(err => {
+                showToast('无法进入全屏模式', 'error');
+            });
+        } else {
+            document.exitFullscreen();
+        }
+    });
+
+    // Keyboard controls for video playback
+    document.addEventListener('keydown', (e) => {
+        if (!elements.modalVideoPlayer.classList.contains('active')) return;
+        
+        // Spacebar: Play/Pause
+        if (e.key === ' ' || e.code === 'Space') {
+            e.preventDefault();
+            togglePlayPause();
+        }
+        // ArrowLeft: Quick seek backward (5 seconds)
+        else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            const currentAbsoluteTime = state.transcodeStartOffset + elements.videoPlayer.currentTime;
+            let targetTime = Math.max(0, currentAbsoluteTime - 5);
+            seekTo(targetTime);
+        }
+        // ArrowRight: Quick seek forward (5 seconds)
+        else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            const currentAbsoluteTime = state.transcodeStartOffset + elements.videoPlayer.currentTime;
+            let targetTime = Math.min(state.videoDuration, currentAbsoluteTime + 5);
+            seekTo(targetTime);
+        }
+        // ArrowUp: Volume up
+        else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            const vol = Math.min(1, elements.videoPlayer.volume + 0.05);
+            elements.videoPlayer.volume = vol;
+            elements.videoVolume.value = vol;
+            elements.videoPlayer.muted = false;
+            elements.btnVideoMute.textContent = '🔊';
+        }
+        // ArrowDown: Volume down
+        else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const vol = Math.max(0, elements.videoPlayer.volume - 0.05);
+            elements.videoPlayer.volume = vol;
+            elements.videoVolume.value = vol;
+            if (vol === 0) {
+                elements.videoPlayer.muted = true;
+                elements.btnVideoMute.textContent = '🔇';
+            }
+        }
+    });
+
+    // Helper for seeking via keyboard hotkeys
+    const seekTo = (targetTime) => {
+        elements.videoProgress.value = targetTime;
+        elements.videoProgress.dispatchEvent(new Event('input'));
+    };
+
+    // Auto-hide controls overlay on mouse inactivity
+    let controlsTimeout;
+    const wrapper = elements.videoPlayer.parentElement; // .video-player-wrapper
+    const resetControlsTimer = () => {
+        elements.videoControlsOverlay.classList.add('active');
+        clearTimeout(controlsTimeout);
+        controlsTimeout = setTimeout(() => {
+            if (!elements.videoPlayer.paused) {
+                elements.videoControlsOverlay.classList.remove('active');
+            }
+        }, 2000);
+    };
+    wrapper.addEventListener('mousemove', resetControlsTimer);
+    elements.videoPlayer.addEventListener('play', resetControlsTimer);
 
     // Close Image Modal (Lightbox)
     elements.btnCloseImageModal.addEventListener('click', () => {
@@ -677,18 +854,58 @@ function openMedia(file) {
 }
 
 // Video player setup & popup
-function openVideoPlayer(file) {
+async function openVideoPlayer(file) {
     state.playingFile = file;
-    state.useTranscode = false; // Start with native stream
+    state.transcodeStartOffset = 0;
+    state.videoDuration = 0;
+    
+    // Initialize custom controls
+    elements.videoVolume.value = elements.videoPlayer.volume;
+    elements.videoProgress.value = 0;
+    elements.videoProgress.max = 100;
+    elements.videoTimeDisplay.textContent = '00:00 / 加载中...';
+    
+    // Auto transcode non-native formats (e.g. .ts, .mkv, .avi, .wmv, .flv)
+    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    const needsTranscode = ['.ts', '.mkv', '.avi', '.wmv', '.flv'].includes(ext);
+    state.useTranscode = needsTranscode;
     
     elements.videoModalTitle.textContent = file.name;
-    elements.btnVideoTranscode.classList.remove('active');
-    elements.btnVideoTranscode.textContent = '原画';
+    if (state.useTranscode) {
+        elements.btnVideoTranscode.classList.add('active');
+        elements.btnVideoTranscode.textContent = '转码中';
+    } else {
+        elements.btnVideoTranscode.classList.remove('active');
+        elements.btnVideoTranscode.textContent = '原画';
+    }
+    
+    // Fetch video duration
+    try {
+        const durationUrl = `${state.apiBase}/api/v1/media/duration?path=${encodeURIComponent(file.path)}`;
+        const res = await fetch(durationUrl);
+        if (res.ok) {
+            const data = await res.json();
+            state.videoDuration = data.duration;
+            elements.videoProgress.max = state.videoDuration;
+            elements.videoTimeDisplay.textContent = `00:00 / ${formatTime(state.videoDuration)}`;
+        } else {
+            console.error('Failed to fetch duration');
+        }
+    } catch (e) {
+        console.error('Error fetching duration:', e);
+    }
     
     // Set video src URL
     let url = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.relative_path)}/stream`;
     if (state.isSystemBrowse) {
         url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}`;
+    }
+    
+    if (state.useTranscode) {
+        url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0`;
+        if (state.isSystemBrowse) {
+            url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0`;
+        }
     }
     
     elements.videoPlayer.src = url;
@@ -872,4 +1089,20 @@ function safeBtoa(str) {
     } catch (e) {
         return str.replace(/[^a-zA-Z0-9]/g, '_');
     }
+}
+
+// Utility: Format seconds into HH:MM:SS or MM:SS
+function formatTime(seconds) {
+    if (isNaN(seconds) || seconds === Infinity) return '00:00';
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    const formattedMins = mins < 10 ? `0${mins}` : mins;
+    const formattedSecs = secs < 10 ? `0${secs}` : secs;
+    
+    if (hrs > 0) {
+        return `${hrs}:${formattedMins}:${formattedSecs}`;
+    }
+    return `${formattedMins}:${formattedSecs}`;
 }
