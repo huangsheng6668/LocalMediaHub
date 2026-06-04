@@ -84,6 +84,7 @@ const elements = {
     videoPlayer: document.getElementById('html5-video-player'),
     videoModalTitle: document.getElementById('video-modal-title'),
     btnVideoTranscode: document.getElementById('btn-video-transcode'),
+    btnVideoDelete: document.getElementById('btn-video-delete'),
     btnCloseVideoModal: document.getElementById('btn-close-video-modal'),
     
     // Custom controls
@@ -269,6 +270,13 @@ function setupEventListeners() {
         state.playingFile = null;
         state.videoDuration = 0;
         state.transcodeStartOffset = 0;
+    });
+
+    // Delete Video inside Video Modal
+    elements.btnVideoDelete.addEventListener('click', () => {
+        if (state.playingFile) {
+            deleteMediaFile(state.playingFile);
+        }
     });
 
     // Transcode Video toggle inside video modal
@@ -764,6 +772,7 @@ function renderBrowserList() {
                 <!-- Action Hover overlay icons -->
                 <div class="card-actions-overlay">
                     <button class="card-action-btn" title="分类标签" onclick="openTaggingDialog(${JSON.stringify(file).replace(/"/g, '&quot;')})">🏷️</button>
+                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" onclick="deleteMediaFile(${JSON.stringify(file).replace(/"/g, '&quot;')})">🗑️</button>` : ''}
                 </div>
                 
                 <div class="card-details" onclick="openMedia(${JSON.stringify(file).replace(/"/g, '&quot;')})">
@@ -871,6 +880,7 @@ async function openVideoPlayer(file) {
     state.useTranscode = needsTranscode;
     
     elements.videoModalTitle.textContent = file.name;
+    elements.btnVideoDelete.style.display = state.enableDelete ? 'block' : 'none';
     if (state.useTranscode) {
         elements.btnVideoTranscode.classList.add('active');
         elements.btnVideoTranscode.textContent = '转码中';
@@ -1105,4 +1115,48 @@ function formatTime(seconds) {
         return `${hrs}:${formattedMins}:${formattedSecs}`;
     }
     return `${formattedMins}:${formattedSecs}`;
+}
+
+// Delete media file from filesystem
+async function deleteMediaFile(file) {
+    if (!state.enableDelete) {
+        showToast('服务端已禁用删除功能', 'error');
+        return;
+    }
+    
+    if (!confirm(`⚠️ 警告：确定要彻底删除该媒体文件吗？\n此操作不可逆！\n\n文件：${file.name}`)) {
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${state.apiBase}/api/v1/system/delete`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                path: file.path,
+                recursive: false
+            })
+        });
+        
+        const data = await res.json();
+        if (res.ok) {
+            showToast('文件删除成功', 'success');
+            // If the video modal is open playing this file, close it
+            if (state.playingFile && state.playingFile.path === file.path) {
+                elements.btnCloseVideoModal.click();
+            }
+            // Reload folder contents
+            if (state.activeTab === 'browser') {
+                browsePath(state.currentPath);
+            } else if (state.activeTab === 'dashboard') {
+                initDashboard();
+            }
+        } else {
+            showToast(`删除失败: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        showToast('请求删除接口错误', 'error');
+    }
 }

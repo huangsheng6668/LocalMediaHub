@@ -623,6 +623,13 @@ body {
     border-color: rgba(239, 68, 68, 0.3);
 }
 
+.card-action-btn.delete-btn:hover {
+    color: var(--text-white);
+    background-color: rgba(239, 68, 68, 0.85);
+    border-color: rgba(239, 68, 68, 0.85);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+}
+
 /* Tag Manager & Creator Grid Layout */
 .tag-manager-container {
     display: grid;
