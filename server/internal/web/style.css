@@ -1162,6 +1162,101 @@ body {
     font-weight: 500;
 }
 
+/* Lightbox Mode Toggle Button */
+.lightbox-toggle-mode {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 110;
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: var(--border-radius-md);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lightbox-toggle-mode:hover {
+    background-color: var(--primary);
+    border-color: transparent;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(138, 75, 243, 0.3);
+}
+
+.lightbox-toggle-mode.active {
+    background-color: var(--primary-light);
+    border-color: transparent;
+}
+
+/* Lightbox View modes */
+.lightbox-single-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
+.lightbox-stitch-view {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    overflow-y: auto;
+    width: 100%;
+    height: 100%;
+    gap: 24px;
+    padding: 20px 0;
+    scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for modern design inside stitch view */
+.lightbox-stitch-view::-webkit-scrollbar {
+    width: 8px;
+}
+.lightbox-stitch-view::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+}
+.lightbox-stitch-view::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+.lightbox-stitch-view::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
+}
+
+.stitch-image-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 90%;
+    max-width: 800px;
+}
+
+.stitch-image-item img {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    border-radius: var(--border-radius-sm);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.stitch-image-caption {
+    margin-top: 8px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+    text-align: center;
+}
+
 /* Toast Notifications styling */
 .toast-container {
     position: fixed;

@@ -248,11 +248,17 @@
     <div class="overlay-modal" id="modal-image-preview">
         <div class="modal-backdrop"></div>
         <div class="modal-wrapper lightbox-wrapper">
-            <button class="btn-close lightbox-close" id="btn-close-image-modal">✕</button>
+            <button class="btn-close lightbox-close" id="btn-close-image-modal" title="关闭">✕</button>
+            <button class="lightbox-toggle-mode" id="btn-image-mode-toggle" title="切换拼接模式">📖 拼接模式</button>
             <button class="lightbox-nav nav-prev" id="btn-image-prev">◀</button>
             <div class="lightbox-content">
-                <img id="lightbox-img" src="" alt="预览">
-                <div class="lightbox-caption" id="lightbox-caption">图片名称</div>
+                <!-- 单张预览模式 -->
+                <div class="lightbox-single-view" id="lightbox-single-view">
+                    <img id="lightbox-img" src="" alt="预览">
+                    <div class="lightbox-caption" id="lightbox-caption">图片名称</div>
+                </div>
+                <!-- 拼图/长图模式 -->
+                <div class="lightbox-stitch-view" id="lightbox-stitch-view"></div>
             </div>
             <button class="lightbox-nav nav-next" id="btn-image-next">▶</button>
         </div>
