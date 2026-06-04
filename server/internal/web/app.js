@@ -339,7 +339,8 @@ async function loadConfig() {
             elements.infoScanRoots.textContent = state.folders.join(', ') || '全盘自动检测';
         }
     } catch (e) {
-        showToast('无法从后端获取系统配置', 'error');
+        console.error('loadConfig error:', e);
+        showToast('无法从后端获取系统配置: ' + e.message, 'error');
     }
 }
 
@@ -358,7 +359,8 @@ async function loadTags() {
             }
         }
     } catch (e) {
-        console.error('Failed to load tags:', e);
+        console.error('loadTags error:', e);
+        showToast('加载标签失败: ' + e.message, 'error');
     }
 }
 
