@@ -1,16 +1,22 @@
 package service
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
-type StreamingService struct{}
+type StreamingService struct {
+	ffmpegPath string
+}
 
-func NewStreamingService() *StreamingService {
-	return &StreamingService{}
+func NewStreamingService(ffmpegPath string) *StreamingService {
+	return &StreamingService{ffmpegPath: ffmpegPath}
 }
 
 // contentTypeFromExt returns a MIME type based on file extension.
@@ -49,6 +55,66 @@ func contentTypeFromExt(filePath string) string {
 // ServeFile streams a file using http.ServeContent for proper Range, ETag,
 // If-Range, and Content-Type handling.
 func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, filePath string) error {
+	if r.URL.Query().Get("transcode") == "true" {
+		ffmpegCmd := s.ffmpegPath
+		if ffmpegCmd == "" {
+			ffmpegCmd = "ffmpeg"
+		}
+
+		if _, err := exec.LookPath(ffmpegCmd); err != nil {
+			return fmt.Errorf("ffmpeg not found, cannot transcode")
+		}
+
+		startSec := r.URL.Query().Get("start")
+		if startSec == "" {
+			startSec = "0"
+		}
+
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Transfer-Encoding", "chunked")
+
+		args := []string{}
+		if startSec != "0" {
+			args = append(args, "-ss", startSec)
+		}
+		args = append(args, "-i", filePath,
+			"-vcodec", "libx264",
+			"-preset", "ultrafast",
+			"-acodec", "aac",
+			"-f", "mp4",
+			"-movflags", "frag_keyframe+empty_moov",
+			"pipe:1",
+		)
+
+		cmd := exec.Command(ffmpegCmd, args...)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return err
+		}
+
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		go func() {
+			<-ctx.Done()
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+		}()
+
+		_, copyErr := io.Copy(w, stdout)
+		waitErr := cmd.Wait()
+
+		if copyErr != nil {
+			return copyErr
+		}
+		return waitErr
+	}
+
 	f, err := os.Open(filePath)
 	if err != nil {
 		return err

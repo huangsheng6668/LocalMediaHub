@@ -35,7 +35,12 @@ func main() {
 	if headless {
 		runHeadless(cfg)
 	} else {
-		gui.Run(cfg)
+		if !isInteractiveSession() {
+			log.Println("Warning: Non-interactive window station or headless environment detected. Automatically falling back to headless mode.")
+			runHeadless(cfg)
+		} else {
+			gui.Run(cfg)
+		}
 	}
 }
 

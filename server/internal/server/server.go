@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"sync"
 
 	"github.com/labstack/echo/v4"
@@ -13,6 +14,7 @@ import (
 	"github.com/localmediahub/server/internal/server/handler"
 	"github.com/localmediahub/server/internal/server/middleware"
 	"github.com/localmediahub/server/internal/service"
+	"github.com/localmediahub/server/internal/web"
 )
 
 type Server struct {
@@ -42,8 +44,8 @@ func New(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tags service: %w", err)
 	}
-	streamingService := service.NewStreamingService()
-	thumbnailService, err := service.NewThumbnailService(cfg.Thumbnail.CacheDir, cfg.Thumbnail.MaxSize, cfg.Thumbnail.Format)
+	streamingService := service.NewStreamingService(cfg.System.FFmpegPath)
+	thumbnailService, err := service.NewThumbnailService(cfg.Thumbnail.CacheDir, cfg.Thumbnail.MaxSize, cfg.Thumbnail.Format, cfg.System.FFmpegPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create thumbnail service: %w", err)
 	}
@@ -79,8 +81,8 @@ func New(cfg *config.Config) (*Server, error) {
 func (s *Server) registerRoutes(h *handler.Handler) {
 	s.Echo.Use(middleware.CORS())
 
-	// Root
-	s.Echo.GET("/", h.Root)
+	// Static Web UI Assets
+	s.Echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(web.Assets))))
 
 	api := s.Echo.Group("/api/v1")
 
@@ -90,7 +92,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	// Videos
 	api.GET("/videos", h.GetVideos)
-	api.GET("/videos/*", h.StreamVideo)
+	api.GET("/videos/*", h.GetVideoAsset)
 
 	// Images
 	api.GET("/images", h.GetImages)

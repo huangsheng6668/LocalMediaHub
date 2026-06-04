@@ -88,6 +88,7 @@ internal fun FavoritesContent(
                 when (file.mediaType) {
                     "video" -> VideoCard(
                         file = file,
+                        thumbnailUrl = getThumbnailUrl(file),
                         isFavorite = isFavorite(file.relativePath),
                         onToggleFavorite = { onToggleFavorite(file) },
                         onClick = { onVideoClick(file) },
@@ -165,6 +166,7 @@ internal fun SearchContent(
                         when (file.mediaType) {
                             "video" -> VideoCard(
                                 file = file,
+                                thumbnailUrl = viewModel.getThumbnailUrl(file),
                                 isFavorite = isFavorite(file.relativePath),
                                 onToggleFavorite = { onToggleFavorite(file) },
                                 onClick = { onVideoClick(file) },
@@ -293,6 +295,7 @@ internal fun BrowseContent(
                     when (file.mediaType) {
                         "video" -> VideoCard(
                             file = file,
+                            thumbnailUrl = viewModel.getThumbnailUrl(file),
                             isFavorite = isFavorite(file.relativePath),
                             onToggleFavorite = { onToggleFavorite(file) },
                             onClick = { onVideoClick(file) },

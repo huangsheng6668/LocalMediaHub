@@ -48,6 +48,7 @@ type ThumbnailConfig struct {
 type SystemConfig struct {
 	AllowedRoots []string `yaml:"allowed_roots,omitempty"`
 	EnableDelete bool     `yaml:"enable_delete,omitempty"`
+	FFmpegPath   string   `yaml:"ffmpeg_path,omitempty"`
 }
 
 // GetSystemAllowedRoots returns configured system browse roots.

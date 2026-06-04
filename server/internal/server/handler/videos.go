@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -43,6 +44,36 @@ func (h *Handler) GetVideos(c echo.Context) error {
 		PageSize: pageSize,
 		HasMore:  end < total,
 	})
+}
+
+func (h *Handler) GetVideoAsset(c echo.Context) error {
+	rawPath := c.Param("*")
+	if strings.HasSuffix(rawPath, "/thumbnail") {
+		return h.GetVideoThumbnail(c)
+	}
+	return h.StreamVideo(c)
+}
+
+func (h *Handler) GetVideoThumbnail(c echo.Context) error {
+	pathStr, err := decodeWildcardPath(c.Param("*"), "/thumbnail")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	valid, err := h.thumbnail.ValidatePath(pathStr, h.cfg.Scan.GetRoots())
+	if err != nil || !valid {
+		return c.JSON(http.StatusForbidden, map[string]string{"error": "access denied"})
+	}
+
+	thumbPath, err := h.thumbnail.GenerateThumbnail(pathStr)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "file not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	return c.File(thumbPath)
 }
 
 func (h *Handler) StreamVideo(c echo.Context) error {

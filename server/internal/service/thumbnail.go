@@ -8,8 +8,10 @@ import (
 	"image/jpeg"
 	_ "image/png"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,28 +20,120 @@ import (
 )
 
 type ThumbnailService struct {
-	cacheDir string
-	maxSize  int
-	format   string
-	sem      chan struct{}
+	cacheDir   string
+	maxSize    int
+	format     string
+	sem        chan struct{}
+	ffmpegPath string
 }
 
-func NewThumbnailService(cacheDir string, maxSize int, format string) (*ThumbnailService, error) {
+func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath string) (*ThumbnailService, error) {
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return nil, err
 	}
 	return &ThumbnailService{
-		cacheDir: cacheDir,
-		maxSize:  maxSize,
-		format:   format,
-		sem:      make(chan struct{}, runtime.NumCPU()),
+		cacheDir:   cacheDir,
+		maxSize:    maxSize,
+		format:     format,
+		sem:        make(chan struct{}, runtime.NumCPU()),
+		ffmpegPath: ffmpegPath,
 	}, nil
+}
+
+func (s *ThumbnailService) getFFmpegCmd() string {
+	if s.ffmpegPath != "" {
+		return s.ffmpegPath
+	}
+	return "ffmpeg"
+}
+
+func (s *ThumbnailService) HasFFmpeg() bool {
+	cmdName := s.getFFmpegCmd()
+	_, err := exec.LookPath(cmdName)
+	return err == nil
+}
+
+func isVideoFile(filePath string) bool {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".ts", ".webm", ".m4v", ".3gp":
+		return true
+	}
+	return false
 }
 
 func (s *ThumbnailService) GetThumbnailPath(sourcePath string, modTime time.Time) string {
 	key := sourcePath + "|" + modTime.Format(time.RFC3339Nano)
 	hash := fmt.Sprintf("%x", md5.Sum([]byte(key)))
 	return filepath.Join(s.cacheDir, hash+".jpg")
+}
+
+func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePath string) (string, error) {
+	if isVideoFile(sourcePath) {
+		if !s.HasFFmpeg() {
+			return "", fmt.Errorf("ffmpeg not found, cannot generate video thumbnail")
+		}
+
+		// Create a temporary JPG file
+		tempFile, err := os.CreateTemp("", "videothumb-*.jpg")
+		if err != nil {
+			return "", err
+		}
+		tempPath := tempFile.Name()
+		tempFile.Close()
+		defer os.Remove(tempPath)
+
+		// 1. Try to extract at 5 seconds
+		ffmpegCmd := s.getFFmpegCmd()
+		cmd := exec.Command(ffmpegCmd, "-y", "-ss", "5", "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
+		if err := cmd.Run(); err != nil {
+			// 2. If it fails (e.g. video is too short), fallback to 0 seconds
+			cmdFallback := exec.Command(ffmpegCmd, "-y", "-ss", "0", "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
+			if err := cmdFallback.Run(); err != nil {
+				return "", fmt.Errorf("failed to extract video frame: %w", err)
+			}
+		}
+
+		// Open the extracted image
+		src, err := imaging.Open(tempPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to open extracted video frame: %w", err)
+		}
+
+		// Generate the thumbnail
+		thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
+
+		out, err := os.Create(cachePath)
+		if err != nil {
+			return "", err
+		}
+		defer out.Close()
+
+		if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
+			return "", err
+		}
+
+		return cachePath, nil
+	}
+
+	src, err := imaging.Open(sourcePath)
+	if err != nil {
+		return "", err
+	}
+
+	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
+
+	out, err := os.Create(cachePath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
+		return "", err
+	}
+
+	return cachePath, nil
 }
 
 func (s *ThumbnailService) GenerateThumbnail(sourcePath string) (string, error) {
@@ -63,24 +157,7 @@ func (s *ThumbnailService) GenerateThumbnail(sourcePath string) (string, error) 
 		return cachePath, nil
 	}
 
-	src, err := imaging.Open(sourcePath)
-	if err != nil {
-		return "", err
-	}
-
-	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
-
-	out, err := os.Create(cachePath)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-
-	if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
-		return "", err
-	}
-
-	return cachePath, nil
+	return s.generateThumbnailFromFile(sourcePath, cachePath)
 }
 
 func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, error) {
@@ -112,24 +189,7 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 		return cachePath, nil
 	}
 
-	src, err := imaging.Open(sourcePath)
-	if err != nil {
-		return "", err
-	}
-
-	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
-
-	out, err := os.Create(cachePath)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-
-	if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
-		return "", err
-	}
-
-	return cachePath, nil
+	return s.generateThumbnailFromFile(sourcePath, cachePath)
 }
 
 func (s *ThumbnailService) ValidatePath(filePath string, roots []string) (bool, error) {

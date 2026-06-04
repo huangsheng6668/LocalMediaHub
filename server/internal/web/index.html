@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LocalMediaHub Web 管理器</title>
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <span class="brand-gradient">LocalMediaHub</span>
+                <span class="brand-version">v0.2.0</span>
+            </div>
+            <nav class="sidebar-menu">
+                <a href="#/dashboard" class="menu-item active" id="menu-dashboard">
+                    <span class="menu-icon">📊</span> 仪表盘
+                </a>
+                <a href="#/browser" class="menu-item" id="menu-browser">
+                    <span class="menu-icon">📂</span> 媒体共享库
+                </a>
+                <a href="#/tags" class="menu-item" id="menu-tags">
+                    <span class="menu-icon">🏷️</span> 标签管理
+                </a>
+                <a href="#/settings" class="menu-item" id="menu-settings">
+                    <span class="menu-icon">⚙️</span> 系统设置
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="server-status">
+                    <span class="status-indicator online"></span>
+                    <span class="status-text">服务正常运行</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="main-header">
+                <h1 id="page-title">仪表盘</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary btn-rescan" id="btn-trigger-scan">
+                        <span>🔄</span> 立即扫描媒体
+                    </button>
+                </div>
+            </header>
+
+            <!-- Dynamic Views -->
+            <div class="view-container">
+                <!-- Dashboard View -->
+                <section id="view-dashboard" class="view-section active">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">📁</div>
+                            <div class="stat-info">
+                                <h3>共享根目录</h3>
+                                <p class="stat-value" id="stat-roots">0</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">🎬</div>
+                            <div class="stat-info">
+                                <h3>视频文件总数</h3>
+                                <p class="stat-value" id="stat-videos">0</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">🖼️</div>
+                            <div class="stat-info">
+                                <h3>图片文件总数</h3>
+                                <p class="stat-value" id="stat-images">0</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">🏷️</div>
+                            <div class="stat-info">
+                                <h3>管理标签总数</h3>
+                                <p class="stat-value" id="stat-tags">0</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-widgets">
+                        <div class="widget-card">
+                            <h2>最近打开的媒体</h2>
+                            <div class="recent-list empty-state" id="dashboard-recent">
+                                正在获取最近活动数据...
+                            </div>
+                        </div>
+                        <div class="widget-card">
+                            <h2>服务信息</h2>
+                            <div class="server-info-list">
+                                <div class="info-item">
+                                    <span class="info-label">内网局域网地址</span>
+                                    <span class="info-value" id="info-ip">加载中...</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">API 主机</span>
+                                    <span class="info-value" id="info-host">加载中...</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">系统扫描路径</span>
+                                    <span class="info-value" id="info-scan-roots">加载中...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Media Browser View -->
+                <section id="view-browser" class="view-section">
+                    <!-- Breadcrumbs & Search -->
+                    <div class="browser-toolbar">
+                        <div class="breadcrumbs" id="browser-breadcrumbs">
+                            <span class="crumb active">根目录</span>
+                        </div>
+                        <div class="search-box">
+                            <input type="text" id="browser-search-input" placeholder="在当前目录下搜索...">
+                            <button class="btn btn-search" id="btn-browser-search">🔍</button>
+                        </div>
+                    </div>
+
+                    <!-- Folders and Files Display -->
+                    <div class="browser-grid" id="browser-list">
+                        <!-- Folders & Media cards are injected here -->
+                    </div>
+                </section>
+
+                <!-- Tags Manager View -->
+                <section id="view-tags" class="view-section">
+                    <div class="tag-manager-container">
+                        <!-- Tag Creator Card -->
+                        <div class="tag-creator-card">
+                            <h2>新建分类标签</h2>
+                            <div class="form-group">
+                                <label for="tag-name">标签名称</label>
+                                <input type="text" id="tag-name" placeholder="请输入名称，如：电影、家庭照...">
+                            </div>
+                            <div class="form-group">
+                                <label for="tag-color">选择颜色</label>
+                                <div class="color-picker-grid">
+                                    <button class="color-dot active" style="background-color: #7c3aed;" data-color="#7c3aed"></button>
+                                    <button class="color-dot" style="background-color: #3b82f6;" data-color="#3b82f6"></button>
+                                    <button class="color-dot" style="background-color: #10b981;" data-color="#10b981"></button>
+                                    <button class="color-dot" style="background-color: #f59e0b;" data-color="#f59e0b"></button>
+                                    <button class="color-dot" style="background-color: #ef4444;" data-color="#ef4444"></button>
+                                    <button class="color-dot" style="background-color: #ec4899;" data-color="#ec4899"></button>
+                                    <button class="color-dot" style="background-color: #6b7280;" data-color="#6b7280"></button>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary" id="btn-create-tag">添加标签</button>
+                        </div>
+
+                        <!-- Tag List -->
+                        <div class="tag-list-card">
+                            <h2>标签列表</h2>
+                            <div class="tags-container" id="tags-manager-list">
+                                <!-- Tags injected here -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- System Settings View -->
+                <section id="view-settings" class="view-section">
+                    <div class="settings-card">
+                        <h2>扫描配置</h2>
+                        <div class="form-group">
+                            <label for="settings-roots">媒体库共享目录 (每行一个目录路径)</label>
+                            <textarea id="settings-roots" rows="5" placeholder="E:/Movies&#10;D:/Photos"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>视频匹配后缀名</label>
+                            <p class="settings-static" id="settings-video-exts"></p>
+                        </div>
+                        <div class="form-group">
+                            <label>图片匹配后缀名</label>
+                            <p class="settings-static" id="settings-image-exts"></p>
+                        </div>
+                        <button class="btn btn-primary" id="btn-save-settings">保存路径配置</button>
+                    </div>
+
+                    <div class="settings-card">
+                        <h2>系统设置 (系统浏览权限)</h2>
+                        <div class="info-item">
+                            <span class="info-label">系统浏览白名单允许目录</span>
+                            <span class="info-value" id="settings-allowed-roots">未配置</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">远程客户端删除开关 (enable_delete)</span>
+                            <span class="info-value" id="settings-enable-delete">未启用</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">缩略图生成最大大小</span>
+                            <span class="info-value" id="settings-thumb-max">0</span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Video Player Overlay Modal -->
+    <div class="overlay-modal" id="modal-video-player">
+        <div class="modal-backdrop"></div>
+        <div class="modal-wrapper">
+            <div class="modal-header">
+                <span class="modal-title" id="video-modal-title">视频播放器</span>
+                <div class="modal-actions">
+                    <button class="btn btn-transcode" id="btn-video-transcode">原画</button>
+                    <button class="btn-close" id="btn-close-video-modal">✕</button>
+                </div>
+            </div>
+            <div class="modal-body video-container">
+                <video id="html5-video-player" controls autoplay></video>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Preview Overlay Lightbox -->
+    <div class="overlay-modal" id="modal-image-preview">
+        <div class="modal-backdrop"></div>
+        <div class="modal-wrapper lightbox-wrapper">
+            <button class="btn-close lightbox-close" id="btn-close-image-modal">✕</button>
+            <button class="lightbox-nav nav-prev" id="btn-image-prev">◀</button>
+            <div class="lightbox-content">
+                <img id="lightbox-img" src="" alt="预览">
+                <div class="lightbox-caption" id="lightbox-caption">图片名称</div>
+            </div>
+            <button class="lightbox-nav nav-next" id="btn-image-next">▶</button>
+        </div>
+    </div>
+
+    <!-- Dropdown Menu / Tag Selector Modal for files -->
+    <div class="overlay-modal" id="modal-file-tags">
+        <div class="modal-backdrop"></div>
+        <div class="modal-wrapper tag-selector-wrapper">
+            <div class="modal-header">
+                <span>管理文件分类标签</span>
+                <button class="btn-close" id="btn-close-file-tags-modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <p class="file-path-subtitle" id="tag-modal-file-path">文件：...</p>
+                <div class="tag-selector-list" id="tag-selector-checkboxes">
+                    <!-- File tag list with checkboxes -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification System -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

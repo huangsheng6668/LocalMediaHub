@@ -23,9 +23,12 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -443,6 +446,43 @@ fun VideoPlayerScreen(
                 contentDescription = "Back",
                 tint = Color.White,
             )
+        }
+
+        // Transcoding Toggle Button
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 8.dp, end = 16.dp)
+        ) {
+            var isTranscodingEnabled by remember { mutableStateOf(streamUrl.contains("transcode=true")) }
+            Button(
+                onClick = {
+                    isTranscodingEnabled = !isTranscodingEnabled
+                    val currentPos = exoPlayer.currentPosition
+                    val newUrl = if (isTranscodingEnabled) {
+                        if (streamUrl.contains("?")) "$streamUrl&transcode=true" else "$streamUrl?transcode=true"
+                    } else {
+                        streamUrl.replace("&transcode=true", "").replace("?transcode=true", "")
+                    }
+                    exoPlayer.setMediaItem(MediaItem.fromUri(newUrl))
+                    exoPlayer.prepare()
+                    exoPlayer.seekTo(currentPos)
+                    exoPlayer.play()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isTranscodingEnabled) androidx.compose.material3.MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text(
+                    text = if (isTranscodingEnabled) "兼容转码" else "极速原画",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
