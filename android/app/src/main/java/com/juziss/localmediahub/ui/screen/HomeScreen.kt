@@ -58,6 +58,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -90,6 +92,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
  
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -106,6 +109,21 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    val url = com.juziss.localmediahub.network.RetrofitClient.getBaseUrl()
+                    if (url.isNotBlank()) {
+                        IconButton(onClick = {
+                            try {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        }) {
+                            Icon(
+                                Icons.Filled.Language,
+                                contentDescription = "Web 端",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                     IconButton(onClick = viewModel::refresh) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
                     }
@@ -165,6 +183,15 @@ fun HomeScreen(
                     onOpenFavorites = onOpenFavorites,
                     downloadCount = downloadedEntries.size,
                     onOpenDownloads = onOpenDownloads,
+                    onOpenWeb = {
+                        try {
+                            val url = com.juziss.localmediahub.network.RetrofitClient.getBaseUrl()
+                            if (url.isNotEmpty()) {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                                context.startActivity(intent)
+                            }
+                        } catch (_: Exception) {}
+                    }
                 )
             }
  
@@ -306,6 +333,7 @@ private fun HeroCard(
     onOpenFavorites: () -> Unit,
     downloadCount: Int,
     onOpenDownloads: () -> Unit,
+    onOpenWeb: () -> Unit,
 ) {
     Card(
         shape = RoundedCornerShape(24.dp),
@@ -396,6 +424,15 @@ private fun HeroCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                    }
+                    if (uiState.serverLabel.isNotBlank()) {
+                        IconButton(onClick = onOpenWeb) {
+                            Icon(
+                                Icons.Filled.Language,
+                                contentDescription = "打开 Web 端",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
