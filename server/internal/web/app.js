@@ -576,7 +576,7 @@ function renderBrowserList() {
         const cardClass = `media-card ${isTagged ? 'tagged' : ''}`;
         
         html += `
-            <div class="${cardClass}" id="file-card-${btoa(file.path).replace(/=/g, '')}">
+            <div class="${cardClass}" id="file-card-${safeBtoa(file.path).replace(/=/g, '')}">
                 <div class="card-preview" onclick="openMedia(${JSON.stringify(file).replace(/"/g, '&quot;')})">
                     ${previewHtml}
                     ${playOverlay}
@@ -621,7 +621,7 @@ function renderBreadcrumbs(path) {
             currentAccumulated += (index === 0 ? '' : '/') + seg;
         }
         
-        const isLast = index === segments.size - 1;
+        const isLast = index === segments.length - 1;
         if (isLast) {
             html += `<span class="crumb active">${seg}</span>`;
         } else {
@@ -779,7 +779,7 @@ async function toggleFileTagAssociation(checkbox, tagId, filePath) {
             }
             
             // Re-render container card dot state
-            const cleanCardId = `file-card-${btoa(filePath).replace(/=/g, '')}`;
+            const cleanCardId = `file-card-${safeBtoa(filePath).replace(/=/g, '')}`;
             const cardEl = document.getElementById(cleanCardId);
             if (cardEl) {
                 // Determine if file has any tags left
@@ -861,4 +861,13 @@ function formatSize(bytes) {
 function encodeRoutePath(path) {
     if (!path) return '';
     return path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+}
+
+// Unicode-safe Base64 encoding for HTML element IDs
+function safeBtoa(str) {
+    try {
+        return btoa(unescape(encodeURIComponent(str)));
+    } catch (e) {
+        return str.replace(/[^a-zA-Z0-9]/g, '_');
+    }
 }
