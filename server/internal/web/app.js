@@ -483,7 +483,7 @@ async function loadSystemDrives() {
 async function browsePath(path) {
     state.currentPath = path;
     
-    let url = `${state.apiBase}/api/v1/folders/${encodeURIComponent(path)}/browse`;
+    let url = `${state.apiBase}/api/v1/folders/${encodeRoutePath(path)}/browse`;
     if (state.isSystemBrowse) {
         url = `${state.apiBase}/api/v1/system/browse?path=${encodeURIComponent(path)}`;
     }
@@ -544,14 +544,14 @@ function renderBrowserList() {
         let playOverlay = '';
         
         // Build API URL for thumbnails
-        let thumbUrl = `${state.apiBase}/api/v1/images/${encodeURIComponent(file.relativePath)}/thumbnail`;
+        let thumbUrl = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.relativePath)}/thumbnail`;
         if (state.isSystemBrowse) {
             thumbUrl = `${state.apiBase}/api/v1/system/thumbnail?path=${encodeURIComponent(file.path)}`;
         }
         
         if (isVideo) {
             // Videos support the new FFmpeg dynamic keyframe thumbnail
-            const videoThumbUrl = `${state.apiBase}/api/v1/videos/${encodeURIComponent(file.relativePath)}/thumbnail`;
+            const videoThumbUrl = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.relativePath)}/thumbnail`;
             const videoUrl = state.isSystemBrowse ? thumbUrl : videoThumbUrl;
             
             previewHtml = `<img src="${videoUrl}" onerror="this.onerror=null; this.parentNode.innerHTML='<span class=\\'card-preview-icon\\'>🎬</span>'">`;
@@ -684,7 +684,7 @@ function openVideoPlayer(file) {
     elements.btnVideoTranscode.textContent = '原画';
     
     // Set video src URL
-    let url = `${state.apiBase}/api/v1/videos/${encodeURIComponent(file.relativePath)}/stream`;
+    let url = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.relativePath)}/stream`;
     if (state.isSystemBrowse) {
         url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}`;
     }
@@ -710,7 +710,7 @@ function renderLightboxImage() {
     if (state.lightboxIndex < 0 || state.lightboxIndex >= state.lightboxFiles.length) return;
     const file = state.lightboxFiles[state.lightboxIndex];
     
-    let url = `${state.apiBase}/api/v1/images/${encodeURIComponent(file.relativePath)}/original`;
+    let url = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.relativePath)}/original`;
     if (state.isSystemBrowse) {
         url = `${state.apiBase}/api/v1/system/original?path=${encodeURIComponent(file.path)}`;
     }
@@ -762,7 +762,7 @@ function openTaggingDialog(file) {
 // Toggle association between a file and a tag
 async function toggleFileTagAssociation(checkbox, tagId, filePath) {
     const isAssociate = checkbox.checked;
-    const url = `${state.apiBase}/api/v1/tags/${tagId}/files/${encodeURIComponent(filePath)}`;
+    const url = `${state.apiBase}/api/v1/tags/${tagId}/files/${encodeRoutePath(filePath)}`;
     
     try {
         const res = await fetch(url, {
@@ -855,4 +855,10 @@ function formatSize(bytes) {
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Encode path segments while keeping literal forward slashes (required for Echo wildcards)
+function encodeRoutePath(path) {
+    if (!path) return '';
+    return path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
 }
