@@ -77,9 +77,16 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 		if startSec != "0" {
 			args = append(args, "-ss", startSec)
 		}
-		args = append(args, "-i", filePath,
-			"-vcodec", "libx264",
-			"-preset", "ultrafast",
+		args = append(args, "-i", filePath)
+
+		vcodec := r.URL.Query().Get("vcodec")
+		if vcodec == "copy" {
+			args = append(args, "-vcodec", "copy")
+		} else {
+			args = append(args, "-vcodec", "libx264", "-preset", "ultrafast")
+		}
+
+		args = append(args,
 			"-acodec", "aac",
 			"-f", "mp4",
 			"-movflags", "frag_keyframe+empty_moov",

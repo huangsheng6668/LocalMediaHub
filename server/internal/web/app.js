@@ -27,6 +27,7 @@ const state = {
     
     // Transcode flag for video player
     useTranscode: false,
+    vcodecMode: 'copy', // 'copy' (Remux) or 'libx264' (Full transcode)
     playingFile: null,
     videoDuration: 0,
     transcodeStartOffset: 0,
@@ -285,10 +286,25 @@ function setupEventListeners() {
         }
     });
 
-    // Transcode Video toggle inside video modal
+    // Transcode Video toggle inside video modal (cycles: 原画 -> 快速流/Remux -> 兼容转码 -> 原画)
     elements.btnVideoTranscode.addEventListener('click', () => {
         if (!state.playingFile) return;
-        state.useTranscode = !state.useTranscode;
+        
+        if (!state.useTranscode) {
+            // direct -> copy (Remux)
+            state.useTranscode = true;
+            state.vcodecMode = 'copy';
+            showToast('🔧 已切换至极速容器封装流（CPU占用极低）', 'success');
+        } else if (state.vcodecMode === 'copy') {
+            // copy -> libx264 (Full transcode)
+            state.useTranscode = true;
+            state.vcodecMode = 'libx264';
+            showToast('🔧 已切换至 H.264 兼容性实时转码输出（CPU占用较高）', 'success');
+        } else {
+            // libx264 -> direct (Original)
+            state.useTranscode = false;
+            showToast('🚀 已切换至极速原文件直通流', 'success');
+        }
         
         const absolutePos = state.transcodeStartOffset + elements.videoPlayer.currentTime;
         
@@ -299,15 +315,17 @@ function setupEventListeners() {
         
         if (state.useTranscode) {
             state.transcodeStartOffset = Math.floor(absolutePos);
-            url += `&transcode=true&start=${state.transcodeStartOffset}`;
+            url += `&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
             elements.btnVideoTranscode.classList.add('active');
-            elements.btnVideoTranscode.textContent = '转码中';
-            showToast('🔧 已切换至 H.264 兼容性实时转码输出', 'success');
+            if (state.vcodecMode === 'copy') {
+                elements.btnVideoTranscode.textContent = '快速流';
+            } else {
+                elements.btnVideoTranscode.textContent = '转码中';
+            }
         } else {
             state.transcodeStartOffset = 0;
             elements.btnVideoTranscode.classList.remove('active');
             elements.btnVideoTranscode.textContent = '原画';
-            showToast('🚀 已切换至极速原文件直通流', 'success');
         }
         
         elements.videoPlayer.src = url;
@@ -357,9 +375,9 @@ function setupEventListeners() {
         const targetTime = parseFloat(e.target.value);
         if (state.useTranscode) {
             state.transcodeStartOffset = Math.floor(targetTime);
-            let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}`;
+            let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
             if (state.isSystemBrowse) {
-                url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}`;
+                url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
             }
             elements.videoPlayer.src = url;
             elements.videoPlayer.load();
@@ -962,12 +980,13 @@ async function openVideoPlayer(file) {
     const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
     const needsTranscode = ['.ts', '.mkv', '.avi', '.wmv', '.flv'].includes(ext);
     state.useTranscode = needsTranscode;
+    state.vcodecMode = 'copy'; // default to fast remux (copy mode) to save server CPU!
     
     elements.videoModalTitle.textContent = file.name;
     elements.btnVideoDelete.style.display = state.enableDelete ? 'block' : 'none';
     if (state.useTranscode) {
         elements.btnVideoTranscode.classList.add('active');
-        elements.btnVideoTranscode.textContent = '转码中';
+        elements.btnVideoTranscode.textContent = '快速流';
     } else {
         elements.btnVideoTranscode.classList.remove('active');
         elements.btnVideoTranscode.textContent = '原画';
@@ -996,9 +1015,9 @@ async function openVideoPlayer(file) {
     }
     
     if (state.useTranscode) {
-        url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0`;
+        url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0&vcodec=${state.vcodecMode}`;
         if (state.isSystemBrowse) {
-            url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0`;
+            url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0&vcodec=${state.vcodecMode}`;
         }
     }
     
