@@ -29,7 +29,8 @@ const state = {
     useTranscode: false,
     playingFile: null,
     videoDuration: 0,
-    transcodeStartOffset: 0
+    transcodeStartOffset: 0,
+    isDraggingProgress: false
 };
 
 // DOM Elements
@@ -274,6 +275,7 @@ function setupEventListeners() {
         state.playingFile = null;
         state.videoDuration = 0;
         state.transcodeStartOffset = 0;
+        state.isDraggingProgress = false;
     });
 
     // Delete Video inside Video Modal
@@ -343,8 +345,15 @@ function setupEventListeners() {
         elements.btnVideoPlayPause.textContent = '▶';
     });
 
-    // Custom controls: Progress Bar Seek
+    // Custom controls: Progress Bar Seek (Update timeline text while dragging)
     elements.videoProgress.addEventListener('input', (e) => {
+        state.isDraggingProgress = true;
+        const targetTime = parseFloat(e.target.value);
+        elements.videoTimeDisplay.textContent = `${formatTime(targetTime)} / ${formatTime(state.videoDuration)}`;
+    });
+
+    // Custom controls: Progress Bar Seek Release (Perform seek on release)
+    elements.videoProgress.addEventListener('change', (e) => {
         const targetTime = parseFloat(e.target.value);
         if (state.useTranscode) {
             state.transcodeStartOffset = Math.floor(targetTime);
@@ -358,6 +367,7 @@ function setupEventListeners() {
         } else {
             elements.videoPlayer.currentTime = targetTime;
         }
+        state.isDraggingProgress = false;
     });
 
     // Custom controls: Timeupdate synchronization
@@ -366,12 +376,24 @@ function setupEventListeners() {
         const currentAbsoluteTime = state.transcodeStartOffset + elements.videoPlayer.currentTime;
         
         // Update progress bar value (unless user is dragging it)
-        if (document.activeElement !== elements.videoProgress) {
+        if (!state.isDraggingProgress) {
             elements.videoProgress.value = currentAbsoluteTime;
         }
         
         // Update time display text
         elements.videoTimeDisplay.textContent = `${formatTime(currentAbsoluteTime)} / ${formatTime(state.videoDuration)}`;
+    });
+
+    // Custom controls: Handle duration changes dynamically (especially for original play)
+    elements.videoPlayer.addEventListener('durationchange', () => {
+        if (!state.useTranscode && elements.videoPlayer.duration && !isNaN(elements.videoPlayer.duration) && elements.videoPlayer.duration !== Infinity) {
+            state.videoDuration = elements.videoPlayer.duration;
+            elements.videoProgress.max = state.videoDuration;
+            if (!state.isDraggingProgress) {
+                const currentAbsoluteTime = elements.videoPlayer.currentTime;
+                elements.videoTimeDisplay.textContent = `${formatTime(currentAbsoluteTime)} / ${formatTime(state.videoDuration)}`;
+            }
+        }
     });
 
     // Custom controls: Volume Bar
@@ -455,6 +477,7 @@ function setupEventListeners() {
     const seekTo = (targetTime) => {
         elements.videoProgress.value = targetTime;
         elements.videoProgress.dispatchEvent(new Event('input'));
+        elements.videoProgress.dispatchEvent(new Event('change'));
     };
 
     // Auto-hide controls overlay on mouse inactivity
