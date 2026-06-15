@@ -35,6 +35,7 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 | 双模式运行 | GUI 模式（系统托盘）或 headless 模式（无窗口） |
 | 安全防护 | 路径遍历攻击防护（ValidatePath + isWithinRoots），系统浏览受 `system.allowed_roots` 限制 |
 | 媒体过滤 | 仅显示配置文件中指定的视频/图片扩展名文件 |
+| Web 管理器 | 内置基于 Single Page App 的精致 Web UI，提供仪表盘、媒体库浏览、标签增删改查、以及系统设置功能 |
 
 ### Android 端
  
@@ -239,7 +240,7 @@ APK 输出位置：`android/app/build/outputs/apk/`
 | PUT | `/api/v1/admin/config` | 更新扫描目录 |
 | POST | `/api/v1/admin/scan/trigger` | 触发全量重扫描 |
 
-当前 `/admin` 仅提供 JSON API，没有独立完成的 Web 管理页面。
+服务端内置了 Web 管理器界面，可以通过浏览器直接访问服务端地址（如 `http://localhost:8000`），在页面中直观地浏览媒体资源、查看仪表盘统计信息、管理标签以及配置扫描目录。
 
 ## 原生库编译 (可选)
 
