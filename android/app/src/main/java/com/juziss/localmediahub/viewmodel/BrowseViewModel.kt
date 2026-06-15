@@ -1,7 +1,6 @@
 package com.juziss.localmediahub.viewmodel
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.juziss.localmediahub.data.BrowseResult
 import com.juziss.localmediahub.data.FavoriteMediaEntry
@@ -16,25 +15,21 @@ import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.DownloadEntry
 import com.juziss.localmediahub.network.NetworkResult
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import com.juziss.localmediahub.data.DownloadManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import android.app.DownloadManager
 import android.content.Context
-import android.net.Uri
 import android.os.Environment
-import android.webkit.MimeTypeMap
-import android.widget.Toast
 import java.io.File
 import java.io.FileOutputStream
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
-import java.util.zip.ZipInputStream
-import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
+import javax.inject.Inject
 
 enum class SortOrder(val label: String) {
     NAME_ASC("按名称升序 (A-Z)"),
@@ -76,27 +71,48 @@ private fun compareNatural(a: String, b: String): Int {
     return tokensA.size.compareTo(tokensB.size)
 }
 
-class BrowseViewModel(
-    private val favoritesStore: FavoritesStore? = null,
-    private val recentActivityStore: RecentActivityStore? = null,
-    private val downloadsStore: DownloadsStore? = null,
+@HiltViewModel
+class BrowseViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
+    private val favoritesStore: FavoritesStore,
+    private val recentActivityStore: RecentActivityStore,
+    private val downloadsStore: DownloadsStore,
+    private val repository: MediaRepository,
+    private val downloadManager: DownloadManager,
 ) : ViewModel() {
 
-    val downloadedFiles = downloadsStore?.downloadedFiles ?: kotlinx.coroutines.flow.emptyFlow()
+    /**
+     * One-shot toast messages for download events. The UI layer observes this
+     * and shows a Toast, then clears it. This keeps Toast creation out of the
+     * ViewModel (which has no valid Activity context) and lets the View decide
+     * how to surface the message.
+     */
+    private val _toastMessage = MutableStateFlow<String?>(null)
+    val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
+
+    /** Emit a toast to be consumed by the UI layer. */
+    private fun showToast(msg: String) {
+        _toastMessage.value = msg
+    }
+
+    /** Called by the UI after it has shown the toast, to clear the pending value. */
+    fun onToastShown() {
+        _toastMessage.value = null
+    }
+
+    val downloadedFiles = downloadsStore.downloadedFiles
 
     fun removeDownload(file: MediaFile) {
         viewModelScope.launch {
-            downloadsStore?.removeDownload(file.relativePath)
+            downloadsStore.removeDownload(file.relativePath)
         }
     }
 
     fun removeDownloads(relativePaths: List<String>) {
         viewModelScope.launch {
-            downloadsStore?.removeDownloads(relativePaths)
+            downloadsStore.removeDownloads(relativePaths)
         }
     }
-
-    private val repository = MediaRepository()
 
     private val _browseState = MutableStateFlow<BrowseState>(BrowseState.Idle)
     val browseState: StateFlow<BrowseState> = _browseState.asStateFlow()
@@ -149,21 +165,19 @@ class BrowseViewModel(
     val showFavoritesOnly: StateFlow<Boolean> = _showFavoritesOnly.asStateFlow()
 
     init {
-        favoritesStore?.let { store ->
-            viewModelScope.launch {
-                store.favorites.collect { favoritePaths ->
-                    _favorites.value = favoritePaths
-                }
+        viewModelScope.launch {
+            favoritesStore.favorites.collect { favoritePaths ->
+                _favorites.value = favoritePaths
             }
-            viewModelScope.launch {
-                store.favoriteFiles.collect { files ->
-                    _favoriteFiles.value = files
-                }
+        }
+        viewModelScope.launch {
+            favoritesStore.favoriteFiles.collect { files ->
+                _favoriteFiles.value = files
             }
-            viewModelScope.launch {
-                store.favoriteEntries.collect { entries ->
-                    _favoriteAccessModes.value = entries.associateFavoriteModes()
-                }
+        }
+        viewModelScope.launch {
+            favoritesStore.favoriteEntries.collect { entries ->
+                _favoriteAccessModes.value = entries.associateFavoriteModes()
             }
         }
     }
@@ -173,10 +187,8 @@ class BrowseViewModel(
     }
 
     fun toggleFavorite(file: MediaFile, isSystemBrowse: Boolean = _isSystemBrowse.value) {
-        favoritesStore?.let { store ->
-            viewModelScope.launch {
-                store.toggleFavorite(file, isSystemBrowse)
-            }
+        viewModelScope.launch {
+            favoritesStore.toggleFavorite(file, isSystemBrowse)
         }
     }
 
@@ -249,7 +261,7 @@ class BrowseViewModel(
                     val data = result.data
                     _rawFolders.value = data.folders
                     _rawFiles.value = data.files
-                    recentActivityStore?.saveLastBrowseLocation(
+                    recentActivityStore.saveLastBrowseLocation(
                         path = absolutePath,
                         title = folderName,
                         isSystemBrowse = true,
@@ -286,7 +298,7 @@ class BrowseViewModel(
                 is NetworkResult.Success -> {
                     _rawFolders.value = result.data.folders
                     _rawFiles.value = result.data.files
-                    recentActivityStore?.saveLastBrowseLocation(
+                    recentActivityStore.saveLastBrowseLocation(
                         path = relativePath,
                         title = folderName,
                         isSystemBrowse = false,
@@ -503,165 +515,23 @@ class BrowseViewModel(
         return repository.getMediaOriginalImageUrl(file.path)
     }
 
-    fun downloadFile(context: Context, file: MediaFile) {
+    fun downloadFile(file: MediaFile) {
         viewModelScope.launch {
-            try {
-                Toast.makeText(context, "开始下载 ${file.name}...", Toast.LENGTH_SHORT).show()
-                val url = if (file.mediaType == "video") {
-                    getVideoStreamUrl(file)
-                } else {
-                    getOriginalImageUrl(file)
-                }
-
-                val downloadResult = repository.downloadFileStream(url)
-                if (downloadResult !is NetworkResult.Success) {
-                    val errorMsg = (downloadResult as? NetworkResult.Error)?.message ?: "未知错误"
-                    Toast.makeText(context, "下载失败: $errorMsg", Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-
-                withContext(Dispatchers.IO) {
-                    val responseBody = downloadResult.data
-                    val destDirectory = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "LocalMediaHub")
-                    if (!destDirectory.exists()) {
-                        destDirectory.mkdirs()
-                    }
-                    val localFile = File(destDirectory, file.name)
-                    
-                    responseBody.byteStream().use { inputStream ->
-                        FileOutputStream(localFile).use { outputStream ->
-                            val buffer = ByteArray(128 * 1024) // 128KB buffer for blazing fast transfer!
-                            var bytesRead: Int
-                            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                                outputStream.write(buffer, 0, bytesRead)
-                            }
-                        }
-                    }
-
-                    // Register download entry in DataStore
-                    downloadsStore?.addDownload(file, localFile.absolutePath)
-                    
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "${file.name} 下载成功！", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "下载失败: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
+            downloadManager.downloadFile(
+                file = file,
+                videoStreamUrl = getVideoStreamUrl(file),
+                imageUrl = getOriginalImageUrl(file),
+                onMessage = ::showToast
+            )
         }
     }
 
-    fun downloadFolder(context: Context, folder: Folder) {
+    fun downloadFolder(folder: Folder) {
         viewModelScope.launch {
-            try {
-                // 1. Fetch metadata first
-                Toast.makeText(context, "正在读取目录 \"${folder.name}\" 结构...", Toast.LENGTH_SHORT).show()
-                val metadataResult = repository.getFolderFilesRecursive(folder.relativePath)
-                if (metadataResult !is NetworkResult.Success) {
-                    val errorMsg = (metadataResult as? NetworkResult.Error)?.message ?: "未知错误"
-                    Toast.makeText(context, "读取结构失败: $errorMsg", Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-                
-                val filesMetadata = metadataResult.data
-                if (filesMetadata.isEmpty()) {
-                    Toast.makeText(context, "该目录下没有找到可下载的媒体资源", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-
-                // 2. Request the dynamic ZIP stream
-                val zipResult = repository.downloadFolderZip(folder.relativePath)
-                if (zipResult !is NetworkResult.Success) {
-                    val errorMsg = (zipResult as? NetworkResult.Error)?.message ?: "未知错误"
-                    Toast.makeText(context, "连接服务端失败: $errorMsg", Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-
-                Toast.makeText(context, "开始流式极速下载并解压 \"${folder.name}\"...", Toast.LENGTH_SHORT).show()
-
-                withContext(Dispatchers.IO) {
-                    val responseBody = zipResult.data
-                    val destDirectory = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "LocalMediaHub")
-                    if (!destDirectory.exists()) {
-                        destDirectory.mkdirs()
-                    }
-
-                    val incomingEntries = mutableListOf<DownloadEntry>()
-
-                    // Safe stream extraction via a temp zip file to bypass Java's ZipInputStream limitation with Stored files
-                    val tempFile = File(context.cacheDir, "download_temp_${System.currentTimeMillis()}.zip")
-                    try {
-                        responseBody.byteStream().use { inputStream ->
-                            FileOutputStream(tempFile).use { outputStream ->
-                                val buffer = ByteArray(128 * 1024)
-                                var bytesRead: Int
-                                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                                    outputStream.write(buffer, 0, bytesRead)
-                                }
-                            }
-                        }
-
-                        ZipFile(tempFile).use { zipFile ->
-                            val entries = zipFile.entries()
-                            val buffer = ByteArray(64 * 1024)
-                            while (entries.hasMoreElements()) {
-                                val zipEntry = entries.nextElement()
-                                if (!zipEntry.isDirectory) {
-                                    val extractedFile = File(destDirectory, zipEntry.name)
-                                    extractedFile.parentFile?.mkdirs()
-
-                                    zipFile.getInputStream(zipEntry).use { zipInputStream ->
-                                        FileOutputStream(extractedFile).use { outputStream ->
-                                            var len: Int
-                                            while (zipInputStream.read(buffer).also { len = it } > 0) {
-                                                outputStream.write(buffer, 0, len)
-                                            }
-                                        }
-                                    }
-
-                                    // Match extracted file against pre-fetched metadata by matching names
-                                    val entryFileName = File(zipEntry.name).name
-                                    val matchedMetadata = filesMetadata.find { 
-                                        it.name.equals(entryFileName, ignoreCase = true) 
-                                    }
-
-                                    if (matchedMetadata != null) {
-                                        incomingEntries.add(
-                                            DownloadEntry(
-                                                file = matchedMetadata,
-                                                localPath = extractedFile.absolutePath,
-                                                addedAt = System.currentTimeMillis()
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    } finally {
-                        if (tempFile.exists()) {
-                            tempFile.delete()
-                        }
-                    }
-
-                    // Register all files inside DownloadsStore in one bulk transaction
-                    if (incomingEntries.isNotEmpty() && downloadsStore != null) {
-                        downloadsStore.addDownloads(incomingEntries)
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "成功下载并流式提取了 ${incomingEntries.size} 个媒体文件！", Toast.LENGTH_LONG).show()
-                        }
-                    } else {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "未找到有效的多媒体提取文件", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "下载目录失败: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
+            downloadManager.downloadFolder(
+                folder = folder,
+                onMessage = ::showToast
+            )
         }
     }
 
@@ -949,20 +819,6 @@ class BrowseViewModel(
 
 private fun List<FavoriteMediaEntry>.associateFavoriteModes(): Map<String, Boolean> {
     return associate { entry -> entry.file.relativePath to entry.isSystemBrowse }
-}
-
-/**
- * Factory to create BrowseViewModel with a FavoritesStore dependency.
- */
-class BrowseViewModelFactory(
-    private val favoritesStore: FavoritesStore,
-    private val recentActivityStore: RecentActivityStore,
-    private val downloadsStore: DownloadsStore,
-) : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return BrowseViewModel(favoritesStore, recentActivityStore, downloadsStore) as T
-    }
 }
 
 sealed class BrowseState {

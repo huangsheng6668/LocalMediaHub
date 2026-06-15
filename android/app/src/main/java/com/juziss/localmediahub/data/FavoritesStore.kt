@@ -6,8 +6,10 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import com.google.gson.JsonParser
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import javax.inject.Inject
 
 data class FavoriteMediaEntry(
     val file: MediaFile,
@@ -32,33 +34,34 @@ internal fun decodeFavoriteEntry(gson: Gson, json: String): FavoriteMediaEntry? 
     }
 }
 
+private val Context.favoritesDataStore by preferencesDataStore(name = "favorites")
+
 /**
  * Persists favorite files with full metadata using Jetpack DataStore.
  * Stores MediaFile as JSON so favorites list works independently of browse state.
  */
-class FavoritesStore(private val context: Context) {
+class FavoritesStore @Inject constructor(@ApplicationContext private val context: Context) {
 
-    private val Context.dataStore by preferencesDataStore(name = "favorites")
     private val gson = Gson()
 
     private val favoritesKey = stringSetPreferencesKey("favorite_files_json")
 
     /** Emits the current set of favorite paths. */
-    val favorites: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+    val favorites: Flow<Set<String>> = context.favoritesDataStore.data.map { preferences ->
         preferences[favoritesKey]?.mapNotNull { json ->
             decodeFavoriteEntry(gson, json)?.file?.relativePath
         }?.toSet() ?: emptySet()
     }
 
     /** Emits the full list of favorited MediaFile objects. */
-    val favoriteFiles: Flow<List<MediaFile>> = context.dataStore.data.map { preferences ->
+    val favoriteFiles: Flow<List<MediaFile>> = context.favoritesDataStore.data.map { preferences ->
         preferences[favoritesKey]?.mapNotNull { json ->
             decodeFavoriteEntry(gson, json)?.file
         } ?: emptyList()
     }
 
     /** Emits the full list of favorited entries with access-mode metadata. */
-    val favoriteEntries: Flow<List<FavoriteMediaEntry>> = context.dataStore.data.map { preferences ->
+    val favoriteEntries: Flow<List<FavoriteMediaEntry>> = context.favoritesDataStore.data.map { preferences ->
         preferences[favoritesKey]?.mapNotNull { json ->
             decodeFavoriteEntry(gson, json)
         } ?: emptyList()
@@ -66,7 +69,7 @@ class FavoritesStore(private val context: Context) {
 
     /** Add a file to favorites. No-op if already present. */
     suspend fun addFavorite(file: MediaFile, isSystemBrowse: Boolean) {
-        context.dataStore.edit { preferences ->
+        context.favoritesDataStore.edit { preferences ->
             val current = preferences[favoritesKey] ?: emptySet()
             val filtered = current.filterNot { json ->
                 decodeFavoriteEntry(gson, json)?.file?.relativePath == file.relativePath
@@ -78,7 +81,7 @@ class FavoritesStore(private val context: Context) {
 
     /** Remove a file from favorites by path. */
     suspend fun removeFavorite(relativePath: String) {
-        context.dataStore.edit { preferences ->
+        context.favoritesDataStore.edit { preferences ->
             val current = preferences[favoritesKey] ?: emptySet()
             preferences[favoritesKey] = current.filterNot { json ->
                 decodeFavoriteEntry(gson, json)?.file?.relativePath == relativePath
@@ -89,7 +92,7 @@ class FavoritesStore(private val context: Context) {
     /** Toggle favorite status for a file. */
     suspend fun toggleFavorite(file: MediaFile, isSystemBrowse: Boolean): Boolean {
         var isNowFavorite = false
-        context.dataStore.edit { preferences ->
+        context.favoritesDataStore.edit { preferences ->
             val current = preferences[favoritesKey] ?: emptySet()
             val existing = current.find { decodeFavoriteEntry(gson, it)?.file?.relativePath == file.relativePath }
             if (existing != null) {

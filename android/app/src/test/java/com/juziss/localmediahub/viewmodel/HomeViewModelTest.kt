@@ -3,6 +3,7 @@ package com.juziss.localmediahub.viewmodel
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.juziss.localmediahub.data.FavoritesStore
+import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.ServerConfig
 import com.juziss.localmediahub.network.RetrofitClient
@@ -66,6 +67,7 @@ class HomeViewModelTest {
             favoritesStore = FavoritesStore(context),
             recentActivityStore = RecentActivityStore(context),
             serverConfig = serverConfig,
+            repository = MediaRepository(),
         )
 
         advanceUntilIdle()

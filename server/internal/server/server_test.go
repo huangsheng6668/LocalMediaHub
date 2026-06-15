@@ -53,7 +53,7 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 		},
 	}
 	s := &Server{Echo: newTestEcho(), Config: cfg}
-	thumbnailService, err := service.NewThumbnailService(cfg.Thumbnail.CacheDir, cfg.Thumbnail.MaxSize, cfg.Thumbnail.Format)
+	thumbnailService, err := service.NewThumbnailService(cfg.Thumbnail.CacheDir, cfg.Thumbnail.MaxSize, cfg.Thumbnail.Format, "")
 	if err != nil {
 		t.Fatalf("failed to create thumbnail service: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 		cfg,
 		service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions),
 		nil,
-		service.NewStreamingService(),
+		service.NewStreamingService(""),
 		thumbnailService,
 	)
 	s.registerRoutes(h)

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -44,7 +45,7 @@ func folderDisplayName(path string, name string) string {
 func (h *Handler) BrowseFolder(c echo.Context) error {
 	rawPath := c.Param("*")
 	if rawPath == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
 	if strings.HasSuffix(rawPath, "/download") {
@@ -54,25 +55,25 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 	if strings.HasSuffix(rawPath, "/files") {
 		pathStr, err := decodeWildcardPath(rawPath, "/files")
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return respondError(c, http.StatusBadRequest, err.Error())
 		}
 
 		pathStr, err = service.NormalizePath(pathStr)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return respondError(c, http.StatusBadRequest, err.Error())
 		}
 
 		valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return respondError(c, http.StatusBadRequest, err.Error())
 		}
 		if !valid {
-			return c.JSON(http.StatusForbidden, map[string]string{"error": "path outside roots"})
+			return respondError(c, http.StatusForbidden, "path outside roots")
 		}
 
-		files, err := h.scanner.GetCached(h.cfg.Scan.GetRoots())
+		files, err := h.scanner.GetCached(c.Request().Context(), h.cfg.Scan.GetRoots())
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return respondInternalError(c, err)
 		}
 
 		matchedFiles := make([]models.MediaFile, 0)
@@ -88,37 +89,37 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 
 	pathStr, err := decodeWildcardPath(rawPath, "/browse")
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
 	pathStr, err = service.NormalizePath(pathStr)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
 	valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 	if !valid {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "path outside roots"})
+		return respondError(c, http.StatusForbidden, "path outside roots")
 	}
 
 	fi, err := os.Stat(pathStr)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "path not found"})
+			return respondNotFound(c, "path not found")
 		}
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
 	if !fi.IsDir() {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "not a directory"})
+		return respondError(c, http.StatusBadRequest, "not a directory")
 	}
 
 	entries, err := os.ReadDir(pathStr)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	videoExts := h.scanner.VideoExts()
@@ -176,29 +177,29 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 	rawPath := c.Param("*")
 	pathStr, err := decodeWildcardPath(rawPath, "/download")
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
 	pathStr, err = service.NormalizePath(pathStr)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
 	valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
 	if err != nil || !valid {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "access denied"})
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
 	fi, err := os.Stat(pathStr)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "path not found"})
+			return respondNotFound(c, "path not found")
 		}
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
 	if !fi.IsDir() {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "not a directory"})
+		return respondError(c, http.StatusBadRequest, "not a directory")
 	}
 
 	c.Response().Header().Set(echo.HeaderContentType, "application/zip")
@@ -250,9 +251,12 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 		return err
 	})
 
+	// Response already started (status + headers written) above, so we can no
+	// longer change the status code or write a JSON error body. Log the failure
+	// and return nil so Echo doesn't try to (re)write an error response onto an
+	// already-committed stream, which would corrupt the partial ZIP output.
 	if err != nil {
-		return err
+		slog.Error("Zip download failed", "method", c.Request().Method, "path", c.Path(), "dir", pathStr, "error", err)
 	}
-
 	return nil
 }

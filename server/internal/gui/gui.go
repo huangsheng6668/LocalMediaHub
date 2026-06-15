@@ -2,7 +2,7 @@ package gui
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -18,16 +18,16 @@ import (
 func Run(cfg *config.Config) {
 	s, err := server.New(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		slog.Error("Failed to create server", "error", err); os.Exit(1)
 	}
 
 	ip := getLocalIP()
 	srvURL := fmt.Sprintf("http://%s:%d", ip, cfg.Server.Port)
 
 	go func() {
-		log.Printf("LocalMediaHub running at %s", srvURL)
+		slog.Info("LocalMediaHub running", "url", srvURL)
 		if err := s.Start(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			slog.Error("Server error", "error", err); os.Exit(1)
 		}
 	}()
 

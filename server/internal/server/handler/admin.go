@@ -17,12 +17,15 @@ func (h *Handler) GetConfig(c echo.Context) error {
 func (h *Handler) UpdateConfig(c echo.Context) error {
 	var req ConfigUpdateRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, "invalid request body", err)
 	}
 
 	h.cfg.Scan.Roots = req.Roots
+	// Roots changed: drop any cached auto-detected drive list so subsequent
+	// GetRoots calls reflect the new configuration immediately.
+	h.cfg.Scan.InvalidateRootsCache()
 	if err := h.cfg.Save("config.yaml"); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	h.scanner.InvalidateCache()
@@ -32,6 +35,8 @@ func (h *Handler) UpdateConfig(c echo.Context) error {
 
 func (h *Handler) TriggerScan(c echo.Context) error {
 	h.scanner.InvalidateCache()
-	go h.scanner.Scan(h.cfg.Scan.GetRoots())
+	// Use the scanner's own background context so the scan outlives this
+	// request and is cancellable on shutdown or when superseded.
+	h.scanner.TriggerScan(h.cfg.Scan.GetRoots())
 	return c.JSON(http.StatusOK, map[string]string{"status": "scan triggered"})
 }

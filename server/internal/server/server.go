@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/labstack/echo/v4"
@@ -80,8 +81,14 @@ func New(cfg *config.Config) (*Server, error) {
 }
 
 func (s *Server) registerRoutes(h *handler.Handler) {
+	// Recover must be first so panics in any handler are caught and converted
+	// to a 500 instead of crashing the whole process.
+	s.Echo.Use(echoMw.Recover())
 	s.Echo.Use(echoMw.Logger())
-	s.Echo.Use(middleware.CORS())
+	// CORS is restricted to this host's LAN IPs + localhost so only devices on
+	// the local network can drive the embedded Web UI (and its destructive
+	// endpoints). See allowedCORSOrigins for details.
+	s.Echo.Use(middleware.CORS(allowedCORSOrigins(s.Config.Server.Port)))
 
 	// Static Web UI Assets
 	s.Echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(web.Assets))))
@@ -148,40 +155,124 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Stop() error {
+	// Cancel any in-flight background scan so a triggered scan doesn't keep
+	// walking the filesystem after the server has stopped.
+	s.Scanner.Shutdown()
 	return s.Echo.Close()
 }
 
 func getLocalIP() (string, error) {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return "", err
+	ips := getAllLocalIPs()
+	if len(ips) == 0 {
+		return "127.0.0.1", nil
 	}
+	// getAllLocalIPs returns private LAN IPs first, so the head is the best pick.
+	return ips[0], nil
+}
 
-	var bestIP string
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
+// getAllLocalIPs returns all usable IPv4 addresses on this machine, with
+// private LAN addresses first, then any other non-loopback address, and
+// finally 127.0.0.1. APIPA (169.254.x.x) addresses and addresses on virtual
+// adapters (VMware vmnet*, VirtualBox vboxnet*, Hyper-V/WSL vEthernet*,
+// Docker) are skipped so mDNS broadcasts the host's real LAN IP rather than a
+// host-only/VM subnet that other devices can't reach. The ordering makes the
+// first element a good default for mDNS broadcast, while the full list is used
+// to build the CORS allow-list so browsers on the LAN can reach the embedded
+// Web UI.
+func getAllLocalIPs() []string {
+	var private, others []string
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return []string{"127.0.0.1"}
+	}
+	for _, ifc := range ifaces {
+		// Skip virtual machine / container adapters — their addresses sit on
+		// isolated host-only or NAT subnets that LAN clients cannot route to.
+		if isVirtualAdapter(ifc.Name) {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok || ipNet.IP.IsLoopback() {
+				continue
+			}
 			ip := ipNet.IP.To4()
-			// Skip APIPA
+			if ip == nil {
+				continue
+			}
+			// Skip APIPA (link-local) addresses.
 			if ip[0] == 169 && ip[1] == 254 {
 				continue
 			}
 
-			// Prefer private LAN IPs
 			isPrivate := (ip[0] == 192 && ip[1] == 168) ||
 				(ip[0] == 10) ||
 				(ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31)
 
 			if isPrivate {
-				return ip.String(), nil
-			}
-			if bestIP == "" {
-				bestIP = ip.String()
+				private = append(private, ip.String())
+			} else {
+				others = append(others, ip.String())
 			}
 		}
 	}
 
-	if bestIP != "" {
-		return bestIP, nil
+	result := append(private, others...)
+	result = append(result, "127.0.0.1")
+	return result
+}
+
+// virtualAdapterPrefixes lists lower-cased interface-name prefixes that mark a
+// virtual machine / container / tunnel adapter. Matches are skipped by
+// getAllLocalIPs so discovery targets the physical LAN only.
+var virtualAdapterPrefixes = []string{
+	"vmnet",       // VMware
+	"vboxnet",     // VirtualBox host-only
+	"vethernet",   // Hyper-V / WSL
+	"docker",      // Docker bridge
+	"virtualbox",  // alt VirtualBox naming
+	"tap-",        // OpenVPN / TAP
+	"tun-",        // tunnel adapters
+	"isatap",      // ISATAP tunneling
+	"teredo",      // Teredo tunneling
+}
+
+func isVirtualAdapter(name string) bool {
+	lower := strings.ToLower(name)
+	for _, p := range virtualAdapterPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
 	}
-	return "127.0.0.1", nil
+	return false
+}
+
+// allowedCORSOrigins builds the list of browser origins permitted by CORS.
+// It covers localhost (any port), 127.0.0.1, and every LAN IPv4 address this
+// machine exposes, on the configured server port. This keeps cross-origin
+// access restricted to the local network instead of the whole internet while
+// still allowing other devices on the LAN to open the Web UI.
+func allowedCORSOrigins(port int) []string {
+	ips := getAllLocalIPs()
+	origins := make([]string, 0, len(ips)*2+4)
+	seen := make(map[string]struct{}, len(origins))
+	add := func(o string) {
+		if _, ok := seen[o]; !ok {
+			seen[o] = struct{}{}
+			origins = append(origins, o)
+		}
+	}
+	for _, ip := range ips {
+		add(fmt.Sprintf("http://%s:%d", ip, port))
+	}
+	// localhost variants (common ports included so dev tooling keeps working).
+	for _, p := range []int{port, 80, 443, 5173} {
+		add(fmt.Sprintf("http://localhost:%d", p))
+	}
+	return origins
 }

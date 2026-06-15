@@ -6,13 +6,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.juziss.localmediahub.data.DownloadsStore
-import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.PlaybackProgressEntry
 import com.juziss.localmediahub.data.RecentActivityStore
@@ -20,16 +18,34 @@ import com.juziss.localmediahub.data.RecentMediaEntry
 import com.juziss.localmediahub.data.ServerConfig
 import com.juziss.localmediahub.ui.screen.BrowseScreen
 import com.juziss.localmediahub.ui.screen.ConnectionScreen
+import com.juziss.localmediahub.ui.screen.DownloadsScreen
 import com.juziss.localmediahub.ui.screen.HomeScreen
 import com.juziss.localmediahub.ui.screen.ImagePreviewScreen
 import com.juziss.localmediahub.ui.screen.VideoPlayerScreen
-import com.juziss.localmediahub.ui.screen.DownloadsScreen
 import com.juziss.localmediahub.ui.theme.LocalMediaHubTheme
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
-import com.juziss.localmediahub.viewmodel.BrowseViewModelFactory
 import com.juziss.localmediahub.viewmodel.HomeViewModel
-import com.juziss.localmediahub.viewmodel.HomeViewModelFactory
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.launch
+
+/**
+ * EntryPoint exposing the singleton Stores to the @Composable layer (which
+ * cannot use @Inject field injection). All Stores are @Singleton-scoped in the
+ * Hilt graph, so the instances retrieved here are the same ones injected into
+ * the ViewModels.
+ */
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface AppStoresEntryPoint {
+    fun recentActivityStore(): RecentActivityStore
+    fun serverConfig(): ServerConfig
+}
+
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +62,20 @@ class MainActivity : ComponentActivity() {
 fun LocalMediaHubApp() {
     val navController = rememberNavController()
 
+    // Retrieve singleton Stores via Hilt EntryPoint. They can't be field-injected
+    // into a top-level @Composable, so we pull them from the Hilt component graph
+    // attached to the Application. These are the same @Singleton instances the
+    // ViewModels receive through constructor injection.
+    val context = LocalContext.current
+    val appStores = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            AppStoresEntryPoint::class.java,
+        )
+    }
+    val recentActivityStore = appStores.recentActivityStore()
+    val serverConfig = appStores.serverConfig()
+
     // Shared state for passing media data between screens
     // Keep media navigation payloads in memory only. Saving whole MediaFile objects and
     // image lists can stall the UI when opening large folders or image sets.
@@ -59,18 +89,9 @@ fun LocalMediaHubApp() {
     var currentImageUsesSystemUrl by remember { mutableStateOf(false) }
     var currentImageIsLocal by remember { mutableStateOf(false) }
  
-    val context = LocalContext.current
-    val favoritesStore = remember { FavoritesStore(context) }
-    val recentActivityStore = remember { RecentActivityStore(context) }
-    val serverConfig = remember { ServerConfig(context) }
-    val downloadsStore = remember { DownloadsStore(context) }
     val appScope = rememberCoroutineScope()
-    val browseViewModel: BrowseViewModel = viewModel(
-        factory = BrowseViewModelFactory(favoritesStore, recentActivityStore, downloadsStore),
-    )
-    val homeViewModel: HomeViewModel = viewModel(
-        factory = HomeViewModelFactory(favoritesStore, recentActivityStore, serverConfig),
-    )
+    val browseViewModel: BrowseViewModel = hiltViewModel()
+    val homeViewModel: HomeViewModel = hiltViewModel()
     val downloadedEntries by browseViewModel.downloadedFiles.collectAsState(initial = emptyList())
 
     NavHost(navController = navController, startDestination = "connection") {
@@ -278,14 +299,14 @@ fun LocalMediaHubApp() {
                                 when (val result = browseViewModel.deletePathSync(file.path, false)) {
                                     is com.juziss.localmediahub.network.NetworkResult.Success -> {
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                            android.widget.Toast.makeText(context, "文件已成功删除", android.widget.Toast.LENGTH_SHORT).show()
+                                            android.widget.Toast.makeText(context, context.getString(R.string.main_delete_success), android.widget.Toast.LENGTH_SHORT).show()
                                             navController.popBackStack()
                                             browseViewModel.refreshCurrentDirectory()
                                         }
                                     }
                                     is com.juziss.localmediahub.network.NetworkResult.Error -> {
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                            android.widget.Toast.makeText(context, "删除失败: ${result.message}", android.widget.Toast.LENGTH_LONG).show()
+                                            android.widget.Toast.makeText(context, context.getString(R.string.main_delete_failed, result.message), android.widget.Toast.LENGTH_LONG).show()
                                         }
                                     }
                                     else -> {}

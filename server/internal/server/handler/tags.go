@@ -98,9 +98,9 @@ func (h *Handler) GetTaggedMedia(c echo.Context) error {
 		return c.JSON(http.StatusOK, []models.MediaFile{})
 	}
 
-	cachedFiles, err := h.scanner.GetCached(h.cfg.Scan.GetRoots())
+	cachedFiles, err := h.scanner.GetCached(c.Request().Context(), h.cfg.Scan.GetRoots())
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	byPath := make(map[string]models.MediaFile, len(cachedFiles))

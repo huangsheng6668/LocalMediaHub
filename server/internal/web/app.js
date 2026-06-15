@@ -1,38 +1,7 @@
-// State Management
-const state = {
-    activeTab: 'dashboard',
-    folders: [], // Config roots
-    allowedRoots: [], // System allowed roots
-    videoExts: [],
-    imageExts: [],
-    
-    // Browser variables
-    currentPath: '',
-    pathHistory: [],
-    currentFiles: [], // Current browser view media files
-    currentFolders: [], // Current browser view directories
-    isSystemBrowse: false,
-    
-    // Tags variables
-    tags: [],
-    fileTagsMap: {},
-    
-    // Lightbox variables
-    lightboxFiles: [],
-    lightboxIndex: -1,
-    lightboxStitchMode: localStorage.getItem('lightboxStitchMode') === 'true',
-    
-    // Selected file for tag mapping
-    taggingFile: null,
-    
-    // Transcode flag for video player
-    useTranscode: false,
-    vcodecMode: 'copy', // 'copy' (Remux) or 'libx264' (Full transcode)
-    playingFile: null,
-    videoDuration: 0,
-    transcodeStartOffset: 0,
-    isDraggingProgress: false
-};
+import { state } from './state.js';
+import { showToast } from './toast.js';
+import { apiRequest, escapeHtml } from './api.js';
+import { handleRoute } from './router.js';
 
 // DOM Elements
 const elements = {
@@ -136,66 +105,23 @@ async function initApp() {
     await loadTags();
     
     // Parse Hash Routing on page load
-    handleRoute();
+    handleRoute(elements, renderDashboard, loadRoots, browsePath, renderTagsManager, renderSettings);
 }
 
 // Router
-window.addEventListener('hashchange', handleRoute);
-
-function handleRoute() {
-    const hash = window.location.hash || '#/dashboard';
-    
-    // De-activate all tabs and menu selections
-    [elements.viewDashboard, elements.viewBrowser, elements.viewTags, elements.viewSettings].forEach(v => v.classList.remove('active'));
-    [elements.menuDashboard, elements.menuBrowser, elements.menuTags, elements.menuSettings].forEach(m => m.classList.remove('active'));
-    
-    if (hash.startsWith('#/dashboard')) {
-        state.activeTab = 'dashboard';
-        elements.pageTitle.textContent = '仪表盘';
-        elements.menuDashboard.classList.add('active');
-        elements.viewDashboard.classList.add('active');
-        renderDashboard();
-    } else if (hash.startsWith('#/browser')) {
-        state.activeTab = 'browser';
-        elements.pageTitle.textContent = '媒体共享库';
-        elements.menuBrowser.classList.add('active');
-        elements.viewBrowser.classList.add('active');
-        
-        // Check if we need to load a specific subfolder based on state, otherwise start at root
-        if (!state.currentPath) {
-            loadRoots();
-        } else {
-            browsePath(state.currentPath);
-        }
-    } else if (hash.startsWith('#/tags')) {
-        state.activeTab = 'tags';
-        elements.pageTitle.textContent = '标签管理';
-        elements.menuTags.classList.add('active');
-        elements.viewTags.classList.add('active');
-        renderTagsManager();
-    } else if (hash.startsWith('#/settings')) {
-        state.activeTab = 'settings';
-        elements.pageTitle.textContent = '系统设置';
-        elements.menuSettings.classList.add('active');
-        elements.viewSettings.classList.add('active');
-        renderSettings();
-    }
-}
+window.addEventListener('hashchange', () => {
+    handleRoute(elements, renderDashboard, loadRoots, browsePath, renderTagsManager, renderSettings);
+});
 
 // Set up Event Listeners
 function setupEventListeners() {
     // Scan Trigger
     elements.btnTriggerScan.addEventListener('click', async () => {
         try {
-            const res = await fetch(`${state.apiBase}/api/v1/admin/scan/trigger`, { method: 'POST' });
-            const data = await res.json();
-            if (res.ok) {
-                showToast('🚀 已成功在后台触发全量媒体重扫描！', 'success');
-            } else {
-                showToast(`扫描启动失败: ${data.error}`, 'error');
-            }
+            await apiRequest(`${state.apiBase}/api/v1/admin/scan/trigger`, { method: 'POST' });
+            showToast('🚀 已成功在后台触发全量媒体重扫描！', 'success');
         } catch (e) {
-            showToast('扫描接口请求超时，请检查服务状态', 'error');
+            showToast(`扫描启动失败: ${e.message}`, 'error');
         }
     });
 
@@ -219,22 +145,17 @@ function setupEventListeners() {
         }
 
         try {
-            const res = await fetch(`${state.apiBase}/api/v1/tags`, {
+            await apiRequest(`${state.apiBase}/api/v1/tags`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, color })
             });
-            const data = await res.json();
-            if (res.ok) {
-                showToast(`成功创建标签 [${name}]`, 'success');
-                elements.tagNameInput.value = '';
-                await loadTags();
-                renderTagsManager();
-            } else {
-                showToast(`标签创建失败: ${data.error}`, 'error');
-            }
+            showToast(`成功创建标签 [${name}]`, 'success');
+            elements.tagNameInput.value = '';
+            await loadTags();
+            renderTagsManager();
         } catch (e) {
-            showToast('连接服务端接口错误', 'error');
+            showToast(`标签创建失败: ${e.message}`, 'error');
         }
     });
 
@@ -244,21 +165,16 @@ function setupEventListeners() {
         const roots = rootsText ? rootsText.split('\n').map(r => r.trim()).filter(r => r !== '') : [];
 
         try {
-            const res = await fetch(`${state.apiBase}/api/v1/admin/config`, {
+            await apiRequest(`${state.apiBase}/api/v1/admin/config`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ roots })
             });
-            const data = await res.json();
-            if (res.ok) {
-                showToast('💾 系统路径配置更新保存成功！', 'success');
-                await loadConfig();
-                renderSettings();
-            } else {
-                showToast(`配置保存失败: ${data.error}`, 'error');
-            }
+            showToast('💾 系统路径配置更新保存成功！', 'success');
+            await loadConfig();
+            renderSettings();
         } catch (e) {
-            showToast('连接配置更新接口错误', 'error');
+            showToast(`配置保存失败: ${e.message}`, 'error');
         }
     });
 
@@ -590,35 +506,20 @@ function setupEventListeners() {
     });
 }
 
-// Toast Notification
-function showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    elements.toastContainer.appendChild(toast);
-    
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(16px)';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
+
 
 // Fetch configs
 async function loadConfig() {
     try {
-        const res = await fetch(`${state.apiBase}/api/v1/admin/config`);
-        const data = await res.json();
-        if (res.ok) {
-            state.folders = data.scan.roots || [];
-            state.videoExts = data.scan.video_extensions || [];
-            state.imageExts = data.scan.image_extensions || [];
-            state.allowedRoots = (data.system && data.system.allowed_roots) || [];
-            state.enableDelete = (data.system && data.system.enable_delete) || false;
-            state.thumbMax = (data.thumbnail && data.thumbnail.max_size) || 300;
-            
-            elements.infoScanRoots.textContent = state.folders.join(', ') || '全盘自动检测';
-        }
+        const data = await apiRequest(`${state.apiBase}/api/v1/admin/config`);
+        state.folders = data.scan.roots || [];
+        state.videoExts = data.scan.video_extensions || [];
+        state.imageExts = data.scan.image_extensions || [];
+        state.allowedRoots = (data.system && data.system.allowed_roots) || [];
+        state.enableDelete = (data.system && data.system.enable_delete) || false;
+        state.thumbMax = (data.thumbnail && data.thumbnail.max_size) || 300;
+        
+        elements.infoScanRoots.textContent = state.folders.join(', ') || '全盘自动检测';
     } catch (e) {
         console.error('loadConfig error:', e);
         showToast('无法从后端获取系统配置: ' + e.message, 'error');
@@ -628,16 +529,15 @@ async function loadConfig() {
 // Fetch Tags
 async function loadTags() {
     try {
-        const res = await fetch(`${state.apiBase}/api/v1/tags`);
-        const tags = await res.json();
-        if (res.ok) {
-            state.tags = tags || [];
-            
-            // Fetch file tags mapping in parallel
-            const mappingRes = await fetch(`${state.apiBase}/api/v1/tags/file-tags`);
-            if (mappingRes.ok) {
-                state.fileTagsMap = await mappingRes.json() || {};
-            }
+        const tags = await apiRequest(`${state.apiBase}/api/v1/tags`);
+        state.tags = tags || [];
+        
+        // Fetch file tags mapping in parallel
+        try {
+            const fileTagsMap = await apiRequest(`${state.apiBase}/api/v1/tags/file-tags`);
+            state.fileTagsMap = fileTagsMap || {};
+        } catch (err) {
+            console.error('load file-tags mapping error:', err);
         }
     } catch (e) {
         console.error('loadTags error:', e);
@@ -649,13 +549,21 @@ async function loadTags() {
 async function renderDashboard() {
     // 1. Fetch total files
     try {
-        const resVideos = await fetch(`${state.apiBase}/api/v1/videos?page=1&page_size=1`);
-        const videosData = await resVideos.json();
-        const totalVideos = resVideos.ok ? videosData.total : 0;
+        let totalVideos = 0;
+        try {
+            const videosData = await apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=1`);
+            totalVideos = videosData.total || 0;
+        } catch (err) {
+            console.error('Fetch video count error:', err);
+        }
         
-        const resImages = await fetch(`${state.apiBase}/api/v1/images?page=1&page_size=1`);
-        const imagesData = await resImages.json();
-        const totalImages = resImages.ok ? imagesData.total : 0;
+        let totalImages = 0;
+        try {
+            const imagesData = await apiRequest(`${state.apiBase}/api/v1/images?page=1&page_size=1`);
+            totalImages = imagesData.total || 0;
+        } catch (err) {
+            console.error('Fetch image count error:', err);
+        }
         
         elements.statRoots.textContent = state.folders.length || '全盘';
         elements.statVideos.textContent = totalVideos;
@@ -663,9 +571,8 @@ async function renderDashboard() {
         elements.statTags.textContent = state.tags.length;
         
         // 2. Mock a list of files or load first page of videos/images for recent preview
-        const recentRes = await fetch(`${state.apiBase}/api/v1/videos?page=1&page_size=3`);
-        if (recentRes.ok) {
-            const data = await recentRes.json();
+        try {
+            const data = await apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=3`);
             const items = data.items || [];
             
             if (items.length === 0) {
@@ -676,12 +583,14 @@ async function renderDashboard() {
                 elements.dashboardRecent.innerHTML = items.map(file => {
                     return `
                         <div class="info-item" style="cursor:pointer;" onclick="openVideoPlayer(${JSON.stringify(file).replace(/"/g, '&quot;')})">
-                            <span class="info-label">🎬 ${file.name}</span>
+                            <span class="info-label">🎬 ${escapeHtml(file.name)}</span>
                             <span class="info-value" style="font-size:11px;">${formatSize(file.size)}</span>
                         </div>
                     `;
                 }).join('');
             }
+        } catch (err) {
+            elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>';
         }
     } catch (e) {
         elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>';
@@ -718,7 +627,7 @@ function loadRoots() {
                     <span class="card-preview-icon">📁</span>
                 </div>
                 <div class="card-details">
-                    <div class="card-title" title="${name}">${name}</div>
+                    <div class="card-title" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
                     <div class="card-meta">
                         <span>共享库</span>
                     </div>
@@ -736,9 +645,8 @@ async function loadSystemDrives() {
     elements.browserBreadcrumbs.innerHTML = '<span class="crumb" onclick="loadRoots()">根目录</span><span class="crumb active">磁盘盘符</span>';
     
     try {
-        const res = await fetch(`${state.apiBase}/api/v1/system/drives`);
-        const drives = await res.json();
-        if (res.ok && drives.length > 0) {
+        const drives = await apiRequest(`${state.apiBase}/api/v1/system/drives`);
+        if (drives && drives.length > 0) {
             elements.browserList.innerHTML = drives.map(drive => {
                 return `
                     <div class="media-card" onclick="browsePath('${drive.replace(/\\/g, '/')}')">
@@ -746,7 +654,7 @@ async function loadSystemDrives() {
                             <span class="card-preview-icon">💾</span>
                         </div>
                         <div class="card-details">
-                            <div class="card-title">${drive}</div>
+                            <div class="card-title">${escapeHtml(drive)}</div>
                             <div class="card-meta">
                                 <span>本地磁盘</span>
                             </div>
@@ -758,7 +666,7 @@ async function loadSystemDrives() {
             elements.browserList.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:48px;">无法获取本地磁盘，可能未在 config.yaml 启用 system.allowed_roots</div>';
         }
     } catch (e) {
-        showToast('获取系统磁盘盘符失败', 'error');
+        showToast('获取系统磁盘盘符失败: ' + e.message, 'error');
     }
 }
 
@@ -774,14 +682,7 @@ async function browsePath(path) {
     elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">正在读取目录结构...</div>';
     
     try {
-        const res = await fetch(url);
-        const data = await res.json();
-        
-        if (!res.ok) {
-            showToast(`浏览失败: ${data.error || '权限限制'}`, 'error');
-            loadRoots();
-            return;
-        }
+        const data = await apiRequest(url);
         
         state.currentFolders = data.folders || [];
         state.currentFiles = data.files || [];
@@ -789,7 +690,7 @@ async function browsePath(path) {
         renderBrowserList();
         renderBreadcrumbs(path);
     } catch (e) {
-        showToast('读取共享目录结构异常', 'error');
+        showToast(`浏览失败: ${e.message}`, 'error');
         loadRoots();
     }
 }
@@ -935,23 +836,18 @@ async function triggerBrowserSearch() {
     
     try {
         const url = `${state.apiBase}/api/v1/search?query=${encodeURIComponent(query)}&path=${encodeURIComponent(state.currentPath)}`;
-        const res = await fetch(url);
-        const data = await res.json();
+        const data = await apiRequest(url);
         
-        if (res.ok) {
-            state.currentFolders = data.folders || [];
-            state.currentFiles = data.files || [];
-            renderBrowserList();
-            
-            elements.browserBreadcrumbs.innerHTML = `
-                <span class="crumb" onclick="browsePath('${state.currentPath}')">返回上级目录</span>
-                <span class="crumb active">关于 "${query}" 的结果</span>
-            `;
-        } else {
-            showToast(`搜索失败: ${data.error}`, 'error');
-        }
+        state.currentFolders = data.folders || [];
+        state.currentFiles = data.files || [];
+        renderBrowserList();
+        
+        elements.browserBreadcrumbs.innerHTML = `
+            <span class="crumb" onclick="browsePath('${state.currentPath}')">返回上级目录</span>
+            <span class="crumb active">关于 "${escapeHtml(query)}" 的结果</span>
+        `;
     } catch (e) {
-        showToast('搜索查询接口故障', 'error');
+        showToast(`搜索失败: ${e.message}`, 'error');
     }
 }
 
@@ -995,15 +891,10 @@ async function openVideoPlayer(file) {
     // Fetch video duration
     try {
         const durationUrl = `${state.apiBase}/api/v1/media/duration?path=${encodeURIComponent(file.path)}`;
-        const res = await fetch(durationUrl);
-        if (res.ok) {
-            const data = await res.json();
-            state.videoDuration = data.duration;
-            elements.videoProgress.max = state.videoDuration;
-            elements.videoTimeDisplay.textContent = `00:00 / ${formatTime(state.videoDuration)}`;
-        } else {
-            console.error('Failed to fetch duration');
-        }
+        const data = await apiRequest(durationUrl);
+        state.videoDuration = data.duration;
+        elements.videoProgress.max = state.videoDuration;
+        elements.videoTimeDisplay.textContent = `00:00 / ${formatTime(state.videoDuration)}`;
     } catch (e) {
         console.error('Error fetching duration:', e);
     }
@@ -1047,7 +938,7 @@ function renderLightboxImage() {
     
     if (state.lightboxStitchMode) {
         elements.btnImageModeToggle.classList.add('active');
-        elements.btnImageModeToggle.innerHTML = '📖 单张模式';
+        elements.btnImageModeToggle.textContent = '📖 单张模式';
         
         elements.lightboxSingleView.style.display = 'none';
         elements.lightboxStitchView.style.display = 'flex';
@@ -1082,7 +973,7 @@ function renderLightboxImage() {
         }
     } else {
         elements.btnImageModeToggle.classList.remove('active');
-        elements.btnImageModeToggle.innerHTML = '📖 拼接模式';
+        elements.btnImageModeToggle.textContent = '📖 拼接模式';
         
         elements.lightboxSingleView.style.display = 'flex';
         elements.lightboxStitchView.style.display = 'none';
@@ -1127,10 +1018,10 @@ function openTaggingDialog(file) {
         return `
             <label class="tag-selector-item">
                 <span style="display:flex; align-items:center; gap:8px;">
-                    <span style="width:12px; height:12px; border-radius:50%; background-color:${tag.color};"></span>
-                    <span>${tag.name}</span>
+                    <span style="width:12px; height:12px; border-radius:50%; background-color:${escapeHtml(tag.color)};"></span>
+                    <span>${escapeHtml(tag.name)}</span>
                 </span>
-                <input type="checkbox" data-tag-id="${tag.id}" ${checked} onchange="toggleFileTagAssociation(this, '${tag.id}', '${file.path.replace(/\\/g, '\\\\')}')">
+                <input type="checkbox" data-tag-id="${escapeHtml(tag.id)}" ${checked} onchange="toggleFileTagAssociation(this, '${escapeHtml(tag.id)}', '${escapeHtml(file.path.replace(/\\/g, '\\\\'))}')">
             </label>
         `;
     }).join('');
@@ -1148,36 +1039,38 @@ async function toggleFileTagAssociation(checkbox, tagId, filePath) {
     const url = `${state.apiBase}/api/v1/tags/${tagId}/files/${encodeRoutePath(filePath)}`;
     
     try {
-        const res = await fetch(url, {
+        await apiRequest(url, {
             method: isAssociate ? 'POST' : 'DELETE'
         });
         
-        if (res.ok) {
-            showToast(isAssociate ? '🏷️ 标签关联成功！' : '🏷️ 标签已解除关联', 'success');
-            await loadTags(); // Refresh tags mappings in memory
+        showToast(isAssociate ? '🏷️ 标签关联成功！' : '🏷️ 标签已解除关联', 'success');
+        await loadTags(); // Refresh tags mappings in memory
+        
+        // Re-render folder list cards to show/hide color dots
+        if (state.activeTab === 'browser') {
+            renderBrowserList();
+        }
+        
+        // Re-render container card dot state
+        const cleanCardId = `file-card-${safeBtoa(filePath).replace(/=/g, '')}`;
+        const cardEl = document.getElementById(cleanCardId);
+        if (cardEl) {
+            // Determine if file has any tags left
+            const fileTags = state.fileTagsMap[filePath] || [];
+            if (fileTags.length > 0) cardEl.classList.add('tagged');
+            else cardEl.classList.remove('tagged');
             
-            // Re-render folder list cards to show/hide color dots
-            if (state.activeTab === 'browser') {
-                renderBrowserList();
+            // Re-render custom tags dots/chips on the item details
+            const dotsEl = cardEl.querySelector('.tag-color-dots');
+            if (dotsEl) {
+                dotsEl.innerHTML = fileTags.map(tag => `
+                    <span class="tag-dot" style="background-color: ${escapeHtml(tag.color)}" title="${escapeHtml(tag.name)}"></span>
+                `).join('');
             }
-            
-            // Re-render container card dot state
-            const cleanCardId = `file-card-${safeBtoa(filePath).replace(/=/g, '')}`;
-            const cardEl = document.getElementById(cleanCardId);
-            if (cardEl) {
-                // Determine if file has any tags left
-                const fileTags = state.fileTagsMap[filePath] || [];
-                if (fileTags.length > 0) cardEl.classList.add('tagged');
-                else cardEl.classList.remove('tagged');
-            }
-        } else {
-            checkbox.checked = !isAssociate; // Revert checkbox state on API error
-            const data = await res.json();
-            showToast(`操作失败: ${data.error}`, 'error');
         }
     } catch (e) {
         checkbox.checked = !isAssociate; // Revert
-        showToast('连接标签管理服务异常', 'error');
+        showToast(`标签关联失败: ${e.message}`, 'error');
     }
 }
 
@@ -1190,10 +1083,10 @@ function renderTagsManager() {
     
     elements.tagsManagerList.innerHTML = state.tags.map(tag => {
         return `
-            <div class="tag-chip" style="background-color: ${tag.color}33; border-color: ${tag.color};">
-                <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background-color:${tag.color};"></span>
-                <span>${tag.name}</span>
-                <button class="btn-tag-delete" title="删除分类标签" onclick="deleteTag('${tag.id}', '${tag.name}')">✕</button>
+            <div class="tag-chip" style="background-color: ${escapeHtml(tag.color)}33; border-color: ${escapeHtml(tag.color)};">
+                <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background-color:${escapeHtml(tag.color)};"></span>
+                <span>${escapeHtml(tag.name)}</span>
+                <button class="btn-tag-delete" title="删除分类标签" onclick="deleteTag('${escapeHtml(tag.id)}', '${escapeHtml(tag.name)}')">✕</button>
             </div>
         `;
     }).join('');
@@ -1204,20 +1097,14 @@ async function deleteTag(tagId, name) {
     if (!confirm(`确定要彻底删除标签 [${name}] 吗？\n所有关联文件的分类记录也会一并清除。`)) return;
     
     try {
-        const res = await fetch(`${state.apiBase}/api/v1/tags/${tagId}`, {
+        await apiRequest(`${state.apiBase}/api/v1/tags/${tagId}`, {
             method: 'DELETE'
         });
-        
-        if (res.ok) {
-            showToast(`已成功删除标签 [${name}]`, 'success');
-            await loadTags();
-            renderTagsManager();
-        } else {
-            const data = await res.json();
-            showToast(`删除失败: ${data.error}`, 'error');
-        }
+        showToast(`已成功删除标签 [${name}]`, 'success');
+        await loadTags();
+        renderTagsManager();
     } catch (e) {
-        showToast('连接服务端接口错误', 'error');
+        showToast(`删除失败: ${e.message}`, 'error');
     }
 }
 
@@ -1283,7 +1170,7 @@ async function deleteMediaFile(file) {
     }
     
     try {
-        const res = await fetch(`${state.apiBase}/api/v1/system/delete`, {
+        await apiRequest(`${state.apiBase}/api/v1/system/delete`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1294,24 +1181,19 @@ async function deleteMediaFile(file) {
             })
         });
         
-        const data = await res.json();
-        if (res.ok) {
-            showToast('文件删除成功', 'success');
-            // If the video modal is open playing this file, close it
-            if (state.playingFile && state.playingFile.path === file.path) {
-                elements.btnCloseVideoModal.click();
-            }
-            // Reload folder contents
-            if (state.activeTab === 'browser') {
-                browsePath(state.currentPath);
-            } else if (state.activeTab === 'dashboard') {
-                initDashboard();
-            }
-        } else {
-            showToast(`删除失败: ${data.error}`, 'error');
+        showToast('文件删除成功', 'success');
+        // If the video modal is open playing this file, close it
+        if (state.playingFile && state.playingFile.path === file.path) {
+            elements.btnCloseVideoModal.click();
+        }
+        // Reload folder contents
+        if (state.activeTab === 'browser') {
+            browsePath(state.currentPath);
+        } else if (state.activeTab === 'dashboard') {
+            initDashboard();
         }
     } catch (e) {
-        showToast('请求删除接口错误', 'error');
+        showToast(`删除失败: ${e.message}`, 'error');
     }
 }
 
@@ -1331,7 +1213,7 @@ async function deleteFolder(folder) {
     }
     
     try {
-        const res = await fetch(`${state.apiBase}/api/v1/system/delete`, {
+        await apiRequest(`${state.apiBase}/api/v1/system/delete`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1342,15 +1224,21 @@ async function deleteFolder(folder) {
             })
         });
         
-        const data = await res.json();
-        if (res.ok) {
-            showToast('文件夹删除成功', 'success');
-            // Reload folder contents
-            browsePath(state.currentPath);
-        } else {
-            showToast(`删除失败: ${data.error}`, 'error');
-        }
+        showToast('文件夹删除成功', 'success');
+        // Reload folder contents
+        browsePath(state.currentPath);
     } catch (e) {
-        showToast('请求删除接口错误', 'error');
+        showToast(`删除失败: ${e.message}`, 'error');
     }
 }
+
+// Expose module-scoped functions to global window object for legacy inline event handlers
+window.browsePath = browsePath;
+window.openMedia = openMedia;
+window.openTaggingDialog = openTaggingDialog;
+window.deleteMediaFile = deleteMediaFile;
+window.deleteFolder = deleteFolder;
+window.deleteTag = deleteTag;
+window.openVideoPlayer = openVideoPlayer;
+window.loadRoots = loadRoots;
+window.toggleFileTagAssociation = toggleFileTagAssociation;

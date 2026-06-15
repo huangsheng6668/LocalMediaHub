@@ -15,7 +15,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
@@ -33,7 +35,6 @@ internal fun FavoritesContent(
     getThumbnailUrl: (MediaFile) -> String,
     onFileLongClick: (MediaFile) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: BrowseViewModel,
 ) {
     if (favoriteFiles.isEmpty()) {
         Box(
@@ -49,13 +50,13 @@ internal fun FavoritesContent(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    "暂无收藏内容",
+                    stringResource(R.string.content_no_favorites),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "在浏览媒体文件时点击右上角的爱心图标即可将其添加到这里",
+                    stringResource(R.string.content_no_favorites_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -112,21 +113,20 @@ internal fun FavoritesContent(
 internal fun SearchContent(
     searchState: SearchState,
     searchQuery: String,
-    favorites: Set<String>,
     onFolderClick: (Folder) -> Unit,
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile) -> Unit,
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
+    getThumbnailUrl: (MediaFile) -> String,
     onFileLongClick: (MediaFile) -> Unit = {},
     modifier: Modifier = Modifier,
-    viewModel: BrowseViewModel,
 ) {
     when (searchState) {
         is SearchState.Idle -> {
             Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    if (searchQuery.isEmpty()) "请输入搜索关键词" else "正在搜索中...",
+                    if (searchQuery.isEmpty()) stringResource(R.string.content_search_placeholder) else stringResource(R.string.content_searching),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -140,16 +140,16 @@ internal fun SearchContent(
         is SearchState.Error -> {
             Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    (searchState as SearchState.Error).message,
+                    searchState.message,
                     color = MaterialTheme.colorScheme.error,
                 )
             }
         }
         is SearchState.Results -> {
-            val result = (searchState as SearchState.Results).result
+            val result = searchState.result
             if (result.folders.isEmpty() && result.files.isEmpty()) {
                 Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("没有找到与 \"$searchQuery\" 相关的搜索结果", style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.content_no_results, searchQuery), style = MaterialTheme.typography.bodyLarge)
                 }
             } else {
                 LazyVerticalGrid(
@@ -166,7 +166,7 @@ internal fun SearchContent(
                         when (file.mediaType) {
                             "video" -> VideoCard(
                                 file = file,
-                                thumbnailUrl = viewModel.getThumbnailUrl(file),
+                                thumbnailUrl = getThumbnailUrl(file),
                                 isFavorite = isFavorite(file.relativePath),
                                 onToggleFavorite = { onToggleFavorite(file) },
                                 onClick = { onVideoClick(file) },
@@ -174,7 +174,7 @@ internal fun SearchContent(
                             )
                             "image" -> ImageCard(
                                 file = file,
-                                thumbnailUrl = viewModel.getThumbnailUrl(file),
+                                thumbnailUrl = getThumbnailUrl(file),
                                 isFavorite = isFavorite(file.relativePath),
                                 onToggleFavorite = { onToggleFavorite(file) },
                                 onClick = { onImageClick(file) },
@@ -193,7 +193,6 @@ internal fun SearchContent(
 internal fun BrowseContent(
     folders: List<Folder>,
     files: List<MediaFile>,
-    favorites: Set<String>,
     onFolderClick: (Folder) -> Unit,
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile) -> Unit,
@@ -334,7 +333,7 @@ internal fun BrowseContent(
                 ) {
                     Icon(
                         Icons.Filled.KeyboardArrowUp,
-                        contentDescription = "回到顶部",
+                        contentDescription = stringResource(R.string.content_to_top),
                         modifier = Modifier.size(24.dp),
                     )
                 }
@@ -355,7 +354,7 @@ internal fun BrowseContent(
                 ) {
                     Icon(
                         Icons.Filled.KeyboardArrowDown,
-                        contentDescription = "滚到底部",
+                        contentDescription = stringResource(R.string.content_to_bottom),
                         modifier = Modifier.size(24.dp),
                     )
                 }

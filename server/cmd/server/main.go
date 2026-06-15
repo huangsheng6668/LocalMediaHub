@@ -2,7 +2,8 @@ package main
 
 import (
 	"flag"
-	"log"
+	"log/slog"
+	"os"
 	"net/http"
 
 	"github.com/localmediahub/server/internal/config"
@@ -19,16 +20,16 @@ func main() {
 
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		slog.Error("Failed to load config", "error", err); os.Exit(1)
 	}
 
 	// Start mDNS
 	mdnsSvc, err := localmdns.NewService(cfg.Server.Host, cfg.Server.Port)
 	if err != nil {
-		log.Printf("Warning: failed to create mDNS service: %v", err)
+		slog.Warn("Failed to create mDNS service", "error", err)
 	} else {
 		if err := mdnsSvc.Start(cfg.Server.Host, cfg.Server.Port); err != nil {
-			log.Printf("Warning: failed to start mDNS: %v", err)
+			slog.Warn("Failed to start mDNS", "error", err)
 		}
 	}
 
@@ -36,10 +37,10 @@ func main() {
 		runHeadless(cfg)
 	} else {
 		if !isSystraySupported() {
-			log.Println("Warning: System tray is not supported in this build (requires Windows with CGO enabled). Automatically falling back to headless mode.")
+			slog.Warn("System tray is not supported in this build (requires Windows with CGO enabled). Automatically falling back to headless mode.")
 			runHeadless(cfg)
 		} else if !isInteractiveSession() {
-			log.Println("Warning: Non-interactive window station or headless environment detected. Automatically falling back to headless mode.")
+			slog.Warn("Non-interactive window station or headless environment detected. Automatically falling back to headless mode.")
 			runHeadless(cfg)
 		} else {
 			gui.Run(cfg)
@@ -50,12 +51,12 @@ func main() {
 func runHeadless(cfg *config.Config) {
 	s, err := server.New(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		slog.Error("Failed to create server", "error", err); os.Exit(1)
 	}
 
-	log.Printf("LocalMediaHub Server Initialized. LAN IP: %s", s.IP)
-	log.Printf("Starting LocalMediaHub on %s:%d (headless)", cfg.Server.Host, cfg.Server.Port)
+	slog.Info("LocalMediaHub Server Initialized", "ip", s.IP)
+	slog.Info("Starting LocalMediaHub (headless)", "host", cfg.Server.Host, "port", cfg.Server.Port)
 	if err := s.Start(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server error: %v", err)
+		slog.Error("Server error", "error", err); os.Exit(1)
 	}
 }

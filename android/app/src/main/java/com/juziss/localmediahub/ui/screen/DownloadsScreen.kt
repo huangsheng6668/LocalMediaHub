@@ -30,7 +30,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import coil.compose.AsyncImage
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.DownloadEntry
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
@@ -87,9 +89,9 @@ fun DownloadsScreen(
             TopAppBar(
                 title = {
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("离线已下载", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.downloads_title), fontWeight = FontWeight.Bold)
                         Text(
-                            text = "设备本地离线媒体库",
+                            text = stringResource(R.string.downloads_subtitle),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -105,7 +107,7 @@ fun DownloadsScreen(
                     }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回",
+                            contentDescription = stringResource(R.string.back),
                             tint = MaterialTheme.colorScheme.onBackground,
                         )
                     }
@@ -139,7 +141,7 @@ fun DownloadsScreen(
                             modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp)
                         ) {
                             Text(
-                                text = "根目录",
+                                text = stringResource(R.string.downloads_root),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
@@ -228,7 +230,7 @@ fun DownloadsScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "当前目录下的所有已下载文件均已被移除。",
+                            text = "stringResource(R.string.downloads_folder_empty_desc)",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -319,7 +321,7 @@ fun DownloadsScreen(
         AlertDialog(
             onDismissRequest = { selectedEntryForDelete = null },
             shape = RoundedCornerShape(20.dp),
-            title = { Text("删除本地已下载文件？", fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(R.string.downloads_delete_file_title), fontWeight = FontWeight.Bold) },
             text = { Text("这将从您手机的本地存储中永久删除文件 \"${entry.file.name}\"，该操作不可撤销。") },
             confirmButton = {
                 TextButton(
@@ -331,12 +333,12 @@ fun DownloadsScreen(
                         contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Text("确认删除")
+                    Text(stringResource(R.string.confirm_delete))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { selectedEntryForDelete = null }) {
-                    Text("取消")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -357,7 +359,7 @@ fun DownloadsScreen(
         AlertDialog(
             onDismissRequest = { selectedFolderForDelete = null },
             shape = RoundedCornerShape(20.dp),
-            title = { Text("删除本地已下载文件夹？", fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(R.string.downloads_delete_folder_title), fontWeight = FontWeight.Bold) },
             text = { Text("这将从您手机的本地存储中永久删除文件夹 \"$folderName\" 及其包含的 ${folderFiles.size} 个离线媒体文件，该操作不可撤销。") },
             confirmButton = {
                 TextButton(
@@ -370,12 +372,12 @@ fun DownloadsScreen(
                         contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Text("全部删除")
+                    Text(stringResource(R.string.downloads_delete_all))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { selectedFolderForDelete = null }) {
-                    Text("取消")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -444,7 +446,7 @@ private fun FolderItemCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "${itemCount} 个文件",
+                        text = stringResource(R.string.downloads_file_count, itemCount),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -572,7 +574,7 @@ private fun DownloadItemCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (entry.file.mediaType == "video") "视频" else "图片",
+                    text = if (entry.file.mediaType == "video") stringResource(R.string.video) else stringResource(R.string.image),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold

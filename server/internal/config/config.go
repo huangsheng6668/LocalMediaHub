@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,6 +23,14 @@ type ScanConfig struct {
 	Roots           []string `yaml:"roots,omitempty" json:"roots,omitempty"`
 	VideoExtensions []string `yaml:"video_extensions" json:"video_extensions"`
 	ImageExtensions []string `yaml:"image_extensions" json:"image_extensions"`
+
+	// Cached result of auto-detected drives (only used when Roots is empty).
+	// Detecting drives probes A-Z: with os.Stat on every call, which is called
+	// dozens of times per request across handlers; the drive set rarely changes
+	// during a run, so we compute it once and reuse it. Reset via
+	// InvalidateRootsCache (e.g. after the user edits config via the admin API).
+	autoRoots     []string
+	autoRootsOnce sync.Once
 }
 
 // GetRoots returns configured roots, or auto-detects all drives if empty.
@@ -29,14 +38,26 @@ func (s *ScanConfig) GetRoots() []string {
 	if len(s.Roots) > 0 {
 		return s.Roots
 	}
-	var drives []string
-	for _, letter := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
-		path := string(letter) + ":\\"
-		if _, err := os.Stat(path); err == nil {
-			drives = append(drives, path)
+	s.autoRootsOnce.Do(func() {
+		var drives []string
+		for _, letter := range "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+			path := string(letter) + ":\\"
+			if _, err := os.Stat(path); err == nil {
+				drives = append(drives, path)
+			}
 		}
-	}
-	return drives
+		s.autoRoots = drives
+	})
+	return s.autoRoots
+}
+
+// InvalidateRootsCache clears the cached auto-detected drive list so the next
+// GetRoots call re-probes. Call this whenever Roots may have changed (e.g.
+// after applying an admin config update) or when external drive topology
+// changes and a refresh is desired.
+func (s *ScanConfig) InvalidateRootsCache() {
+	s.autoRoots = nil
+	s.autoRootsOnce = sync.Once{}
 }
 
 type ThumbnailConfig struct {

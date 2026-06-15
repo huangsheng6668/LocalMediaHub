@@ -71,7 +71,7 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 
 	entries, err := os.ReadDir(pathStr)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	folders := make([]models.Folder, 0)
@@ -140,9 +140,9 @@ func (h *Handler) SystemThumbnail(c echo.Context) error {
 	thumbPath, err := h.thumbnail.GenerateSystemThumbnail(pathStr)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "file not found"})
+			return respondNotFound(c, "file not found")
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	return c.File(thumbPath)
@@ -173,9 +173,9 @@ func (h *Handler) SystemStream(c echo.Context) error {
 
 	if err := h.streaming.ServeFile(c.Response().Writer, c.Request(), pathStr); err != nil {
 		if os.IsNotExist(err) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "file not found"})
+			return respondNotFound(c, "file not found")
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 	return nil
 }
@@ -264,21 +264,21 @@ func (h *Handler) DeletePath(c echo.Context) error {
 	fi, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "path not found"})
+			return respondNotFound(c, "path not found")
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	if fi.IsDir() {
 		if !req.Recursive {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot delete a non-empty directory without recursive flag"})
+			return respondError(c, http.StatusBadRequest, "cannot delete a non-empty directory without recursive flag")
 		}
 		if err := os.RemoveAll(absPath); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to delete directory: %v", err)})
+			return respondInternalError(c, fmt.Errorf("failed to delete directory: %w", err))
 		}
 	} else {
 		if err := os.Remove(absPath); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to delete file: %v", err)})
+			return respondInternalError(c, fmt.Errorf("failed to delete file: %w", err))
 		}
 	}
 

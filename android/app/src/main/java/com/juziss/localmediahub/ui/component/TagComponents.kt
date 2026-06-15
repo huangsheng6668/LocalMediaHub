@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.stringResource
+import com.juziss.localmediahub.R
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
@@ -19,11 +21,10 @@ internal fun TagFilterBar(
     tags: List<Tag>,
     activeTagFilter: Tag?,
     onTagClick: (Tag) -> Unit,
-    onManageTags: () -> Unit,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(
-            text = "文件标签",
+            text = stringResource(R.string.tag_title),
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -75,14 +76,14 @@ internal fun TagMenuDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "${file.name} 的标签列表",
+                text = stringResource(R.string.tag_list_title, file.name),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         },
         text = {
             if (tags.isEmpty()) {
-                Text("尚无已创建的标签。请先在服务端或首页创建标签。")
+                Text(stringResource(R.string.tag_empty))
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     tags.forEach { tag ->
@@ -130,7 +131,7 @@ internal fun TagMenuDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("完成")
+                Text(stringResource(R.string.done))
             }
         },
     )

@@ -1,5 +1,9 @@
 package com.juziss.localmediahub.ui.screen
 
+import com.juziss.localmediahub.ui.component.SeekState
+import com.juziss.localmediahub.ui.component.GestureIndicator
+import com.juziss.localmediahub.ui.component.rememberPlayerGestureListener
+
 import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
@@ -22,7 +26,7 @@ import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
@@ -50,19 +54,43 @@ import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.compose.ui.res.stringResource
+import com.juziss.localmediahub.R
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
-private data class SeekState(
-    val isSeeking: Boolean = false,
-    val offsetMs: Long = 0L,
-)
 
-private data class GestureIndicator(
-    val visible: Boolean = false,
-    val icon: ImageVector? = null,
-    val text: String = "",
-)
+
+/**
+ * Builds a stream URL for the given base, transcode flag and start position.
+ *
+ * For transcoded streams the server cannot satisfy byte-range seeks, so seeking
+ * is done at the time level via `?start=<seconds>` (ffmpeg input seek). In
+ * direct (copy) mode the server uses http.ServeContent which handles Range
+ * natively, so no `start` param is added — ExoPlayer seeks via Range requests.
+ *
+ * Any existing transcode/start query params on [baseUrl] are stripped first so
+ * re-seeking doesn't accumulate duplicate params.
+ */
+private fun buildStreamUrl(baseUrl: String, transcode: Boolean, startSec: Double): String {
+    // Strip any previously applied transcode/start params to get the clean base.
+    var clean = baseUrl
+        .replace(Regex("[?&]transcode=true"), "")
+        .replace(Regex("[?&]start=[^&]*"), "")
+    // Fix up "?&" or trailing "?" left after stripping.
+    clean = clean.replace("?&", "?").removeSuffix("?").removeSuffix("&")
+
+    val params = mutableListOf<String>()
+    if (transcode) params.add("transcode=true")
+    // Only add start for transcoded streams, and only when actually seeking
+    // past the beginning (start=0 is ffmpeg's default anyway).
+    if (transcode && startSec > 0) params.add("start=%.3f".format(startSec))
+
+    return if (params.isEmpty()) clean else {
+        val sep = if (clean.contains("?")) "&" else "?"
+        "$clean$sep${params.joinToString("&")}"
+    }
+}
 
 @Composable
 fun VideoPlayerScreen(
@@ -74,6 +102,10 @@ fun VideoPlayerScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    // Pre-resolve these strings in the composition so they can be used inside
+    // gesture callbacks (detectTapGestures) where stringResource() is not allowed.
+    val pausedText = stringResource(R.string.video_paused)
+    val playingText = stringResource(R.string.video_playing)
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     val exoPlayer = remember {
@@ -185,15 +217,42 @@ fun VideoPlayerScreen(
         }
     }
 
+    // Whether the current stream is transcoded. Declared here (before the seek
+    // LaunchedEffect) because seek behaviour depends on it: transcoded streams
+    // need a URL rebuild with ?start=<seconds> instead of a byte-range seek.
+    var isTranscodingEnabled by remember { mutableStateOf(streamUrl.contains("transcode=true")) }
+
     // Apply seek on gesture end
     LaunchedEffect(seekState.isSeeking) {
         if (!seekState.isSeeking && seekState.offsetMs != 0L) {
             val currentPos = exoPlayer.currentPosition
             val newPos = (currentPos + seekState.offsetMs).coerceIn(0L, exoPlayer.duration)
-            exoPlayer.seekTo(newPos)
+            if (isTranscodingEnabled) {
+                // Transcoded streams are generated on the fly and cannot be
+                // byte-seeked. Rebuild the URL with ?start=<seconds> so the
+                // server re-opens the transcode at the requested position
+                // (ffmpeg input seek), then resume playback from there.
+                val newUrl = buildStreamUrl(streamUrl, isTranscodingEnabled, newPos / 1000.0)
+                exoPlayer.setMediaItem(MediaItem.fromUri(newUrl))
+                exoPlayer.prepare()
+                exoPlayer.seekTo(0L)
+                exoPlayer.play()
+            } else {
+                exoPlayer.seekTo(newPos)
+            }
             seekState = SeekState()
         }
     }
+
+    val gestureListener = rememberPlayerGestureListener(
+        exoPlayer = exoPlayer,
+        pausedText = pausedText,
+        playingText = playingText,
+        onSeekStateChange = { seekState = it },
+        onBrightnessIndicatorChange = { brightnessIndicator = it },
+        onVolumeIndicatorChange = { volumeIndicator = it },
+        onPlayPauseIndicatorChange = { playPauseIndicator = it }
+    )
 
     Box(
         modifier = Modifier
@@ -210,140 +269,7 @@ fun VideoPlayerScreen(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-
-                    // Gesture detection on PlayerView — returns false so PlayerView
-                    // still handles its own seekbar and controls normally.
-                    var gestureStartX = 0f
-                    var gestureStartY = 0f
-                    var isDragging = false
-                    var isHorizontal: Boolean? = null
-                    var lastTapTime = 0L
-                    var brightnessStart = 0f
-                    var volumeStart = 0
-
-                    fun getBrightness(): Float {
-                        val activity = ctx as? Activity ?: return 0.5f
-                        val params = activity.window.attributes
-                        return if (params.screenBrightness < 0) 0.5f else params.screenBrightness
-                    }
-
-                    fun setBrightness(value: Float) {
-                        val activity = ctx as? Activity ?: return
-                        val clamped = value.coerceIn(0f, 1f)
-                        val params = activity.window.attributes
-                        params.screenBrightness = clamped
-                        activity.window.attributes = params
-                    }
-
-                    fun getVolume(): Int {
-                        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        return am.getStreamVolume(AudioManager.STREAM_MUSIC)
-                    }
-
-                    fun getMaxVolume(): Int {
-                        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        return am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    }
-
-                    fun setVolume(vol: Int) {
-                        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                        am.setStreamVolume(AudioManager.STREAM_MUSIC, vol.coerceIn(0, max), 0)
-                    }
-
-                    setOnTouchListener { _, event ->
-                        val viewHeight = height.toFloat()
-                        val viewWidth = width.toFloat()
-                        val threshold = 30f * resources.displayMetrics.density
-
-                        when (event.actionMasked) {
-                            MotionEvent.ACTION_DOWN -> {
-                                gestureStartX = event.x
-                                gestureStartY = event.y
-                                isDragging = false
-                                isHorizontal = null
-                                brightnessStart = getBrightness()
-                                volumeStart = getVolume()
-                            }
-                            MotionEvent.ACTION_MOVE -> {
-                                val dx = event.x - gestureStartX
-                                val dy = event.y - gestureStartY
-
-                                if (!isDragging) {
-                                    if (abs(dx) > threshold || abs(dy) > threshold) {
-                                        isDragging = true
-                                        isHorizontal = abs(dx) > abs(dy)
-                                    }
-                                }
-
-                                if (isDragging) {
-                                    if (isHorizontal == true) {
-                                        val density = resources.displayMetrics.density
-                                        val seekSec = (dx / density).toInt().coerceIn(-120, 120)
-                                        val offsetMs = (seekSec.toLong() * 1000).coerceIn(-120_000L, 120_000L)
-                                        seekState = SeekState(isSeeking = true, offsetMs = offsetMs)
-                                    } else {
-                                        val isLeftHalf = gestureStartX < viewWidth / 2
-                                        val progress = -dy / viewHeight
-
-                                        if (isLeftHalf) {
-                                            val newBrightness = (brightnessStart + progress).coerceIn(0f, 1f)
-                                            setBrightness(newBrightness)
-                                            brightnessIndicator = GestureIndicator(
-                                                visible = true,
-                                                icon = Icons.Default.Brightness6,
-                                                text = "${(newBrightness * 100).toInt()}%"
-                                            )
-                                        } else {
-                                            val maxVol = getMaxVolume()
-                                            val delta = (progress * maxVol).toInt()
-                                            val newVol = (volumeStart + delta).coerceIn(0, maxVol)
-                                            setVolume(newVol)
-                                            volumeIndicator = GestureIndicator(
-                                                visible = true,
-                                                icon = Icons.Default.VolumeUp,
-                                                text = "$newVol/$maxVol"
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            MotionEvent.ACTION_UP -> {
-                                if (isDragging) {
-                                    // Finalize seek
-                                    if (seekState.isSeeking) {
-                                        seekState = seekState.copy(isSeeking = false)
-                                    }
-                                } else {
-                                    // Tap → detect double tap for play/pause
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastTapTime < 300) {
-                                        if (exoPlayer.isPlaying) {
-                                            exoPlayer.pause()
-                                            playPauseIndicator = GestureIndicator(
-                                                visible = true,
-                                                icon = Icons.Default.Pause,
-                                                text = "已暂停"
-                                            )
-                                        } else {
-                                            exoPlayer.play()
-                                            playPauseIndicator = GestureIndicator(
-                                                visible = true,
-                                                icon = Icons.Default.PlayArrow,
-                                                text = "播放中"
-                                            )
-                                        }
-                                        lastTapTime = 0L
-                                    } else {
-                                        lastTapTime = now
-                                    }
-                                }
-                                isDragging = false
-                            }
-                        }
-                        // Return false → PlayerView still handles seekbar & controls
-                        false
-                    }
+                    setOnTouchListener(gestureListener)
                 }
             },
             modifier = Modifier.fillMaxSize(),
@@ -433,7 +359,7 @@ fun VideoPlayerScreen(
                     .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(volumeIndicator.text, color = Color.White, fontSize = 14.sp)
             }
@@ -476,19 +402,16 @@ fun VideoPlayerScreen(
                 }
             }
 
-            var isTranscodingEnabled by remember { mutableStateOf(streamUrl.contains("transcode=true")) }
             Button(
                 onClick = {
-                    isTranscodingEnabled = !isTranscodingEnabled
                     val currentPos = exoPlayer.currentPosition
-                    val newUrl = if (isTranscodingEnabled) {
-                        if (streamUrl.contains("?")) "$streamUrl&transcode=true" else "$streamUrl?transcode=true"
-                    } else {
-                        streamUrl.replace("&transcode=true", "").replace("?transcode=true", "")
-                    }
+                    val newUrl = buildStreamUrl(streamUrl, isTranscodingEnabled, currentPos / 1000.0)
                     exoPlayer.setMediaItem(MediaItem.fromUri(newUrl))
                     exoPlayer.prepare()
-                    exoPlayer.seekTo(currentPos)
+                    // In transcode mode the stream starts at `start=<currentPos>`
+                    // already, so seek to 0 (the stream's own zero point). In
+                    // direct mode seek to the original position via byte Range.
+                    exoPlayer.seekTo(if (isTranscodingEnabled) 0L else currentPos)
                     exoPlayer.play()
                 },
                 colors = ButtonDefaults.buttonColors(
@@ -499,7 +422,7 @@ fun VideoPlayerScreen(
                 modifier = Modifier.height(36.dp)
             ) {
                 Text(
-                    text = if (isTranscodingEnabled) "兼容转码" else "极速原画",
+                    text = if (isTranscodingEnabled) stringResource(R.string.video_transcode_on) else stringResource(R.string.video_transcode_off),
                     color = Color.White,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
@@ -513,10 +436,10 @@ fun VideoPlayerScreen(
                 onDismissRequest = { showDeleteConfirm = false },
                 shape = RoundedCornerShape(20.dp),
                 title = {
-                    Text("确认彻底删除？", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.video_delete_title), fontWeight = FontWeight.Bold)
                 },
                 text = {
-                    Text("您确定要从服务端永久删除该视频文件吗？此操作不可逆！")
+                    Text(stringResource(R.string.video_delete_desc))
                 },
                 confirmButton = {
                     TextButton(
@@ -528,12 +451,12 @@ fun VideoPlayerScreen(
                             contentColor = Color.Red
                         )
                     ) {
-                        Text("确认删除")
+                        Text(stringResource(R.string.confirm_delete))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showDeleteConfirm = false }) {
-                        Text("取消")
+                        Text(stringResource(R.string.cancel))
                     }
                 }
             )

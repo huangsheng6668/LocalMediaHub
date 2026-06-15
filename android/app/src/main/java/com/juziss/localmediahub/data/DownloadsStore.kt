@@ -6,9 +6,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.io.File
+import javax.inject.Inject
 
 data class DownloadEntry(
     val file: MediaFile,
@@ -16,15 +18,16 @@ data class DownloadEntry(
     val addedAt: Long = System.currentTimeMillis()
 )
 
-class DownloadsStore(private val context: Context) {
+private val Context.downloadsDataStore by preferencesDataStore(name = "downloads")
 
-    private val Context.dataStore by preferencesDataStore(name = "downloads")
+class DownloadsStore @Inject constructor(@ApplicationContext private val context: Context) {
+
     private val gson = Gson()
 
     private val downloadsKey = stringSetPreferencesKey("download_files_json")
 
     /** Emits all registered downloads, filtering out files that no longer exist on disk. */
-    val downloadedFiles: Flow<List<DownloadEntry>> = context.dataStore.data.map { preferences ->
+    val downloadedFiles: Flow<List<DownloadEntry>> = context.downloadsDataStore.data.map { preferences ->
         val entries = preferences[downloadsKey]?.mapNotNull { json ->
             try {
                 gson.fromJson(json, DownloadEntry::class.java)
@@ -46,7 +49,7 @@ class DownloadsStore(private val context: Context) {
         val path = customPath ?: File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), file.name).absolutePath
         val entry = DownloadEntry(file, path)
         
-        context.dataStore.edit { preferences ->
+        context.downloadsDataStore.edit { preferences ->
             val current = preferences[downloadsKey] ?: emptySet()
             val filtered = current.filterNot { json ->
                 try {
@@ -63,7 +66,7 @@ class DownloadsStore(private val context: Context) {
 
     /** Remove a downloaded file from downloads list and delete the file. */
     suspend fun removeDownload(relativePath: String) {
-        context.dataStore.edit { preferences ->
+        context.downloadsDataStore.edit { preferences ->
             val current = preferences[downloadsKey] ?: emptySet()
             var localPathToDelete: String? = null
             val match = current.find { json ->
@@ -93,7 +96,7 @@ class DownloadsStore(private val context: Context) {
 
     /** Remove multiple downloaded files from downloads list and delete the files. */
     suspend fun removeDownloads(relativePaths: List<String>) {
-        context.dataStore.edit { preferences ->
+        context.downloadsDataStore.edit { preferences ->
             val current = preferences[downloadsKey] ?: emptySet()
             val pathsSet = relativePaths.toSet()
             val matchesToRemove = mutableSetOf<String>()
@@ -125,7 +128,7 @@ class DownloadsStore(private val context: Context) {
 
     /** Add multiple files to downloads list. */
     suspend fun addDownloads(entries: List<DownloadEntry>) {
-        context.dataStore.edit { preferences ->
+        context.downloadsDataStore.edit { preferences ->
             val current = preferences[downloadsKey] ?: emptySet()
             val incomingPaths = entries.map { it.file.relativePath }.toSet()
             

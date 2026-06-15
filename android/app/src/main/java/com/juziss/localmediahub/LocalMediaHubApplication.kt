@@ -8,7 +8,9 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import com.juziss.localmediahub.native.NativeDecoderFactory
+import dagger.hilt.android.HiltAndroidApp
 
+@HiltAndroidApp
 class LocalMediaHubApplication : Application(), ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {

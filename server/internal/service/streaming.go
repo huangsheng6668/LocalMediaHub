@@ -72,6 +72,12 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 
 		w.Header().Set("Content-Type", "video/mp4")
 		w.Header().Set("Transfer-Encoding", "chunked")
+		// Transcoded streams are generated on the fly and have no fixed byte
+		// layout, so byte-range requests cannot be satisfied. Declaring this
+		// explicitly stops players from issuing Range requests that would 416.
+		// Seeking is handled at the time level via the ?start=<seconds> query
+		// param (the client rebuilds the URL with the new start on seek).
+		w.Header().Set("Accept-Ranges", "none")
 
 		args := []string{}
 		if startSec != "0" {
@@ -147,10 +153,6 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 
 	http.ServeContent(w, r, filepath.Base(filePath), fi.ModTime(), f)
 	return nil
-}
-
-func (s *StreamingService) ValidatePath(filePath string, roots []string) (bool, error) {
-	return IsPathWithinRoots(filePath, roots)
 }
 
 func (s *StreamingService) GetVideoDuration(filePath string) (float64, error) {

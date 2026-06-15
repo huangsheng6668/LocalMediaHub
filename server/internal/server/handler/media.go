@@ -12,20 +12,20 @@ import (
 func (h *Handler) MediaThumbnail(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
 	allowedExts := append(h.cfg.Scan.ImageExtensions, h.cfg.Scan.VideoExtensions...)
 	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusForbidden, err.Error())
 	}
 
 	thumbPath, err := h.thumbnail.GenerateThumbnail(pathStr)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "file not found"})
+			return respondNotFound(c, "file not found")
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	return c.File(thumbPath)
@@ -34,11 +34,11 @@ func (h *Handler) MediaThumbnail(c echo.Context) error {
 func (h *Handler) MediaOriginal(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
 	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.ImageExtensions); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusForbidden, err.Error())
 	}
 
 	return c.File(pathStr)
@@ -47,18 +47,18 @@ func (h *Handler) MediaOriginal(c echo.Context) error {
 func (h *Handler) MediaStream(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
 	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusForbidden, err.Error())
 	}
 
 	if err := h.streaming.ServeFile(c.Response().Writer, c.Request(), pathStr); err != nil {
 		if os.IsNotExist(err) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "file not found"})
+			return respondNotFound(c, "file not found")
 		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 	return nil
 }
@@ -66,16 +66,16 @@ func (h *Handler) MediaStream(c echo.Context) error {
 func (h *Handler) MediaDuration(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
 	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusForbidden, err.Error())
 	}
 
 	duration, err := h.streaming.GetVideoDuration(pathStr)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{

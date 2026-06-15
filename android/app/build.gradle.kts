@@ -5,6 +5,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.parcelize")
+    id("kotlin-kapt")
+    id("com.google.dagger.hilt.android")
 }
 
 val keystorePropertiesFile = rootProject.file("keystore.properties")
@@ -30,7 +32,21 @@ android {
                 storeFile = storeFileVal
                 storePassword = storePasswordVal
             } else {
-                // Fallback to debug signing for release builds
+                // WARNING: no keystore.properties found at the project root, so
+                // the release build falls back to the debug signing key. This is
+                // fine for local testing but MUST NOT be used for Play Store / public
+                // distribution — a debug-signed APK can be resigned by anyone.
+                // To sign properly, create android/keystore.properties with:
+                //   storeFile=<path-to-release.keystore>
+                //   storePassword=***
+                //   keyAlias=***
+                //   keyPassword=***
+                val logger = org.gradle.api.logging.Logging.getLogger("LocalMediaHubSigning")
+                logger.warn("==============================================================")
+                logger.warn(" RELEASE BUILD IS USING THE DEBUG SIGNING KEY.")
+                logger.warn(" No android/keystore.properties with a valid storeFile was found.")
+                logger.warn(" Do NOT distribute this APK publicly.")
+                logger.warn("==============================================================")
                 keyAlias = "androiddebugkey"
                 keyPassword = "android"
                 storePassword = "android"
@@ -43,8 +59,8 @@ android {
         applicationId = "com.juziss.localmediahub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -58,7 +74,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Enable R8 code shrinking + resource shrinking for release builds.
+            // ProGuard/R8 rules are maintained in proguard-rules.pro; see there
+            // for the reflection/JNI keep rules required by Retrofit, Gson,
+            // Compose, DataStore and the native image decoder.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -116,6 +137,11 @@ dependencies {
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.0")
+
+    // Hilt dependency injection
+    implementation("com.google.dagger:hilt-android:2.50")
+    kapt("com.google.dagger:hilt-android-compiler:2.50")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Network
     implementation("com.squareup.retrofit2:retrofit:2.9.0")

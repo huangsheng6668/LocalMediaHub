@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +31,7 @@ func TestGetTaggedMediaReturnsMatchingFiles(t *testing.T) {
 		},
 	}
 	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions)
-	if _, err := scanner.Scan(cfg.Scan.GetRoots()); err != nil {
+	if _, err := scanner.Scan(context.Background(), cfg.Scan.GetRoots()); err != nil {
 		t.Fatalf("failed to seed scanner cache: %v", err)
 	}
 

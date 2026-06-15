@@ -8,8 +8,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import javax.inject.Inject
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(
     name = "server_config"
@@ -21,7 +23,7 @@ data class KnownServer(
     val lastConnected: Long = System.currentTimeMillis(),
 )
 
-class ServerConfig(private val context: Context) {
+class ServerConfig @Inject constructor(@ApplicationContext private val context: Context) {
 
     companion object {
         private val KEY_SERVER_URL = stringPreferencesKey("server_url")

@@ -1,4 +1,8 @@
 package com.juziss.localmediahub.ui.screen
+
+import com.juziss.localmediahub.ui.component.browse.BrowseSummaryCard
+import com.juziss.localmediahub.ui.component.browse.BrowseStateCard
+import com.juziss.localmediahub.ui.component.browse.BrowseLoadingCard
  
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -70,6 +74,8 @@ import com.juziss.localmediahub.ui.component.SystemDrivesContent
 import com.juziss.localmediahub.ui.component.TagFilterBar
 import com.juziss.localmediahub.ui.component.TagMenuDialog
 import com.juziss.localmediahub.viewmodel.BrowseState
+import androidx.compose.ui.res.stringResource
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.viewmodel.SearchState
 import com.juziss.localmediahub.viewmodel.SortOrder
@@ -105,6 +111,16 @@ fun BrowseScreen(
         }
         viewModel.loadTags()
     }
+
+    // Surface download-related toast messages emitted by the ViewModel.
+    val toastMessage by viewModel.toastMessage.collectAsState()
+    val toastContext = LocalContext.current
+    LaunchedEffect(toastMessage) {
+        toastMessage?.let { msg ->
+            Toast.makeText(toastContext, msg, Toast.LENGTH_SHORT).show()
+            viewModel.onToastShown()
+        }
+    }
  
     LaunchedEffect(searchQuery) {
         if (searchQuery.isNotEmpty()) {
@@ -136,7 +152,7 @@ fun BrowseScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { viewModel.updateSearchQuery(it) },
-                            placeholder = { Text("搜索媒体文件...") },
+                            placeholder = { Text(stringResource(R.string.browse_search_hint)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -150,7 +166,7 @@ fun BrowseScreen(
                             isSearchMode = false
                             viewModel.clearSearch()
                         }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -163,11 +179,11 @@ fun BrowseScreen(
                         val collectionTitle = (browseState as? BrowseState.TagCollection)?.title
                         Text(
                             when {
-                                showFavoritesOnly -> "我的最爱"
+                                showFavoritesOnly -> stringResource(R.string.browse_favorites)
                                 collectionTitle != null -> collectionTitle
-                                isSystemBrowse && currentPath.isEmpty() -> "磁盘驱动器"
+                                isSystemBrowse && currentPath.isEmpty() -> stringResource(R.string.browse_drives)
                                 isSystemBrowse -> currentPath
-                                currentPath.isEmpty() -> "共享媒体库"
+                                currentPath.isEmpty() -> stringResource(R.string.browse_libraries)
                                 else -> currentPath
                             },
                             maxLines = 1,
@@ -178,15 +194,15 @@ fun BrowseScreen(
                     navigationIcon = {
                         if (showFavoritesOnly) {
                             IconButton(onClick = { viewModel.setShowFavoritesOnly(false) }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                             }
                         } else if (isCollectionView) {
                             IconButton(onClick = onExitBrowse) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                             }
                         } else if (viewModel.canGoBack()) {
                             IconButton(onClick = { viewModel.navigateBack() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                             }
                         }
                     },
@@ -197,7 +213,7 @@ fun BrowseScreen(
                             }) {
                                 Icon(
                                     Icons.Filled.Storage,
-                                    contentDescription = if (isSystemBrowse) "共享媒体库" else "磁盘分区",
+                                    contentDescription = if (isSystemBrowse) stringResource(R.string.browse_libraries) else stringResource(R.string.browse_title_drive),
                                 )
                             }
                         }
@@ -205,21 +221,21 @@ fun BrowseScreen(
                             IconButton(onClick = { viewModel.setShowFavoritesOnly(true) }) {
                                 Icon(
                                     Icons.Outlined.FavoriteBorder,
-                                    contentDescription = "我的最爱",
+                                    contentDescription = stringResource(R.string.browse_favorites),
                                 )
                             }
                         }
                         if (!showFavoritesOnly) {
                             var showSortMenu by remember { mutableStateOf(false) }
                             IconButton(onClick = { showSortMenu = true }) {
-                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "排序")
+                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = stringResource(R.string.sort))
                             }
                             DropdownMenu(
                                 expanded = showSortMenu,
                                 onDismissRequest = { showSortMenu = false },
                             ) {
                                 Text(
-                                    "文件夹排序",
+                                    stringResource(R.string.browse_sort_folder),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
@@ -246,7 +262,7 @@ fun BrowseScreen(
                                 }
                                 HorizontalDivider()
                                 Text(
-                                    "文件排序",
+                                    stringResource(R.string.browse_sort_file),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
@@ -267,7 +283,7 @@ fun BrowseScreen(
                             }
                             if (!isCollectionView) {
                                 IconButton(onClick = { isSearchMode = true }) {
-                                    Icon(Icons.Filled.Search, contentDescription = "搜索")
+                                    Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
                                 }
                             }
                         }
@@ -311,7 +327,7 @@ fun BrowseScreen(
                 shape = RoundedCornerShape(20.dp),
                 title = {
                     Text(
-                        text = "快捷操作选项",
+                        text = stringResource(R.string.browse_quick_actions),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -341,12 +357,12 @@ fun BrowseScreen(
                                     horizontalArrangement = Arrangement.Start,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("编辑文件标签")
+                                    Text(stringResource(R.string.browse_action_edit_tags))
                                 }
                             }
                             TextButton(
                                 onClick = {
-                                    viewModel.downloadFile(context, item)
+                                    viewModel.downloadFile(item)
                                     itemForActions = null
                                 },
                                 modifier = Modifier.fillMaxWidth()
@@ -355,7 +371,7 @@ fun BrowseScreen(
                                     horizontalArrangement = Arrangement.Start,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("下载媒体到本地")
+                                    Text(stringResource(R.string.browse_action_download_file))
                                 }
                             }
                             TextButton(
@@ -373,7 +389,7 @@ fun BrowseScreen(
                                     horizontalArrangement = Arrangement.Start,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("永久从服务端删除该文件")
+                                    Text(stringResource(R.string.browse_action_delete_file))
                                 }
                             }
                         } else if (item is com.juziss.localmediahub.data.Folder) {
@@ -387,7 +403,7 @@ fun BrowseScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             TextButton(
                                 onClick = {
-                                    viewModel.downloadFolder(context, item)
+                                    viewModel.downloadFolder(item)
                                     itemForActions = null
                                 },
                                 modifier = Modifier.fillMaxWidth()
@@ -396,7 +412,7 @@ fun BrowseScreen(
                                     horizontalArrangement = Arrangement.Start,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("下载整个文件夹内容")
+                                    Text(stringResource(R.string.browse_action_download_folder))
                                 }
                             }
                             TextButton(
@@ -415,7 +431,7 @@ fun BrowseScreen(
                                     horizontalArrangement = Arrangement.Start,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("永久从服务端删除该文件夹")
+                                    Text(stringResource(R.string.browse_action_delete_folder))
                                 }
                             }
                         }
@@ -423,7 +439,7 @@ fun BrowseScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = { itemForActions = null }) {
-                        Text("取消")
+                        Text(stringResource(R.string.cancel))
                     }
                 }
             )
@@ -443,7 +459,7 @@ fun BrowseScreen(
                 shape = RoundedCornerShape(20.dp),
                 title = {
                     Text(
-                        text = if (isFolder) "删除文件夹" else "删除文件",
+                        text = if (isFolder) stringResource(R.string.browse_delete_folder) else stringResource(R.string.browse_delete_file),
                         color = MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.Bold
                     )
@@ -471,7 +487,7 @@ fun BrowseScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "强制递归删除（如果文件夹内有其他内容，必须勾选）",
+                                    text = stringResource(R.string.browse_delete_recursive),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -495,12 +511,12 @@ fun BrowseScreen(
                             contentColor = MaterialTheme.colorScheme.error
                         )
                     ) {
-                        Text("确认删除")
+                        Text(stringResource(R.string.confirm_delete))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showDeleteConfirm = false }) {
-                        Text("取消")
+                        Text(stringResource(R.string.cancel))
                     }
                 }
             )
@@ -511,7 +527,7 @@ fun BrowseScreen(
             AlertDialog(
                 onDismissRequest = {},
                 shape = RoundedCornerShape(20.dp),
-                title = { Text("正在删除资源...", fontWeight = FontWeight.Bold) },
+                title = { Text(stringResource(R.string.browse_deleting), fontWeight = FontWeight.Bold) },
                 text = {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -519,7 +535,7 @@ fun BrowseScreen(
                         modifier = Modifier.padding(16.dp)
                     ) {
                         CircularProgressIndicator()
-                        Text("正在清理云端多媒体文件，这可能需要一点时间。")
+                        Text(stringResource(R.string.browse_deleting_desc))
                     }
                 },
                 confirmButton = {}
@@ -540,7 +556,6 @@ fun BrowseScreen(
             SearchContent(
                 searchState = searchState,
                 searchQuery = searchQuery,
-                favorites = favorites,
                 onFolderClick = { folder ->
                     val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath
                     isSearchMode = false
@@ -557,9 +572,9 @@ fun BrowseScreen(
                 },
                 onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
                 isFavorite = { relativePath -> relativePath in favorites },
+                getThumbnailUrl = viewModel::getThumbnailUrl,
                 onFileLongClick = { file -> itemForActions = file },
                 modifier = Modifier.padding(innerPadding),
-                viewModel = viewModel,
             )
             return@Scaffold
         }
@@ -572,8 +587,8 @@ fun BrowseScreen(
             ) {
                 BrowseSummaryCard(
                     icon = Icons.Outlined.FavoriteBorder,
-                    title = "我的最爱",
-                    message = "收藏的媒体将集中在此处，方便您随时快捷播放。",
+                    title = stringResource(R.string.browse_favorites),
+                    message = stringResource(R.string.browse_fav_card_desc),
                     meta = "共 ${favoriteFiles.size} 个收藏",
                     badge = null,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -592,7 +607,6 @@ fun BrowseScreen(
                     getThumbnailUrl = viewModel::getFavoriteThumbnailUrl,
                     onFileLongClick = { file -> itemForActions = file },
                     modifier = Modifier.weight(1f),
-                    viewModel = viewModel,
                 )
             }
             return@Scaffold
@@ -601,8 +615,8 @@ fun BrowseScreen(
         when (browseState) {
             is BrowseState.Idle -> {
                 BrowseStateCard(
-                    title = "正在准备文件列表...",
-                    message = "正在载入媒体共享根目录、文件属性及快捷标签，请稍候。",
+                    title = stringResource(R.string.browse_loading_files),
+                    message = stringResource(R.string.browse_loading_files_desc),
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
@@ -617,12 +631,12 @@ fun BrowseScreen(
             }
             is BrowseState.Error -> {
                 BrowseStateCard(
-                    title = "浏览目录发生错误",
+                    title = stringResource(R.string.browse_error_title),
                     message = (browseState as BrowseState.Error).message,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
-                    actionLabel = "重新尝试",
+                    actionLabel = stringResource(R.string.browse_retry),
                     onAction = {
                         if (isSystemBrowse) viewModel.loadSystemDrives() else viewModel.loadRoots()
                     },
@@ -637,8 +651,8 @@ fun BrowseScreen(
                 ) {
                     BrowseSummaryCard(
                         icon = Icons.Filled.Storage,
-                        title = "本地共享媒体库",
-                        message = "请选择运行中的电脑服务端所共享的本地磁盘目录。",
+                        title = stringResource(R.string.browse_lib_card_title),
+                        message = stringResource(R.string.browse_lib_card_desc),
                         meta = "共 ${folders.size} 个共享盘符",
                         badge = null,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -662,8 +676,8 @@ fun BrowseScreen(
                 ) {
                     BrowseSummaryCard(
                         icon = Icons.Filled.Storage,
-                        title = "设备系统盘符",
-                        message = "在需要浏览共享媒体库以外的完整磁盘路径时进行切换。",
+                        title = stringResource(R.string.browse_drive_card_title),
+                        message = stringResource(R.string.browse_drive_card_desc),
                         meta = "检测到 ${drives.size} 个磁盘分区",
                         badge = null,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -687,7 +701,7 @@ fun BrowseScreen(
                 ) {
                     BrowseSummaryCard(
                         icon = Icons.Filled.Storage,
-                        title = "系统盘符路径",
+                        title = stringResource(R.string.browse_path_title),
                         message = result.currentPath ?: currentPath,
                         meta = "${result.folders.size} 文件夹 · ${filteredFiles.size} 文件",
                         badge = activeTagFilter?.name,
@@ -696,7 +710,6 @@ fun BrowseScreen(
                     BrowseContent(
                         folders = result.folders,
                         files = filteredFiles,
-                        favorites = favorites,
                         onFolderClick = { folder ->
                             viewModel.browseSystemPath(folder.path, folder.name)
                         },
@@ -723,8 +736,8 @@ fun BrowseScreen(
                 ) {
                     BrowseSummaryCard(
                         icon = Icons.Filled.Folder,
-                        title = if (currentPath.isBlank()) "共享媒体库浏览" else currentPath,
-                        message = "浏览当前共享目录，支持按标签过滤、长按管理标签和播放离线下载。",
+                        title = if (currentPath.isBlank()) stringResource(R.string.browse_browsed_title) else currentPath,
+                        message = stringResource(R.string.browse_browsed_desc),
                         meta = "${result.folders.size} 文件夹 · ${filteredFiles.size} 文件",
                         badge = activeTagFilter?.name,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -739,14 +752,12 @@ fun BrowseScreen(
                                         if (activeTagFilter?.id == tag.id) null else tag
                                     )
                                 },
-                                onManageTags = { },
                             )
                         }
                     }
                     BrowseContent(
                         folders = result.folders,
                         files = filteredFiles,
-                        favorites = favorites,
                         onFolderClick = { folder ->
                             val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath
                             viewModel.browseFolder(path, folder.name)
@@ -774,14 +785,14 @@ fun BrowseScreen(
                     BrowseSummaryCard(
                         icon = Icons.Filled.Bookmarks,
                         title = collection.title,
-                        message = "将您贴上相同标签的多媒体文件跨库收集于此。",
+                        message = stringResource(R.string.browse_collection_desc),
                         meta = "共 ${collection.files.size} 个媒体文件",
-                        badge = "主题收藏集",
+                        badge = stringResource(R.string.browse_collection_title),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                     )
                     if (collection.files.isEmpty()) {
                         BrowseStateCard(
-                            title = "该主题收藏集目前为空",
+                            title = stringResource(R.string.browse_collection_empty),
                             message = "您可以在浏览媒体文件时长按并贴上 \"${collection.title}\" 标签，以便在此快速查看。",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -792,7 +803,6 @@ fun BrowseScreen(
                         BrowseContent(
                             folders = emptyList(),
                             files = collection.files,
-                            favorites = favorites,
                             onFolderClick = {},
                             onVideoClick = onVideoClick,
                             onImageClick = { file ->
@@ -811,156 +821,3 @@ fun BrowseScreen(
     }
 }
  
-@Composable
-private fun BrowseSummaryCard(
-    icon: ImageVector,
-    title: String,
-    message: String,
-    meta: String,
-    badge: String?,
-    modifier: Modifier = Modifier,
-) {
-    ElevatedCard(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(10.dp),
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(10.dp),
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                if (!badge.isNullOrBlank()) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = RoundedCornerShape(4.dp),
-                    ) {
-                        Text(
-                            text = badge,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
-                }
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = meta,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-    }
-}
- 
-@Composable
-private fun BrowseStateCard(
-    title: String,
-    message: String,
-    modifier: Modifier = Modifier,
-    actionLabel: String? = null,
-    onAction: (() -> Unit)? = null,
-) {
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        ElevatedCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp),
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                if (actionLabel != null && onAction != null) {
-                    Button(
-                        onClick = onAction,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(actionLabel)
-                    }
-                }
-            }
-        }
-    }
-}
- 
-@Composable
-private fun BrowseLoadingCard(
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        ElevatedCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp),
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                CircularProgressIndicator()
-                Text(
-                    text = "正在加载文件列表...",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "正在努力加载文件夹、文件列表和标签属性。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}

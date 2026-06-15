@@ -20,8 +20,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.material.icons.filled.PlayArrow
 import coil.compose.AsyncImage
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
  
@@ -37,7 +39,7 @@ internal fun FavoriteToggleIcon(
     ) {
         Icon(
             imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-            contentDescription = if (isFavorite) "取消收藏" else "添加收藏",
+            contentDescription = if (isFavorite) stringResource(R.string.media_unfavorite) else stringResource(R.string.media_favorite),
             tint = if (isFavorite) {
                 MaterialTheme.colorScheme.error
             } else {
@@ -87,12 +89,12 @@ internal fun FolderCard(
                 ) {
                     Icon(
                         Icons.Filled.Folder,
-                        contentDescription = "文件夹",
+                        contentDescription = stringResource(R.string.folder),
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                     Text(
-                        text = "文件夹",
+                        text = stringResource(R.string.folder),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -105,7 +107,7 @@ internal fun FolderCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "打开并浏览内部媒体资源",
+                text = stringResource(R.string.media_open_folder),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -174,7 +176,7 @@ internal fun VideoCard(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Filled.PlayArrow,
-                                    contentDescription = "播放",
+                                    contentDescription = stringResource(R.string.play),
                                     tint = Color.White,
                                     modifier = Modifier.size(20.dp)
                                 )
@@ -193,7 +195,7 @@ internal fun VideoCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "视频 · ${file.extension.uppercase()}",
+                        text = stringResource(R.string.media_video_ext, file.extension.uppercase()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -259,7 +261,7 @@ internal fun ImageCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "图片 · ${file.extension.uppercase()}",
+                        text = stringResource(R.string.media_image_ext, file.extension.uppercase()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

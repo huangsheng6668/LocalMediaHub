@@ -26,6 +26,7 @@ func (t *Tray) Run() {
 }
 
 func (t *Tray) onReady() {
+	systray.SetIcon(trayIconBytes)
 	systray.SetTitle("LMH")
 	systray.SetTooltip("LocalMediaHub - Running")
 

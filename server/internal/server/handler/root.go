@@ -1,19 +1,6 @@
 package handler
 
-import (
-	"net/http"
-
-	"github.com/labstack/echo/v4"
-)
-
-type RootResponse struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-func (h *Handler) Root(c echo.Context) error {
-	return c.JSON(http.StatusOK, RootResponse{
-		Name:    "LocalMediaHub",
-		Version: "0.2.0",
-	})
-}
+// This file previously held Root / RootResponse handlers that were never
+// registered on any route. They have been removed as dead code. The root API
+// information is instead surfaced via the embedded web UI and the /health
+// endpoint registered in server.go.

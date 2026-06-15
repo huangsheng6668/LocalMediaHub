@@ -1,3 +1,235 @@
 <resources>
     <string name="app_name">LocalMediaHub</string>
+
+    <!-- ── Common / shared ─────────────────────────────────── -->
+    <string name="back">返回</string>
+    <string name="cancel">取消</string>
+    <string name="delete">删除</string>
+    <string name="done">完成</string>
+    <string name="refresh">刷新</string>
+    <string name="search">搜索</string>
+    <string name="sort">排序</string>
+    <string name="unknown_error">未知错误</string>
+    <string name="unknown_size">未知大小</string>
+    <string name="folder">文件夹</string>
+    <string name="play">播放</string>
+    <string name="video">视频</string>
+    <string name="image">图片</string>
+    <string name="confirm_delete">确认删除</string>
+
+    <!-- ── Home screen ─────────────────────────────────────── -->
+    <string name="home_subtitle">您的私人媒体资源管理中心</string>
+    <string name="home_web_btn">Web 端</string>
+    <string name="home_disconnect">断开连接</string>
+    <string name="home_loading_title">正在载入媒体资源中...</string>
+    <string name="home_loading_desc">正在同步您电脑端的共享媒体库、收藏集以及最近活动。</string>
+    <string name="home_section_libraries">本地共享媒体库</string>
+    <string name="home_section_libraries_desc">%1$d 个服务器共享盘符已就绪</string>
+    <string name="home_section_collections">主题收藏集</string>
+    <string name="home_section_collections_desc">通过标签一键直达，无需层层翻找文件夹</string>
+    <string name="home_section_continue">继续播放</string>
+    <string name="home_section_continue_desc">继续播放未看完的视频，精确恢复上次的播放进度</string>
+    <string name="home_section_recent">最近浏览</string>
+    <string name="home_section_recent_desc">快速重新打开您最近浏览过的视频或图片</string>
+    <string name="home_section_favorites">我的最爱</string>
+    <string name="home_section_favorites_desc">固定您最喜爱的媒体，一键快捷开启</string>
+    <string name="home_section_downloads">离线下载内容</string>
+    <string name="home_section_downloads_desc">随时随地离线播放存储在设备上的已下载媒体</string>
+    <string name="home_empty_title">轻松直达您的媒体，告别繁琐的磁盘翻找。</string>
+    <string name="home_connected_desc">已成功连接至 %1$s。以下所有内容均已同步，点击可直接进入。</string>
+    <string name="home_disconnected_desc">等待下一次连接，随时从您上次停留的播放进度恢复。</string>
+    <string name="home_chip_library">共享库</string>
+    <string name="home_chip_collection">收藏集</string>
+    <string name="home_chip_continue">再播放</string>
+    <string name="home_chip_recent">最近</string>
+    <string name="home_chip_offline">离线</string>
+    <string name="home_current_server">当前服务器连接</string>
+    <string name="home_waiting_connection">等待下一次连接</string>
+    <string name="home_open_web">打开 Web 端</string>
+    <string name="home_last_browse">上次浏览位置</string>
+    <string name="home_path_system">系统盘符路径</string>
+    <string name="home_path_library">媒体库共享目录</string>
+    <string name="home_continue_browse">继续浏览 %1$s</string>
+    <string name="home_view_favorites">查看我的最爱</string>
+    <string name="home_offline_downloaded">离线已下载</string>
+    <string name="home_shared_root">共享根目录</string>
+    <string name="home_open_library">打开共享库</string>
+    <string name="home_continue_play">继续播放</string>
+    <string name="home_resume_system">恢复播放系统路径</string>
+    <string name="home_resume_library">恢复播放共享库</string>
+    <string name="home_from_system">来自系统盘符</string>
+    <string name="home_from_library">来自共享库</string>
+    <string name="home_favorited">已收藏</string>
+    <string name="home_no_library_title">未发现共享媒体库</string>
+    <string name="home_no_library_desc">请在电脑端 LocalMediaHub 设置并开启至少一个共享媒体库，然后刷新当前页面。</string>
+    <string name="home_sync_error">同步出现异常</string>
+    <string name="home_offline_download">离线下载</string>
+
+    <!-- ── Connection screen ───────────────────────────────── -->
+    <string name="conn_title">连接到服务器</string>
+    <string name="conn_subtitle">配对并连接您的 PC 媒体服务器</string>
+    <string name="conn_detecting">正在检测服务器状态</string>
+    <string name="conn_detecting_desc">正在尝试连接 LocalMediaHub，连接成功后将自动保存该服务器。</string>
+    <string name="conn_ready">连接已准备就绪</string>
+    <string name="conn_connected">已成功连接至 %1$s</string>
+    <string name="conn_failed">连接失败</string>
+    <string name="conn_not_found">未发现可用服务器</string>
+    <string name="conn_not_found_desc">局域网扫描结束，未发现运行中的 LocalMediaHub 服务。您仍然可以使用手动输入 IP 地址进行连接。</string>
+    <string name="conn_error">自动发现服务遇到问题</string>
+    <string name="conn_found_multi">发现 %1$d 个可用服务器</string>
+    <string name="conn_found_one_connecting">在 %1$s:%2$d 发现 LocalMediaHub 服务器。正在连接...</string>
+    <string name="conn_found_multi_select">发现 %1$d 个服务器。点击 \"查看服务器\" 选择一个连接。</string>
+    <string name="conn_offline_btn">浏览离线下载内容</string>
+    <string name="conn_offline_desc">无网状态下直接播放已下载的视频或浏览图片。</string>
+    <string name="conn_select_server">选择服务器</string>
+    <string name="conn_select_desc">在当前局域网中发现 %1$d 个 LocalMediaHub 服务器。</string>
+    <string name="conn_hint_same_lan">将您的手机与电脑连接至同一局域网，LocalMediaHub 将自动完成其余工作。</string>
+    <string name="conn_hint_reconnect">我们将优先尝试连接上次使用的服务器，您也可以随时进行局域网扫描或手动输入。</string>
+    <string name="conn_hint_recommend">推荐使用自动搜索连接，或在下方手动输入服务器地址。</string>
+    <string name="conn_last_server">上次使用的服务器</string>
+    <string name="conn_auto_connecting">正在尝试自动连接保存的服务器...</string>
+    <string name="conn_lan_scan">局域网自动搜索</string>
+    <string name="conn_lan_scan_desc">自动扫描当前局域网以寻找运行中的 LocalMediaHub 服务端并自动完成配对。</string>
+    <string name="conn_scanning">正在扫描...</string>
+    <string name="conn_scan_btn">扫描局域网</string>
+    <string name="conn_view_servers">查看可用服务器 (%1$d)</string>
+    <string name="conn_progress">已检查 %1$d / %2$d 个 IP 地址</string>
+    <string name="conn_discovered">已发现 %1$d 个</string>
+    <string name="conn_manual_title">手动输入连接</string>
+    <string name="conn_manual_desc">若自动扫描未能发现，请输入您电脑的局域网 IP 地址和 LocalMediaHub 运行端口。</string>
+    <string name="conn_ip_label">服务器 IP 地址</string>
+    <string name="conn_ip_hint">通常为运行 LocalMediaHub 服务端的电脑局域网 IPv4 地址。</string>
+    <string name="conn_port_label">运行端口</string>
+    <string name="conn_port_hint">若未修改服务端配置文件，请保持默认的 8000 端口。</string>
+    <string name="conn_connecting">正在连接...</string>
+    <string name="conn_connect_btn">手动连接服务器</string>
+
+    <!-- ── Browse screen ───────────────────────────────────── -->
+    <string name="browse_search_hint">搜索媒体文件...</string>
+    <string name="browse_favorites">我的最爱</string>
+    <string name="browse_drives">磁盘驱动器</string>
+    <string name="browse_libraries">共享媒体库</string>
+    <string name="browse_title_system">共享媒体库</string>
+    <string name="browse_title_drive">磁盘分区</string>
+    <string name="browse_sort_folder">文件夹排序</string>
+    <string name="browse_sort_file">文件排序</string>
+    <string name="browse_error">错误: %1$s</string>
+    <string name="browse_quick_actions">快捷操作选项</string>
+    <string name="browse_action_edit_tags">编辑文件标签</string>
+    <string name="browse_action_download_file">下载媒体到本地</string>
+    <string name="browse_action_delete_file">永久从服务端删除该文件</string>
+    <string name="browse_action_download_folder">下载整个文件夹内容</string>
+    <string name="browse_action_delete_folder">永久从服务端删除该文件夹</string>
+    <string name="browse_delete_folder">删除文件夹</string>
+    <string name="browse_delete_file">删除文件</string>
+    <string name="browse_delete_confirm">您确定要从服务端永久删除 \"%1$s\" 吗？此操作不可撤销，文件将彻底消失。</string>
+    <string name="browse_delete_recursive">强制递归删除（如果文件夹内有其他内容，必须勾选）</string>
+    <string name="browse_deleting">正在删除资源...</string>
+    <string name="browse_deleting_desc">正在清理云端多媒体文件，这可能需要一点时间。</string>
+    <string name="browse_fav_card_title">我的最爱</string>
+    <string name="browse_fav_card_desc">收藏的媒体将集中在此处，方便您随时快捷播放。</string>
+    <string name="browse_fav_card_count">共 %1$d 个收藏</string>
+    <string name="browse_loading_files">正在准备文件列表...</string>
+    <string name="browse_loading_files_desc">正在载入媒体共享根目录、文件属性及快捷标签，请稍候。</string>
+    <string name="browse_error_title">浏览目录发生错误</string>
+    <string name="browse_retry">重新尝试</string>
+    <string name="browse_lib_card_title">本地共享媒体库</string>
+    <string name="browse_lib_card_desc">请选择运行中的电脑服务端所共享的本地磁盘目录。</string>
+    <string name="browse_lib_card_count">共 %1$d 个共享盘符</string>
+    <string name="browse_drive_card_title">设备系统盘符</string>
+    <string name="browse_drive_card_desc">在需要浏览共享媒体库以外的完整磁盘路径时进行切换。</string>
+    <string name="browse_drive_card_count">检测到 %1$d 个磁盘分区</string>
+    <string name="browse_path_title">系统盘符路径</string>
+    <string name="browse_path_count">%1$d 文件夹 · %2$d 文件</string>
+    <string name="browse_browsed_title">共享媒体库浏览</string>
+    <string name="browse_browsed_desc">浏览当前共享目录，支持按标签过滤、长按管理标签和播放离线下载。</string>
+    <string name="browse_collection_desc">将您贴上相同标签的多媒体文件跨库收集于此。</string>
+    <string name="browse_collection_count">共 %1$d 个媒体文件</string>
+    <string name="browse_collection_title">主题收藏集</string>
+    <string name="browse_collection_empty">该主题收藏集目前为空</string>
+    <string name="browse_collection_empty_desc">您可以在浏览媒体文件时长按并贴上 \"%1$s\" 标签，以便在此快速查看。</string>
+    <string name="browse_loading_list">正在加载文件列表...</string>
+    <string name="browse_loading_list_desc">正在努力加载文件夹、文件列表和标签属性。</string>
+
+    <!-- ── Downloads screen ────────────────────────────────── -->
+    <string name="downloads_title">离线已下载</string>
+    <string name="downloads_subtitle">设备本地离线媒体库</string>
+    <string name="downloads_root">根目录</string>
+    <string name="downloads_empty_title">暂无离线下载内容</string>
+    <string name="downloads_empty_desc">您可以在浏览共享媒体库时，长按文件并选择\"下载到本地\"，以便随时在此离线播放和浏览。</string>
+    <string name="downloads_folder_empty">此文件夹为空</string>
+    <string name="downloads_folder_empty_desc">当前目录下的所有已下载文件均已被移除。</string>
+    <string name="downloads_up">返回上一级文件夹</string>
+    <string name="downloads_delete_file_title">删除本地已下载文件？</string>
+    <string name="downloads_delete_file_desc">这将从您手机的本地存储中永久删除文件 \"%1$s\"，该操作不可撤销。</string>
+    <string name="downloads_delete_folder_title">删除本地已下载文件夹？</string>
+    <string name="downloads_delete_folder_desc">这将从您手机的本地存储中永久删除文件夹 \"%1$s\" 及其包含的 %2$d 个离线媒体文件，该操作不可撤销。</string>
+    <string name="downloads_delete_all">全部删除</string>
+    <string name="downloads_file_count">%1$d 个文件</string>
+
+    <!-- ── Video player ────────────────────────────────────── -->
+    <string name="video_paused">已暂停</string>
+    <string name="video_playing">播放中</string>
+    <string name="video_transcode_on">兼容转码</string>
+    <string name="video_transcode_off">极速原画</string>
+    <string name="video_delete_title">确认彻底删除？</string>
+    <string name="video_delete_desc">您确定要从服务端永久删除该视频文件吗？此操作不可逆！</string>
+    <string name="video_seek_minutes">%1$s%2$d分%3$d秒</string>
+    <string name="video_seek_seconds">%1$s%2$d秒</string>
+
+    <!-- ── Sort order labels ──────────────────────────────── -->
+    <string name="sort_name_asc">按名称升序 (A-Z)</string>
+    <string name="sort_name_desc">按名称降序 (Z-A)</string>
+    <string name="sort_numeric_asc">按数字升序 (1→9)</string>
+    <string name="sort_numeric_desc">按数字降序 (9→1)</string>
+    <string name="sort_size_asc">文件从小到大</string>
+    <string name="sort_size_desc">文件从大到小</string>
+    <string name="sort_time_asc">修改时间从旧到新</string>
+    <string name="sort_time_desc">修改时间从新到旧</string>
+
+    <!-- ── Download toasts ────────────────────────────────── -->
+    <string name="toast_download_start">开始下载 %1$s...</string>
+    <string name="toast_download_failed">下载失败: %1$s</string>
+    <string name="toast_download_success">%1$s 下载成功！</string>
+    <string name="toast_read_folder">正在读取目录 \"%1$s\" 结构...</string>
+    <string name="toast_read_failed">读取结构失败: %1$s</string>
+    <string name="toast_no_media">该目录下没有找到可下载的媒体资源</string>
+    <string name="toast_connect_failed">连接服务端失败: %1$s</string>
+    <string name="toast_stream_start">开始流式极速下载并解压 \"%1$s\"...</string>
+    <string name="toast_extract_success">成功下载并流式提取了 %1$d 个媒体文件！</string>
+    <string name="toast_no_extract">未找到有效的多媒体提取文件</string>
+    <string name="toast_folder_failed">下载目录失败: %1$s</string>
+
+    <!-- ── Browse content component ───────────────────────── -->
+    <string name="content_no_favorites">暂无收藏内容</string>
+    <string name="content_no_favorites_desc">在浏览媒体文件时点击右上角的爱心图标即可将其添加到这里</string>
+    <string name="content_search_placeholder">请输入搜索关键词</string>
+    <string name="content_searching">正在搜索中...</string>
+    <string name="content_no_results">没有找到与 \"%1$s\" 相关的搜索结果</string>
+    <string name="content_to_top">回到顶部</string>
+    <string name="content_to_bottom">滚到底部</string>
+
+    <!-- ── Grid containers ────────────────────────────────── -->
+    <string name="grid_no_folders">未发现文件夹</string>
+    <string name="grid_no_folders_desc">当前目录下没有包含任何子文件夹。</string>
+    <string name="grid_no_drives">未发现磁盘驱动器</string>
+    <string name="grid_no_drives_desc">LocalMediaHub 在此系统视图下未检测到可用的磁盘驱动器。</string>
+    <string name="grid_drive_root">磁盘根目录</string>
+    <string name="grid_drive_root_desc">从此根目录浏览完整的系统路径。</string>
+
+    <!-- ── Media items ────────────────────────────────────── -->
+    <string name="media_unfavorite">取消收藏</string>
+    <string name="media_favorite">添加收藏</string>
+    <string name="media_open_folder">打开并浏览内部媒体资源</string>
+    <string name="media_video_ext">视频 · %1$s</string>
+    <string name="media_image_ext">图片 · %1$s</string>
+
+    <!-- ── Tag components ─────────────────────────────────── -->
+    <string name="tag_title">文件标签</string>
+    <string name="tag_list_title">%1$s 的标签列表</string>
+    <string name="tag_empty">尚无已创建的标签。请先在服务端或首页创建标签。</string>
+
+    <!-- ── Main activity ──────────────────────────────────── -->
+    <string name="main_delete_success">文件已成功删除</string>
+    <string name="main_delete_failed">删除失败: %1$s</string>
 </resources>

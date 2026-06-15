@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -255,7 +256,7 @@ func TestBrowseFolderRecursiveFiles(t *testing.T) {
 	e.GET("/api/v1/folders/*", h.BrowseFolder)
 
 	// Trigger initial scan so files are cached in memory
-	_, err := h.scanner.Scan(cfg.Scan.GetRoots())
+	_, err := h.scanner.Scan(context.Background(), cfg.Scan.GetRoots())
 	if err != nil {
 		t.Fatalf("failed to scan roots: %v", err)
 	}

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 func (h *Handler) Search(c echo.Context) error {
 	query := strings.TrimSpace(c.QueryParam("q"))
 	if query == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "query required"})
+		return respondError(c, http.StatusBadRequest, "query required")
 	}
 
 	limit, _ := strconv.Atoi(c.QueryParam("limit"))
@@ -28,39 +29,39 @@ func (h *Handler) Search(c echo.Context) error {
 	if searchPath != "" {
 		normalizedPath, err := service.NormalizePath(searchPath)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return respondError(c, http.StatusBadRequest, err.Error())
 		}
 
 		valid, err := service.IsPathWithinRoots(normalizedPath, h.cfg.Scan.GetRoots())
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return respondError(c, http.StatusBadRequest, err.Error())
 		}
 		if !valid {
-			return c.JSON(http.StatusForbidden, map[string]string{"error": "path outside roots"})
+			return respondError(c, http.StatusForbidden, "path outside roots")
 		}
 
 		info, err := os.Stat(normalizedPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return c.JSON(http.StatusNotFound, map[string]string{"error": "path not found"})
+				return respondNotFound(c, "path not found")
 			}
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return respondError(c, http.StatusBadRequest, err.Error())
 		}
 		if !info.IsDir() {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "path must be a directory"})
+			return respondError(c, http.StatusBadRequest, "path must be a directory")
 		}
 
 		searchPath = normalizedPath
 	}
 
-	files, err := h.scanner.GetCached(h.cfg.Scan.GetRoots())
+	files, err := h.scanner.GetCached(c.Request().Context(), h.cfg.Scan.GetRoots())
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
-	matchedFolders, err := h.searchFolders(searchPath, query, limit)
+	matchedFolders, err := h.searchFoldersCtx(c.Request().Context(), searchPath, query, limit)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	matchedFiles := h.searchFiles(files, searchPath, query, limit)
@@ -100,6 +101,13 @@ func (h *Handler) searchFiles(files []models.MediaFile, scopedPath, query string
 }
 
 func (h *Handler) searchFolders(scopedPath, query string, limit int) ([]models.Folder, error) {
+	return h.searchFoldersCtx(context.Background(), scopedPath, query, limit)
+}
+
+// searchFoldersCtx walks the roots looking for folders whose name matches the
+// query. The ctx lets the walk abort early when the request is cancelled, so a
+// slow search doesn't keep eating IO after the client has disconnected.
+func (h *Handler) searchFoldersCtx(ctx context.Context, scopedPath, query string, limit int) ([]models.Folder, error) {
 	searchRoots := h.cfg.Scan.GetRoots()
 	if scopedPath != "" {
 		searchRoots = []string{scopedPath}
@@ -112,6 +120,12 @@ func (h *Handler) searchFolders(scopedPath, query string, limit int) ([]models.F
 		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
+			}
+			// Abort the walk as soon as the request context is cancelled.
+			select {
+			case <-ctx.Done():
+				return filepath.SkipAll
+			default:
 			}
 			if len(matchedFolders) >= limit {
 				return filepath.SkipAll
@@ -141,6 +155,9 @@ func (h *Handler) searchFolders(scopedPath, query string, limit int) ([]models.F
 			return nil, err
 		}
 		if len(matchedFolders) >= limit {
+			break
+		}
+		if ctx.Err() != nil {
 			break
 		}
 	}

@@ -7,11 +7,12 @@ import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.RetrofitClient
 import retrofit2.HttpException
 import java.io.IOException
+import javax.inject.Inject
 
 /**
  * Repository layer: wraps API calls with error handling.
  */
-class MediaRepository {
+class MediaRepository @Inject constructor() {
 
     private val api
         get() = RetrofitClient.api

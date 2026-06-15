@@ -6,8 +6,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import javax.inject.Inject
 
 private val Context.recentActivityDataStore by preferencesDataStore(name = "recent_activity")
 
@@ -77,7 +79,7 @@ internal fun mergePlaybackProgress(
         .take(limit)
 }
 
-class RecentActivityStore(private val context: Context) {
+class RecentActivityStore @Inject constructor(@ApplicationContext private val context: Context) {
 
     private val gson = Gson()
 

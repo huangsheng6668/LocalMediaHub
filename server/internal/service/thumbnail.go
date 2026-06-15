@@ -192,10 +192,6 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 	return s.generateThumbnailFromFile(sourcePath, cachePath)
 }
 
-func (s *ThumbnailService) ValidatePath(filePath string, roots []string) (bool, error) {
-	return IsPathWithinRoots(filePath, roots)
-}
-
 func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx context.Context) {
 	var images []models.MediaFile
 	for _, f := range files {

@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.juziss.localmediahub.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -84,8 +86,8 @@ internal fun FolderGrid(
     if (folders.isEmpty()) {
         GridEmptyState(
             icon = Icons.Filled.FolderOff,
-            title = "未发现文件夹",
-            message = "当前目录下没有包含任何子文件夹。",
+            title = stringResource(R.string.grid_no_folders),
+            message = stringResource(R.string.grid_no_folders_desc),
             modifier = modifier,
         )
         return
@@ -113,8 +115,8 @@ internal fun SystemDrivesContent(
     if (drives.isEmpty()) {
         GridEmptyState(
             icon = Icons.Filled.Storage,
-            title = "未发现磁盘驱动器",
-            message = "LocalMediaHub 在此系统视图下未检测到可用的磁盘驱动器。",
+            title = stringResource(R.string.grid_no_drives),
+            message = stringResource(R.string.grid_no_drives_desc),
             modifier = modifier,
         )
         return
@@ -155,7 +157,7 @@ internal fun SystemDrivesContent(
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                             Text(
-                                text = "磁盘根目录",
+                                text = stringResource(R.string.grid_drive_root),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
                             )
@@ -166,7 +168,7 @@ internal fun SystemDrivesContent(
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(
-                        text = "从此根目录浏览完整的系统路径。",
+                        text = stringResource(R.string.grid_drive_root_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
