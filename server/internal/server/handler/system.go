@@ -51,22 +51,22 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 
 	// Validate path is under an allowed root
 	if err := service.ValidateSystemBrowseAllowed(pathStr, h.cfg.GetSystemAllowedRoots()); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 	if err := service.ValidateSystemBrowsePath(pathStr); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
 	fi, err := os.Stat(pathStr)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "path not found"})
+			return respondNotFound(c, "path not found")
 		}
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	if !fi.IsDir() {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "not a directory"})
+		return respondError(c, http.StatusBadRequest, "not a directory")
 	}
 
 	entries, err := os.ReadDir(pathStr)
@@ -130,11 +130,11 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 func (h *Handler) SystemThumbnail(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateSystemPath(pathStr, h.mediaExtensions()); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	if err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions()); err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
 	thumbPath, err := h.thumbnail.GenerateSystemThumbnail(pathStr)
@@ -151,11 +151,11 @@ func (h *Handler) SystemThumbnail(c echo.Context) error {
 func (h *Handler) SystemOriginal(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateSystemPath(pathStr, h.mediaExtensions()); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	if err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions()); err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
 	return c.File(pathStr)
@@ -164,11 +164,11 @@ func (h *Handler) SystemOriginal(c echo.Context) error {
 func (h *Handler) SystemStream(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateSystemPath(pathStr, h.mediaExtensions()); err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	if err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions()); err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
 	if err := h.streaming.ServeFile(c.Response().Writer, c.Request(), pathStr); err != nil {
