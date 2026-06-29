@@ -193,6 +193,12 @@ function setupEventListeners() {
     // Delegated click handling for dashboard recent items
     elements.dashboardRecent.addEventListener('click', onDashboardRecentClick);
 
+    // Delegated click for tag manager (delete tag)
+    elements.tagsManagerList.addEventListener('click', onTagsManagerListClick);
+
+    // Delegated change for per-file tag selector checkboxes
+    elements.tagSelectorCheckboxes.addEventListener('change', onTagSelectorChange);
+
     // Delegated thumbnail error fallback (img 'error' does not bubble -> capture phase)
     elements.browserList.addEventListener('error', (e) => {
         const img = e.target;
@@ -1082,7 +1088,7 @@ function openTaggingDialog(file) {
                     <span style="width:12px; height:12px; border-radius:50%; background-color:${escapeHtml(tag.color)};"></span>
                     <span>${escapeHtml(tag.name)}</span>
                 </span>
-                <input type="checkbox" data-tag-id="${escapeHtml(tag.id)}" ${checked} onchange="toggleFileTagAssociation(this, '${escapeHtml(tag.id)}', '${escapeHtml(file.path.replace(/\\/g, '\\\\'))}')">
+                <input type="checkbox" data-tag-id="${escapeHtml(tag.id)}" ${checked}>
             </label>
         `;
     }).join('');
@@ -1135,6 +1141,23 @@ async function toggleFileTagAssociation(checkbox, tagId, filePath) {
     }
 }
 
+// Delegated click dispatcher for the tags manager list
+function onTagsManagerListClick(e) {
+    const actionEl = e.target.closest('[data-action]');
+    if (!actionEl) return;
+    if (actionEl.dataset.action === 'delete-tag') {
+        deleteTag(actionEl.dataset.id || '', actionEl.dataset.name || '');
+    }
+}
+
+// Delegated change dispatcher for the file-tag selector dialog
+function onTagSelectorChange(e) {
+    const checkbox = e.target;
+    if (checkbox.matches('input[type="checkbox"][data-tag-id]') && state.taggingFile) {
+        toggleFileTagAssociation(checkbox, checkbox.dataset.tagId || '', state.taggingFile.path);
+    }
+}
+
 // Render Tags Manager (Tab 3)
 function renderTagsManager() {
     if (state.tags.length === 0) {
@@ -1143,11 +1166,14 @@ function renderTagsManager() {
     }
     
     elements.tagsManagerList.innerHTML = state.tags.map(tag => {
+        const safeColor = escapeHtml(tag.color);
+        const safeName = escapeHtml(tag.name);
+        const safeId = escapeHtml(tag.id);
         return `
-            <div class="tag-chip" style="background-color: ${escapeHtml(tag.color)}33; border-color: ${escapeHtml(tag.color)};">
-                <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background-color:${escapeHtml(tag.color)};"></span>
-                <span>${escapeHtml(tag.name)}</span>
-                <button class="btn-tag-delete" title="删除分类标签" onclick="deleteTag('${escapeHtml(tag.id)}', '${escapeHtml(tag.name)}')">✕</button>
+            <div class="tag-chip" style="background-color: ${safeColor}33; border-color: ${safeColor};">
+                <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background-color:${safeColor};"></span>
+                <span>${safeName}</span>
+                <button class="btn-tag-delete" title="删除分类标签" data-action="delete-tag" data-id="${safeId}" data-name="${safeName}">✕</button>
             </div>
         `;
     }).join('');
