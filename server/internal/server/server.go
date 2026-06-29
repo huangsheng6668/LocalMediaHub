@@ -93,6 +93,10 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// Static Web UI Assets
 	s.Echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(web.Assets))))
 
+	// Favicon: serve a procedurally-generated PNG so the browser's automatic
+	// /favicon.ico request resolves instead of 404ing through the static handler.
+	s.Echo.GET("/favicon.ico", s.serveFavicon)
+
 	api := s.Echo.Group("/api/v1")
 
 	api.GET("/health", func(c echo.Context) error {
@@ -147,6 +151,14 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	media.GET("/duration", h.MediaDuration)
 
 	// Admin page
+}
+
+// serveFavicon returns the procedurally-generated brand favicon PNG, cached for
+// a week. Registered at /favicon.ico so the browser's automatic favicon request
+// does not 404.
+func (s *Server) serveFavicon(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "public, max-age=604800")
+	return c.Blob(http.StatusOK, "image/png", web.FaviconPNG)
 }
 
 func (s *Server) Start() error {
