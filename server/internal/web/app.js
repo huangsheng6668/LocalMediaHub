@@ -1318,14 +1318,3 @@ async function deleteFolder(folder) {
         showToast(`删除失败: ${e.message}`, 'error');
     }
 }
-
-// Expose module-scoped functions to global window object for legacy inline event handlers
-window.browsePath = browsePath;
-window.openMedia = openMedia;
-window.openTaggingDialog = openTaggingDialog;
-window.deleteMediaFile = deleteMediaFile;
-window.deleteFolder = deleteFolder;
-window.deleteTag = deleteTag;
-window.openVideoPlayer = openVideoPlayer;
-window.loadRoots = loadRoots;
-window.toggleFileTagAssociation = toggleFileTagAssociation;
