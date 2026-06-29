@@ -1024,8 +1024,8 @@ function renderLightboxImage() {
                 imgContainer.className = 'stitch-image-item';
                 imgContainer.id = `stitch-img-${idx}`;
                 imgContainer.innerHTML = `
-                    <img src="${url}" alt="${file.name}" loading="lazy">
-                    <div class="stitch-image-caption">${file.name} (${idx + 1}/${state.lightboxFiles.length})</div>
+                    <img src="${url}" alt="${escapeHtml(file.name)}" loading="lazy">
+                    <div class="stitch-image-caption">${escapeHtml(file.name)} (${idx + 1}/${state.lightboxFiles.length})</div>
                 `;
                 elements.lightboxStitchView.appendChild(imgContainer);
             });
