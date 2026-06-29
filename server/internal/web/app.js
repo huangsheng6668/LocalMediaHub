@@ -187,6 +187,9 @@ function setupEventListeners() {
     // Delegated click handling for browser list (folders, files, roots, drives)
     elements.browserList.addEventListener('click', onBrowserListClick);
 
+    // Delegated click handling for breadcrumbs
+    elements.browserBreadcrumbs.addEventListener('click', onBreadcrumbsClick);
+
     // Delegated thumbnail error fallback (img 'error' does not bubble -> capture phase)
     elements.browserList.addEventListener('error', (e) => {
         const img = e.target;
@@ -662,7 +665,7 @@ async function loadSystemDrives() {
     state.isSystemBrowse = true;
     state.currentPath = '/system';
     
-    elements.browserBreadcrumbs.innerHTML = '<span class="crumb" onclick="loadRoots()">根目录</span><span class="crumb active">磁盘盘符</span>';
+    elements.browserBreadcrumbs.innerHTML = '<span class="crumb" data-action="load-roots">根目录</span><span class="crumb active">磁盘盘符</span>';
     
     try {
         const drives = await apiRequest(`${state.apiBase}/api/v1/system/drives`);
@@ -829,31 +832,41 @@ function renderBrowserList() {
     elements.browserList.innerHTML = html;
 }
 
+// Delegated click dispatcher for breadcrumbs
+function onBreadcrumbsClick(e) {
+    const actionEl = e.target.closest('[data-action]');
+    if (!actionEl) return;
+    const action = actionEl.dataset.action;
+    if (action === 'load-roots') {
+        loadRoots();
+    } else if (action === 'crumb') {
+        browsePath(actionEl.dataset.path || '');
+    }
+}
+
 // Render Breadcrumbs
 function renderBreadcrumbs(path) {
     const isWin = path.includes(':');
-    const separator = isWin ? '/' : '/';
     const segments = path.split(/[/\\]+/).filter(Boolean);
-    
-    let html = `<span class="crumb" onclick="loadRoots()">根目录</span>`;
-    
+
+    let html = `<span class="crumb" data-action="load-roots">根目录</span>`;
+
     let currentAccumulated = '';
     segments.forEach((seg, index) => {
-        // Handle Windows drive root segment, e.g. "D:" -> "D:/"
         if (index === 0 && isWin) {
             currentAccumulated = seg + '/';
         } else {
             currentAccumulated += (index === 0 ? '' : '/') + seg;
         }
-        
+
         const isLast = index === segments.length - 1;
         if (isLast) {
-            html += `<span class="crumb active">${seg}</span>`;
+            html += `<span class="crumb active">${escapeHtml(seg)}</span>`;
         } else {
-            html += `<span class="crumb" onclick="browsePath('${currentAccumulated}')">${seg}</span>`;
+            html += `<span class="crumb" data-action="crumb" data-path="${escapeHtml(currentAccumulated)}">${escapeHtml(seg)}</span>`;
         }
     });
-    
+
     elements.browserBreadcrumbs.innerHTML = html;
 }
 
@@ -877,7 +890,7 @@ async function triggerBrowserSearch() {
         renderBrowserList();
         
         elements.browserBreadcrumbs.innerHTML = `
-            <span class="crumb" onclick="browsePath('${state.currentPath}')">返回上级目录</span>
+            <span class="crumb" data-action="crumb" data-path="${escapeHtml(state.currentPath)}">返回上级目录</span>
             <span class="crumb active">关于 "${escapeHtml(query)}" 的结果</span>
         `;
     } catch (e) {
