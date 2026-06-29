@@ -55,6 +55,9 @@ android/release-keystore.jks
 # Claude Code / AI
 .claude/
 
+# CodeGraph — local index database, never commit
+.codegraph/
+
 # Server runtime data
 server/.data/
 server/config.yaml
