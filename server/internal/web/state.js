@@ -24,6 +24,9 @@ export const state = {
     
     // Selected file for tag mapping
     taggingFile: null,
+
+    // Dashboard recent media (backing array for index-based click delegation)
+    dashboardRecentFiles: [],
     
     // Transcode flag for video player
     useTranscode: false,

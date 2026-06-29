@@ -190,6 +190,9 @@ function setupEventListeners() {
     // Delegated click handling for breadcrumbs
     elements.browserBreadcrumbs.addEventListener('click', onBreadcrumbsClick);
 
+    // Delegated click handling for dashboard recent items
+    elements.dashboardRecent.addEventListener('click', onDashboardRecentClick);
+
     // Delegated thumbnail error fallback (img 'error' does not bubble -> capture phase)
     elements.browserList.addEventListener('error', (e) => {
         const img = e.target;
@@ -566,6 +569,16 @@ async function loadTags() {
     }
 }
 
+// Delegated click dispatcher for dashboard recent items
+function onDashboardRecentClick(e) {
+    const actionEl = e.target.closest('[data-action]');
+    if (!actionEl) return;
+    if (actionEl.dataset.action === 'open-video') {
+        const idx = Number(actionEl.dataset.index);
+        if (state.dashboardRecentFiles[idx]) openVideoPlayer(state.dashboardRecentFiles[idx]);
+    }
+}
+
 // Render Dashboard (Tab 1)
 async function renderDashboard() {
     // 1. Fetch total files
@@ -595,15 +608,16 @@ async function renderDashboard() {
         try {
             const data = await apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=3`);
             const items = data.items || [];
-            
+            state.dashboardRecentFiles = items;
+
             if (items.length === 0) {
-                elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>';
                 elements.dashboardRecent.classList.add('empty-state');
+                elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>';
             } else {
                 elements.dashboardRecent.classList.remove('empty-state');
-                elements.dashboardRecent.innerHTML = items.map(file => {
+                elements.dashboardRecent.innerHTML = items.map((file, index) => {
                     return `
-                        <div class="info-item" style="cursor:pointer;" onclick="openVideoPlayer(${JSON.stringify(file).replace(/"/g, '&quot;')})">
+                        <div class="info-item" style="cursor:pointer;" data-action="open-video" data-index="${index}">
                             <span class="info-label">🎬 ${escapeHtml(file.name)}</span>
                             <span class="info-value" style="font-size:11px;">${formatSize(file.size)}</span>
                         </div>
