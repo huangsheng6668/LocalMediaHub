@@ -50,7 +50,8 @@ class DownloadManager @Inject constructor(
                 if (!destDirectory.exists()) {
                     destDirectory.mkdirs()
                 }
-                val localFile = File(destDirectory, file.name)
+                val localFile = safeResolveChild(destDirectory, file.name)
+                    ?: throw SecurityException("非法文件名，已拒绝下载")
 
                 responseBody.byteStream().use { inputStream ->
                     FileOutputStream(localFile).use { outputStream ->
@@ -69,6 +70,11 @@ class DownloadManager @Inject constructor(
         } catch (e: Exception) {
             onMessage("下载失败: ${e.message}")
         }
+    }
+
+    private fun safeResolveChild(destDir: File, name: String): File? {
+        val candidate = File(destDir, name)
+        return if (isInside(destDir, candidate)) candidate else null
     }
 
     suspend fun downloadFolder(
@@ -128,7 +134,11 @@ class DownloadManager @Inject constructor(
                         while (entries.hasMoreElements()) {
                             val zipEntry = entries.nextElement()
                             if (!zipEntry.isDirectory) {
-                                val extractedFile = File(destDirectory, zipEntry.name)
+                                val extractedFile = safeResolveChild(destDirectory, zipEntry.name)
+                                if (extractedFile == null) {
+                                    android.util.Log.w("DownloadManager", "Skipping zip entry outside dest dir: ${zipEntry.name}")
+                                    continue
+                                }
                                 extractedFile.parentFile?.mkdirs()
 
                                 zipFile.getInputStream(zipEntry).use { zipInputStream ->
