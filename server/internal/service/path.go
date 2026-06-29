@@ -97,6 +97,28 @@ func ValidateSystemPath(pathStr string, allowedExtensions []string) error {
 	return nil
 }
 
+// ValidateSystemMediaAccess validates a media file path for the system
+// thumbnail/original/stream endpoints. It enforces that the path is under one
+// of the configured system allowed roots, is not inside a blocked directory,
+// and is an existing file whose extension is in the allowed list.
+//
+// Unlike ValidateSystemPath, this also enforces the allowed-roots boundary,
+// preventing the system media endpoints from serving files outside the
+// directories the operator explicitly opened via system.allowed_roots.
+func ValidateSystemMediaAccess(pathStr string, allowedRoots []string, allowedExtensions []string) error {
+	if err := ValidateSystemBrowseAllowed(pathStr, allowedRoots); err != nil {
+		return err
+	}
+	absPath, err := NormalizePath(pathStr)
+	if err != nil {
+		return err
+	}
+	if err := checkBlocked(absPath); err != nil {
+		return err
+	}
+	return validateMediaFilePath(absPath, allowedExtensions)
+}
+
 // ValidateSystemBrowsePath validates a directory path for browsing (listing contents).
 // Only checks for path traversal and blocked directories; does NOT restrict extensions
 // since the browsing handler already filters by media extensions.
