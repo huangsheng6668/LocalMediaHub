@@ -898,6 +898,7 @@ function onDashboardRecentClick(e) {
             
             if (items.length === 0) {
                 elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>';
+                elements.dashboardRecent.classList.add('empty-state');
             } else {
                 elements.dashboardRecent.classList.remove('empty-state');
                 elements.dashboardRecent.innerHTML = items.map(file => {
