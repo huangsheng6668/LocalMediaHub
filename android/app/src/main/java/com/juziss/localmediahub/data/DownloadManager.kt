@@ -175,3 +175,13 @@ class DownloadManager @Inject constructor(
         }
     }
 }
+
+/**
+ * Returns true only when [candidate] resolves to a path strictly inside [destDir].
+ * Guards ZIP extraction against Zip Slip: entries whose canonical path escapes
+ * the destination directory (e.g. `../escape.mp4` or absolute paths) return false.
+ */
+internal fun isInside(destDir: File, candidate: File): Boolean {
+    val destCanonical = destDir.canonicalPath + File.separator
+    return candidate.canonicalPath.startsWith(destCanonical)
+}
