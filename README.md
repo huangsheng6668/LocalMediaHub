@@ -26,14 +26,14 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 | 功能 | 说明 |
 |------|------|
 | 全盘浏览 | 自动检测 Windows 驱动器，浏览任意目录，只显示媒体文件 |
-| REST API | 24 个端点，覆盖目录浏览、媒体列表、搜索、标签、系统浏览等 |
+| REST API | 29 个端点，覆盖目录浏览、媒体列表、搜索、标签、系统浏览、统一媒体访问、管理等 |
 | 视频流 | HTTP Range Requests (206 Partial Content)，64KB 分块，支持进度拖动 |
 | 缩略图 | LANCZOS 缩放，MD5 磁盘缓存，懒加载 |
 | 标签系统 | JSON 持久化，RWMutex 并发安全，CRUD + 文件关联 |
 | 搜索 | 按文件名递归搜索，支持限定目录范围 |
 | mDNS 发现 | 局域网服务注册，Android NSD 自动发现 |
 | 双模式运行 | GUI 模式（系统托盘）或 headless 模式（无窗口） |
-| 安全防护 | 路径遍历攻击防护（ValidatePath + isWithinRoots），系统浏览受 `system.allowed_roots` 限制 |
+| 安全防护 | 路径遍历防护（ValidatePath + isWithinRoots）；系统浏览、系统媒体与统一媒体端点均强制 `system.allowed_roots` 边界（ValidateSystemMediaAccess / ValidateAccessibleMediaPath）；Android 下载解压防 Zip Slip |
 | 媒体过滤 | 仅显示配置文件中指定的视频/图片扩展名文件 |
 | Web 管理器 | 内置基于 Single Page App 的精致 Web UI，提供仪表盘、媒体库浏览、标签增删改查、以及系统设置功能 |
 
@@ -91,16 +91,18 @@ localResourcesToPhone/
 │   │   ├── config/               # 配置加载（YAML）
 │   │   ├── models/               # 数据模型
 │   │   ├── server/               # Echo 路由注册
-│   │   │   ├── handler/          # 24 个 API handler
+│   │   │   ├── handler/          # 29 个 API handler
 │   │   │   └── middleware/       # CORS 中间件
 │   │   ├── service/              # 业务逻辑
 │   │   │   ├── scanner.go        # 文件扫描（TTL 缓存）
 │   │   │   ├── tags.go           # 标签系统（JSON 持久化）
 │   │   │   ├── streaming.go      # 视频流传输（Range）
-│   │   │   └── thumbnail.go      # 缩略图生成（MD5 缓存）
+│   │   │   ├── thumbnail.go      # 缩略图生成（MD5 缓存）
+│   │   │   └── path.go           # 路径校验（ValidatePath / ValidateSystemMediaAccess / ValidateAccessibleMediaPath）
 │   │   ├── mdns/                 # mDNS 服务注册
 │   │   ├── systray/              # 系统托盘
-│   │   └── gui/                  # GUI 模式入口
+│   │   ├── gui/                  # GUI 模式入口
+│   │   └── web/                  # Web 管理器（SPA 静态资源 + 模块化脚本 + 程序生成 favicon）
 │   ├── config.yaml               # 运行时配置
 │   └── go.mod
 │
@@ -220,6 +222,7 @@ APK 输出位置：`android/app/build/outputs/apk/`
 | POST | `/api/v1/tags/{id}/files/{path}` | 给文件打标签 |
 | DELETE | `/api/v1/tags/{id}/files/{path}` | 移除文件标签 |
 | GET | `/api/v1/tags/{id}/files` | 获取标签下的文件 |
+| GET | `/api/v1/tags/{id}/media` | 获取标签下的媒体（分页） |
 | GET | `/api/v1/tags/file-tags` | 批量获取文件标签映射 |
 
 ### 系统浏览
@@ -228,14 +231,27 @@ APK 输出位置：`android/app/build/outputs/apk/`
 |------|------|------|
 | GET | `/api/v1/system/drives` | 已配置的 system roots 列表 |
 | GET | `/api/v1/system/browse` | 在 `system.allowed_roots` 范围内浏览目录 |
-| GET | `/api/v1/system/thumbnail` | 系统级缩略图 |
-| GET | `/api/v1/system/stream` | 系统级视频流 |
-| GET | `/api/v1/system/original` | 系统级原图 |
+| GET | `/api/v1/system/thumbnail` | 系统级缩略图（受 `allowed_roots` 校验） |
+| GET | `/api/v1/system/stream` | 系统级视频流（受 `allowed_roots` 校验） |
+| GET | `/api/v1/system/original` | 系统级原图（受 `allowed_roots` 校验） |
+| POST | `/api/v1/system/delete` | 删除指定文件/目录 |
+
+### 统一媒体访问（绝对路径）
+
+通过查询参数 `?path=<绝对路径>` 访问媒体，统一覆盖扫描根目录与 `system.allowed_roots`，均经 `ValidateAccessibleMediaPath` 校验。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/media/thumbnail` | 绝对路径缩略图 |
+| GET | `/api/v1/media/original` | 绝对路径原图 |
+| GET | `/api/v1/media/stream` | 绝对路径视频流（支持 Range） |
+| GET | `/api/v1/media/duration` | 媒体时长（供播放器进度条） |
 
 ### 管理
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| GET | `/api/v1/health` | 健康检查（返回 `{status: ok}`） |
 | GET | `/api/v1/admin/config` | 获取配置 |
 | PUT | `/api/v1/admin/config` | 更新扫描目录 |
 | POST | `/api/v1/admin/scan/trigger` | 触发全量重扫描 |

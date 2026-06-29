@@ -29,9 +29,9 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
     - `internal/config/`: 配置加载（YAML）
     - `internal/models/`: 数据模型
     - `internal/server/`: Echo 路由注册
-    - `internal/server/handler/`: 24 个 API handler
+    - `internal/server/handler/`: 29 个 API handler
     - `internal/server/middleware/`: CORS 中间件
-    - `internal/service/`: 业务逻辑（scanner, tags, streaming, thumbnail）
+    - `internal/service/`: 业务逻辑（scanner, tags, streaming, thumbnail, path 路径校验）
     - `internal/mdns/`: mDNS 服务注册
     - `internal/systray/`: 系统托盘（getlantern/systray）
     - `internal/gui/`: GUI 模式入口
@@ -53,6 +53,7 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
 ### Go (Server)
 - Handler 层通过 `Handler` struct 持有服务依赖，不使用全局变量。
 - 路径安全：所有文件访问必须经过 `ValidatePath` 或 `isWithinRoots` 校验。
+- **系统/统一媒体端点**：`/api/v1/system/*`（缩略图/原图/流）与 `/api/v1/media/*` 必须经 `ValidateSystemMediaAccess` / `ValidateAccessibleMediaPath`，强制 `system.allowed_roots` 边界，禁止越界读取。
 - **权限控制**: 目录访问受 `config.yaml` 中的 `system.allowed_roots` 限制（若配置）。
 - 列表返回用 `make([]T, 0)` 初始化，避免 JSON 序列化为 `null`。
 - 业务逻辑放在 `internal/service/`，handler 只做参数解析和响应。
@@ -90,4 +91,5 @@ Handler struct 接收所有 service 引用，方法挂在 struct 上。
 8. **同步政策**: 任何本地代码改动将自动同步推送至 GitHub `master` 分支。
 9. **中文汉化与视觉美观度优化**: 深度汉化原生 Android 界面所有硬编码文案。引入柔和的线性色彩渐变（Linear Gradients）与高阶毛玻璃面板拟态（Glassmorphism）胶囊，为多媒体和文件夹卡片引入精致超细描边及按压阻尼动态立体悬浮效果。
 10. **Web 管理界面**: 内置精致的 Web Single Page App，提供仪表盘、媒体共享库浏览、标签增删改查、以及系统设置功能。
+11. **统一媒体访问**: `/api/v1/media/*` 通过绝对路径 `?path=` 统一提供缩略图、原图、视频流与时长，覆盖扫描根目录与 `system.allowed_roots`，均经路径与边界校验。
 
