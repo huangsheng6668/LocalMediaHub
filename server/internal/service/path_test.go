@@ -148,3 +148,60 @@ func TestContainsBlockedSegmentMatchesWholeSegment(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveWithinRootsRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "secret.jpg")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	link := filepath.Join(root, "link.jpg")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink creation not supported on this platform: %v", err)
+	}
+
+	_, err := ResolveWithinRoots(link, []string{root})
+	if err == nil {
+		t.Fatal("expected symlink escaping roots to be rejected")
+	}
+}
+
+func TestResolveWithinRootsAllowsInRootSymlink(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "real.jpg")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	link := filepath.Join(root, "link.jpg")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink creation not supported on this platform: %v", err)
+	}
+
+	resolved, err := ResolveWithinRoots(link, []string{root})
+	if err != nil {
+		t.Fatalf("expected in-root symlink to resolve, got %v", err)
+	}
+	if _, err := os.Stat(resolved); err != nil {
+		t.Errorf("resolved path should be statable, got %v", err)
+	}
+}
+
+func TestResolveWithinRootsRejectsUNC(t *testing.T) {
+	_, err := ResolveWithinRoots(`\\server\share\file.jpg`, []string{`\\server\share`})
+	if err == nil {
+		t.Fatal("expected UNC path to be rejected")
+	}
+}
+
+func TestResolveWithinRootsRejectsPathOutsideRoots(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	filePath := filepath.Join(outside, "clip.mp4")
+	if err := os.WriteFile(filePath, []byte("v"), 0o644); err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	if _, err := ResolveWithinRoots(filePath, []string{root}); err == nil {
+		t.Fatal("expected path outside roots to be rejected")
+	}
+}

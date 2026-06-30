@@ -226,3 +226,66 @@ func validateMediaFilePath(absPath string, allowedExtensions []string) error {
 	}
 	return fmt.Errorf("access denied: file type not allowed")
 }
+
+// isUNC reports whether path is a UNC path (\\server\share, \\?\, \\.\).
+func isUNC(path string) bool {
+	return len(path) >= 2 && path[0] == '\\' && path[1] == '\\'
+}
+
+// resolveWithin lexical-cleans pathStr, rejects UNC input, resolves symlinks /
+// junctions on BOTH the path and each root via filepath.EvalSymlinks, and
+// requires the resolved path to remain inside one of the (similarly resolved)
+// roots. It does NOT apply the blocked-segment list. Returns the resolved real
+// path so callers open/serve that instead of the link-bearing input — closing
+// the "validate lexically, serve follows the link" TOCTOU.
+//
+// EvalSymlinks requires the path to exist; non-existent paths produce a wrapped
+// error that os.IsNotExist can detect (callers map it to 404). Security is not
+// weakened: only an EXISTING symlink can escape, and those are resolved here.
+func resolveWithin(pathStr string, roots []string) (string, error) {
+	absPath, err := NormalizePath(pathStr)
+	if err != nil {
+		return "", err
+	}
+	if isUNC(absPath) {
+		return "", fmt.Errorf("access denied: UNC paths are not allowed")
+	}
+
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", fmt.Errorf("path not accessible: %w", err)
+	}
+
+	for _, root := range roots {
+		absRoot, err := NormalizePath(root)
+		if err != nil || isUNC(absRoot) {
+			continue
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+		if err != nil {
+			continue
+		}
+		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			return resolvedPath, nil
+		}
+	}
+	return "", fmt.Errorf("access denied: path outside allowed directories")
+}
+
+// ResolveWithinRoots is the security boundary for system/media endpoints: it
+// resolves symlinks/junctions (resolveWithin) AND applies the blocked-segment
+// list. Returns the resolved real path for the caller to open/serve.
+func ResolveWithinRoots(pathStr string, roots []string) (string, error) {
+	resolved, err := resolveWithin(pathStr, roots)
+	if err != nil {
+		return "", err
+	}
+	if err := containsBlockedSegment(resolved); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
