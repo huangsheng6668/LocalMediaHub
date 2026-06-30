@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.res.stringResource
 import com.juziss.localmediahub.R
 import androidx.compose.ui.Alignment
@@ -48,12 +49,15 @@ internal fun WaterfallImageGrid(
         modifier = modifier.fillMaxSize(),
     ) {
         items(images, key = { it.relativePath }) { file ->
+            val imageClick = remember(file, onImageClick) { { onImageClick(file) } }
+            val longClick = remember(file, onFileLongClick) { { onFileLongClick(file) } }
+            val toggle = remember(file, onToggleFavorite) { { onToggleFavorite(file) } }
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .combinedClickable(
-                        onClick = { onImageClick(file) },
-                        onLongClick = { onFileLongClick(file) },
+                        onClick = imageClick,
+                        onLongClick = longClick,
                     ),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
             ) {
@@ -66,7 +70,7 @@ internal fun WaterfallImageGrid(
                     )
                     FavoriteToggleIcon(
                         isFavorite = isFavorite(file.relativePath),
-                        onClick = { onToggleFavorite(file) },
+                        onClick = toggle,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(4.dp),

@@ -70,10 +70,10 @@ internal fun FavoritesContent(
     if (images.isNotEmpty() && favoriteFiles.all { it.mediaType == "image" }) {
         WaterfallImageGrid(
             images = images,
-            onImageClick = { file -> onImageClick(file, favoriteFiles) },
+            onImageClick = remember(onImageClick, favoriteFiles) { { file -> onImageClick(file, favoriteFiles) } },
             getThumbnailUrl = getThumbnailUrl,
-            isFavorite = { isFavorite(it) },
-            onToggleFavorite = { onToggleFavorite(it) },
+            isFavorite = isFavorite,
+            onToggleFavorite = onToggleFavorite,
             onFileLongClick = onFileLongClick,
             modifier = modifier,
         )
