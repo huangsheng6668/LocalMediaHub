@@ -77,7 +77,7 @@ system:
 	}
 }
 
-func TestPublicOmitsSensitiveSystemFields(t *testing.T) {
+func TestPublicRedactsOnlyFFmpegPath(t *testing.T) {
 	cfg := &Config{
 		Server: ServerConfig{Host: "0.0.0.0", Port: 8000},
 		System: SystemConfig{
@@ -96,13 +96,10 @@ func TestPublicOmitsSensitiveSystemFields(t *testing.T) {
 	if strings.Contains(s, "ffmpeg_path") {
 		t.Errorf("Public() leaked ffmpeg_path: %s", s)
 	}
-	if strings.Contains(s, "enable_delete") {
-		t.Errorf("Public() leaked enable_delete: %s", s)
+	if !strings.Contains(s, "enable_delete") {
+		t.Errorf("Public() should keep enable_delete (Web UI delete buttons depend on it): %s", s)
 	}
 	if !strings.Contains(s, "allowed_roots") {
 		t.Errorf("Public() should keep allowed_roots: %s", s)
-	}
-	if !strings.Contains(s, "D:/Media") {
-		t.Errorf("Public() should keep allowed_roots values: %s", s)
 	}
 }

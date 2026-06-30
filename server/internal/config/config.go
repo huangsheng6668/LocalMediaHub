@@ -73,11 +73,11 @@ type SystemConfig struct {
 }
 
 // ConfigPublic is the redacted view of Config returned by GET/PUT /admin/config.
-// It omits System.FFmpegPath and System.EnableDelete (local binary path and the
-// delete flag are reconnaissance value), while keeping System.AllowedRoots (already
-// exposed by GET /system/drives and shown in the Web settings UI). ScanConfig is
-// projected onto ScanConfigPublic so the internal auto-detected-drive cache
-// (sync.Once) is neither copied nor leaked.
+// It omits only System.FFmpegPath (a local binary path). System.EnableDelete is
+// kept because the Web manager's delete buttons gate on it, and System.AllowedRoots
+// is kept (already exposed by GET /system/drives and shown in the Web settings UI).
+// ScanConfig is projected onto ScanConfigPublic so the internal auto-detected-drive
+// cache (sync.Once) is neither copied nor leaked.
 type ConfigPublic struct {
 	Server    ServerConfig        `json:"server"`
 	Scan      ScanConfigPublic    `json:"scan"`
@@ -96,6 +96,7 @@ type ScanConfigPublic struct {
 
 type SystemConfigPublic struct {
 	AllowedRoots []string `json:"allowed_roots,omitempty"`
+	EnableDelete bool     `json:"enable_delete,omitempty"`
 }
 
 // Public returns a copy of the config with sensitive operational fields removed.
@@ -104,7 +105,7 @@ func (c *Config) Public() ConfigPublic {
 		Server:    c.Server,
 		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions},
 		Thumbnail: c.Thumbnail,
-		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots},
+		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots, EnableDelete: c.System.EnableDelete},
 	}
 }
 
