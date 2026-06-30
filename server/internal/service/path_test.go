@@ -233,3 +233,25 @@ func TestResolveWithinRootsRejectsPathOutsideRoots(t *testing.T) {
 		t.Fatal("expected path outside roots to be rejected")
 	}
 }
+
+func TestValidateDeletionRejectsRootItself(t *testing.T) {
+	root := t.TempDir()
+	if _, err := ValidateDeletion(root, []string{root}); err == nil {
+		t.Fatal("expected deleting a root directory to be rejected")
+	}
+}
+
+func TestValidateDeletionAllowsChildFile(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "clip.mp4")
+	if err := os.WriteFile(child, []byte("v"), 0o644); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	resolved, err := ValidateDeletion(child, []string{root})
+	if err != nil {
+		t.Fatalf("expected child file deletion to be allowed, got %v", err)
+	}
+	if resolved != child {
+		t.Errorf("expected resolved %q, got %q", child, resolved)
+	}
+}

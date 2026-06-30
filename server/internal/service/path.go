@@ -119,11 +119,11 @@ func ValidateDeletion(pathStr string, allRoots []string) (string, error) {
 		if err != nil || isUNC(absRoot) {
 			continue
 		}
-		resolvedRoot, err := filepath.EvalSymlinks(absRoot)
-		if err != nil {
-			continue
-		}
-		if resolved == resolvedRoot {
+		// Compare lexical-to-lexical: resolveWithin returns the lexical cleaned
+		// path, so the root check must also be lexical. Using EvalSymlinks here
+		// would resolve a symlink/junction root to its target and fail to match,
+		// letting a link-style root be deleted.
+		if resolved == absRoot {
 			return "", fmt.Errorf("access denied: cannot delete a root directory")
 		}
 	}
