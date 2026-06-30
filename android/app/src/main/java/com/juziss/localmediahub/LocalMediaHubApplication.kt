@@ -23,7 +23,7 @@ class LocalMediaHubApplication : Application(), ImageLoaderFactory {
             .memoryCachePolicy(CachePolicy.ENABLED)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.15) // Memory cache capped at 15%
+                    .maxSizePercent(0.25) // 15% → 25%：全屏图片位图更多余量，减少滚动淘汰/重解码
                     .build()
             }
             .diskCachePolicy(CachePolicy.ENABLED)
