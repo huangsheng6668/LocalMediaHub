@@ -54,6 +54,33 @@ func (s *ThumbnailService) HasFFmpeg() bool {
 	return err == nil
 }
 
+func (s *ThumbnailService) getFFprobeCmd() string {
+	if s.ffmpegPath != "" {
+		return ffprobeSibling(s.ffmpegPath)
+	}
+	return "ffprobe"
+}
+
+func (s *ThumbnailService) HasFFprobe() bool {
+	_, err := exec.LookPath(s.getFFprobeCmd())
+	return err == nil
+}
+
+// videoDuration returns the file's duration in seconds via ffprobe, or
+// (0, false) if ffprobe is unavailable or the probe fails.
+func (s *ThumbnailService) videoDuration(sourcePath string) (float64, bool) {
+	cmd := exec.Command(s.getFFprobeCmd(),
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		sourcePath)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, false
+	}
+	return parseFFprobeDuration(string(out))
+}
+
 func isVideoFile(filePath string) bool {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
@@ -84,9 +111,11 @@ func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePat
 		tempFile.Close()
 		defer os.Remove(tempPath)
 
-		// 1. Try to extract at 5 seconds
+		// Seek to a representative frame (video midpoint when ffprobe is
+		// available, else the prior default of 5s). Fall back to 0s on failure.
 		ffmpegCmd := s.getFFmpegCmd()
-		cmd := exec.Command(ffmpegCmd, "-y", "-ss", "5", "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
+		seek := midpointSeek(s.videoDuration(sourcePath))
+		cmd := exec.Command(ffmpegCmd, "-y", "-ss", seek, "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
 		if err := cmd.Run(); err != nil {
 			// 2. If it fails (e.g. video is too short), fallback to 0 seconds
 			cmdFallback := exec.Command(ffmpegCmd, "-y", "-ss", "0", "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
