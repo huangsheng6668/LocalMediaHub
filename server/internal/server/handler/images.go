@@ -53,11 +53,12 @@ func (h *Handler) GetThumbnail(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
-	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.ImageExtensions); err != nil {
-		return respondError(c, http.StatusForbidden, err.Error())
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.ImageExtensions)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	thumbPath, err := h.thumbnail.GenerateThumbnail(pathStr)
+	thumbPath, err := h.thumbnail.GenerateThumbnail(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "file not found")
@@ -74,9 +75,10 @@ func (h *Handler) GetOriginal(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
-	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.ImageExtensions); err != nil {
-		return respondError(c, http.StatusForbidden, err.Error())
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.ImageExtensions)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	return c.File(pathStr)
+	return c.File(resolved)
 }

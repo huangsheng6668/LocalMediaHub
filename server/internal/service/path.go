@@ -130,34 +130,29 @@ func ValidateDeletion(pathStr string, allRoots []string) (string, error) {
 	return resolved, nil
 }
 
-// ValidateAccessibleMediaPath checks whether a media file path is accessible from either the
-// configured scan roots or the explicit system browse roots.
-func ValidateAccessibleMediaPath(pathStr string, scanRoots []string, systemAllowedRoots []string, allowedExtensions []string) error {
-	absPath, err := NormalizePath(pathStr)
-	if err != nil {
-		return err
-	}
-
-	ok, err := IsPathWithinRoots(absPath, scanRoots)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return validateMediaFilePath(absPath, allowedExtensions)
-	}
-
-	ok, err = IsPathWithinRoots(absPath, systemAllowedRoots)
-	if err != nil {
-		return err
-	}
-	if ok {
-		if err := containsBlockedSegment(absPath); err != nil {
-			return err
+// ValidateAccessibleMediaPath checks whether a media file path is accessible from
+// either the configured scan roots or the explicit system browse roots, resolving
+// symlinks/junctions and returning the resolved real path. Scan-root matches do
+// NOT apply the blocked-segment list (the operator's explicit library); system-root
+// matches DO (via ResolveWithinRoots), preserving the prior asymmetry.
+func ValidateAccessibleMediaPath(pathStr string, scanRoots []string, systemAllowedRoots []string, allowedExtensions []string) (string, error) {
+	// 1. Scan roots.
+	if resolved, err := resolveWithin(pathStr, scanRoots); err == nil {
+		if err := validateMediaFilePath(resolved, allowedExtensions); err != nil {
+			return "", err
 		}
-		return validateMediaFilePath(absPath, allowedExtensions)
+		return resolved, nil
 	}
-
-	return fmt.Errorf("access denied: path outside allowed directories")
+	// 2. System allowed roots (with blocked-segment check).
+	if len(systemAllowedRoots) > 0 {
+		if resolved, err := ResolveWithinRoots(pathStr, systemAllowedRoots); err == nil {
+			if err := validateMediaFilePath(resolved, allowedExtensions); err != nil {
+				return "", err
+			}
+			return resolved, nil
+		}
+	}
+	return "", fmt.Errorf("access denied: path outside allowed directories")
 }
 
 // containsBlockedSegment reports whether any segment of absPath (split on the OS

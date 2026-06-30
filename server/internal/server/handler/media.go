@@ -16,11 +16,12 @@ func (h *Handler) MediaThumbnail(c echo.Context) error {
 	}
 
 	allowedExts := append(h.cfg.Scan.ImageExtensions, h.cfg.Scan.VideoExtensions...)
-	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts); err != nil {
-		return respondError(c, http.StatusForbidden, err.Error())
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	thumbPath, err := h.thumbnail.GenerateThumbnail(pathStr)
+	thumbPath, err := h.thumbnail.GenerateThumbnail(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "file not found")
@@ -37,11 +38,12 @@ func (h *Handler) MediaOriginal(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.ImageExtensions); err != nil {
-		return respondError(c, http.StatusForbidden, err.Error())
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.ImageExtensions)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	return c.File(pathStr)
+	return c.File(resolved)
 }
 
 func (h *Handler) MediaStream(c echo.Context) error {
@@ -50,11 +52,12 @@ func (h *Handler) MediaStream(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions); err != nil {
-		return respondError(c, http.StatusForbidden, err.Error())
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	if err := h.streaming.ServeFile(c.Response().Writer, c.Request(), pathStr); err != nil {
+	if err := h.streaming.ServeFile(c.Response().Writer, c.Request(), resolved); err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "file not found")
 		}
@@ -69,11 +72,12 @@ func (h *Handler) MediaDuration(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions); err != nil {
-		return respondError(c, http.StatusForbidden, err.Error())
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	duration, err := h.streaming.GetVideoDuration(pathStr)
+	duration, err := h.streaming.GetVideoDuration(resolved)
 	if err != nil {
 		return respondInternalError(c, err)
 	}

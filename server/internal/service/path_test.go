@@ -46,7 +46,7 @@ func TestValidateAccessibleMediaPathAllowsScanRoots(t *testing.T) {
 		t.Fatalf("failed to create media file: %v", err)
 	}
 
-	if err := ValidateAccessibleMediaPath(filePath, []string{root}, nil, []string{".jpg"}); err != nil {
+	if _, err := ValidateAccessibleMediaPath(filePath, []string{root}, nil, []string{".jpg"}); err != nil {
 		t.Fatalf("expected scan-root media path to be accessible, got %v", err)
 	}
 }
@@ -58,7 +58,7 @@ func TestValidateAccessibleMediaPathAllowsSystemRoots(t *testing.T) {
 		t.Fatalf("failed to create media file: %v", err)
 	}
 
-	if err := ValidateAccessibleMediaPath(filePath, nil, []string{root}, []string{".mp4"}); err != nil {
+	if _, err := ValidateAccessibleMediaPath(filePath, nil, []string{root}, []string{".mp4"}); err != nil {
 		t.Fatalf("expected system-root media path to be accessible, got %v", err)
 	}
 }
@@ -71,7 +71,7 @@ func TestValidateAccessibleMediaPathRejectsPathsOutsideAllRoots(t *testing.T) {
 		t.Fatalf("failed to create outside media file: %v", err)
 	}
 
-	err := ValidateAccessibleMediaPath(filePath, []string{root}, nil, []string{".mp4"})
+	_, err := ValidateAccessibleMediaPath(filePath, []string{root}, nil, []string{".mp4"})
 	if err == nil {
 		t.Fatal("expected media path outside configured roots to be denied")
 	}
