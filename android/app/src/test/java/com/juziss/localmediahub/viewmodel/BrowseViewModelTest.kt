@@ -7,6 +7,8 @@ import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,7 +21,7 @@ class BrowseViewModelTest {
     @Test
     fun `setShowFavoritesOnly keeps favorites separate from tag collections`() {
         val appContext = ApplicationProvider.getApplicationContext<Context>()
-        val favoritesStore = FavoritesStore(appContext)
+        val favoritesStore = FavoritesStore(appContext, CoroutineScope(Dispatchers.Unconfined))
         val recentActivityStore = RecentActivityStore(appContext)
         val downloadsStore = DownloadsStore(appContext)
         val repository = MediaRepository()

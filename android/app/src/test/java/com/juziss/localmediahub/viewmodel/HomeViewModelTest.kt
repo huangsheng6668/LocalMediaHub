@@ -7,6 +7,7 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.ServerConfig
 import com.juziss.localmediahub.network.RetrofitClient
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -64,7 +65,7 @@ class HomeViewModelTest {
         serverConfig.saveServerConfig("127.0.0.1", "1")
 
         val viewModel = HomeViewModel(
-            favoritesStore = FavoritesStore(context),
+            favoritesStore = FavoritesStore(context, CoroutineScope(Dispatchers.Unconfined)),
             recentActivityStore = RecentActivityStore(context),
             serverConfig = serverConfig,
             repository = MediaRepository(),
