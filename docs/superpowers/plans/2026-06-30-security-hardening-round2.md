@@ -90,6 +90,11 @@ Expected: 编译失败，提示 `undefined: containsBlockedSegment`（`checkBloc
 // system.go). Whole-segment matching avoids the old substring false positives
 // (e.g. a media folder named "windows-screenshots" is its own segment and is NOT
 // blocked).
+//
+// NOTE: "users" is intentionally EXCLUDED. On Windows most real media lives under
+// C:\Users\<profile>\(Pictures|Videos|Downloads) and t.TempDir() sits under
+// C:\Users\<profile>\AppData\Local\Temp, so blocking the "users" segment would
+// reject legitimate user media (and break every temp-dir test fixture).
 var blockedSegments = []string{
 	"windows",
 	"winnt",
@@ -99,7 +104,6 @@ var blockedSegments = []string{
 	"system volume information",
 	"program files",
 	"program files (x86)",
-	"users",
 	"boot",
 }
 ```

@@ -104,7 +104,7 @@ func ResolveWithinRoots(pathStr string, roots []string) (resolved string, err er
 - `checkBlocked`（`path.go:190`）用 `strings.Contains(lowerPath, sep+blocked)`：`sep+blocked`（无尾分隔符）会匹配"任意段的结尾"，误伤如 `MyBootleg\windows-screenshots`；且末段命中靠第二条子句，边界脆弱。
 
 ### 4.2 修复方案
-- `service` 一份权威 `blockedSegments`（并集，全小写）：`windows, winnt, system32, syswow64, $recycle.bin, system volume information, program files, program files (x86), users, boot`。
+- `service` 一份权威 `blockedSegments`（并集，全小写）：`windows, winnt, system32, syswow64, $recycle.bin, system volume information, program files, program files (x86), boot`。**注意：不包含 `users`**——Windows 下绝大多数真实媒体位于 `C:\Users\<用户>\(Pictures|Videos|Downloads)`、`t.TempDir()` 位于 `C:\Users\<用户>\AppData\Local\Temp`，若拦截 `users` 段会误杀合法用户媒体并破坏所有临时目录测试。（round-1 的删除黑名单含 `users`，本轮统一时**主动剔除**该条。）
 - 新 `containsBlockedSegment(resolvedPath) error`：把**解析后**路径按 `filepath.Separator` 切段、逐段小写、在集合中**整段**匹配。
   - `\windows\system32\foo` → 命中（段 `windows`、`system32`）。
   - `D:\Media\MyBootleg\windows-screenshots` → **不**命中（`windows-screenshots` 是单独一段）。
@@ -228,7 +228,7 @@ func (c *Config) Save(path string) error {
 | 符号链接策略 | 解析后重新校验（`EvalSymlinks` 路径与根） | 唯一能堵住链接逃逸的方式；指向根外的条目变 403，加根可恢复 |
 | validator 返回值 | 返回解析后真实路径 | 消除"校验用词法、服务跟随链接"的 TOCTOU |
 | `IsPathWithinRoots` | 保持词法 | 搜索 scoped 过滤为显示用途、非安全边界；改解析会拖慢热路径 |
-| 黑名单范围 | 并集（浏览+删除共享同一份） | 浏览本就限在 `allowed_roots`，并集为纯纵深防御 |
+| 黑名单范围 | 并集（浏览+删除共享同一份），但**剔除 `users`** | 浏览本就限在 `allowed_roots`，并集为纯纵深防御；`users` 会误杀 Windows 用户目录下的媒体故不纳入（见 §4.2） |
 | config 脱敏范围 | 去掉 `ffmpeg_path`+`enable_delete`，保留 `allowed_roots` | 前两者纯侦察/状态泄露；后者已有专用端点且 UI 可能展示 |
 | HTTP `WriteTimeout` | 0（不设） | 保护长视频流/zip 下载；Slowloris 由 `ReadHeaderTimeout` 覆盖 |
 | 优雅关停期限 | 15s | 足够排空 zip 下载；主动退出时长视频可被掐断，可接受 |
