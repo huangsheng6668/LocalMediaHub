@@ -24,9 +24,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import kotlin.math.min
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.ui.component.VerticalScrollbar
 import kotlinx.coroutines.delay
@@ -141,6 +146,19 @@ private fun ZoomableImageItem(
     imageUrl: String,
     onTap: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val cap = 2048
+    val reqWidth = min(with(density) { configuration.screenWidthDp.dp.toPx() }.toInt(), cap)
+    val reqHeight = min(with(density) { configuration.screenHeightDp.dp.toPx() }.toInt(), cap)
+    val request = remember(imageUrl, reqWidth, reqHeight) {
+        ImageRequest.Builder(context)
+            .data(imageUrl)
+            .size(reqWidth, reqHeight)
+            .build()
+    }
+
     var scale by remember(file.relativePath) { mutableFloatStateOf(1f) }
     var offset by remember(file.relativePath) { mutableStateOf(Offset.Zero) }
     var hasMoved by remember { mutableStateOf(false) }
@@ -196,7 +214,7 @@ private fun ZoomableImageItem(
         contentAlignment = Alignment.Center,
     ) {
         AsyncImage(
-            model = imageUrl,
+            model = request,
             contentDescription = file.name,
             modifier = Modifier.fillMaxWidth(),
             contentScale = ContentScale.FillWidth,
