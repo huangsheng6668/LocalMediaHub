@@ -7,14 +7,28 @@ import (
 	"strings"
 )
 
-// blockedPaths are directories that should never be accessible via system browsing.
-var blockedPaths = []string{
+// blockedSegments are path segments (compared case-insensitively, whole-segment)
+// that must never be browsed, served, or deleted. Shared by browse, media-access,
+// and delete validation so read and write paths enforce the SAME blocklist
+// (previously these were duplicated and had already diverged between path.go and
+// system.go). Whole-segment matching avoids the old substring false positives
+// (e.g. a media folder named "windows-screenshots" is its own segment and is NOT
+// blocked).
+//
+// NOTE: "users" is intentionally EXCLUDED. On Windows most real media lives under
+// C:\Users\<profile>\(Pictures|Videos|Downloads) and t.TempDir() sits under
+// C:\Users\<profile>\AppData\Local\Temp, so blocking the "users" segment would
+// reject legitimate user media (and break every temp-dir test fixture).
+var blockedSegments = []string{
 	"windows",
 	"winnt",
 	"system32",
 	"syswow64",
 	"$recycle.bin",
 	"system volume information",
+	"program files",
+	"program files (x86)",
+	"boot",
 }
 
 // NormalizePath converts route/query path input into a cleaned absolute local path.
@@ -71,7 +85,7 @@ func ValidateSystemPath(pathStr string, allowedExtensions []string) error {
 		return err
 	}
 
-	if err := checkBlocked(absPath); err != nil {
+	if err := containsBlockedSegment(absPath); err != nil {
 		return err
 	}
 
@@ -113,7 +127,7 @@ func ValidateSystemMediaAccess(pathStr string, allowedRoots []string, allowedExt
 	if err != nil {
 		return err
 	}
-	if err := checkBlocked(absPath); err != nil {
+	if err := containsBlockedSegment(absPath); err != nil {
 		return err
 	}
 	return validateMediaFilePath(absPath, allowedExtensions)
@@ -128,7 +142,7 @@ func ValidateSystemBrowsePath(pathStr string) error {
 		return err
 	}
 
-	if err := checkBlocked(absPath); err != nil {
+	if err := containsBlockedSegment(absPath); err != nil {
 		return err
 	}
 
@@ -173,7 +187,7 @@ func ValidateAccessibleMediaPath(pathStr string, scanRoots []string, systemAllow
 		return err
 	}
 	if ok {
-		if err := checkBlocked(absPath); err != nil {
+		if err := containsBlockedSegment(absPath); err != nil {
 			return err
 		}
 		return validateMediaFilePath(absPath, allowedExtensions)
@@ -182,13 +196,14 @@ func ValidateAccessibleMediaPath(pathStr string, scanRoots []string, systemAllow
 	return fmt.Errorf("access denied: path outside allowed directories")
 }
 
-// checkBlocked returns an error if absPath falls inside a blocked directory.
-func checkBlocked(absPath string) error {
-	lowerPath := strings.ToLower(absPath)
-	for _, blocked := range blockedPaths {
-		sep := string(filepath.Separator)
-		if strings.Contains(lowerPath, sep+blocked+sep) || strings.Contains(lowerPath, sep+blocked) {
-			return fmt.Errorf("access denied: restricted directory")
+// containsBlockedSegment reports whether any segment of absPath (split on the OS
+// separator, lower-cased) equals one of the blocked segments.
+func containsBlockedSegment(absPath string) error {
+	for _, seg := range strings.Split(strings.ToLower(absPath), string(filepath.Separator)) {
+		for _, blocked := range blockedSegments {
+			if seg == blocked {
+				return fmt.Errorf("access denied: restricted directory")
+			}
 		}
 	}
 	return nil

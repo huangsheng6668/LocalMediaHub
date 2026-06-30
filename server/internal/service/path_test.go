@@ -127,3 +127,24 @@ func TestValidateSystemMediaAccessRejectsDisallowedExtension(t *testing.T) {
 		t.Fatal("expected non-media extension to be denied")
 	}
 }
+
+func TestContainsBlockedSegmentMatchesWholeSegment(t *testing.T) {
+	cases := map[string]bool{
+		// 真实段 → 命中
+		filepath.Join("D:", "Media", "windows", "x.jpg"):          true,
+		filepath.Join("D:", "Media", "System32", "x.jpg"):         true, // 大小写不敏感
+		filepath.Join("D:", "Media", "Program Files (x86)", "x"):  true, // 并集新成员 + 含括号空格
+		filepath.Join("D:", "Media", "$RECYCLE.BIN", "x.jpg"):     true,
+		// 非整段 → 不命中（修复旧子串误伤）
+		filepath.Join("D:", "Media", "windows-screenshots", "x"):  false,
+		filepath.Join("D:", "Media", "mywindows", "x.jpg"):        false,
+		filepath.Join("D:", "Media", "clip.mp4"):                  false,
+	}
+	for path, wantBlocked := range cases {
+		err := containsBlockedSegment(path)
+		gotBlocked := err != nil
+		if gotBlocked != wantBlocked {
+			t.Errorf("containsBlockedSegment(%q) blocked=%v, want %v", path, gotBlocked, wantBlocked)
+		}
+	}
+}
