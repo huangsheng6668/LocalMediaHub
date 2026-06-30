@@ -192,14 +192,12 @@ func TestResolveWithinRootsRejectsSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink creation not supported on this platform: %v", err)
 	}
-
-	_, err := ResolveWithinRoots(link, []string{root})
-	if err == nil {
-		t.Fatal("expected symlink escaping roots to be rejected")
+	if _, err := ResolveWithinRoots(link, []string{root}); err == nil {
+		t.Fatal("expected symlink under root to be rejected")
 	}
 }
 
-func TestResolveWithinRootsAllowsInRootSymlink(t *testing.T) {
+func TestResolveWithinRootsRejectsInRootSymlink(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "real.jpg")
 	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
@@ -209,19 +207,14 @@ func TestResolveWithinRootsAllowsInRootSymlink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Skipf("symlink creation not supported on this platform: %v", err)
 	}
-
-	resolved, err := ResolveWithinRoots(link, []string{root})
-	if err != nil {
-		t.Fatalf("expected in-root symlink to resolve, got %v", err)
-	}
-	if _, err := os.Stat(resolved); err != nil {
-		t.Errorf("resolved path should be statable, got %v", err)
+	// reparse-point policy rejects ALL links under roots (in-root or escaping).
+	if _, err := ResolveWithinRoots(link, []string{root}); err == nil {
+		t.Fatal("expected in-root symlink to be rejected under the reparse-point policy")
 	}
 }
 
 func TestResolveWithinRootsRejectsUNC(t *testing.T) {
-	_, err := ResolveWithinRoots(`\\server\share\file.jpg`, []string{`\\server\share`})
-	if err == nil {
+	if _, err := ResolveWithinRoots(`\\server\share\file.jpg`, []string{`\\server\share`}); err == nil {
 		t.Fatal("expected UNC path to be rejected")
 	}
 }
@@ -235,6 +228,34 @@ func TestResolveWithinRootsRejectsPathOutsideRoots(t *testing.T) {
 	}
 	if _, err := ResolveWithinRoots(filePath, []string{root}); err == nil {
 		t.Fatal("expected path outside roots to be rejected")
+	}
+}
+
+// TestResolveWithinRootsRejectsJunction guards the threat that motivated the
+// reparse-point policy: directory junctions, which filepath.EvalSymlinks does
+// NOT resolve on Windows (Go 1.24). Junctions need no administrator privilege
+// (unlike symlinks), so this runs on every Windows host — it is the real
+// verification of the bypass that the symlink tests can only t.Skip on Windows.
+func TestResolveWithinRootsRejectsJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junction test is Windows-specific")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	link := filepath.Join(root, "link")
+	cmd := exec.Command("cmd", "/c", "mklink", "/J", link, outside)
+	if err := cmd.Run(); err != nil {
+		t.Skipf("mklink /J failed: %v", err)
+	}
+	if _, err := ResolveWithinRoots(link, []string{root}); err == nil {
+		t.Fatal("expected junction under root to be rejected")
+	}
+	through := filepath.Join(link, "secret.jpg")
+	if _, err := ResolveWithinRoots(through, []string{root}); err == nil {
+		t.Fatal("expected path traversing a junction to be rejected")
 	}
 }
 ```
@@ -254,16 +275,19 @@ func isUNC(path string) bool {
 	return len(path) >= 2 && path[0] == '\\' && path[1] == '\\'
 }
 
-// resolveWithin lexical-cleans pathStr, rejects UNC input, resolves symlinks /
-// junctions on BOTH the path and each root via filepath.EvalSymlinks, and
-// requires the resolved path to remain inside one of the (similarly resolved)
-// roots. It does NOT apply the blocked-segment list. Returns the resolved real
-// path so callers open/serve that instead of the link-bearing input — closing
-// the "validate lexically, serve follows the link" TOCTOU.
+// resolveWithin lexical-cleans pathStr, rejects UNC, requires the cleaned path
+// to be inside one of the cleaned roots, AND rejects any path that traverses a
+// reparse point (Windows junction or a symlink) below the root boundary.
 //
-// EvalSymlinks requires the path to exist; non-existent paths produce a wrapped
-// error that os.IsNotExist can detect (callers map it to 404). Security is not
-// weakened: only an EXISTING symlink can escape, and those are resolved here.
+// Reparse points are REJECTED, not followed. filepath.EvalSymlinks does NOT
+// resolve Windows directory junctions (verified on Go 1.24 — caused a confirmed
+// /system/browse escape via junction), and a hand-rolled follower is risky in
+// security-critical code; denying links outright guarantees none can escape the
+// configured roots. os.Readlink succeeds for both junctions and symlinks on
+// Windows and for symlinks on Unix, so it is the detector.
+//
+// Returns the cleaned path (not the raw input) so callers open/serve that,
+// closing the "validate lexically, serve follows the link" TOCTOU.
 func resolveWithin(pathStr string, roots []string) (string, error) {
 	absPath, err := NormalizePath(pathStr)
 	if err != nil {
@@ -273,34 +297,48 @@ func resolveWithin(pathStr string, roots []string) (string, error) {
 		return "", fmt.Errorf("access denied: UNC paths are not allowed")
 	}
 
-	resolvedPath, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return "", fmt.Errorf("path not accessible: %w", err)
-	}
-
 	for _, root := range roots {
 		absRoot, err := NormalizePath(root)
 		if err != nil || isUNC(absRoot) {
 			continue
 		}
-		resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+		rel, err := filepath.Rel(absRoot, absPath)
 		if err != nil {
 			continue
 		}
-		rel, err := filepath.Rel(resolvedRoot, resolvedPath)
-		if err != nil {
-			continue
+		if rel == "." {
+			return absPath, nil // the root itself; operator-configured, allowed
 		}
-		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
-			return resolvedPath, nil
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue // not within this root
 		}
+		if err := assertNoReparseBelow(absRoot, rel); err != nil {
+			return "", err
+		}
+		return absPath, nil
 	}
 	return "", fmt.Errorf("access denied: path outside allowed directories")
 }
 
+// assertNoReparseBelow walks each component of rel under root and returns an
+// error if any is a reparse point (junction or symlink), detected via os.Readlink.
+func assertNoReparseBelow(root, rel string) error {
+	cur := root
+	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
+		if seg == "" || seg == "." {
+			continue
+		}
+		cur = filepath.Join(cur, seg)
+		if _, err := os.Readlink(cur); err == nil {
+			return fmt.Errorf("access denied: path traverses a link")
+		}
+	}
+	return nil
+}
+
 // ResolveWithinRoots is the security boundary for system/media endpoints: it
-// resolves symlinks/junctions (resolveWithin) AND applies the blocked-segment
-// list. Returns the resolved real path for the caller to open/serve.
+// runs resolveWithin (lexical containment + reparse-point rejection) AND applies
+// the blocked-segment list. Returns the cleaned path for the caller to open/serve.
 func ResolveWithinRoots(pathStr string, roots []string) (string, error) {
 	resolved, err := resolveWithin(pathStr, roots)
 	if err != nil {

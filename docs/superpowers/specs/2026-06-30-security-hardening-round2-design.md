@@ -68,12 +68,13 @@
 func ResolveWithinRoots(pathStr string, roots []string) (resolved string, err error)
 ```
 
-要点：
-1. 词法清洗：`filepath.Abs(filepath.Clean(...))` 作为输入形式。`..` 穿越由清洗后的包含判断（下条第 3 点）兜底——清洗会先词法消解 `..`，逃出根者必被包含判断拒绝，无需另设原始 `..` 黑名单（避免误伤 `D:\Media\..\Media\file` 这类冗余但合法的输入）。
-2. **拒绝 UNC**：原始输入以 `\\` 开头（含 `\\?\`、`\\.\`、`\\server\share`）一律拒绝（防御性，pre-clean；`Clean`/`Abs` 对 UNC 处理不一致，显式拒绝更稳）。
-3. `filepath.EvalSymlinks` **同时作用于请求路径与每个根**，对**解析后的形式**做包含判断 → junction/symlink 指向根外即拒。
-   - `EvalSymlinks` 要求路径存在；本组端点本就要求文件/目录存在（`validateMediaFilePath`/`SystemBrowse` 都会 `os.Stat`），存在性天然满足；不存在则 `EvalSymlinks` 报错 → 映射为 403/404。
-4. 黑名单段检查（见 §4）作用于**解析后路径**。
+要点（**设计修订 2026-06-30**：原方案用 `filepath.EvalSymlinks` 跟随链接后重校验，但实测 Go 1.24/Windows 下 `EvalSymlinks` 不解析目录 junction，导致 `/system/browse` 经 junction 逃逸。改为**拒绝 reparse point**）：
+1. 词法清洗：`filepath.Abs(filepath.Clean(...))` 作为输入形式。`..` 穿越由清洗后的包含判断兜底。
+2. **拒绝 UNC**：原始输入以 `\\` 开头一律拒绝。
+3. **词法包含判断**：要求清洗后的路径在某个清洗后的根内（与既有 `IsPathWithinRoots` 同一词法判定）。
+4. **拒绝 reparse point（核心）**：自根的下一级组件起，逐级用 `os.Readlink` 探测；任一组件是链接（junction 或符号链接——`os.Readlink` 在 Windows 对两者都成功、在 Unix 对符号链接成功）即返回 403，**不跟随**。这样无论链接目标为何都不可能逃出根。根本身（操作者配置）允许是链接（解析到自身即可，不强制）。
+5. 黑名单段检查（见 §4）作用于清洗后路径。
+6. validator 返回**清洗后的真实路径**（非原始 `pathStr`），handler 据此打开/服务——消除"校验用词法、服务跟随链接"的 TOCTOU。
 
 **各安全 validator 改用 `ResolveWithinRoots`，签名由 `error` 改为 `(resolved string, error)`**：
 
@@ -225,7 +226,7 @@ func (c *Config) Save(path string) error {
 | 决策 | 选择 | 理由 |
 |---|---|---|
 | 部署/威胁模型 | 仅自用可信 LAN，不加鉴权 | 用户确认；维持现有 CORS 局域网白名单模型 |
-| 符号链接策略 | 解析后重新校验（`EvalSymlinks` 路径与根） | 唯一能堵住链接逃逸的方式；指向根外的条目变 403，加根可恢复 |
+| 符号链接策略 | **拒绝 reparse point**：路径在根下若有任何 junction/符号链接组件则 403（不跟随） | `filepath.EvalSymlinks` 在 Windows（Go 1.24 实测）**不解析目录 junction**，导致 `/system/browse` 经 junction 逃逸（已实测 200+列出根外文件）；手写跟随解析器在安全关键路径上风险高。拒绝所有根下链接（用 `os.Readlink` 探测）最简单且零逃逸。代价：根内合法符号链接/junction 也被拒——自用媒体库通常用不到，可接受（见 §3.2） |
 | validator 返回值 | 返回解析后真实路径 | 消除"校验用词法、服务跟随链接"的 TOCTOU |
 | `IsPathWithinRoots` | 保持词法 | 搜索 scoped 过滤为显示用途、非安全边界；改解析会拖慢热路径 |
 | 黑名单范围 | 并集（浏览+删除共享同一份），但**剔除 `users`** | 浏览本就限在 `allowed_roots`，并集为纯纵深防御；`users` 会误杀 Windows 用户目录下的媒体故不纳入（见 §4.2） |
