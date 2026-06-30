@@ -196,16 +196,19 @@ func isUNC(path string) bool {
 	return len(path) >= 2 && path[0] == '\\' && path[1] == '\\'
 }
 
-// resolveWithin lexical-cleans pathStr, rejects UNC input, resolves symlinks /
-// junctions on BOTH the path and each root via filepath.EvalSymlinks, and
-// requires the resolved path to remain inside one of the (similarly resolved)
-// roots. It does NOT apply the blocked-segment list. Returns the resolved real
-// path so callers open/serve that instead of the link-bearing input — closing
-// the "validate lexically, serve follows the link" TOCTOU.
+// resolveWithin lexical-cleans pathStr, rejects UNC, requires the cleaned path
+// to be inside one of the cleaned roots, AND rejects any path that traverses a
+// reparse point (Windows junction or a symlink) below the root boundary.
 //
-// EvalSymlinks requires the path to exist; non-existent paths produce a wrapped
-// error that os.IsNotExist can detect (callers map it to 404). Security is not
-// weakened: only an EXISTING symlink can escape, and those are resolved here.
+// Reparse points are REJECTED, not followed. filepath.EvalSymlinks does NOT
+// resolve Windows directory junctions (verified on Go 1.24 — caused a confirmed
+// /system/browse escape via junction), and a hand-rolled follower is risky in
+// security-critical code; denying links outright guarantees none can escape the
+// configured roots. os.Readlink succeeds for both junctions and symlinks on
+// Windows and for symlinks on Unix, so it is the detector.
+//
+// Returns the cleaned path (not the raw input) so callers open/serve that,
+// closing the "validate lexically, serve follows the link" TOCTOU.
 func resolveWithin(pathStr string, roots []string) (string, error) {
 	absPath, err := NormalizePath(pathStr)
 	if err != nil {
@@ -215,29 +218,43 @@ func resolveWithin(pathStr string, roots []string) (string, error) {
 		return "", fmt.Errorf("access denied: UNC paths are not allowed")
 	}
 
-	resolvedPath, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return "", fmt.Errorf("path not accessible: %w", err)
-	}
-
 	for _, root := range roots {
 		absRoot, err := NormalizePath(root)
 		if err != nil || isUNC(absRoot) {
 			continue
 		}
-		resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+		rel, err := filepath.Rel(absRoot, absPath)
 		if err != nil {
 			continue
 		}
-		rel, err := filepath.Rel(resolvedRoot, resolvedPath)
-		if err != nil {
-			continue
+		if rel == "." {
+			return absPath, nil // the root itself; operator-configured, allowed
 		}
-		if rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
-			return resolvedPath, nil
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue // not within this root
 		}
+		if err := assertNoReparseBelow(absRoot, rel); err != nil {
+			return "", err
+		}
+		return absPath, nil
 	}
 	return "", fmt.Errorf("access denied: path outside allowed directories")
+}
+
+// assertNoReparseBelow walks each component of rel under root and returns an
+// error if any is a reparse point (junction or symlink), detected via os.Readlink.
+func assertNoReparseBelow(root, rel string) error {
+	cur := root
+	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
+		if seg == "" || seg == "." {
+			continue
+		}
+		cur = filepath.Join(cur, seg)
+		if _, err := os.Readlink(cur); err == nil {
+			return fmt.Errorf("access denied: path traverses a link")
+		}
+	}
+	return nil
 }
 
 // ResolveWithinRoots is the security boundary for system/media endpoints: it

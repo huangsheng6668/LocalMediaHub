@@ -2,7 +2,9 @@ package service
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -167,7 +169,10 @@ func TestResolveWithinRootsRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
-func TestResolveWithinRootsAllowsInRootSymlink(t *testing.T) {
+// Under the reparse-point policy ALL links under roots are rejected (junctions
+// are not resolved by filepath.EvalSymlinks on Windows, so the only safe rule is
+// to deny links outright).
+func TestResolveWithinRootsRejectsInRootSymlink(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "real.jpg")
 	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
@@ -178,12 +183,35 @@ func TestResolveWithinRootsAllowsInRootSymlink(t *testing.T) {
 		t.Skipf("symlink creation not supported on this platform: %v", err)
 	}
 
-	resolved, err := ResolveWithinRoots(link, []string{root})
-	if err != nil {
-		t.Fatalf("expected in-root symlink to resolve, got %v", err)
+	if _, err := ResolveWithinRoots(link, []string{root}); err == nil {
+		t.Fatal("expected in-root symlink to be rejected under the reparse-point policy")
 	}
-	if _, err := os.Stat(resolved); err != nil {
-		t.Errorf("resolved path should be statable, got %v", err)
+}
+
+// TestResolveWithinRootsRejectsJunction guards the threat that motivated the
+// reparse-point policy: directory junctions, which filepath.EvalSymlinks does
+// NOT resolve on Windows (Go 1.24). Junctions need no administrator privilege
+// (unlike symlinks), so this runs on every Windows host.
+func TestResolveWithinRootsRejectsJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junction test is Windows-specific")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.jpg"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	link := filepath.Join(root, "link")
+	cmd := exec.Command("cmd", "/c", "mklink", "/J", link, outside)
+	if err := cmd.Run(); err != nil {
+		t.Skipf("mklink /J failed: %v", err)
+	}
+	if _, err := ResolveWithinRoots(link, []string{root}); err == nil {
+		t.Fatal("expected junction under root to be rejected")
+	}
+	through := filepath.Join(link, "secret.jpg")
+	if _, err := ResolveWithinRoots(through, []string{root}); err == nil {
+		t.Fatal("expected path traversing a junction to be rejected")
 	}
 }
 
