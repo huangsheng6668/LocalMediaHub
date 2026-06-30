@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	echoMw "github.com/labstack/echo/v4/middleware"
@@ -27,6 +28,7 @@ type Server struct {
 	Tags         *service.TagsService
 	Streaming    *service.StreamingService
 	Thumbnail    *service.ThumbnailService
+	httpServer   *http.Server
 	preGenCtx    context.Context
 	preGenCancel context.CancelFunc
 	preGenMu     sync.Mutex
@@ -76,6 +78,16 @@ func New(cfg *config.Config) (*Server, error) {
 
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService)
 	s.registerRoutes(h)
+
+	s.httpServer = &http.Server{
+		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:           s.Echo,
+		ReadHeaderTimeout: 10 * time.Second, // mitigate Slowloris slow-header attacks
+		ReadTimeout:       30 * time.Second, // covers small request bodies (e.g. config JSON)
+		IdleTimeout:       120 * time.Second,
+		// WriteTimeout intentionally 0: video streams and folder-zip downloads can
+		// run for minutes-to-hours; a global write deadline would cut them off.
+	}
 
 	return s, nil
 }
@@ -162,15 +174,24 @@ func (s *Server) serveFavicon(c echo.Context) error {
 }
 
 func (s *Server) Start() error {
-	addr := fmt.Sprintf("%s:%d", s.Config.Server.Host, s.Config.Server.Port)
-	return s.Echo.Start(addr)
+	return s.httpServer.ListenAndServe()
 }
 
 func (s *Server) Stop() error {
-	// Cancel any in-flight background scan so a triggered scan doesn't keep
-	// walking the filesystem after the server has stopped.
+	// Cancel any in-flight background scan so it doesn't keep walking the FS.
 	s.Scanner.Shutdown()
-	return s.Echo.Close()
+	// Cancel thumbnail pre-generation (preGenCancel is nil until the first scan
+	// completes — guard against nil to avoid a panic).
+	s.preGenMu.Lock()
+	if s.preGenCancel != nil {
+		s.preGenCancel()
+	}
+	s.preGenMu.Unlock()
+	// Drain in-flight requests (notably folder-zip downloads) before returning,
+	// so Ctrl+C / tray-quit doesn't corrupt a half-written download.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return s.httpServer.Shutdown(ctx)
 }
 
 func getLocalIP() (string, error) {

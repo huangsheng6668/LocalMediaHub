@@ -1,15 +1,18 @@
 package server
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/localmediahub/server/internal/config"
@@ -81,4 +84,58 @@ func newTestEcho() *echo.Echo {
 	e := echo.New()
 	e.HideBanner = true
 	return e
+}
+
+func TestServerStartAndStopGracefulShutdown(t *testing.T) {
+	// 选取一个空闲端口供 Start 绑定。
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	cacheDir := filepath.Join(t.TempDir(), "thumb")
+	cfg := &config.Config{
+		Server: config.ServerConfig{Host: "127.0.0.1", Port: port},
+		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: cacheDir, MaxSize: 64, Format: "jpeg",
+		},
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	startErr := make(chan error, 1)
+	go func() { startErr <- s.Start() }()
+
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/v1/health", port)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(healthURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// 确认超时已配置。
+	if s.httpServer == nil {
+		t.Fatal("expected httpServer to be configured")
+	}
+	if s.httpServer.ReadHeaderTimeout <= 0 {
+		t.Error("expected ReadHeaderTimeout > 0")
+	}
+
+	if err := s.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := <-startErr; err != nil && err != http.ErrServerClosed {
+		t.Fatalf("Start returned unexpected error: %v", err)
+	}
 }
