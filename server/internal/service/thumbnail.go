@@ -61,11 +61,6 @@ func (s *ThumbnailService) getFFprobeCmd() string {
 	return "ffprobe"
 }
 
-func (s *ThumbnailService) HasFFprobe() bool {
-	_, err := exec.LookPath(s.getFFprobeCmd())
-	return err == nil
-}
-
 // videoDuration returns the file's duration in seconds via ffprobe, or
 // (0, false) if ffprobe is unavailable or the probe fails.
 func (s *ThumbnailService) videoDuration(sourcePath string) (float64, bool) {
