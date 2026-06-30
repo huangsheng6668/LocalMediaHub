@@ -49,19 +49,17 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 		})
 	}
 
-	// Validate path is under an allowed root
-	if err := service.ValidateSystemBrowseAllowed(pathStr, h.cfg.GetSystemAllowedRoots()); err != nil {
-		return respondError(c, http.StatusForbidden, "access denied")
-	}
-	if err := service.ValidateSystemBrowsePath(pathStr); err != nil {
-		return respondError(c, http.StatusForbidden, "access denied")
-	}
-
-	fi, err := os.Stat(pathStr)
+	// Resolve symlinks + enforce allowed_roots boundary in one step.
+	resolved, err := service.ValidateSystemBrowse(pathStr, h.cfg.GetSystemAllowedRoots())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "path not found")
 		}
+		return respondError(c, http.StatusForbidden, "access denied")
+	}
+
+	fi, err := os.Stat(resolved)
+	if err != nil {
 		return respondInternalError(c, err)
 	}
 
@@ -69,7 +67,7 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "not a directory")
 	}
 
-	entries, err := os.ReadDir(pathStr)
+	entries, err := os.ReadDir(resolved)
 	if err != nil {
 		return respondInternalError(c, err)
 	}
@@ -77,7 +75,7 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 	folders := make([]models.Folder, 0)
 	files := make([]models.MediaFile, 0)
 	for _, entry := range entries {
-		fullPath := filepath.Join(pathStr, entry.Name())
+		fullPath := filepath.Join(resolved, entry.Name())
 		if entry.IsDir() {
 			info, _ := entry.Info()
 			var modTime time.Time
@@ -121,7 +119,7 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, models.BrowseResult{
-		CurrentPath: pathStr,
+		CurrentPath: resolved,
 		Folders:     folders,
 		Files:       files,
 	})
@@ -133,11 +131,12 @@ func (h *Handler) SystemThumbnail(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions()); err != nil {
+	resolved, err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions())
+	if err != nil {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	thumbPath, err := h.thumbnail.GenerateSystemThumbnail(pathStr)
+	thumbPath, err := h.thumbnail.GenerateSystemThumbnail(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "file not found")
@@ -154,11 +153,12 @@ func (h *Handler) SystemOriginal(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions()); err != nil {
+	resolved, err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions())
+	if err != nil {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	return c.File(pathStr)
+	return c.File(resolved)
 }
 
 func (h *Handler) SystemStream(c echo.Context) error {
@@ -167,11 +167,12 @@ func (h *Handler) SystemStream(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	if err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions()); err != nil {
+	resolved, err := service.ValidateSystemMediaAccess(pathStr, h.cfg.GetSystemAllowedRoots(), h.mediaExtensions())
+	if err != nil {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	if err := h.streaming.ServeFile(c.Response().Writer, c.Request(), pathStr); err != nil {
+	if err := h.streaming.ServeFile(c.Response().Writer, c.Request(), resolved); err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "file not found")
 		}
@@ -183,59 +184,6 @@ func (h *Handler) SystemStream(c echo.Context) error {
 type DeleteRequest struct {
 	Path      string `json:"path"`
 	Recursive bool   `json:"recursive"`
-}
-
-func (h *Handler) isAllowedToDelete(pathStr string) error {
-	absPath, err := service.NormalizePath(pathStr)
-	if err != nil {
-		return err
-	}
-
-	lowerPath := strings.ToLower(absPath)
-	blockedPaths := []string{
-		"windows", "winnt", "system32", "syswow64", "$recycle.bin", "system volume information",
-		"program files", "program files (x86)", "users", "boot",
-	}
-	for _, blocked := range blockedPaths {
-		sep := string(filepath.Separator)
-		if strings.Contains(lowerPath, sep+blocked+sep) || strings.Contains(lowerPath, sep+blocked) {
-			return fmt.Errorf("access denied: restricted directory")
-		}
-	}
-
-	scanRoots := h.cfg.Scan.GetRoots()
-	allowedRoots := h.cfg.GetSystemAllowedRoots()
-
-	var allRoots []string
-	allRoots = append(allRoots, scanRoots...)
-	allRoots = append(allRoots, allowedRoots...)
-
-	isWithin := false
-	for _, root := range allRoots {
-		absRoot, err := service.NormalizePath(root)
-		if err != nil {
-			continue
-		}
-
-		rel, err := filepath.Rel(absRoot, absPath)
-		if err != nil {
-			continue
-		}
-
-		if rel == "." {
-			return fmt.Errorf("access denied: cannot delete a root directory")
-		}
-
-		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			isWithin = true
-		}
-	}
-
-	if !isWithin {
-		return fmt.Errorf("access denied: path outside allowed directories")
-	}
-
-	return nil
 }
 
 func (h *Handler) DeletePath(c echo.Context) error {
@@ -252,16 +200,13 @@ func (h *Handler) DeletePath(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
 	}
 
-	absPath, err := service.NormalizePath(req.Path)
+	allRoots := append(append([]string{}, h.cfg.Scan.GetRoots()...), h.cfg.GetSystemAllowedRoots()...)
+	resolved, err := service.ValidateDeletion(req.Path, allRoots)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
-
-	if err := h.isAllowedToDelete(absPath); err != nil {
 		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 	}
 
-	fi, err := os.Stat(absPath)
+	fi, err := os.Stat(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "path not found")
@@ -273,16 +218,16 @@ func (h *Handler) DeletePath(c echo.Context) error {
 		if !req.Recursive {
 			return respondError(c, http.StatusBadRequest, "cannot delete a non-empty directory without recursive flag")
 		}
-		if err := os.RemoveAll(absPath); err != nil {
+		if err := os.RemoveAll(resolved); err != nil {
 			return respondInternalError(c, fmt.Errorf("failed to delete directory: %w", err))
 		}
 	} else {
-		if err := os.Remove(absPath); err != nil {
+		if err := os.Remove(resolved); err != nil {
 			return respondInternalError(c, fmt.Errorf("failed to delete file: %w", err))
 		}
 	}
 
-	_ = h.tags.CleanDeletedPath(absPath)
+	_ = h.tags.CleanDeletedPath(resolved)
 	h.scanner.InvalidateCache()
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "deleted successfully"})

@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-func TestValidateSystemBrowseAllowedRequiresConfiguredRoots(t *testing.T) {
+func TestValidateSystemBrowseRequiresConfiguredRoots(t *testing.T) {
 	root := t.TempDir()
 
-	err := ValidateSystemBrowseAllowed(root, nil)
+	_, err := ValidateSystemBrowse(root, nil)
 	if err == nil {
 		t.Fatal("expected access to be denied when no system roots are configured")
 	}
@@ -82,7 +82,7 @@ func TestValidateSystemMediaAccessRequiresConfiguredRoots(t *testing.T) {
 		t.Fatalf("failed to create media file: %v", err)
 	}
 
-	err := ValidateSystemMediaAccess(filePath, nil, []string{".mp4"})
+	_, err := ValidateSystemMediaAccess(filePath, nil, []string{".mp4"})
 	if err == nil {
 		t.Fatal("expected access to be denied when no system roots are configured")
 	}
@@ -95,7 +95,7 @@ func TestValidateSystemMediaAccessAllowsFileWithinRoots(t *testing.T) {
 		t.Fatalf("failed to create media file: %v", err)
 	}
 
-	err := ValidateSystemMediaAccess(filePath, []string{root}, []string{".mp4"})
+	_, err := ValidateSystemMediaAccess(filePath, []string{root}, []string{".mp4"})
 	if err != nil {
 		t.Fatalf("expected media file within roots to be accessible, got %v", err)
 	}
@@ -109,7 +109,7 @@ func TestValidateSystemMediaAccessRejectsPathOutsideRoots(t *testing.T) {
 		t.Fatalf("failed to create media file: %v", err)
 	}
 
-	err := ValidateSystemMediaAccess(filePath, []string{root}, []string{".jpg"})
+	_, err := ValidateSystemMediaAccess(filePath, []string{root}, []string{".jpg"})
 	if err == nil {
 		t.Fatal("expected media file outside roots to be denied")
 	}
@@ -122,7 +122,7 @@ func TestValidateSystemMediaAccessRejectsDisallowedExtension(t *testing.T) {
 		t.Fatalf("failed to create file: %v", err)
 	}
 
-	err := ValidateSystemMediaAccess(filePath, []string{root}, []string{".mp4", ".jpg"})
+	_, err := ValidateSystemMediaAccess(filePath, []string{root}, []string{".mp4", ".jpg"})
 	if err == nil {
 		t.Fatal("expected non-media extension to be denied")
 	}

@@ -74,96 +74,60 @@ func IsPathWithinRoots(pathStr string, roots []string) (bool, error) {
 	return false, nil
 }
 
-// ValidateSystemPath validates a path for system browsing endpoints.
-// It ensures:
-//  1. The path is absolute and cleaned (no .. traversal)
-//  2. The path is not in a blocked sensitive directory
-//  3. If it is a file, its extension must be in the allowed list
-func ValidateSystemPath(pathStr string, allowedExtensions []string) error {
-	absPath, err := NormalizePath(pathStr)
-	if err != nil {
-		return err
-	}
-
-	if err := containsBlockedSegment(absPath); err != nil {
-		return err
-	}
-
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return fmt.Errorf("path not accessible: %w", err)
-	}
-
-	if !info.IsDir() {
-		ext := strings.ToLower(filepath.Ext(absPath))
-		allowed := false
-		for _, allowedExt := range allowedExtensions {
-			if strings.EqualFold(ext, allowedExt) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return fmt.Errorf("access denied: file type not allowed")
-		}
-	}
-
-	return nil
-}
-
 // ValidateSystemMediaAccess validates a media file path for the system
-// thumbnail/original/stream endpoints. It enforces that the path is under one
-// of the configured system allowed roots, is not inside a blocked directory,
-// and is an existing file whose extension is in the allowed list.
-//
-// Unlike ValidateSystemPath, this also enforces the allowed-roots boundary,
-// preventing the system media endpoints from serving files outside the
-// directories the operator explicitly opened via system.allowed_roots.
-func ValidateSystemMediaAccess(pathStr string, allowedRoots []string, allowedExtensions []string) error {
-	if err := ValidateSystemBrowseAllowed(pathStr, allowedRoots); err != nil {
-		return err
-	}
-	absPath, err := NormalizePath(pathStr)
-	if err != nil {
-		return err
-	}
-	if err := containsBlockedSegment(absPath); err != nil {
-		return err
-	}
-	return validateMediaFilePath(absPath, allowedExtensions)
-}
-
-// ValidateSystemBrowsePath validates a directory path for browsing (listing contents).
-// Only checks for path traversal and blocked directories; does NOT restrict extensions
-// since the browsing handler already filters by media extensions.
-func ValidateSystemBrowsePath(pathStr string) error {
-	absPath, err := NormalizePath(pathStr)
-	if err != nil {
-		return err
-	}
-
-	if err := containsBlockedSegment(absPath); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// ValidateSystemBrowseAllowed checks that the path is under one of the allowed roots.
-// If allowedRoots is empty, system browse is disabled until configured.
-func ValidateSystemBrowseAllowed(pathStr string, allowedRoots []string) error {
+// thumbnail/original/stream endpoints. It resolves symlinks/junctions, requires
+// the resolved path be under one of the configured system allowed roots, blocks
+// sensitive segments, and confirms it is an existing file with an allowed
+// extension. Returns the resolved real path for the caller to open/serve.
+func ValidateSystemMediaAccess(pathStr string, allowedRoots []string, allowedExtensions []string) (string, error) {
 	if len(allowedRoots) == 0 {
-		return fmt.Errorf("system browse is not configured")
+		return "", fmt.Errorf("system browse is not configured")
 	}
-
-	ok, err := IsPathWithinRoots(pathStr, allowedRoots)
+	resolved, err := ResolveWithinRoots(pathStr, allowedRoots)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if ok {
-		return nil
+	if err := validateMediaFilePath(resolved, allowedExtensions); err != nil {
+		return "", err
 	}
-	return fmt.Errorf("access denied: path outside allowed directories")
+	return resolved, nil
+}
+
+// ValidateSystemBrowse validates a directory path for listing contents: it
+// resolves symlinks/junctions, requires the resolved path within the resolved
+// allowed roots, and blocks sensitive segments. Returns the resolved directory
+// path. Replaces the old ValidateSystemBrowseAllowed + ValidateSystemBrowsePath
+// two-step, whose security depended on call order.
+func ValidateSystemBrowse(pathStr string, allowedRoots []string) (string, error) {
+	if len(allowedRoots) == 0 {
+		return "", fmt.Errorf("system browse is not configured")
+	}
+	return ResolveWithinRoots(pathStr, allowedRoots)
+}
+
+// ValidateDeletion resolves symlinks/junctions, requires the resolved path be
+// within one of the resolved roots, blocks sensitive segments, and forbids
+// deleting a root itself. Returns the resolved path. Moved here from
+// handler.isAllowedToDelete so blocklist + roots logic live in one place.
+func ValidateDeletion(pathStr string, allRoots []string) (string, error) {
+	resolved, err := ResolveWithinRoots(pathStr, allRoots)
+	if err != nil {
+		return "", err
+	}
+	for _, root := range allRoots {
+		absRoot, err := NormalizePath(root)
+		if err != nil || isUNC(absRoot) {
+			continue
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+		if err != nil {
+			continue
+		}
+		if resolved == resolvedRoot {
+			return "", fmt.Errorf("access denied: cannot delete a root directory")
+		}
+	}
+	return resolved, nil
 }
 
 // ValidateAccessibleMediaPath checks whether a media file path is accessible from either the
