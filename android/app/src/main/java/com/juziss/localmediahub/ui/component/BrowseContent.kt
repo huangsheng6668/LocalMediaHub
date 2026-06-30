@@ -86,22 +86,24 @@ internal fun FavoritesContent(
             modifier = modifier.fillMaxSize(),
         ) {
             items(favoriteFiles, key = { it.relativePath }) { file ->
+                val toggle = remember(file, onToggleFavorite) { { onToggleFavorite(file) } }
+                val longClick = remember(file, onFileLongClick) { { onFileLongClick(file) } }
                 when (file.mediaType) {
                     "video" -> VideoCard(
                         file = file,
                         thumbnailUrl = getThumbnailUrl(file),
                         isFavorite = isFavorite(file.relativePath),
-                        onToggleFavorite = { onToggleFavorite(file) },
-                        onClick = { onVideoClick(file) },
-                        onLongClick = { onFileLongClick(file) },
+                        onToggleFavorite = toggle,
+                        onClick = remember(file, onVideoClick) { { onVideoClick(file) } },
+                        onLongClick = longClick,
                     )
                     "image" -> ImageCard(
                         file = file,
                         thumbnailUrl = getThumbnailUrl(file),
                         isFavorite = isFavorite(file.relativePath),
-                        onToggleFavorite = { onToggleFavorite(file) },
-                        onClick = { onImageClick(file, favoriteFiles) },
-                        onLongClick = { onFileLongClick(file) },
+                        onToggleFavorite = toggle,
+                        onClick = remember(file, onImageClick, favoriteFiles) { { onImageClick(file, favoriteFiles) } },
+                        onLongClick = longClick,
                     )
                 }
             }
@@ -163,22 +165,24 @@ internal fun SearchContent(
                         FolderCard(folder = folder, onClick = { onFolderClick(folder) })
                     }
                     items(result.files, key = { it.relativePath }) { file ->
+                        val toggle = remember(file, onToggleFavorite) { { onToggleFavorite(file) } }
+                        val longClick = remember(file, onFileLongClick) { { onFileLongClick(file) } }
                         when (file.mediaType) {
                             "video" -> VideoCard(
                                 file = file,
                                 thumbnailUrl = getThumbnailUrl(file),
                                 isFavorite = isFavorite(file.relativePath),
-                                onToggleFavorite = { onToggleFavorite(file) },
-                                onClick = { onVideoClick(file) },
-                                onLongClick = { onFileLongClick(file) },
+                                onToggleFavorite = toggle,
+                                onClick = remember(file, onVideoClick) { { onVideoClick(file) } },
+                                onLongClick = longClick,
                             )
                             "image" -> ImageCard(
                                 file = file,
                                 thumbnailUrl = getThumbnailUrl(file),
                                 isFavorite = isFavorite(file.relativePath),
-                                onToggleFavorite = { onToggleFavorite(file) },
-                                onClick = { onImageClick(file) },
-                                onLongClick = { onFileLongClick(file) },
+                                onToggleFavorite = toggle,
+                                onClick = remember(file, onImageClick) { { onImageClick(file) } },
+                                onLongClick = longClick,
                             )
                         }
                     }
@@ -291,22 +295,24 @@ internal fun BrowseContent(
                     )
                 }
                 items(files, key = { it.relativePath }, contentType = { it.mediaType }) { file ->
+                    val toggle = remember(file, onToggleFavorite) { { onToggleFavorite(file) } }
+                    val longClick = remember(file, onFileLongClick) { { onFileLongClick(file) } }
                     when (file.mediaType) {
                         "video" -> VideoCard(
                             file = file,
                             thumbnailUrl = viewModel.getThumbnailUrl(file),
                             isFavorite = isFavorite(file.relativePath),
-                            onToggleFavorite = { onToggleFavorite(file) },
-                            onClick = { onVideoClick(file) },
-                            onLongClick = { onFileLongClick(file) },
+                            onToggleFavorite = toggle,
+                            onClick = remember(file, onVideoClick) { { onVideoClick(file) } },
+                            onLongClick = longClick,
                         )
                         "image" -> ImageCard(
                             file = file,
                             thumbnailUrl = viewModel.getThumbnailUrl(file),
                             isFavorite = isFavorite(file.relativePath),
-                            onToggleFavorite = { onToggleFavorite(file) },
-                            onClick = { onImageClick(file) },
-                            onLongClick = { onFileLongClick(file) },
+                            onToggleFavorite = toggle,
+                            onClick = remember(file, onImageClick) { { onImageClick(file) } },
+                            onLongClick = longClick,
                         )
                     }
                 }

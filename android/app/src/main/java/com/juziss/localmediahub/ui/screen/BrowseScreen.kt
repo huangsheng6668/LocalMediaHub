@@ -297,6 +297,17 @@ fun BrowseScreen(
         }
     ) { innerPadding ->
         var itemForActions by remember { mutableStateOf<Any?>(null) }
+        // Stable callback refs so the grid content can skip recomposition when
+        // these don't change (isFavorite only rebuilds when the favorites set does).
+        val onToggleFavoriteCb: (MediaFile) -> Unit = remember(viewModel) {
+            { file -> viewModel.toggleFavorite(file) }
+        }
+        val isFavoriteCb: (String) -> Boolean = remember(favorites) {
+            { relativePath -> relativePath in favorites }
+        }
+        val onFileLongClickCb: (MediaFile) -> Unit = remember {
+            { file -> itemForActions = file }
+        }
         var itemToDelete by remember { mutableStateOf<Any?>(null) }
         var showDeleteConfirm by remember { mutableStateOf(false) }
         var deleteRecursive by remember { mutableStateOf(true) }
@@ -570,10 +581,10 @@ fun BrowseScreen(
                     }
                     onImageClick(file, allImages)
                 },
-                onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
-                isFavorite = { relativePath -> relativePath in favorites },
+                onToggleFavorite = onToggleFavoriteCb,
+                isFavorite = isFavoriteCb,
                 getThumbnailUrl = viewModel::getThumbnailUrl,
-                onFileLongClick = { file -> itemForActions = file },
+                onFileLongClick = onFileLongClickCb,
                 modifier = Modifier.padding(innerPadding),
             )
             return@Scaffold
@@ -602,10 +613,10 @@ fun BrowseScreen(
                         val allImages = allFiles.filter { it.mediaType == "image" }
                         onFavoriteImageClick(file, allImages, viewModel.isFavoriteSystemBrowse(file))
                     },
-                    onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
-                    isFavorite = { relativePath -> relativePath in favorites },
+                    onToggleFavorite = onToggleFavoriteCb,
+                    isFavorite = isFavoriteCb,
                     getThumbnailUrl = viewModel::getFavoriteThumbnailUrl,
-                    onFileLongClick = { file -> itemForActions = file },
+                    onFileLongClick = onFileLongClickCb,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -717,9 +728,9 @@ fun BrowseScreen(
                         onImageClick = { file ->
                             onImageClick(file, filteredFiles.filter { it.mediaType == "image" })
                         },
-                        onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
-                        isFavorite = { relativePath -> relativePath in favorites },
-                        onFileLongClick = { file -> itemForActions = file },
+                        onToggleFavorite = onToggleFavoriteCb,
+                        isFavorite = isFavoriteCb,
+                        onFileLongClick = onFileLongClickCb,
                         onFolderLongClick = { folder -> itemForActions = folder },
                         modifier = Modifier.weight(1f),
                         viewModel = viewModel,
@@ -766,9 +777,9 @@ fun BrowseScreen(
                         onImageClick = { file ->
                             onImageClick(file, filteredFiles.filter { it.mediaType == "image" })
                         },
-                        onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
-                        isFavorite = { relativePath -> relativePath in favorites },
-                        onFileLongClick = { file -> itemForActions = file },
+                        onToggleFavorite = onToggleFavoriteCb,
+                        isFavorite = isFavoriteCb,
+                        onFileLongClick = onFileLongClickCb,
                         onFolderLongClick = { folder -> itemForActions = folder },
                         modifier = Modifier.weight(1f),
                         viewModel = viewModel,
@@ -808,9 +819,9 @@ fun BrowseScreen(
                             onImageClick = { file ->
                                 onImageClick(file, collection.files.filter { it.mediaType == "image" })
                             },
-                            onToggleFavorite = { file -> viewModel.toggleFavorite(file) },
-                            isFavorite = { relativePath -> relativePath in favorites },
-                            onFileLongClick = { file -> itemForActions = file },
+                            onToggleFavorite = onToggleFavoriteCb,
+                            isFavorite = isFavoriteCb,
+                            onFileLongClick = onFileLongClickCb,
                             modifier = Modifier.weight(1f),
                             viewModel = viewModel,
                         )
