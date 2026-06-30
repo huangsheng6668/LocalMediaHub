@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +74,35 @@ system:
 	}
 	if got[0] != `F:\restricted` || got[1] != `S:\more` {
 		t.Fatalf("expected allowed roots to become scan roots, got %v", got)
+	}
+}
+
+func TestPublicOmitsSensitiveSystemFields(t *testing.T) {
+	cfg := &Config{
+		Server: ServerConfig{Host: "0.0.0.0", Port: 8000},
+		System: SystemConfig{
+			AllowedRoots: []string{"D:/Media"},
+			EnableDelete: true,
+			FFmpegPath:   "C:/tools/ffmpeg.exe",
+		},
+	}
+
+	data, err := json.Marshal(cfg.Public())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(data)
+
+	if strings.Contains(s, "ffmpeg_path") {
+		t.Errorf("Public() leaked ffmpeg_path: %s", s)
+	}
+	if strings.Contains(s, "enable_delete") {
+		t.Errorf("Public() leaked enable_delete: %s", s)
+	}
+	if !strings.Contains(s, "allowed_roots") {
+		t.Errorf("Public() should keep allowed_roots: %s", s)
+	}
+	if !strings.Contains(s, "D:/Media") {
+		t.Errorf("Public() should keep allowed_roots values: %s", s)
 	}
 }

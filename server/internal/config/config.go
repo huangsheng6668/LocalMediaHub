@@ -72,6 +72,42 @@ type SystemConfig struct {
 	FFmpegPath   string   `yaml:"ffmpeg_path,omitempty" json:"ffmpeg_path,omitempty"`
 }
 
+// ConfigPublic is the redacted view of Config returned by GET/PUT /admin/config.
+// It omits System.FFmpegPath and System.EnableDelete (local binary path and the
+// delete flag are reconnaissance value), while keeping System.AllowedRoots (already
+// exposed by GET /system/drives and shown in the Web settings UI). ScanConfig is
+// projected onto ScanConfigPublic so the internal auto-detected-drive cache
+// (sync.Once) is neither copied nor leaked.
+type ConfigPublic struct {
+	Server    ServerConfig        `json:"server"`
+	Scan      ScanConfigPublic    `json:"scan"`
+	Thumbnail ThumbnailConfig     `json:"thumbnail"`
+	System    SystemConfigPublic  `json:"system"`
+}
+
+// ScanConfigPublic mirrors only the user-facing fields of ScanConfig. The internal
+// autoRoots/autoRootsOnce cache (the latter is a sync.Once and must not be copied)
+// is intentionally omitted.
+type ScanConfigPublic struct {
+	Roots           []string `json:"roots,omitempty"`
+	VideoExtensions []string `json:"video_extensions"`
+	ImageExtensions []string `json:"image_extensions"`
+}
+
+type SystemConfigPublic struct {
+	AllowedRoots []string `json:"allowed_roots,omitempty"`
+}
+
+// Public returns a copy of the config with sensitive operational fields removed.
+func (c *Config) Public() ConfigPublic {
+	return ConfigPublic{
+		Server:    c.Server,
+		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions},
+		Thumbnail: c.Thumbnail,
+		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots},
+	}
+}
+
 // GetSystemAllowedRoots returns configured system browse roots.
 // If empty, system browse is disabled until explicitly configured.
 func (c *Config) GetSystemAllowedRoots() []string {

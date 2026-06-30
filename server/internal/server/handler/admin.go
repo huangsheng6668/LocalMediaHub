@@ -11,7 +11,7 @@ type ConfigUpdateRequest struct {
 }
 
 func (h *Handler) GetConfig(c echo.Context) error {
-	return c.JSON(http.StatusOK, h.cfg)
+	return c.JSON(http.StatusOK, h.cfg.Public())
 }
 
 func (h *Handler) UpdateConfig(c echo.Context) error {
@@ -30,7 +30,7 @@ func (h *Handler) UpdateConfig(c echo.Context) error {
 
 	h.scanner.InvalidateCache()
 
-	return c.JSON(http.StatusOK, h.cfg)
+	return c.JSON(http.StatusOK, h.cfg.Public())
 }
 
 func (h *Handler) TriggerScan(c echo.Context) error {
