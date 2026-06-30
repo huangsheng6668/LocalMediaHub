@@ -230,7 +230,7 @@ func (c *Config) Save(path string) error {
 | validator 返回值 | 返回解析后真实路径 | 消除"校验用词法、服务跟随链接"的 TOCTOU |
 | `IsPathWithinRoots` | 保持词法 | 搜索 scoped 过滤为显示用途、非安全边界；改解析会拖慢热路径 |
 | 黑名单范围 | 并集（浏览+删除共享同一份），但**剔除 `users`** | 浏览本就限在 `allowed_roots`，并集为纯纵深防御；`users` 会误杀 Windows 用户目录下的媒体故不纳入（见 §4.2） |
-| config 脱敏范围 | 去掉 `ffmpeg_path`+`enable_delete`，保留 `allowed_roots` | 前两者纯侦察/状态泄露；后者已有专用端点且 UI 可能展示 |
+| config 脱敏范围 | 去掉 `ffmpeg_path`，**保留** `enable_delete`+`allowed_roots` | `ffmpeg_path`（本地二进制绝对路径）是纯侦察价值；`enable_delete` 是功能开关，Web 管理器的删除按钮依赖它（实测脱敏会让按钮永久隐藏），且在可信 LAN 上"是否开启删除"近乎无密（试一下即知），故保留；`allowed_roots` 已有 `/system/drives` 专用端点 |
 | HTTP `WriteTimeout` | 0（不设） | 保护长视频流/zip 下载；Slowloris 由 `ReadHeaderTimeout` 覆盖 |
 | 优雅关停期限 | 15s | 足够排空 zip 下载；主动退出时长视频可被掐断，可接受 |
 | config roots 校验 | 仅绝对路径，不校验存在性 | 防相对路径误解析；外置盘可能未挂载，不误拒 |

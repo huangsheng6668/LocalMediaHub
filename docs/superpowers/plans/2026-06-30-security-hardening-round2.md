@@ -1319,6 +1319,7 @@ type ConfigPublic struct {
 
 type SystemConfigPublic struct {
 	AllowedRoots []string `json:"allowed_roots,omitempty"`
+	EnableDelete bool     `json:"enable_delete,omitempty"` // kept: Web UI delete buttons depend on it (owner decision); only ffmpeg_path is redacted
 }
 
 // Public returns a copy of the config with sensitive operational fields removed.
