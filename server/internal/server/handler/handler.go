@@ -91,6 +91,15 @@ func respondNotFound(c echo.Context, msg string) error {
 	return c.JSON(http.StatusNotFound, map[string]string{"error": msg})
 }
 
+// setMediaCacheHeaders marks a thumbnail/original response as browser-cacheable
+// for one day. The thumbnail cache key includes the source file's modtime, so a
+// changed source produces a new cache file with a different modtime and browsers
+// revalidating via If-Modified-Since get a 200 — correct outside the max-age
+// window. Not applied to stream endpoints (different Range semantics).
+func setMediaCacheHeaders(c echo.Context) {
+	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
+}
+
 // paginateBounds returns the [start, end) slice indices for a page-based
 // pagination, clamped to [0, total]. Used by GetVideos / GetImages which
 // previously duplicated this logic verbatim.

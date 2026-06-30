@@ -66,6 +66,7 @@ func (h *Handler) GetThumbnail(c echo.Context) error {
 		return respondInternalError(c, err)
 	}
 
+	setMediaCacheHeaders(c)
 	return c.File(thumbPath)
 }
 
@@ -80,5 +81,6 @@ func (h *Handler) GetOriginal(c echo.Context) error {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
+	setMediaCacheHeaders(c)
 	return c.File(resolved)
 }

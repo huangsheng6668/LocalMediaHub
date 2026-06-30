@@ -78,6 +78,9 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected thumbnail route to return 200, got %d with body %s", rec.Code, rec.Body.String())
 	}
+	if got := rec.Result().Header.Get("Cache-Control"); got != "public, max-age=86400" {
+		t.Fatalf("expected thumbnail Cache-Control 'public, max-age=86400', got %q", got)
+	}
 }
 
 func newTestEcho() *echo.Echo {
