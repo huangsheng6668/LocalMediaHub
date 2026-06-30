@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"path/filepath"
 
 	"github.com/labstack/echo/v4"
 )
@@ -18,6 +19,14 @@ func (h *Handler) UpdateConfig(c echo.Context) error {
 	var req ConfigUpdateRequest
 	if err := c.Bind(&req); err != nil {
 		return respondError(c, http.StatusBadRequest, "invalid request body", err)
+	}
+
+	// Roots must be absolute so they don't resolve against the server CWD.
+	// Existence is NOT required (an external drive may be unmounted).
+	for _, r := range req.Roots {
+		if !filepath.IsAbs(r) {
+			return respondError(c, http.StatusBadRequest, "scan roots must be absolute paths")
+		}
 	}
 
 	h.cfg.Scan.Roots = req.Roots

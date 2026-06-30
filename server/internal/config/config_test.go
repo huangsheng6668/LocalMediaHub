@@ -103,3 +103,39 @@ func TestPublicRedactsOnlyFFmpegPath(t *testing.T) {
 		t.Errorf("Public() should keep allowed_roots: %s", s)
 	}
 }
+
+func TestSaveIsAtomicAndReadable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg := &Config{
+		Server:      ServerConfig{Host: "0.0.0.0", Port: 8000},
+		Scan:        ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Thumbnail:   ThumbnailConfig{CacheDir: ".cache/thumbnails", MaxSize: 300, Format: "JPEG"},
+	}
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// 不应残留临时文件。
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "config.yaml" {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("expected only config.yaml in dir, got %v", names)
+	}
+
+	// 可回读。
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Server.Port != 8000 {
+		t.Errorf("expected port 8000, got %d", loaded.Server.Port)
+	}
+}
