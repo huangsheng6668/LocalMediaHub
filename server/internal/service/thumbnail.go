@@ -223,14 +223,20 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 }
 
 func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx context.Context) {
-	var images []models.MediaFile
+	hasFFmpeg := s.HasFFmpeg()
+	var queue []models.MediaFile
 	for _, f := range files {
-		if f.MediaType == "image" {
-			images = append(images, f)
+		switch f.MediaType {
+		case "image":
+			queue = append(queue, f)
+		case "video":
+			if hasFFmpeg {
+				queue = append(queue, f)
+			}
 		}
 	}
 
-	if len(images) == 0 {
+	if len(queue) == 0 {
 		return
 	}
 
@@ -239,8 +245,8 @@ func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx c
 		numWorkers = 1
 	}
 
-	jobs := make(chan models.MediaFile, len(images))
-	for _, img := range images {
+	jobs := make(chan models.MediaFile, len(queue))
+	for _, img := range queue {
 		jobs <- img
 	}
 	close(jobs)
