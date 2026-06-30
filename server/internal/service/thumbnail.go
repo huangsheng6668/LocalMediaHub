@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -266,4 +267,40 @@ func DecodeImage(path string) (image.Image, error) {
 		return nil, err
 	}
 	return img, nil
+}
+
+// ffprobeSibling derives the ffprobe path from an ffmpeg path: same directory
+// and extension with the basename ffmpeg -> ffprobe. If the basename does not
+// contain "ffmpeg", it returns the bare "ffprobe" (relying on PATH lookup).
+func ffprobeSibling(ffmpegPath string) string {
+	base := strings.ToLower(filepath.Base(ffmpegPath))
+	if !strings.Contains(base, "ffmpeg") {
+		return "ffprobe"
+	}
+	ext := filepath.Ext(ffmpegPath)
+	return filepath.Join(filepath.Dir(ffmpegPath), "ffprobe"+ext)
+}
+
+// parseFFprobeDuration parses ffprobe's duration output (seconds, decimal).
+// Returns false on empty / "N/A" / non-numeric / non-positive input.
+func parseFFprobeDuration(out string) (float64, bool) {
+	out = strings.TrimSpace(out)
+	if out == "" || out == "N/A" {
+		return 0, false
+	}
+	d, err := strconv.ParseFloat(out, 64)
+	if err != nil || d <= 0 {
+		return 0, false
+	}
+	return d, true
+}
+
+// midpointSeek returns the seek offset (seconds, 2 decimals) at half the video
+// duration for a representative frame; falls back to "5" when the duration is
+// unknown (preserving the prior hardcoded -ss 5 behavior).
+func midpointSeek(duration float64, ok bool) string {
+	if !ok || duration <= 0 {
+		return "5"
+	}
+	return strconv.FormatFloat(duration/2, 'f', 2, 64)
 }
