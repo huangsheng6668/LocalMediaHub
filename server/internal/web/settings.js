@@ -1,15 +1,8 @@
 // Settings feature module: extracted from app.js (loadConfig / renderSettings + 2 button listeners).
-// loadConfig/renderSettings are called zero-arg from initApp() and the router, so they resolve
-// their DOM nodes from a module-local map (mirroring app.js element IDs) rather than a param.
-const settingsElements = {
-    infoScanRoots: document.getElementById('info-scan-roots'),
-    settingsRoots: document.getElementById('settings-roots'),
-    settingsVideoExts: document.getElementById('settings-video-exts'),
-    settingsImageExts: document.getElementById('settings-image-exts'),
-    settingsAllowedRoots: document.getElementById('settings-allowed-roots'),
-    settingsEnableDelete: document.getElementById('settings-enable-delete'),
-    settingsThumbMax: document.getElementById('settings-thumb-max')
-};
+import { state } from './state.js';
+import { showToast } from './toast.js';
+import { apiRequest } from './api.js';
+import { elements } from './dom.js';
 
 // Fetch configs
 export async function loadConfig() {
@@ -22,7 +15,7 @@ export async function loadConfig() {
         state.enableDelete = (data.system && data.system.enable_delete) || false;
         state.thumbMax = (data.thumbnail && data.thumbnail.max_size) || 300;
 
-        settingsElements.infoScanRoots.textContent = state.folders.join(', ') || '全盘自动检测';
+        elements.infoScanRoots.textContent = state.folders.join(', ') || '全盘自动检测';
     } catch (e) {
         console.error('loadConfig error:', e);
         showToast('无法从后端获取系统配置: ' + e.message, 'error');
@@ -31,12 +24,12 @@ export async function loadConfig() {
 
 // Render Settings View (Tab 4)
 export function renderSettings() {
-    settingsElements.settingsRoots.value = state.folders.join('\n');
-    settingsElements.settingsVideoExts.textContent = state.videoExts.join(', ') || '未配置';
-    settingsElements.settingsImageExts.textContent = state.imageExts.join(', ') || '未配置';
-    settingsElements.settingsAllowedRoots.textContent = state.allowedRoots.join(', ') || '未限制/不可浏览系统';
-    settingsElements.settingsEnableDelete.textContent = state.enableDelete ? '已开启 (运行在客户端删除 PC 文件)' : '已禁用 (安全只读)';
-    settingsElements.settingsThumbMax.textContent = `${state.thumbMax} px`;
+    elements.settingsRoots.value = state.folders.join('\n');
+    elements.settingsVideoExts.textContent = state.videoExts.join(', ') || '未配置';
+    elements.settingsImageExts.textContent = state.imageExts.join(', ') || '未配置';
+    elements.settingsAllowedRoots.textContent = state.allowedRoots.join(', ') || '未限制/不可浏览系统';
+    elements.settingsEnableDelete.textContent = state.enableDelete ? '已开启 (运行在客户端删除 PC 文件)' : '已禁用 (安全只读)';
+    elements.settingsThumbMax.textContent = `${state.thumbMax} px`;
 }
 
 // Set up Settings-related event listeners (btnTriggerScan + btnSaveSettings).
