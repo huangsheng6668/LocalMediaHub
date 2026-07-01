@@ -40,6 +40,15 @@ class BrowseSorterTest {
     }
 
     @Test
+    fun `sortFiles NAME_DESC is reverse natural order`() {
+        val sorted = BrowseSorter.sortFiles(
+            listOf(file("img1.jpg"), file("img2.jpg"), file("img10.jpg")),
+            SortOrder.NAME_DESC,
+        )
+        assertEquals(listOf("img10.jpg", "img2.jpg", "img1.jpg"), sorted.map { it.name })
+    }
+
+    @Test
     fun `sortFiles SIZE_ASC and SIZE_DESC by size`() {
         val files = listOf(file("a", size = 30), file("b", size = 10), file("c", size = 20))
         assertEquals(
