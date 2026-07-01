@@ -2,6 +2,7 @@ import { state } from './state.js';
 import { showToast } from './toast.js';
 import { apiRequest, escapeHtml } from './api.js';
 import { handleRoute } from './router.js';
+import { formatSize, formatTime, encodeRoutePath, safeBtoa } from './utils.js';
 
 // DOM Elements
 const elements = {
@@ -1203,46 +1204,6 @@ function renderSettings() {
     elements.settingsAllowedRoots.textContent = state.allowedRoots.join(', ') || '未限制/不可浏览系统';
     elements.settingsEnableDelete.textContent = state.enableDelete ? '已开启 (运行在客户端删除 PC 文件)' : '已禁用 (安全只读)';
     elements.settingsThumbMax.textContent = `${state.thumbMax} px`;
-}
-
-// Utility formatting functions
-function formatSize(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// Encode path segments while keeping literal forward slashes (required for Echo wildcards)
-function encodeRoutePath(path) {
-    if (!path) return '';
-    return path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
-}
-
-// Unicode-safe Base64 encoding for HTML element IDs
-function safeBtoa(str) {
-    try {
-        return btoa(unescape(encodeURIComponent(str)));
-    } catch (e) {
-        return str.replace(/[^a-zA-Z0-9]/g, '_');
-    }
-}
-
-// Utility: Format seconds into HH:MM:SS or MM:SS
-function formatTime(seconds) {
-    if (isNaN(seconds) || seconds === Infinity) return '00:00';
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-    
-    const formattedMins = mins < 10 ? `0${mins}` : mins;
-    const formattedSecs = secs < 10 ? `0${secs}` : secs;
-    
-    if (hrs > 0) {
-        return `${hrs}:${formattedMins}:${formattedSecs}`;
-    }
-    return `${formattedMins}:${formattedSecs}`;
 }
 
 // Delete media file from filesystem
