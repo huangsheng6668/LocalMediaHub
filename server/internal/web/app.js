@@ -417,7 +417,7 @@ function onDashboardRecentClick(e) {
 }
 
 // Render Dashboard (Tab 1)
-async function renderDashboard() {
+export async function renderDashboard() {
     // 1. Fetch total files
     try {
         let totalVideos = 0;
@@ -546,7 +546,7 @@ async function loadSystemDrives() {
 }
 
 // Browse specific path
-async function browsePath(path) {
+export async function browsePath(path) {
     state.currentPath = path;
     
     let url = `${state.apiBase}/api/v1/folders/${encodeRoutePath(path)}/browse`;

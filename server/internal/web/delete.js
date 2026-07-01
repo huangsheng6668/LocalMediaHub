@@ -3,6 +3,7 @@ import { state } from './state.js';
 import { apiRequest } from './api.js';
 import { showToast } from './toast.js';
 import { elements } from './dom.js';
+import { browsePath, renderDashboard } from './app.js';
 
 // Delete media file from filesystem
 export async function deleteMediaFile(file) {
@@ -36,7 +37,7 @@ export async function deleteMediaFile(file) {
         if (state.activeTab === 'browser') {
             browsePath(state.currentPath);
         } else if (state.activeTab === 'dashboard') {
-            initDashboard();
+            renderDashboard();
         }
     } catch (e) {
         showToast(`删除失败: ${e.message}`, 'error');
