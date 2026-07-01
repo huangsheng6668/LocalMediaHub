@@ -231,24 +231,29 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		fileToZip, err := os.Open(filePath)
-		if err != nil {
-			return err
-		}
-		defer fileToZip.Close()
+		// Per-file anonymous scope: defer Close runs after each file's copy,
+		// not accumulated until the whole Walk ends (which exhausted FDs on
+		// large folders). Method stays Store (media is already compressed).
+		return func() error {
+			fileToZip, err := os.Open(filePath)
+			if err != nil {
+				return err
+			}
+			defer fileToZip.Close()
 
-		header := &zip.FileHeader{
-			Name:     relPath,
-			Method:   zip.Store,
-			Modified: info.ModTime(),
-		}
-		writer, err := zipWriter.CreateHeader(header)
-		if err != nil {
-			return err
-		}
+			header := &zip.FileHeader{
+				Name:     relPath,
+				Method:   zip.Store,
+				Modified: info.ModTime(),
+			}
+			writer, err := zipWriter.CreateHeader(header)
+			if err != nil {
+				return err
+			}
 
-		_, err = io.Copy(writer, fileToZip)
-		return err
+			_, err = io.Copy(writer, fileToZip)
+			return err
+		}()
 	})
 
 	// Response already started (status + headers written) above, so we can no
