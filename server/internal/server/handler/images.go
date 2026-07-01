@@ -22,12 +22,11 @@ func (h *Handler) GetImages(c echo.Context) error {
 		pageSize = 50
 	}
 
-	files, err := h.scanner.GetCached(c.Request().Context(), h.cfg.Scan.GetRoots())
+	images, err := h.scanner.GetCachedByType(c.Request().Context(), h.cfg.Scan.GetRoots(), "image")
 	if err != nil {
 		return respondInternalError(c, err)
 	}
 
-	images := h.scanner.FilterByType(files, "image")
 	start, end := paginateBounds(len(images), page, pageSize)
 
 	return c.JSON(http.StatusOK, models.PaginatedMediaFiles{

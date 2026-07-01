@@ -161,14 +161,27 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 		return nil, err
 	}
 
-	// Merge slices
+	// Merge slices, splitting by media type so list endpoints can read per-type
+	// slices directly instead of re-filtering the whole cache on every request.
 	allFiles := make([]models.MediaFile, 0)
+	videoFiles := make([]models.MediaFile, 0)
+	imageFiles := make([]models.MediaFile, 0)
 	for _, subList := range results {
-		allFiles = append(allFiles, subList...)
+		for _, f := range subList {
+			allFiles = append(allFiles, f)
+			switch f.MediaType {
+			case "video":
+				videoFiles = append(videoFiles, f)
+			case "image":
+				imageFiles = append(imageFiles, f)
+			}
+		}
 	}
 
 	s.mu.Lock()
 	s.cache["all"] = allFiles
+	s.cache["video"] = videoFiles
+	s.cache["image"] = imageFiles
 	s.cacheTime = time.Now()
 	callback := s.OnScanComplete
 	s.mu.Unlock()
@@ -202,6 +215,30 @@ func (s *Scanner) GetCached(ctx context.Context, roots []string) ([]models.Media
 		return nil, err
 	}
 	return val.([]models.MediaFile), nil
+}
+
+// GetCachedByType returns the cached scan results filtered to mediaType,
+// triggering a scan on cache miss (shared via singleflight, same as GetCached).
+func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType string) ([]models.MediaFile, error) {
+	s.mu.RLock()
+	if time.Since(s.cacheTime) < s.cacheTTL {
+		if files, ok := s.cache[mediaType]; ok {
+			s.mu.RUnlock()
+			return files, nil
+		}
+	}
+	s.mu.RUnlock()
+
+	_, err, _ := s.sf.Do("scan", func() (interface{}, error) {
+		return s.Scan(ctx, roots)
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Scan 刚填充了 cache[mediaType]；读回请求的类型切片。
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cache[mediaType], nil
 }
 
 func (s *Scanner) InvalidateCache() {

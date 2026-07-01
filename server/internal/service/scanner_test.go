@@ -97,3 +97,30 @@ func TestScanner(t *testing.T) {
 	// Test shutdown
 	scanner.Shutdown()
 }
+
+func TestScanCachesPerType(t *testing.T) {
+	tempDir := t.TempDir()
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "v.mp4"), []byte("v"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "i.jpg"), []byte("i"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "skip.txt"), []byte("x"), 0644))
+
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	files, err := scanner.Scan(context.Background(), []string{tempDir})
+	assert.NoError(t, err)
+	assert.Len(t, files, 2)
+
+	// Scan 应按类型分流缓存
+	assert.Len(t, scanner.cache["video"], 1)
+	assert.Len(t, scanner.cache["image"], 1)
+
+	// GetCachedByType 返回对应子集（缓存新鲜）
+	vids, err := scanner.GetCachedByType(context.Background(), []string{tempDir}, "video")
+	assert.NoError(t, err)
+	assert.Len(t, vids, 1)
+	assert.Equal(t, "video", vids[0].MediaType)
+
+	imgs, err := scanner.GetCachedByType(context.Background(), []string{tempDir}, "image")
+	assert.NoError(t, err)
+	assert.Len(t, imgs, 1)
+	assert.Equal(t, "image", imgs[0].MediaType)
+}

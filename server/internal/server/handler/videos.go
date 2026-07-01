@@ -22,12 +22,11 @@ func (h *Handler) GetVideos(c echo.Context) error {
 		pageSize = 50
 	}
 
-	files, err := h.scanner.GetCached(c.Request().Context(), h.cfg.Scan.GetRoots())
+	videos, err := h.scanner.GetCachedByType(c.Request().Context(), h.cfg.Scan.GetRoots(), "video")
 	if err != nil {
 		return respondInternalError(c, err)
 	}
 
-	videos := h.scanner.FilterByType(files, "video")
 	start, end := paginateBounds(len(videos), page, pageSize)
 
 	return c.JSON(http.StatusOK, models.PaginatedMediaFiles{
