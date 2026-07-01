@@ -248,16 +248,6 @@ func (s *Scanner) InvalidateCache() {
 	s.mu.Unlock()
 }
 
-func (s *Scanner) FilterByType(files []models.MediaFile, mediaType string) []models.MediaFile {
-	result := make([]models.MediaFile, 0)
-	for _, f := range files {
-		if f.MediaType == mediaType {
-			result = append(result, f)
-		}
-	}
-	return result
-}
-
 func (s *Scanner) Search(files []models.MediaFile, query string) []models.MediaFile {
 	result := make([]models.MediaFile, 0)
 	q := strings.ToLower(query)
