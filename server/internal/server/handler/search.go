@@ -77,12 +77,19 @@ func (h *Handler) searchFiles(files []models.MediaFile, scopedPath, query string
 	lowerQuery := strings.ToLower(query)
 	matchedFiles := make([]models.MediaFile, 0, limit)
 
+	// scopedPath 已在 handler 归一化；预算前缀（仅当无尾分隔符才补，正确处理盘根 D:\），
+	// 逐文件 HasPrefix 替代每文件 IsPathWithinRoots（消除双 NormalizePath + Rel）。
+	var scopePrefix string
+	if scopedPath != "" {
+		scopePrefix = scopedPath
+		if !strings.HasSuffix(scopePrefix, string(filepath.Separator)) {
+			scopePrefix += string(filepath.Separator)
+		}
+	}
+
 	for _, file := range files {
-		if scopedPath != "" {
-			ok, err := service.IsPathWithinRoots(file.Path, []string{scopedPath})
-			if err != nil || !ok {
-				continue
-			}
+		if scopePrefix != "" && !strings.HasPrefix(file.Path, scopePrefix) {
+			continue
 		}
 
 		if !strings.Contains(strings.ToLower(file.Name), lowerQuery) {
