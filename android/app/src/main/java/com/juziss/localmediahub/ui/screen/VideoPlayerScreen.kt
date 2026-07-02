@@ -204,7 +204,9 @@ fun VideoPlayerScreen(
         onDispose { exoPlayer.removeListener(listener) }
     }
 
-    LaunchedEffect(exoPlayer, savedPositionMs) {
+    // Initial seek on player creation only — NOT keyed on savedPositionMs,
+    // otherwise every 5s progress update re-seeks and fights the user's scrubber.
+    LaunchedEffect(exoPlayer) {
         if (savedPositionMs > 0L) {
             exoPlayer.seekTo(savedPositionMs)
         }
@@ -257,7 +259,8 @@ fun VideoPlayerScreen(
     LaunchedEffect(seekState.isSeeking) {
         if (!seekState.isSeeking && seekState.offsetMs != 0L) {
             val currentPos = exoPlayer.currentPosition
-            val newPos = (currentPos + seekState.offsetMs).coerceIn(0L, exoPlayer.duration)
+            val maxPos = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
+            val newPos = (currentPos + seekState.offsetMs).coerceIn(0L, maxPos)
             if (isTranscodingEnabled) {
                 // Transcoded streams are generated on the fly and cannot be
                 // byte-seeked. Rebuild the URL with ?start=<seconds> so the
