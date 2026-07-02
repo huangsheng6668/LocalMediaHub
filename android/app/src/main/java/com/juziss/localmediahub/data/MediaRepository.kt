@@ -144,7 +144,11 @@ class MediaRepository @Inject constructor() {
     }
 
     suspend fun getFileTags(paths: List<String> = emptyList()): NetworkResult<Map<String, List<Tag>>> {
-        return safeApiCall { api.getFileTags(paths) }
+        return safeApiCall {
+            val json = api.getFileTags(paths).string()
+            val type = object : com.google.gson.reflect.TypeToken<Map<String, List<Tag>>>() {}.type
+            com.google.gson.Gson().fromJson(json, type) ?: emptyMap()
+        }
     }
 
     suspend fun deletePath(path: String, recursive: Boolean): NetworkResult<String> = try {

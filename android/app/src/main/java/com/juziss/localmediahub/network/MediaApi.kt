@@ -113,9 +113,13 @@ interface MediaApi {
     @GET("api/v1/tags/{tagId}/media")
     suspend fun getTaggedMedia(@Path("tagId") tagId: String): List<com.juziss.localmediahub.data.MediaFile>
 
-    // Batch endpoint: get tags for multiple files (or all files) in one call
+    // Batch endpoint: get tags for multiple files (or all files) in one call.
+    // Returns raw JSON (ResponseBody) — the nested generics Map<String, List<Tag>>
+    // trigger "Class cannot be cast to ParameterizedType" in Retrofit+Gson’s
+    // generic resolution. Parsed manually in MediaRepository with an explicit
+    // TypeToken to preserve full type information.
     @GET("api/v1/tags/file-tags")
-    suspend fun getFileTags(@Query("path") paths: List<String>): Map<String, List<Tag>>
+    suspend fun getFileTags(@Query("path") paths: List<String>): okhttp3.ResponseBody
 
     @POST("api/v1/system/delete")
     suspend fun deletePath(@Body request: DeleteRequest): Response<ResponseBody>

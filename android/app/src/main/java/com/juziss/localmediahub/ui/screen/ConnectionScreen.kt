@@ -640,7 +640,12 @@ private fun ManualConnectionCard(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 isError = connectionState is ConnectionState.Error,
                 supportingText = {
-                    Text(stringResource(R.string.conn_ip_hint))
+                    val error = connectionState as? ConnectionState.Error
+                    Text(
+                        text = error?.message ?: stringResource(R.string.conn_ip_hint),
+                        color = if (error != null) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 },
                 shape = RoundedCornerShape(10.dp)
             )
