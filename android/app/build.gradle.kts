@@ -161,8 +161,9 @@ dependencies {
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
 
-    // Serialization
-    implementation("com.google.code.gson:gson:2.10.1")
+    // Serialization — version pinned to 2.8.9 to match converter-gson:2.9.0
+    // (Gson 2.10+ changed internal APIs: "Class cannot be cast to ParameterizedType").
+    implementation("com.google.code.gson:gson:2.8.9")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
