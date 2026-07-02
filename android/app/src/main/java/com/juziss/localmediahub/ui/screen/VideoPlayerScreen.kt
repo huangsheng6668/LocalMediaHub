@@ -121,7 +121,7 @@ fun VideoPlayerScreen(
         onProgress(positionMs, durationMs)
     }
 
-    val exoPlayer = remember {
+    val exoPlayer = remember(streamUrl) {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 15000,  // minBufferMs — ExoPlayer default; keeps ~15s buffered
@@ -134,8 +134,23 @@ fun VideoPlayerScreen(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
+        // OkHttp-backed data source for better connection reuse and timeout
+        // handling on LAN — DefaultHttpDataSource can stall on some routers.
+        val okClient = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(0, java.util.concurrent.TimeUnit.SECONDS) // no overall timeout for streaming
+            .retryOnConnectionFailure(true)
+            .build()
+        val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okClient)
+            .setUserAgent("LocalMediaHub")
+
+        val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(dataSourceFactory)
+
         ExoPlayer.Builder(context)
             .setLoadControl(loadControl)
+            .setMediaSourceFactory(mediaSource)
             .build().apply {
                 val mediaItem = MediaItem.fromUri(streamUrl)
                 setMediaItem(mediaItem)

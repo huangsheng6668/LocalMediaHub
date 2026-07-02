@@ -155,6 +155,7 @@ dependencies {
     // Video player
     implementation("androidx.media3:media3-exoplayer:1.2.0")
     implementation("androidx.media3:media3-ui:1.2.0")
+    implementation("androidx.media3:media3-datasource-okhttp:1.2.0")
     // FFmpeg extension: media3-decoder-ffmpeg is not published to Maven.
     // libffmpeg.so is pre-built in jniLibs/arm64-v8a/ for future FFmpeg JNI bridge.
 
