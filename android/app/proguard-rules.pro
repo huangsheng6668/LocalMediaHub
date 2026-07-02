@@ -27,6 +27,10 @@
 # ----------------------------------------------------------------------------
 -keep class com.google.gson.** { *; }
 -keep class com.google.gson.reflect.TypeToken { *; }
+-keep class com.google.gson.reflect.TypeToken$** {
+    !private !static !transient <fields>;
+    !private !static !transient <methods>;
+}
 -keep class * implements com.google.gson.TypeAdapterFactory
 -keep class * implements com.google.gson.JsonSerializer
 -keep class * implements com.google.gson.JsonDeserializer
@@ -34,6 +38,12 @@
 -keepclassmembers,allowobfuscation class * {
     @com.google.gson.annotations.SerializedName <fields>;
 }
+# R8 can strip java.lang.reflect.* classes Gson depends on for generic
+# type resolution (ParameterizedType, TypeToken).  Keep them explicitly.
+-keep class java.lang.reflect.Type
+-keep class java.lang.reflect.ParameterizedType
+-keep class java.lang.reflect.GenericArrayType
+-keep class java.lang.reflect.WildcardType
 
 # ----------------------------------------------------------------------------
 # Retrofit — interface methods and annotations are resolved by reflection.
