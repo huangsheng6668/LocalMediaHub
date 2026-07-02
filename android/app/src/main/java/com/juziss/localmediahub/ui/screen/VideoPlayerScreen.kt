@@ -37,6 +37,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -108,6 +109,18 @@ fun VideoPlayerScreen(
     val playingText = stringResource(R.string.video_playing)
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
+    // Tracks the current playback position across configuration changes (rotation)
+    // so the new ExoPlayer can seek to the correct spot.
+    var savedPositionMs by rememberSaveable { mutableLongStateOf(initialPositionMs) }
+
+    // Wrap the caller's onProgress so this screen also tracks the position
+    // for rememberSaveable (rotation survival). Both the periodic 5s timer
+    // and the dispose-time flush update this.
+    val wrappedOnProgress: (Long, Long) -> Unit = { positionMs, durationMs ->
+        savedPositionMs = positionMs
+        onProgress(positionMs, durationMs)
+    }
+
     val exoPlayer = remember {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -142,7 +155,7 @@ fun VideoPlayerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            onProgress(exoPlayer.currentPosition, exoPlayer.duration)
+            wrappedOnProgress(exoPlayer.currentPosition, exoPlayer.duration)
             exoPlayer.release()
             (context as? Activity)?.requestedOrientation =
                 ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -154,7 +167,7 @@ fun VideoPlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
-                    onProgress(exoPlayer.duration, exoPlayer.duration)
+                    wrappedOnProgress(exoPlayer.duration, exoPlayer.duration)
                 }
             }
 
@@ -173,9 +186,9 @@ fun VideoPlayerScreen(
         onDispose { exoPlayer.removeListener(listener) }
     }
 
-    LaunchedEffect(exoPlayer, initialPositionMs) {
-        if (initialPositionMs > 0L) {
-            exoPlayer.seekTo(initialPositionMs)
+    LaunchedEffect(exoPlayer, savedPositionMs) {
+        if (savedPositionMs > 0L) {
+            exoPlayer.seekTo(savedPositionMs)
         }
     }
 
@@ -183,7 +196,7 @@ fun VideoPlayerScreen(
         while (true) {
             delay(5_000)
             if (exoPlayer.duration > 0L) {
-                onProgress(exoPlayer.currentPosition, exoPlayer.duration)
+                wrappedOnProgress(exoPlayer.currentPosition, exoPlayer.duration)
             }
         }
     }
