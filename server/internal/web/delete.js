@@ -3,7 +3,8 @@ import { state } from './state.js';
 import { apiRequest } from './api.js';
 import { showToast } from './toast.js';
 import { elements } from './dom.js';
-import { browsePath, renderDashboard } from './app.js';
+import { browsePath } from './browserView.js';
+import { renderDashboard } from './dashboard.js';
 
 // Delete media file from filesystem
 export async function deleteMediaFile(file) {

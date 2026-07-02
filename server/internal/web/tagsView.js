@@ -4,7 +4,7 @@ import { apiRequest, escapeHtml } from './api.js';
 import { showToast } from './toast.js';
 import { elements } from './dom.js';
 import { encodeRoutePath, safeBtoa } from './utils.js';
-import { renderBrowserList } from './app.js';
+import { renderBrowserList } from './browserView.js';
 
 // Fetch Tags
 export async function loadTags() {
