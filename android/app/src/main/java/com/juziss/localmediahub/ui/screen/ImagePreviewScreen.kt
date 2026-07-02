@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -159,9 +160,10 @@ private fun ZoomableImageItem(
             .build()
     }
 
-    var scale by remember(file.relativePath) { mutableFloatStateOf(1f) }
-    var offset by remember(file.relativePath) { mutableStateOf(Offset.Zero) }
-    var hasMoved by remember { mutableStateOf(false) }
+    var scale by rememberSaveable(file.relativePath) { mutableFloatStateOf(1f) }
+    var offsetX by rememberSaveable(file.relativePath) { mutableFloatStateOf(0f) }
+    var offsetY by rememberSaveable(file.relativePath) { mutableFloatStateOf(0f) }
+    var hasMoved by remember { mutableStateOf(false) } // UI auxiliary, accept reset
 
     Box(
         modifier = Modifier
@@ -184,10 +186,8 @@ private fun ZoomableImageItem(
                         val newScale = (scale * zoomChange).coerceIn(0.5f, 5f)
 
                         if (newScale > 1f && scale > 1f) {
-                            offset = Offset(
-                                x = offset.x + panChange.x,
-                                y = offset.y + panChange.y,
-                            )
+                            offsetX += panChange.x
+                            offsetY += panChange.y
                             scale = newScale
                             down.consume()
                         } else if (newScale > 1f && scale <= 1f) {
@@ -195,7 +195,8 @@ private fun ZoomableImageItem(
                             down.consume()
                         } else {
                             scale = newScale.coerceAtLeast(1f)
-                            offset = Offset.Zero
+                            offsetX = 0f
+                            offsetY = 0f
                         }
                     } while (event.changes.any { it.pressed })
 
@@ -208,8 +209,8 @@ private fun ZoomableImageItem(
             .graphicsLayer {
                 scaleX = scale.coerceAtLeast(1f)
                 scaleY = scale.coerceAtLeast(1f)
-                translationX = if (scale <= 1f) 0f else offset.x
-                translationY = if (scale <= 1f) 0f else offset.y
+                translationX = if (scale <= 1f) 0f else offsetX
+                translationY = if (scale <= 1f) 0f else offsetY
             },
         contentAlignment = Alignment.Center,
     ) {
