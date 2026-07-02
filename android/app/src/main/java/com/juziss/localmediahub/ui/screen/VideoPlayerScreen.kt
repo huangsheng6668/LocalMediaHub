@@ -124,11 +124,14 @@ fun VideoPlayerScreen(
     val exoPlayer = remember {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                2500, // minBufferMs
-                30000, // maxBufferMs
-                1500, // bufferForPlaybackMs
-                2000 // bufferForPlaybackAfterRebufferMs
+                15000,  // minBufferMs — ExoPlayer default; keeps ~15s buffered
+                        // so playback doesn't stutter every few seconds.
+                50000,  // maxBufferMs — aggressively prefetch up to 50s ahead.
+                1500,   // bufferForPlaybackMs — start quickly after seek.
+                3000,   // bufferForPlaybackAfterRebufferMs — conservative after
+                        // a rebuffer to avoid immediate re-stall.
             )
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         ExoPlayer.Builder(context)
