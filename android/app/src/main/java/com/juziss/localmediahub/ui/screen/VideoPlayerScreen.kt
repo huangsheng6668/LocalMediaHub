@@ -107,7 +107,7 @@ fun VideoPlayerScreen(
     // gesture callbacks (detectTapGestures) where stringResource() is not allowed.
     val pausedText = stringResource(R.string.video_paused)
     val playingText = stringResource(R.string.video_playing)
-    var showDeleteConfirm by remember { mutableStateOf(false) }
+
 
     // Tracks the current playback position across configuration changes (rotation)
     // so the new ExoPlayer can seek to the correct spot.
@@ -258,9 +258,12 @@ fun VideoPlayerScreen(
     // Apply seek on gesture end
     LaunchedEffect(seekState.isSeeking) {
         if (!seekState.isSeeking && seekState.offsetMs != 0L) {
-            val currentPos = exoPlayer.currentPosition
+            // Use the base position recorded at gesture start — NOT the
+            // continuously-advancing currentPosition — so the final seek
+            // target matches what the user saw in the overlay indicator.
+            val basePos = seekState.basePositionMs
             val maxPos = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
-            val newPos = (currentPos + seekState.offsetMs).coerceIn(0L, maxPos)
+            val newPos = (basePos + seekState.offsetMs).coerceIn(0L, maxPos)
             if (isTranscodingEnabled) {
                 // Transcoded streams are generated on the fly and cannot be
                 // byte-seeked. Rebuild the URL with ?start=<seconds> so the
@@ -413,88 +416,7 @@ fun VideoPlayerScreen(
             )
         }
 
-        // Top Right Action Buttons (Delete & Transcoding Toggle)
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 8.dp, end = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (onDelete != null) {
-                IconButton(
-                    onClick = { showDeleteConfirm = true },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = Color.Red
-                    )
-                }
-            }
 
-            Button(
-                onClick = {
-                    val currentPos = exoPlayer.currentPosition
-                    val newUrl = buildStreamUrl(streamUrl, isTranscodingEnabled, currentPos / 1000.0)
-                    exoPlayer.setMediaItem(MediaItem.fromUri(newUrl))
-                    exoPlayer.prepare()
-                    // In transcode mode the stream starts at `start=<currentPos>`
-                    // already, so seek to 0 (the stream's own zero point). In
-                    // direct mode seek to the original position via byte Range.
-                    exoPlayer.seekTo(if (isTranscodingEnabled) 0L else currentPos)
-                    exoPlayer.play()
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isTranscodingEnabled) androidx.compose.material3.MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.5f)
-                ),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                modifier = Modifier.height(36.dp)
-            ) {
-                Text(
-                    text = if (isTranscodingEnabled) stringResource(R.string.video_transcode_on) else stringResource(R.string.video_transcode_off),
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        // Delete Confirmation Dialog inside video player screen
-        if (showDeleteConfirm && onDelete != null) {
-            AlertDialog(
-                onDismissRequest = { showDeleteConfirm = false },
-                shape = RoundedCornerShape(20.dp),
-                title = {
-                    Text(stringResource(R.string.video_delete_title), fontWeight = FontWeight.Bold)
-                },
-                text = {
-                    Text(stringResource(R.string.video_delete_desc))
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            showDeleteConfirm = false
-                            onDelete()
-                        },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = Color.Red
-                        )
-                    ) {
-                        Text(stringResource(R.string.confirm_delete))
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDeleteConfirm = false }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                }
-            )
-        }
     }
 }
 

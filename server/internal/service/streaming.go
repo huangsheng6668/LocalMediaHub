@@ -95,11 +95,9 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 
 	etag := fmt.Sprintf(`"%x-%x"`, fi.ModTime().UnixNano(), size)
 	w.Header().Set("ETag", etag)
-	if match := r.Header.Get("If-None-Match"); match == etag || r.Header.Get("If-Modified-Since") != "" {
-		if match == etag {
-			w.WriteHeader(http.StatusNotModified)
-			return nil
-		}
+	if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return nil
 	}
 
 	// Parse Range header.
@@ -147,13 +145,13 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 
 	contentLength := end - start + 1
 
+	w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
 	if rangeHeader != "" {
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
 		w.WriteHeader(http.StatusPartialContent)
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
-	w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
 
 	// Seek to start offset.
 	if _, err := f.Seek(start, io.SeekStart); err != nil {

@@ -14,11 +14,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.media3.common.Player
+import androidx.media3.ui.PlayerView
 import kotlin.math.abs
 
 data class SeekState(
     val isSeeking: Boolean = false,
     val offsetMs: Long = 0L,
+    val basePositionMs: Long = 0L,
 )
 
 data class GestureIndicator(
@@ -45,6 +47,9 @@ fun rememberPlayerGestureListener(
         var lastTapTime = 0L
         var brightnessStart = 0f
         var volumeStart = 0
+        var initialPlayerPosition = 0L
+        var gestureActive = false
+        var lastSeekTargetPosition = -1L
         var currentSeekState = SeekState()
 
         fun getBrightness(context: Context): Float {
@@ -78,21 +83,50 @@ fun rememberPlayerGestureListener(
         }
 
         View.OnTouchListener { view, event ->
+            val playerView = view as? PlayerView
             val ctx = view.context
             val viewHeight = view.height.toFloat()
             val viewWidth = view.width.toFloat()
-            val threshold = 30f * view.resources.displayMetrics.density
+            val density = view.resources.displayMetrics.density
+            val threshold = 20f * density
 
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    // If ExoPlayer's control bar (SeekBar, buttons) is currently visible,
+                    // pass ALL touches in this gesture to PlayerView natively so SeekBar dragging works 100%.
+                    val controlsVisible = playerView?.isControllerFullyVisible == true
+                    if (controlsVisible) {
+                        gestureActive = false
+                        return@OnTouchListener false
+                    }
+
+                    gestureActive = true
                     gestureStartX = event.x
                     gestureStartY = event.y
+
+                    // Use lastSeekTargetPosition if player is still buffering from a rapid prior seek
+                    // to prevent position lag from causing fast-forward to rewind.
+                    val currentPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                    initialPlayerPosition = if (lastSeekTargetPosition >= 0L &&
+                        abs(currentPos - lastSeekTargetPosition) > 1000L &&
+                        exoPlayer.playbackState == Player.STATE_BUFFERING
+                    ) {
+                        lastSeekTargetPosition
+                    } else {
+                        currentPos
+                    }
+
                     isDragging = false
                     isHorizontal = null
                     brightnessStart = getBrightness(ctx)
                     volumeStart = getVolume(ctx)
+                    currentSeekState = SeekState()
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    if (!gestureActive) {
+                        return@OnTouchListener false
+                    }
+
                     val dx = event.x - gestureStartX
                     val dy = event.y - gestureStartY
 
@@ -105,10 +139,19 @@ fun rememberPlayerGestureListener(
 
                     if (isDragging) {
                         if (isHorizontal == true) {
-                            val density = view.resources.displayMetrics.density
-                            val seekSec = (dx / density).toInt().coerceIn(-120, 120)
-                            val offsetMs = (seekSec.toLong() * 1000).coerceIn(-120_000L, 120_000L)
-                            currentSeekState = SeekState(isSeeking = true, offsetMs = offsetMs)
+                            // 1dp horizontal drag = 0.4 seconds seek offset
+                            val seekSec = (dx / (density * 2.5f)).toLong().coerceIn(-300L, 300L)
+                            val duration = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
+                            val targetPos = (initialPlayerPosition + seekSec * 1000L).coerceIn(0L, duration)
+                            val offsetMs = targetPos - initialPlayerPosition
+
+                            lastSeekTargetPosition = targetPos
+
+                            currentSeekState = SeekState(
+                                isSeeking = true,
+                                offsetMs = offsetMs,
+                                basePositionMs = initialPlayerPosition
+                            )
                             onSeekStateChange(currentSeekState)
                         } else {
                             val isLeftHalf = gestureStartX < viewWidth / 2
@@ -140,15 +183,21 @@ fun rememberPlayerGestureListener(
                         }
                     }
                 }
-                MotionEvent.ACTION_UP -> {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!gestureActive) {
+                        return@OnTouchListener false
+                    }
+                    gestureActive = false
+
                     if (isDragging) {
                         if (currentSeekState.isSeeking) {
                             currentSeekState = currentSeekState.copy(isSeeking = false)
                             onSeekStateChange(currentSeekState)
                         }
-                    } else {
+                    } else if (event.actionMasked == MotionEvent.ACTION_UP) {
                         val now = System.currentTimeMillis()
                         if (now - lastTapTime < 300) {
+                            // Double tap: toggle play/pause
                             if (exoPlayer.isPlaying) {
                                 exoPlayer.pause()
                                 onPlayPauseIndicatorChange(
@@ -170,7 +219,9 @@ fun rememberPlayerGestureListener(
                             }
                             lastTapTime = 0L
                         } else {
+                            // Single tap: toggle control bar visibility
                             lastTapTime = now
+                            playerView?.showController()
                         }
                     }
                     isDragging = false

@@ -134,6 +134,10 @@ export function setupVideoPlayerListeners(elements) {
             // libx264 -> direct (Original)
             state.useTranscode = false;
             showToast('🚀 已切换至极速原文件直通流', 'success');
+            const ext = state.playingFile.name.substring(state.playingFile.name.lastIndexOf('.')).toLowerCase();
+            if (['.ts', '.mkv', '.avi', '.wmv', '.flv'].includes(ext)) {
+                showToast('⚠️ 当前视频格式 (' + ext + ') 缺乏浏览器原生解码支持，如画面黑屏请切回快速流', 'info');
+            }
         }
 
         const absolutePos = state.transcodeStartOffset + elements.videoPlayer.currentTime;
