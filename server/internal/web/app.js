@@ -13,6 +13,8 @@ import {
 import { elements } from './dom.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 import { openVideoPlayer, setupVideoPlayerListeners } from './videoPlayer.js';
+import { openMedia, setupLightboxListeners } from './lightbox.js';
+import { renderDashboard, setupDashboardListeners } from './dashboard.js';
 
 // Initial Setup
 document.addEventListener('DOMContentLoaded', () => {
@@ -71,8 +73,8 @@ function setupEventListeners() {
     // Delegated click handling for breadcrumbs
     elements.browserBreadcrumbs.addEventListener('click', onBreadcrumbsClick);
 
-    // Delegated click handling for dashboard recent items
-    elements.dashboardRecent.addEventListener('click', onDashboardRecentClick);
+    // Dashboard module listeners (recent items click)
+    setupDashboardListeners(elements);
 
     // Delegated thumbnail error fallback (img 'error' does not bubble -> capture phase)
     elements.browserList.addEventListener('error', (e) => {
@@ -92,141 +94,11 @@ function setupEventListeners() {
     // Video player module listeners (modal open/close, controls, keyboard shortcuts)
     setupVideoPlayerListeners(elements);
 
-    // Close Image Modal (Lightbox)
-    elements.btnCloseImageModal.addEventListener('click', () => {
-        elements.modalImagePreview.classList.remove('active');
-        elements.lightboxImg.src = '';
-        elements.lightboxStitchView.innerHTML = '';
-    });
-
-    // Lightbox navigation
-    elements.btnImagePrev.addEventListener('click', () => navigateLightbox(-1));
-    elements.btnImageNext.addEventListener('click', () => navigateLightbox(1));
-    
-    // Toggle Stitch Mode
-    elements.btnImageModeToggle.addEventListener('click', () => {
-        state.lightboxStitchMode = !state.lightboxStitchMode;
-        localStorage.setItem('lightboxStitchMode', state.lightboxStitchMode);
-        renderLightboxImage();
-    });
-
-    // Stitch View Scroll listener to dynamically update the active index
-    elements.lightboxStitchView.addEventListener('scroll', () => {
-        if (!state.lightboxStitchMode) return;
-        const items = elements.lightboxStitchView.querySelectorAll('.stitch-image-item');
-        const containerRect = elements.lightboxStitchView.getBoundingClientRect();
-        
-        let closestIndex = state.lightboxIndex;
-        let minDistance = Infinity;
-        
-        items.forEach((item, idx) => {
-            const rect = item.getBoundingClientRect();
-            // Distance from item's top to container's top
-            const distance = Math.abs(rect.top - containerRect.top);
-            if (distance < minDistance) {
-                minDistance = distance;
-                closestIndex = idx;
-            }
-        });
-        
-        if (closestIndex !== state.lightboxIndex && closestIndex >= 0 && closestIndex < state.lightboxFiles.length) {
-            state.lightboxIndex = closestIndex;
-        }
-    });
-
-    document.addEventListener('keydown', (e) => {
-        if (!elements.modalImagePreview.classList.contains('active')) return;
-        if (e.key === 'ArrowLeft') {
-            if (state.lightboxStitchMode) {
-                // In stitch mode, scrolling up or back is nice
-                const prevIndex = Math.max(0, state.lightboxIndex - 1);
-                const targetImg = document.getElementById(`stitch-img-${prevIndex}`);
-                if (targetImg) targetImg.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            } else {
-                navigateLightbox(-1);
-            }
-        }
-        if (e.key === 'ArrowRight') {
-            if (state.lightboxStitchMode) {
-                const nextIndex = Math.min(state.lightboxFiles.length - 1, state.lightboxIndex + 1);
-                const targetImg = document.getElementById(`stitch-img-${nextIndex}`);
-                if (targetImg) targetImg.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            } else {
-                navigateLightbox(1);
-            }
-        }
-        if (e.key === 'Escape') {
-            elements.modalImagePreview.classList.remove('active');
-            elements.lightboxImg.src = '';
-            elements.lightboxStitchView.innerHTML = '';
-        }
-    });
+    // Lightbox module listeners (image modal close/nav, stitch mode, keyboard shortcuts)
+    setupLightboxListeners(elements);
 }
 
 
-
-// Delegated click dispatcher for dashboard recent items
-function onDashboardRecentClick(e) {
-    const actionEl = e.target.closest('[data-action]');
-    if (!actionEl) return;
-    if (actionEl.dataset.action === 'open-video') {
-        const idx = Number(actionEl.dataset.index);
-        if (state.dashboardRecentFiles[idx]) openVideoPlayer(state.dashboardRecentFiles[idx]);
-    }
-}
-
-// Render Dashboard (Tab 1)
-export async function renderDashboard() {
-    // 1. Fetch total files
-    try {
-        let totalVideos = 0;
-        try {
-            const videosData = await apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=1`);
-            totalVideos = videosData.total || 0;
-        } catch (err) {
-            console.error('Fetch video count error:', err);
-        }
-        
-        let totalImages = 0;
-        try {
-            const imagesData = await apiRequest(`${state.apiBase}/api/v1/images?page=1&page_size=1`);
-            totalImages = imagesData.total || 0;
-        } catch (err) {
-            console.error('Fetch image count error:', err);
-        }
-        
-        elements.statRoots.textContent = state.folders.length || '全盘';
-        elements.statVideos.textContent = totalVideos;
-        elements.statImages.textContent = totalImages;
-        elements.statTags.textContent = state.tags.length;
-        
-        // 2. Mock a list of files or load first page of videos/images for recent preview
-        try {
-            const data = await apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=3`);
-            const items = data.items || [];
-            state.dashboardRecentFiles = items;
-
-            if (items.length === 0) {
-                elements.dashboardRecent.classList.add('empty-state');
-                elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>';
-            } else {
-                elements.dashboardRecent.classList.remove('empty-state');
-                elements.dashboardRecent.innerHTML = items.map((file, index) => {
-                    return `
-                        <div class="info-item" style="cursor:pointer;" data-action="open-video" data-index="${index}">
-                            <span class="info-label">🎬 ${escapeHtml(file.name)}</span>
-                            <span class="info-value" style="font-size:11px;">${formatSize(file.size)}</span>
-                        </div>
-                    `;
-                }).join('');
-            }
-        } catch (err) {
-            elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>';
-        }
-    } catch (e) {
-        elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>';
-    }
-}
 
 // Load Root directories in file browser
 function loadRoots() {
@@ -506,101 +378,5 @@ async function triggerBrowserSearch() {
     } catch (e) {
         showToast(`搜索失败: ${e.message}`, 'error');
     }
-}
-
-// Open Video/Image assets
-function openMedia(file) {
-    if (file.media_type === 'video') {
-        openVideoPlayer(file);
-    } else if (file.media_type === 'image') {
-        openImageLightbox(file);
-    }
-}
-
-// Image Lightbox popup
-function openImageLightbox(file) {
-    // Collect all image files in the current view to allow previous/next navigation
-    state.lightboxFiles = state.currentFiles.filter(f => f.media_type === 'image');
-    
-    // Alphanumeric natural sort in ascending order (by name)
-    state.lightboxFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-    
-    state.lightboxIndex = state.lightboxFiles.findIndex(f => f.path === file.path);
-    
-    renderLightboxImage();
-    elements.modalImagePreview.classList.add('active');
-}
-
-// Show image in lightbox
-function renderLightboxImage() {
-    if (state.lightboxIndex < 0 || state.lightboxIndex >= state.lightboxFiles.length) return;
-    
-    if (state.lightboxStitchMode) {
-        elements.btnImageModeToggle.classList.add('active');
-        elements.btnImageModeToggle.textContent = '📖 单张模式';
-        
-        elements.lightboxSingleView.style.display = 'none';
-        elements.lightboxStitchView.style.display = 'flex';
-        elements.btnImagePrev.style.display = 'none';
-        elements.btnImageNext.style.display = 'none';
-        
-        // Render all files in stitch view if not already loaded/rendered
-        if (elements.lightboxStitchView.children.length === 0) {
-            elements.lightboxStitchView.innerHTML = '';
-            state.lightboxFiles.forEach((file, idx) => {
-                let url = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.relative_path)}/original`;
-                if (state.isSystemBrowse) {
-                    url = `${state.apiBase}/api/v1/system/original?path=${encodeURIComponent(file.path)}`;
-                }
-                const imgContainer = document.createElement('div');
-                imgContainer.className = 'stitch-image-item';
-                imgContainer.id = `stitch-img-${idx}`;
-                imgContainer.innerHTML = `
-                    <img src="${url}" alt="${escapeHtml(file.name)}" loading="lazy">
-                    <div class="stitch-image-caption">${escapeHtml(file.name)} (${idx + 1}/${state.lightboxFiles.length})</div>
-                `;
-                elements.lightboxStitchView.appendChild(imgContainer);
-            });
-        }
-        
-        // Scroll target image into view
-        const targetImg = document.getElementById(`stitch-img-${state.lightboxIndex}`);
-        if (targetImg) {
-            setTimeout(() => {
-                targetImg.scrollIntoView({ behavior: 'auto', block: 'start' });
-            }, 50);
-        }
-    } else {
-        elements.btnImageModeToggle.classList.remove('active');
-        elements.btnImageModeToggle.textContent = '📖 拼接模式';
-        
-        elements.lightboxSingleView.style.display = 'flex';
-        elements.lightboxStitchView.style.display = 'none';
-        elements.btnImagePrev.style.display = 'flex';
-        elements.btnImageNext.style.display = 'flex';
-        elements.lightboxStitchView.innerHTML = ''; // Clean up stitch view content to free memory
-        
-        const file = state.lightboxFiles[state.lightboxIndex];
-        
-        let url = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.relative_path)}/original`;
-        if (state.isSystemBrowse) {
-            url = `${state.apiBase}/api/v1/system/original?path=${encodeURIComponent(file.path)}`;
-        }
-        
-        elements.lightboxImg.src = url;
-        elements.lightboxCaption.textContent = `${file.name} (${state.lightboxIndex + 1}/${state.lightboxFiles.length})`;
-    }
-}
-
-// Navigate lightbox
-function navigateLightbox(dir) {
-    if (state.lightboxFiles.length <= 1) return;
-    state.lightboxIndex += dir;
-    
-    // Wrap around boundaries
-    if (state.lightboxIndex < 0) state.lightboxIndex = state.lightboxFiles.length - 1;
-    if (state.lightboxIndex >= state.lightboxFiles.length) state.lightboxIndex = 0;
-    
-    renderLightboxImage();
 }
 
