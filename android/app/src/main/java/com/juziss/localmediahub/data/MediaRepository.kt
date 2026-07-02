@@ -3,6 +3,11 @@ package com.juziss.localmediahub.data
 import com.juziss.localmediahub.data.SearchResult
 import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.data.TagCreateRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.RetrofitClient
 import retrofit2.HttpException
@@ -19,6 +24,15 @@ class MediaRepository @Inject constructor() {
 
     private val baseUrl
         get() = RetrofitClient.getBaseUrl()
+
+    // Minimal OkHttp instance for endpoints that must bypass Retrofit+Gson
+    // (nested generics trigger "Class cannot be cast to ParameterizedType").
+    private val rawHttp by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
 
     // ── Folders ───────────────────────────────────────────────
 
@@ -95,16 +109,27 @@ class MediaRepository @Inject constructor() {
 
     // ── Health check ──────────────────────────────────────────
 
-    suspend fun healthCheck(): NetworkResult<Map<String, String>> = try {
-        val response = api.healthCheck()
-        if (response.isSuccessful) {
-            NetworkResult.Success(response.body() ?: emptyMap())
-        } else {
-            NetworkResult.Error("Server returned ${response.code()}", response.code())
+    suspend fun healthCheck(): NetworkResult<Map<String, String>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val request = okhttp3.Request.Builder()
+                    .url("$baseUrl/api/v1/health")
+                    .get()
+                    .build()
+                rawHttp.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        NetworkResult.Success(mapOf("status" to "ok"))
+                    } else {
+                        NetworkResult.Error(
+                            "Server returned ${response.code}",
+                            response.code,
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                NetworkResult.Error(e.toUserMessage())
+            }
         }
-    } catch (e: Exception) {
-        NetworkResult.Error(e.toUserMessage())
-    }
 
     // ── Tags ──────────────────────────────────────────────
 
