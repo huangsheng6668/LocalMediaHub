@@ -78,15 +78,16 @@ fun BrowseSortMenu(folderSort: SortOrder, fileSort: SortOrder,
 @Composable
 fun DeleteLoadingDialog()
 
-// 数据 + 类型化动作 lambda；item 为 null 时不渲染
+// 数据 + 类型化动作 lambda；item 非空（调用方保留既有 `if (x != null) { val item = x!!; ... }`
+// 守卫与 `!!`，忠实原文、对齐「不消除 !!」非目标）
 @Composable
-fun QuickActionsDialog(item: Any?, onEditTags: (MediaFile) -> Unit,
+fun QuickActionsDialog(item: Any, onEditTags: (MediaFile) -> Unit,
                       onDownloadFile: (MediaFile) -> Unit, onDeleteFile: (MediaFile) -> Unit,
                       onDownloadFolder: (Folder) -> Unit, onDeleteFolder: (Folder) -> Unit,
                       onDismiss: () -> Unit)
 
 @Composable
-fun DeleteConfirmDialog(item: Any?, deleteRecursive: Boolean,
+fun DeleteConfirmDialog(item: Any, deleteRecursive: Boolean,
                        onRecursiveChange: (Boolean) -> Unit,
                        onConfirm: (path: String, recursive: Boolean) -> Unit,
                        onDismiss: () -> Unit)
