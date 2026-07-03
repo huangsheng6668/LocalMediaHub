@@ -79,6 +79,7 @@ import com.juziss.localmediahub.R
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.viewmodel.SearchState
 import com.juziss.localmediahub.viewmodel.SortOrder
+import com.juziss.localmediahub.ui.component.browse.BrowseSortMenu
 import kotlinx.coroutines.delay
  
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,6 +102,8 @@ fun BrowseScreen(
     val showFavoritesOnly by viewModel.showFavoritesOnly.collectAsState()
     val tags by viewModel.tags.collectAsState()
     val activeTagFilter by viewModel.activeTagFilter.collectAsState()
+    val folderSort by viewModel.folderSortOrder.collectAsState()
+    val fileSort by viewModel.fileSortOrder.collectAsState()
  
     var isSearchMode by remember { mutableStateOf(false) }
     var showTagMenuForFile by remember { mutableStateOf<MediaFile?>(null) }
@@ -226,61 +229,12 @@ fun BrowseScreen(
                             }
                         }
                         if (!showFavoritesOnly) {
-                            var showSortMenu by remember { mutableStateOf(false) }
-                            IconButton(onClick = { showSortMenu = true }) {
-                                Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = stringResource(R.string.sort))
-                            }
-                            DropdownMenu(
-                                expanded = showSortMenu,
-                                onDismissRequest = { showSortMenu = false },
-                            ) {
-                                Text(
-                                    stringResource(R.string.browse_sort_folder),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                )
-                                val folderSort by viewModel.folderSortOrder.collectAsState()
-                                listOf(
-                                    SortOrder.NAME_ASC,
-                                    SortOrder.NAME_DESC,
-                                    SortOrder.NUMERIC_ASC,
-                                    SortOrder.NUMERIC_DESC,
-                                    SortOrder.TIME_ASC,
-                                    SortOrder.TIME_DESC,
-                                ).forEach { order ->
-                                    DropdownMenuItem(
-                                        text = { Text(order.label) },
-                                        trailingIcon = {
-                                            if (order == folderSort) {
-                                                Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp))
-                                            }
-                                        },
-                                        onClick = { viewModel.setFolderSortOrder(order) },
-                                    )
-                                }
-                                HorizontalDivider()
-                                Text(
-                                    stringResource(R.string.browse_sort_file),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                )
-                                val fileSort by viewModel.fileSortOrder.collectAsState()
-                                SortOrder.entries.forEach { order ->
-                                    DropdownMenuItem(
-                                        text = { Text(order.label) },
-                                        trailingIcon = {
-                                            if (order == fileSort) {
-                                                Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp))
-                                            }
-                                        },
-                                        onClick = { viewModel.setFileSortOrder(order) },
-                                    )
-                                }
-                            }
+                            BrowseSortMenu(
+                                folderSort = folderSort,
+                                fileSort = fileSort,
+                                onFolderSortChange = viewModel::setFolderSortOrder,
+                                onFileSortChange = viewModel::setFileSortOrder,
+                            )
                             if (!isCollectionView) {
                                 IconButton(onClick = { isSearchMode = true }) {
                                     Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
