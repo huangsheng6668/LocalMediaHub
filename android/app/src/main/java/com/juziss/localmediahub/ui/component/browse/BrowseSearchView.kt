@@ -2,7 +2,6 @@ package com.juziss.localmediahub.ui.component.browse
 
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.Composable
-import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.ui.component.SearchContent
 import com.juziss.localmediahub.viewmodel.SearchState

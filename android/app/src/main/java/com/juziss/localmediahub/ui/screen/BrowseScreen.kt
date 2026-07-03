@@ -1,17 +1,11 @@
 package com.juziss.localmediahub.ui.screen
 
-import com.juziss.localmediahub.ui.component.browse.BrowseSummaryCard
-import com.juziss.localmediahub.ui.component.browse.BrowseStateCard
-import com.juziss.localmediahub.ui.component.browse.BrowseLoadingCard
 import com.juziss.localmediahub.ui.component.browse.DeleteConfirmDialog
 import com.juziss.localmediahub.ui.component.browse.DeleteLoadingDialog
 import com.juziss.localmediahub.ui.component.browse.QuickActionsDialog
  
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -32,10 +26,8 @@ import com.juziss.localmediahub.viewmodel.BrowseState
 import androidx.compose.ui.res.stringResource
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
-import com.juziss.localmediahub.viewmodel.SortOrder
 import com.juziss.localmediahub.ui.component.browse.BrowseFavoritesView
 import com.juziss.localmediahub.ui.component.browse.BrowseSearchView
-import com.juziss.localmediahub.ui.component.browse.BrowseSortMenu
 import com.juziss.localmediahub.ui.component.browse.BrowseStateContent
 import com.juziss.localmediahub.ui.component.browse.BrowseTopBar
 import kotlinx.coroutines.delay
