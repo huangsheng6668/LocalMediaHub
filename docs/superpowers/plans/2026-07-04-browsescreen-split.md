@@ -1111,6 +1111,7 @@ In `BrowseScreen.kt`, the `Scaffold(...)` call's `topBar = { ... }` argument cur
 
 ```kotlin
         topBar = {
+            val collectionTitle = (browseState as? BrowseState.TagCollection)?.title
             BrowseTopBar(
                 isSearchMode = isSearchMode,
                 searchQuery = searchQuery,
@@ -1121,8 +1122,7 @@ In `BrowseScreen.kt`, the `Scaffold(...)` call's `topBar = { ... }` argument cur
                 },
                 title = when {
                     showFavoritesOnly -> stringResource(R.string.browse_favorites)
-                    (browseState as? BrowseState.TagCollection)?.title != null ->
-                        (browseState as? BrowseState.TagCollection)!!.title
+                    collectionTitle != null -> collectionTitle
                     isSystemBrowse && currentPath.isEmpty() -> stringResource(R.string.browse_drives)
                     isSystemBrowse -> currentPath
                     currentPath.isEmpty() -> stringResource(R.string.browse_libraries)
@@ -1152,7 +1152,7 @@ In `BrowseScreen.kt`, the `Scaffold(...)` call's `topBar = { ... }` argument cur
 ```
 
 > Faithfulness notes:
-> - The `title` `when` reproduces the original 6-branch expression verbatim (search-field branch is gone — that belongs to `isSearchMode`). The `collectionTitle` local is inlined as `(browseState as? BrowseState.TagCollection)?.title`.
+> - The `title` `when` reproduces the original 6-branch expression verbatim (search-field branch is gone — that belongs to `isSearchMode`). `collectionTitle` is hoisted as a local (`val collectionTitle = (browseState as? BrowseState.TagCollection)?.title`) at the top of the `topBar` lambda so the `when` can branch on it without a new `!!`.
 > - `onBack` collapses the original 3-branch `if/else if` navigation icon to a single nullable lambda; rendering of the icon is gated by `onBack != null` inside `BrowseTopBar`, exactly matching when the original showed an icon.
 > - The `actions` gating (`showLibraryActions` for both toggles, `showSortAndSearch` for sort, `showSearch` for the search button) reproduces the original `if` conditions verbatim.
 
@@ -1837,6 +1837,6 @@ Report to the user: all 7 extraction tasks compiled and tests pass. Request the 
 - `BrowseFavoritesView(favoriteFiles, onVideoClick, onImageClick, onToggleFavorite, isFavorite, getFavoriteThumbnailUrl, onFileLongClick, modifier)` — Task 7 step 2 defines; step 4 calls with same 8. ✓ (Note: `onVideoClick`/`onImageClick` here carry the `Boolean` system-browse flag, matching the original favorites-branch glue — distinct from the screen's `onFavoriteVideoClick`/`onFavoriteImageClick` signatures, which the caller adapts.)
 - `SortOrder`, `BrowseState`, `SearchState`, `MediaFile`, `Folder`, `Tag` import paths confirmed against codebase. ✓
 
-**4. One residual risk flagged for the executor:** Task 5 step 3's `title` `when` uses `(browseState as? BrowseState.TagCollection)!!.title` inside the non-null branch — this is a new `!!` introduced to inline `collectionTitle`. It is provably non-null at that point (guarded by the preceding `?.title != null` check) and behavior-identical to the original `val collectionTitle = (browseState as? BrowseState.TagCollection)?.title; ... collectionTitle != null -> collectionTitle`. This does not violate the "don't remove `!!`" non-goal (that's about not removing *existing* `!!`s; this preserves the original null-check semantics). If the executor prefers to avoid the new `!!`, they may instead hoist `val collectionTitle = (browseState as? BrowseState.TagCollection)?.title` as a local in `BrowseScreen` and branch on it — equally faithful. Documented here so it is a conscious choice, not an accident.
+**4. Task 5 `title` `when`:** hoists `val collectionTitle = (browseState as? BrowseState.TagCollection)?.title` as a local inside the `topBar` lambda and branches `collectionTitle != null -> collectionTitle` — faithful to the original and introduces no new `!!` (consistent with the Global Constraint).
 
 No further issues. Plan is complete.
