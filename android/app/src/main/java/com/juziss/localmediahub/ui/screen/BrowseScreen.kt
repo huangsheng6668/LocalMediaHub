@@ -3,6 +3,7 @@ package com.juziss.localmediahub.ui.screen
 import com.juziss.localmediahub.ui.component.browse.BrowseSummaryCard
 import com.juziss.localmediahub.ui.component.browse.BrowseStateCard
 import com.juziss.localmediahub.ui.component.browse.BrowseLoadingCard
+import com.juziss.localmediahub.ui.component.browse.DeleteLoadingDialog
  
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -489,22 +490,7 @@ fun BrowseScreen(
  
         // Loading Overlay for Deletion
         if (deleteState is com.juziss.localmediahub.viewmodel.DeleteState.Loading) {
-            AlertDialog(
-                onDismissRequest = {},
-                shape = RoundedCornerShape(20.dp),
-                title = { Text(stringResource(R.string.browse_deleting), fontWeight = FontWeight.Bold) },
-                text = {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        CircularProgressIndicator()
-                        Text(stringResource(R.string.browse_deleting_desc))
-                    }
-                },
-                confirmButton = {}
-            )
+            DeleteLoadingDialog()
         }
  
         val taggedFile = showTagMenuForFile
