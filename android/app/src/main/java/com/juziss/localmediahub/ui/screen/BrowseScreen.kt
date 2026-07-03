@@ -3,6 +3,7 @@ package com.juziss.localmediahub.ui.screen
 import com.juziss.localmediahub.ui.component.browse.BrowseSummaryCard
 import com.juziss.localmediahub.ui.component.browse.BrowseStateCard
 import com.juziss.localmediahub.ui.component.browse.BrowseLoadingCard
+import com.juziss.localmediahub.ui.component.browse.DeleteConfirmDialog
 import com.juziss.localmediahub.ui.component.browse.DeleteLoadingDialog
  
 import androidx.activity.compose.BackHandler
@@ -414,77 +415,12 @@ fun BrowseScreen(
         // Delete Confirmation Dialog
         if (showDeleteConfirm && itemToDelete != null) {
             val item = itemToDelete!!
-            val name = when (item) {
-                is MediaFile -> item.name
-                is com.juziss.localmediahub.data.Folder -> item.name
-                else -> ""
-            }
-            val isFolder = item is com.juziss.localmediahub.data.Folder
-            AlertDialog(
-                onDismissRequest = { showDeleteConfirm = false },
-                shape = RoundedCornerShape(20.dp),
-                title = {
-                    Text(
-                        text = if (isFolder) stringResource(R.string.browse_delete_folder) else stringResource(R.string.browse_delete_file),
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold
-                    )
-                },
-                text = {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "您确定要从服务端永久删除 \"$name\" 吗？此操作不可撤销，文件将彻底消失。",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        if (isFolder) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { deleteRecursive = !deleteRecursive }
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                Checkbox(
-                                    checked = deleteRecursive,
-                                    onCheckedChange = { deleteRecursive = it }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = stringResource(R.string.browse_delete_recursive),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            val path = when (item) {
-                                is MediaFile -> item.path
-                                is com.juziss.localmediahub.data.Folder -> item.path
-                                else -> ""
-                            }
-                            if (path.isNotEmpty()) {
-                                viewModel.deletePath(path, if (isFolder) deleteRecursive else false)
-                            }
-                        },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text(stringResource(R.string.confirm_delete))
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDeleteConfirm = false }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                }
+            DeleteConfirmDialog(
+                item = item,
+                deleteRecursive = deleteRecursive,
+                onRecursiveChange = { deleteRecursive = it },
+                onConfirm = { path, recursive -> viewModel.deletePath(path, recursive) },
+                onDismiss = { showDeleteConfirm = false },
             )
         }
  
