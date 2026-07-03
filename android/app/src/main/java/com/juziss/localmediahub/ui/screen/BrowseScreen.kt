@@ -8,49 +8,13 @@ import com.juziss.localmediahub.ui.component.browse.DeleteLoadingDialog
 import com.juziss.localmediahub.ui.component.browse.QuickActionsDialog
  
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.Bookmarks
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.Checkbox
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
 import androidx.compose.runtime.Composable
@@ -60,28 +24,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.juziss.localmediahub.data.MediaFile
-import com.juziss.localmediahub.ui.component.BrowseContent
-import com.juziss.localmediahub.ui.component.FavoritesContent
-import com.juziss.localmediahub.ui.component.FolderGrid
-import com.juziss.localmediahub.ui.component.SearchContent
-import com.juziss.localmediahub.ui.component.SystemDrivesContent
-import com.juziss.localmediahub.ui.component.TagFilterBar
 import com.juziss.localmediahub.ui.component.TagMenuDialog
 import com.juziss.localmediahub.viewmodel.BrowseState
 import androidx.compose.ui.res.stringResource
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
-import com.juziss.localmediahub.viewmodel.SearchState
 import com.juziss.localmediahub.viewmodel.SortOrder
+import com.juziss.localmediahub.ui.component.browse.BrowseFavoritesView
+import com.juziss.localmediahub.ui.component.browse.BrowseSearchView
 import com.juziss.localmediahub.ui.component.browse.BrowseSortMenu
 import com.juziss.localmediahub.ui.component.browse.BrowseStateContent
 import com.juziss.localmediahub.ui.component.browse.BrowseTopBar
@@ -286,81 +239,53 @@ fun BrowseScreen(
             )
         }
  
-        if (isSearchMode) {
-            SearchContent(
+        when {
+            isSearchMode -> BrowseSearchView(
                 searchState = searchState,
                 searchQuery = searchQuery,
-                onFolderClick = { folder ->
-                    val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath
+                onClearSearch = {
                     isSearchMode = false
                     viewModel.clearSearch()
-                    viewModel.browseFolder(path, folder.name)
                 },
+                onBrowseFolder = viewModel::browseFolder,
                 onVideoClick = onVideoClick,
-                onImageClick = { file ->
-                    val allImages = when (val state = searchState) {
-                        is SearchState.Results -> state.result.files.filter { it.mediaType == "image" }
-                        else -> emptyList()
-                    }
-                    onImageClick(file, allImages)
-                },
+                onImageClick = onImageClick,
                 onToggleFavorite = onToggleFavoriteCb,
                 isFavorite = isFavoriteCb,
                 getThumbnailUrl = viewModel::getThumbnailUrl,
                 onFileLongClick = onFileLongClickCb,
                 modifier = Modifier.padding(innerPadding),
             )
-            return@Scaffold
+            showFavoritesOnly -> BrowseFavoritesView(
+                favoriteFiles = favoriteFiles,
+                onVideoClick = { file ->
+                    onFavoriteVideoClick(file, viewModel.isFavoriteSystemBrowse(file))
+                },
+                onImageClick = { file, allFiles ->
+                    onFavoriteImageClick(file, allFiles.filter { it.mediaType == "image" }, viewModel.isFavoriteSystemBrowse(file))
+                },
+                onToggleFavorite = onToggleFavoriteCb,
+                isFavorite = isFavoriteCb,
+                getFavoriteThumbnailUrl = viewModel::getFavoriteThumbnailUrl,
+                onFileLongClick = onFileLongClickCb,
+                modifier = Modifier.padding(innerPadding),
+            )
+            else -> BrowseStateContent(
+                browseState = browseState,
+                currentPath = currentPath,
+                isSystemBrowse = isSystemBrowse,
+                tags = tags,
+                activeTagFilter = activeTagFilter,
+                onVideoClick = onVideoClick,
+                onImageClick = onImageClick,
+                onToggleFavorite = onToggleFavoriteCb,
+                isFavorite = isFavoriteCb,
+                onFileLongClick = onFileLongClickCb,
+                onFolderLongClick = { folder -> itemForActions = folder },
+                viewModel = viewModel,
+                innerPadding = innerPadding,
+            )
         }
- 
-        if (showFavoritesOnly) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            ) {
-                BrowseSummaryCard(
-                    icon = Icons.Outlined.FavoriteBorder,
-                    title = stringResource(R.string.browse_favorites),
-                    message = stringResource(R.string.browse_fav_card_desc),
-                    meta = "共 ${favoriteFiles.size} 个收藏",
-                    badge = null,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                )
-                FavoritesContent(
-                    favoriteFiles = favoriteFiles,
-                    onVideoClick = { file ->
-                        onFavoriteVideoClick(file, viewModel.isFavoriteSystemBrowse(file))
-                    },
-                    onImageClick = { file, allFiles ->
-                        val allImages = allFiles.filter { it.mediaType == "image" }
-                        onFavoriteImageClick(file, allImages, viewModel.isFavoriteSystemBrowse(file))
-                    },
-                    onToggleFavorite = onToggleFavoriteCb,
-                    isFavorite = isFavoriteCb,
-                    getThumbnailUrl = viewModel::getFavoriteThumbnailUrl,
-                    onFileLongClick = onFileLongClickCb,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            return@Scaffold
-        }
- 
-        BrowseStateContent(
-            browseState = browseState,
-            currentPath = currentPath,
-            isSystemBrowse = isSystemBrowse,
-            tags = tags,
-            activeTagFilter = activeTagFilter,
-            onVideoClick = onVideoClick,
-            onImageClick = onImageClick,
-            onToggleFavorite = onToggleFavoriteCb,
-            isFavorite = isFavoriteCb,
-            onFileLongClick = onFileLongClickCb,
-            onFolderLongClick = { folder -> itemForActions = folder },
-            viewModel = viewModel,
-            innerPadding = innerPadding,
-        )
     }
 }
  
