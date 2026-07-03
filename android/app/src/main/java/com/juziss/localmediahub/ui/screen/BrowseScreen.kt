@@ -83,6 +83,7 @@ import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.viewmodel.SearchState
 import com.juziss.localmediahub.viewmodel.SortOrder
 import com.juziss.localmediahub.ui.component.browse.BrowseSortMenu
+import com.juziss.localmediahub.ui.component.browse.BrowseStateContent
 import com.juziss.localmediahub.ui.component.browse.BrowseTopBar
 import kotlinx.coroutines.delay
  
@@ -345,212 +346,21 @@ fun BrowseScreen(
             return@Scaffold
         }
  
-        when (browseState) {
-            is BrowseState.Idle -> {
-                BrowseStateCard(
-                    title = stringResource(R.string.browse_loading_files),
-                    message = stringResource(R.string.browse_loading_files_desc),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
-            }
-            is BrowseState.Loading -> {
-                BrowseLoadingCard(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
-            }
-            is BrowseState.Error -> {
-                BrowseStateCard(
-                    title = stringResource(R.string.browse_error_title),
-                    message = (browseState as BrowseState.Error).message,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    actionLabel = stringResource(R.string.browse_retry),
-                    onAction = {
-                        if (isSystemBrowse) viewModel.loadSystemDrives() else viewModel.loadRoots()
-                    },
-                )
-            }
-            is BrowseState.RootFolders -> {
-                val folders = (browseState as BrowseState.RootFolders).folders
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                ) {
-                    BrowseSummaryCard(
-                        icon = Icons.Filled.Storage,
-                        title = stringResource(R.string.browse_lib_card_title),
-                        message = stringResource(R.string.browse_lib_card_desc),
-                        meta = "共 ${folders.size} 个共享盘符",
-                        badge = null,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
-                    FolderGrid(
-                        folders = folders,
-                        onFolderClick = { folder ->
-                            val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath
-                            viewModel.browseFolder(path, folder.name)
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-            is BrowseState.SystemDrives -> {
-                val drives = (browseState as BrowseState.SystemDrives).drives
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                ) {
-                    BrowseSummaryCard(
-                        icon = Icons.Filled.Storage,
-                        title = stringResource(R.string.browse_drive_card_title),
-                        message = stringResource(R.string.browse_drive_card_desc),
-                        meta = "检测到 ${drives.size} 个磁盘分区",
-                        badge = null,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
-                    SystemDrivesContent(
-                        drives = drives,
-                        onDriveClick = { drivePath ->
-                            viewModel.browseSystemPath(drivePath, drivePath)
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-            is BrowseState.SystemBrowsed -> {
-                val result = (browseState as BrowseState.SystemBrowsed).result
-                val filteredFiles = viewModel.filterFilesByTag(result.files)
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                ) {
-                    BrowseSummaryCard(
-                        icon = Icons.Filled.Storage,
-                        title = stringResource(R.string.browse_path_title),
-                        message = result.currentPath ?: currentPath,
-                        meta = "${result.folders.size} 文件夹 · ${filteredFiles.size} 文件",
-                        badge = activeTagFilter?.name,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
-                    BrowseContent(
-                        folders = result.folders,
-                        files = filteredFiles,
-                        onFolderClick = { folder ->
-                            viewModel.browseSystemPath(folder.path, folder.name)
-                        },
-                        onVideoClick = onVideoClick,
-                        onImageClick = { file ->
-                            onImageClick(file, filteredFiles.filter { it.mediaType == "image" })
-                        },
-                        onToggleFavorite = onToggleFavoriteCb,
-                        isFavorite = isFavoriteCb,
-                        onFileLongClick = onFileLongClickCb,
-                        onFolderLongClick = { folder -> itemForActions = folder },
-                        modifier = Modifier.weight(1f),
-                        viewModel = viewModel,
-                    )
-                }
-            }
-            is BrowseState.Browsed -> {
-                val result = (browseState as BrowseState.Browsed).result
-                val filteredFiles = viewModel.filterFilesByTag(result.files)
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                ) {
-                    BrowseSummaryCard(
-                        icon = Icons.Filled.Folder,
-                        title = if (currentPath.isBlank()) stringResource(R.string.browse_browsed_title) else currentPath,
-                        message = stringResource(R.string.browse_browsed_desc),
-                        meta = "${result.folders.size} 文件夹 · ${filteredFiles.size} 文件",
-                        badge = activeTagFilter?.name,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
-                    if (tags.isNotEmpty()) {
-                        Box(modifier = Modifier.padding(horizontal = 12.dp)) {
-                            TagFilterBar(
-                                tags = tags,
-                                activeTagFilter = activeTagFilter,
-                                onTagClick = { tag ->
-                                    viewModel.setActiveTagFilter(
-                                        if (activeTagFilter?.id == tag.id) null else tag
-                                    )
-                                },
-                            )
-                        }
-                    }
-                    BrowseContent(
-                        folders = result.folders,
-                        files = filteredFiles,
-                        onFolderClick = { folder ->
-                            val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath
-                            viewModel.browseFolder(path, folder.name)
-                        },
-                        onVideoClick = onVideoClick,
-                        onImageClick = { file ->
-                            onImageClick(file, filteredFiles.filter { it.mediaType == "image" })
-                        },
-                        onToggleFavorite = onToggleFavoriteCb,
-                        isFavorite = isFavoriteCb,
-                        onFileLongClick = onFileLongClickCb,
-                        onFolderLongClick = { folder -> itemForActions = folder },
-                        modifier = Modifier.weight(1f),
-                        viewModel = viewModel,
-                    )
-                }
-            }
-            is BrowseState.TagCollection -> {
-                val collection = browseState as BrowseState.TagCollection
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                ) {
-                    BrowseSummaryCard(
-                        icon = Icons.Filled.Bookmarks,
-                        title = collection.title,
-                        message = stringResource(R.string.browse_collection_desc),
-                        meta = "共 ${collection.files.size} 个媒体文件",
-                        badge = stringResource(R.string.browse_collection_title),
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
-                    if (collection.files.isEmpty()) {
-                        BrowseStateCard(
-                            title = stringResource(R.string.browse_collection_empty),
-                            message = "您可以在浏览媒体文件时长按并贴上 \"${collection.title}\" 标签，以便在此快速查看。",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                                .weight(1f),
-                        )
-                    } else {
-                        BrowseContent(
-                            folders = emptyList(),
-                            files = collection.files,
-                            onFolderClick = {},
-                            onVideoClick = onVideoClick,
-                            onImageClick = { file ->
-                                onImageClick(file, collection.files.filter { it.mediaType == "image" })
-                            },
-                            onToggleFavorite = onToggleFavoriteCb,
-                            isFavorite = isFavoriteCb,
-                            onFileLongClick = onFileLongClickCb,
-                            modifier = Modifier.weight(1f),
-                            viewModel = viewModel,
-                        )
-                    }
-                }
-            }
-        }
+        BrowseStateContent(
+            browseState = browseState,
+            currentPath = currentPath,
+            isSystemBrowse = isSystemBrowse,
+            tags = tags,
+            activeTagFilter = activeTagFilter,
+            onVideoClick = onVideoClick,
+            onImageClick = onImageClick,
+            onToggleFavorite = onToggleFavoriteCb,
+            isFavorite = isFavoriteCb,
+            onFileLongClick = onFileLongClickCb,
+            onFolderLongClick = { folder -> itemForActions = folder },
+            viewModel = viewModel,
+            innerPadding = innerPadding,
+        )
     }
 }
  
