@@ -5,6 +5,7 @@ import com.juziss.localmediahub.ui.component.browse.BrowseStateCard
 import com.juziss.localmediahub.ui.component.browse.BrowseLoadingCard
 import com.juziss.localmediahub.ui.component.browse.DeleteConfirmDialog
 import com.juziss.localmediahub.ui.component.browse.DeleteLoadingDialog
+import com.juziss.localmediahub.ui.component.browse.QuickActionsDialog
  
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -289,126 +290,32 @@ fun BrowseScreen(
         // Action Sheet / Dialog for Long-press options
         if (itemForActions != null) {
             val item = itemForActions!!
-            AlertDialog(
-                onDismissRequest = { itemForActions = null },
-                shape = RoundedCornerShape(20.dp),
-                title = {
-                    Text(
-                        text = stringResource(R.string.browse_quick_actions),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+            QuickActionsDialog(
+                item = item,
+                onEditTags = { file ->
+                    showTagMenuForFile = file
+                    itemForActions = null
                 },
-                text = {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (item is MediaFile) {
-                            Text(
-                                text = item.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            TextButton(
-                                onClick = {
-                                    showTagMenuForFile = item
-                                    itemForActions = null
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Start,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(stringResource(R.string.browse_action_edit_tags))
-                                }
-                            }
-                            TextButton(
-                                onClick = {
-                                    viewModel.downloadFile(item)
-                                    itemForActions = null
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Start,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(stringResource(R.string.browse_action_download_file))
-                                }
-                            }
-                            TextButton(
-                                onClick = {
-                                    itemToDelete = item
-                                    showDeleteConfirm = true
-                                    itemForActions = null
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.error
-                                )
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Start,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(stringResource(R.string.browse_action_delete_file))
-                                }
-                            }
-                        } else if (item is com.juziss.localmediahub.data.Folder) {
-                            Text(
-                                text = item.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            TextButton(
-                                onClick = {
-                                    viewModel.downloadFolder(item)
-                                    itemForActions = null
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Start,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(stringResource(R.string.browse_action_download_folder))
-                                }
-                            }
-                            TextButton(
-                                onClick = {
-                                    itemToDelete = item
-                                    showDeleteConfirm = true
-                                    deleteRecursive = true
-                                    itemForActions = null
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.error
-                                )
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.Start,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(stringResource(R.string.browse_action_delete_folder))
-                                }
-                            }
-                        }
-                    }
+                onDownloadFile = { file ->
+                    viewModel.downloadFile(file)
+                    itemForActions = null
                 },
-                confirmButton = {
-                    TextButton(onClick = { itemForActions = null }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                }
+                onDeleteFile = { file ->
+                    itemToDelete = file
+                    showDeleteConfirm = true
+                    itemForActions = null
+                },
+                onDownloadFolder = { folder ->
+                    viewModel.downloadFolder(folder)
+                    itemForActions = null
+                },
+                onDeleteFolder = { folder ->
+                    itemToDelete = folder
+                    showDeleteConfirm = true
+                    deleteRecursive = true
+                    itemForActions = null
+                },
+                onDismiss = { itemForActions = null },
             )
         }
  
