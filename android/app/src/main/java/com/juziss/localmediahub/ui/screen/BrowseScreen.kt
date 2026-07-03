@@ -83,6 +83,7 @@ import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.viewmodel.SearchState
 import com.juziss.localmediahub.viewmodel.SortOrder
 import com.juziss.localmediahub.ui.component.browse.BrowseSortMenu
+import com.juziss.localmediahub.ui.component.browse.BrowseTopBar
 import kotlinx.coroutines.delay
  
 @OptIn(ExperimentalMaterial3Api::class)
@@ -152,105 +153,43 @@ fun BrowseScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            if (isSearchMode) {
-                TopAppBar(
-                    title = {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { viewModel.updateSearchQuery(it) },
-                            placeholder = { Text(stringResource(R.string.browse_search_hint)) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                            ),
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = {
-                            isSearchMode = false
-                            viewModel.clearSearch()
-                        }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    ),
-                )
-            } else {
-                TopAppBar(
-                    title = {
-                        val collectionTitle = (browseState as? BrowseState.TagCollection)?.title
-                        Text(
-                            when {
-                                showFavoritesOnly -> stringResource(R.string.browse_favorites)
-                                collectionTitle != null -> collectionTitle
-                                isSystemBrowse && currentPath.isEmpty() -> stringResource(R.string.browse_drives)
-                                isSystemBrowse -> currentPath
-                                currentPath.isEmpty() -> stringResource(R.string.browse_libraries)
-                                else -> currentPath
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            fontWeight = FontWeight.Bold
-                        )
-                    },
-                    navigationIcon = {
-                        if (showFavoritesOnly) {
-                            IconButton(onClick = { viewModel.setShowFavoritesOnly(false) }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                            }
-                        } else if (isCollectionView) {
-                            IconButton(onClick = onExitBrowse) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                            }
-                        } else if (viewModel.canGoBack()) {
-                            IconButton(onClick = { viewModel.navigateBack() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                            }
-                        }
-                    },
-                    actions = {
-                        if (currentPath.isEmpty() && !showFavoritesOnly && !isCollectionView) {
-                            IconButton(onClick = {
-                                if (isSystemBrowse) viewModel.loadRoots() else viewModel.loadSystemDrives()
-                            }) {
-                                Icon(
-                                    Icons.Filled.Storage,
-                                    contentDescription = if (isSystemBrowse) stringResource(R.string.browse_libraries) else stringResource(R.string.browse_title_drive),
-                                )
-                            }
-                        }
-                        if (currentPath.isEmpty() && !showFavoritesOnly && !isCollectionView) {
-                            IconButton(onClick = { viewModel.setShowFavoritesOnly(true) }) {
-                                Icon(
-                                    Icons.Outlined.FavoriteBorder,
-                                    contentDescription = stringResource(R.string.browse_favorites),
-                                )
-                            }
-                        }
-                        if (!showFavoritesOnly) {
-                            BrowseSortMenu(
-                                folderSort = folderSort,
-                                fileSort = fileSort,
-                                onFolderSortChange = viewModel::setFolderSortOrder,
-                                onFileSortChange = viewModel::setFileSortOrder,
-                            )
-                            if (!isCollectionView) {
-                                IconButton(onClick = { isSearchMode = true }) {
-                                    Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.search))
-                                }
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        titleContentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                )
-            }
+            val collectionTitle = (browseState as? BrowseState.TagCollection)?.title
+            BrowseTopBar(
+                isSearchMode = isSearchMode,
+                searchQuery = searchQuery,
+                onSearchQueryChange = viewModel::updateSearchQuery,
+                onClearSearch = {
+                    isSearchMode = false
+                    viewModel.clearSearch()
+                },
+                title = when {
+                    showFavoritesOnly -> stringResource(R.string.browse_favorites)
+                    collectionTitle != null -> collectionTitle
+                    isSystemBrowse && currentPath.isEmpty() -> stringResource(R.string.browse_drives)
+                    isSystemBrowse -> currentPath
+                    currentPath.isEmpty() -> stringResource(R.string.browse_libraries)
+                    else -> currentPath
+                },
+                onBack = when {
+                    showFavoritesOnly -> ({ viewModel.setShowFavoritesOnly(false) })
+                    isCollectionView -> onExitBrowse
+                    viewModel.canGoBack() -> ({ viewModel.navigateBack() })
+                    else -> null
+                },
+                showLibraryActions = currentPath.isEmpty() && !showFavoritesOnly && !isCollectionView,
+                isSystemBrowse = isSystemBrowse,
+                onToggleSystemMode = {
+                    if (isSystemBrowse) viewModel.loadRoots() else viewModel.loadSystemDrives()
+                },
+                onShowFavorites = { viewModel.setShowFavoritesOnly(true) },
+                showSortAndSearch = !showFavoritesOnly,
+                folderSort = folderSort,
+                fileSort = fileSort,
+                onFolderSortChange = viewModel::setFolderSortOrder,
+                onFileSortChange = viewModel::setFileSortOrder,
+                showSearch = !showFavoritesOnly && !isCollectionView,
+                onEnterSearch = { isSearchMode = true },
+            )
         }
     ) { innerPadding ->
         var itemForActions by remember { mutableStateOf<Any?>(null) }
