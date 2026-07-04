@@ -47,6 +47,13 @@ kamadak-exif = "0.5"
 jpeg-decoder = "0.3"
 image-webp = "0.2"
 fast_image_resize = "6.0"
+# Task 4: PNG decode. `png` is the pure-Rust PNG decoder from the `image`
+# crate ecosystem (image-rs/png). No C dependencies, cross-compiles
+# cleanly to aarch64-linux-android. The 0.17 line is what the plan called
+# for; cargo will resolve the latest 0.17.x release (the API surface used
+# here — `Decoder::new`, `read_info`, `next_frame`, `info().color_type` —
+# has been stable across 0.17).
+png = "0.17"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # libheif-rs will be added in Task 5 (HEIC decode). Left here as a marker

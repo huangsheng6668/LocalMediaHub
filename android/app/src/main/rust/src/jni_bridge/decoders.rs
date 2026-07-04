@@ -42,8 +42,12 @@ fn decode_slice(data: &[u8], tw: jint, th: jint) -> Option<(Vec<u8>, i32, i32)> 
     match detect_format(data) {
         1 => crate::jpeg::decode_scaled(data, tw, th),
         2 => crate::webp::decode_scaled(data, tw, th),
-        // PNG / HEIC land in later tasks; for now they fall through to the
-        // Kotlin BitmapFactory fallback (the JNI entry returns null).
+        // Task 4: PNG decode. PNG path uses fixed-size decode (no IDCT-scale
+        // shortcut like JPEG), so we ignore (tw, th) here; the optional
+        // aspect-fit downscale lives inside `png::decode_scaled`.
+        3 => crate::png::decode_scaled(data, tw, th),
+        // HEIC lands in Task 5; for now it falls through to the Kotlin
+        // BitmapFactory fallback (the JNI entry returns null).
         _ => None,
     }
 }

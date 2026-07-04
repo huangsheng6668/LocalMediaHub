@@ -74,6 +74,21 @@ class NativeImageDecoderTest {
     }
 
     @Test
+    fun decodePngReturnsBitmapViaFallback() = runTest {
+        // Round 11 Task 4: PNG path. On the host JVM this exercises the
+        // BitmapFactory fallback (the Rust .so is not loaded); the real
+        // Rust PNG decode is covered by `cargo test` in
+        // `android/app/src/main/rust/`. The contract this test pins is
+        // identical to the JPEG/WebP cases: a non-null bitmap with
+        // positive dimensions for a valid PNG input.
+        val bytes = readTestImage("sample.png") ?: return@runTest
+        val bitmap = NativeImageDecoder.decode(bytes, 0, 0)
+        assertNotNull("fallback decode should produce a bitmap", bitmap)
+        assertTrue("width > 0", bitmap.width > 0)
+        assertTrue("height > 0", bitmap.height > 0)
+    }
+
+    @Test
     fun fallbackOnCorruptData() = runTest {
         // Just a JPEG magic header followed by garbage — both Rust and
         // BitmapFactory will fail; the contract is that we either surface
