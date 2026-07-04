@@ -30,13 +30,19 @@ pub extern "system" fn Java_com_juziss_localmediahub_native_NaturalSorter_native
     a: JString,
     b: JString,
 ) -> jint {
-    let a: String = match env.get_string(&a) {
-        Ok(s) => s.into(),
-        Err(_) => return 0,
-    };
-    let b: String = match env.get_string(&b) {
-        Ok(s) => s.into(),
-        Err(_) => return 0,
-    };
-    crate::natural_sort::compare(&a, &b) as jint
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let a: String = match env.get_string(&a) {
+            Ok(s) => s.into(),
+            Err(_) => return 0,
+        };
+        let b: String = match env.get_string(&b) {
+            Ok(s) => s.into(),
+            Err(_) => return 0,
+        };
+        crate::natural_sort::compare(&a, &b) as jint
+    }));
+    match result {
+        Ok(ordering) => ordering,
+        Err(_) => 0,
+    }
 }
