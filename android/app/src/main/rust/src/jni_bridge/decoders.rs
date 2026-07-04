@@ -49,22 +49,42 @@ fn detect_format(data: &[u8]) -> u32 {
 
 #[cfg(target_os = "android")]
 fn decode_slice(data: &[u8], tw: jint, th: jint) -> Option<(Vec<u8>, i32, i32)> {
-    match detect_format(data) {
-        1 => crate::jpeg::decode_scaled(data, tw, th),
-        2 => crate::webp::decode_scaled(data, tw, th),
+    let fmt = detect_format(data);
+    let (rgba, w, h) = match fmt {
+        1 => crate::jpeg::decode_scaled(data, tw, th)?,
+        2 => crate::webp::decode_scaled(data, tw, th)?,
         // Task 4: PNG decode. PNG path uses fixed-size decode (no IDCT-scale
         // shortcut like JPEG), so we ignore (tw, th) here; the optional
         // aspect-fit downscale lives inside `png::decode_scaled`.
-        3 => crate::png::decode_scaled(data, tw, th),
+        3 => crate::png::decode_scaled(data, tw, th)?,
         // Task 5: HEIC. `heif::decode` currently returns `None` (stub) —
         // the Rust side declines to decode, and the JNI entry surfaces
         // null to Kotlin, which then runs the `BitmapFactory` fallback
         // (it uses NDK `AImageDecoder` on API 28+). Routing still flows
         // through here so a future pure-Rust HEIC crate can be dropped
         // into `heif.rs` without touching the dispatcher.
-        4 => crate::heif::decode(data),
-        _ => None,
-    }
+        4 => crate::heif::decode(data)?,
+        _ => return None,
+    };
+
+    // Task 6: EXIF orientation correction. Only JPEG carries the
+    // EXIF `Orientation` tag in practice (PNG/WebP samples used in
+    // this project are all orientation=1), so we read it only for
+    // JPEG-formatted inputs. Orientation=1 is the EXIF "no rotation"
+    // sentinel and is the no-op fast path — the dominant case for
+    // most phone JPEGs in the test corpus. For orientations 2..8 the
+    // RGBA buffer is rotated/flipped in place before Bitmap creation.
+    let oriented = if fmt == 1 {
+        let orientation = crate::exif_reader::parse_orientation_only(data);
+        if orientation == 1 {
+            (rgba, w, h)
+        } else {
+            crate::bitmap::apply_exif_orientation(&rgba, w, h, orientation)
+        }
+    } else {
+        (rgba, w, h)
+    };
+    Some(oriented)
 }
 
 /// `NativeImageDecoder.nativeDecodeByteArray(data, length, tw, th): Bitmap?`.

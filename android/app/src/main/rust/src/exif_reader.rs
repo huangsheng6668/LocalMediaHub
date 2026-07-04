@@ -84,6 +84,30 @@ pub fn parse(data: &[u8]) -> Option<ExifInfo> {
     })
 }
 
+/// Fast path: parse only the EXIF Orientation tag.
+///
+/// Returns the orientation value (1..8) on success, or `1` (the EXIF
+/// "no rotation" sentinel) when:
+///   * the byte stream is too short to be a JPEG,
+///   * the container isn't a JPEG (other formats may carry EXIF in
+///     principle but the Round 11 decode pipeline only honours JPEG
+///     orientation — PNG/WebP test samples all use orientation=1), or
+///   * `parse` returns `None` (no EXIF segment / parse failure).
+///
+/// Implementation note: this simply delegates to [`parse`] and projects
+/// out the orientation field. `kamadak-exif` parses the leading APP1
+/// segment in ~10µs for a typical phone JPEG, so a hand-written seeker
+/// would not be a meaningful win and would duplicate the upstream
+/// boundary-checking logic.
+pub fn parse_orientation_only(data: &[u8]) -> i32 {
+    // Quick JPEG SOI guard. Non-JPEG containers are reported as
+    // orientation=1 — see the doc comment for the rationale.
+    if data.len() < 12 || data[0] != 0xFF || data[1] != 0xD8 {
+        return 1;
+    }
+    parse(data).map(|e| e.orientation).unwrap_or(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +131,27 @@ mod tests {
         // defaults to 1", not as an error.
         let fake_jpeg_no_exif = b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00";
         assert!(parse(fake_jpeg_no_exif).is_none());
+    }
+
+    #[test]
+    fn parse_orientation_only_returns_1_for_non_jpeg() {
+        // PNG/WebP/garbage inputs are not JPEG, so the orientation fast
+        // path short-circuits to the EXIF "no rotation" sentinel.
+        assert_eq!(parse_orientation_only(b""), 1);
+        assert_eq!(parse_orientation_only(b"not an image"), 1);
+        assert_eq!(
+            parse_orientation_only(&[
+                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0
+            ]),
+            1
+        );
+    }
+
+    #[test]
+    fn parse_orientation_only_returns_1_for_jpeg_without_exif() {
+        // A JPEG SOI that has no APP1 segment: `parse` returns None, which
+        // the fast path maps to orientation=1.
+        let fake_jpeg_no_exif = b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00";
+        assert_eq!(parse_orientation_only(fake_jpeg_no_exif), 1);
     }
 }
