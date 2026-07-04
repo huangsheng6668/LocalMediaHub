@@ -114,6 +114,10 @@ android {
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        // Required so android.util.Log calls in production code don't throw
+        // "Method X in android.util.Log not mocked" during JVM unit tests.
+        // Round 12 Task 1: CacheCleanup uses Log.i / Log.w for telemetry.
+        unitTests.isReturnDefaultValues = true
     }
 }
 
