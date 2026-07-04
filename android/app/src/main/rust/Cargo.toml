@@ -56,13 +56,16 @@ fast_image_resize = "6.0"
 png = "0.17"
 
 [target.'cfg(target_os = "android")'.dependencies]
-# libheif-rs will be added in Task 5 (HEIC decode). Left here as a marker
-# for the future target-scoped block; intentionally empty for Task 0.
+# Task 5 (HEIC decode) ships a `None`-returning Rust stub and delegates real
+# HEIC decoding to Android's native `AImageDecoder` via the Kotlin
+# `BitmapFactory` fallback path — see `src/heif.rs`. As a result there is
+# currently no `libheif-rs` / `libde265` dependency here. If a future task
+# reintroduces native Rust HEIC decode, gate the C-binding crate behind a
+# `heif-native` cargo feature and add it under this target scope so the
+# host-side `cargo test` does not try to link Android-only symbols.
 
 [features]
 default = []
-# heif-native will be wired up in Task 5.
-# heif-native = ["libheif-rs"]
 
 [lib]
 crate-type = ["cdylib"]

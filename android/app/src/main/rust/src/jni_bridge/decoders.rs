@@ -22,6 +22,7 @@ use jni::JNIEnv;
 ///   - `1` for JPEG (SOI = FF D8 FF)
 ///   - `2` for WebP (RIFF....WEBP)
 ///   - `3` for PNG (89 50 4E 47 0D 0A 1A 0A)
+///   - `4` for HEIC/HEIF (ISO BMFF `ftyp` box at offset 4..8)
 ///   - `0` for unknown / unsupported
 #[cfg(target_os = "android")]
 fn detect_format(data: &[u8]) -> u32 {
@@ -33,6 +34,15 @@ fn detect_format(data: &[u8]) -> u32 {
     }
     if data.len() >= 8 && data[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
         return 3;
+    }
+    // HEIF/HEIC: ISO base media file format container. The first box is
+    // always a `ftyp` box — its 4-byte type lives at offset 4..8. This
+    // matches `heic`, `heix`, `heim`, `heis`, `mif1` (HEIF) and AVIF's
+    // `avif`/`avis` brands; the actual codec dispatch happens inside
+    // `heif::decode` (currently a stub that returns `None`, delegating to
+    // Android's `AImageDecoder` via the Kotlin `BitmapFactory` fallback).
+    if data.len() >= 12 && &data[4..8] == b"ftyp" {
+        return 4;
     }
     0
 }
@@ -46,8 +56,13 @@ fn decode_slice(data: &[u8], tw: jint, th: jint) -> Option<(Vec<u8>, i32, i32)> 
         // shortcut like JPEG), so we ignore (tw, th) here; the optional
         // aspect-fit downscale lives inside `png::decode_scaled`.
         3 => crate::png::decode_scaled(data, tw, th),
-        // HEIC lands in Task 5; for now it falls through to the Kotlin
-        // BitmapFactory fallback (the JNI entry returns null).
+        // Task 5: HEIC. `heif::decode` currently returns `None` (stub) —
+        // the Rust side declines to decode, and the JNI entry surfaces
+        // null to Kotlin, which then runs the `BitmapFactory` fallback
+        // (it uses NDK `AImageDecoder` on API 28+). Routing still flows
+        // through here so a future pure-Rust HEIC crate can be dropped
+        // into `heif.rs` without touching the dispatcher.
+        4 => crate::heif::decode(data),
         _ => None,
     }
 }

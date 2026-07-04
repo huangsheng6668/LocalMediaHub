@@ -89,6 +89,29 @@ class NativeImageDecoderTest {
     }
 
     @Test
+    fun decodeHeicReturnsBitmapViaFallback() = runTest {
+        // Round 11 Task 5: HEIC path. The Rust crate deliberately ships a
+        // `None`-returning stub for `heif::decode` (see
+        // `android/app/src/main/rust/src/heif.rs`), so on a real device the
+        // JNI entry returns null and Kotlin falls back to `BitmapFactory`,
+        // which on API 28+ is backed by NDK `AImageDecoder`. On the host
+        // JVM (this Robolectric test) the Rust `.so` isn't loaded at all,
+        // so the fallback path is always exercised.
+        //
+        // The HEIC sample is not checked into the repo (HEIC samples are
+        // hard to source royalty-free and the value of a host-only
+        // Robolectric decode is low — `BitmapFactory` under Robolectric
+        // does not actually decode HEIC bitstreams). If `sample.heic` is
+        // absent the test degrades to a no-op `return`, matching the
+        // JPEG/WebP/PNG tests' "skip on missing resource" contract.
+        val bytes = readTestImage("sample.heic") ?: return@runTest
+        val bitmap = NativeImageDecoder.decode(bytes, 0, 0)
+        assertNotNull("fallback decode should produce a bitmap", bitmap)
+        assertTrue("width > 0", bitmap.width > 0)
+        assertTrue("height > 0", bitmap.height > 0)
+    }
+
+    @Test
     fun fallbackOnCorruptData() = runTest {
         // Just a JPEG magic header followed by garbage — both Rust and
         // BitmapFactory will fail; the contract is that we either surface
