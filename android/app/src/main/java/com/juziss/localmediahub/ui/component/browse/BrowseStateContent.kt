@@ -40,6 +40,12 @@ internal fun BrowseStateContent(
     viewModel: BrowseViewModel,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
 ) {
+    val contentState = BrowseContentState(
+        folderSort = viewModel.folderSortOrder.value,
+        fileSort = viewModel.fileSortOrder.value,
+        currentPath = currentPath,
+        restoreScrollTo = viewModel.restoreScrollTo.value,
+    )
     when (browseState) {
         is BrowseState.Idle -> {
             BrowseStateCard(
@@ -150,7 +156,11 @@ internal fun BrowseStateContent(
                     onFileLongClick = onFileLongClick,
                     onFolderLongClick = onFolderLongClick,
                     modifier = Modifier.weight(1f),
-                    viewModel = viewModel,
+                    state = contentState,
+                    onSaveScrollPosition = viewModel::saveScrollPosition,
+                    onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
+                    getScrollPosition = viewModel::getScrollPosition,
+                    getThumbnailUrl = viewModel::getThumbnailUrl,
                 )
             }
         }
@@ -199,7 +209,11 @@ internal fun BrowseStateContent(
                     onFileLongClick = onFileLongClick,
                     onFolderLongClick = onFolderLongClick,
                     modifier = Modifier.weight(1f),
-                    viewModel = viewModel,
+                    state = contentState,
+                    onSaveScrollPosition = viewModel::saveScrollPosition,
+                    onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
+                    getScrollPosition = viewModel::getScrollPosition,
+                    getThumbnailUrl = viewModel::getThumbnailUrl,
                 )
             }
         }
@@ -240,7 +254,11 @@ internal fun BrowseStateContent(
                         isFavorite = isFavorite,
                         onFileLongClick = onFileLongClick,
                         modifier = Modifier.weight(1f),
-                        viewModel = viewModel,
+                        state = contentState,
+                        onSaveScrollPosition = viewModel::saveScrollPosition,
+                        onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
+                        getScrollPosition = viewModel::getScrollPosition,
+                        getThumbnailUrl = viewModel::getThumbnailUrl,
                     )
                 }
             }

@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
-import com.juziss.localmediahub.viewmodel.BrowseViewModel
+import com.juziss.localmediahub.ui.component.browse.BrowseContentState
 import com.juziss.localmediahub.viewmodel.SearchState
 import com.juziss.localmediahub.viewmodel.SortOrder
 import kotlinx.coroutines.launch
@@ -204,16 +204,20 @@ internal fun BrowseContent(
     isFavorite: (String) -> Boolean,
     onFileLongClick: (MediaFile) -> Unit = {},
     onFolderLongClick: (Folder) -> Unit = {},
+    state: BrowseContentState,
+    onSaveScrollPosition: (path: String, index: Int) -> Unit,
+    onConsumeRestoreScroll: () -> Unit,
+    getScrollPosition: (path: String) -> Int,
+    getThumbnailUrl: (file: MediaFile) -> String,
     modifier: Modifier = Modifier,
-    viewModel: BrowseViewModel,
 ) {
-    val folderSortOrder by viewModel.folderSortOrder.collectAsState()
-    val fileSortOrder by viewModel.fileSortOrder.collectAsState()
+    val folderSortOrder = state.folderSort
+    val fileSortOrder = state.fileSort
     val gridState = rememberLazyGridState()
     val staggeredState = rememberLazyStaggeredGridState()
     val scope = rememberCoroutineScope()
-    val restorePath by viewModel.restoreScrollTo.collectAsState()
-    val currentPath by viewModel.currentPath.collectAsState()
+    val restorePath = state.restoreScrollTo
+    val currentPath = state.currentPath
  
     val images = files.filter { it.mediaType == "image" }
     val useStaggeredGrid = folders.isEmpty() && images.isNotEmpty()
@@ -232,13 +236,13 @@ internal fun BrowseContent(
         } else {
             gridState.firstVisibleItemIndex
         }
-        viewModel.saveScrollPosition(currentPath, index)
+        onSaveScrollPosition(currentPath, index)
     }
  
     // Restore scroll position when navigating back
     LaunchedEffect(restorePath) {
         if (restorePath != null) {
-            val savedIndex = viewModel.getScrollPosition(restorePath!!)
+            val savedIndex = getScrollPosition(restorePath!!)
             if (savedIndex > 0) {
                 if (useStaggeredGrid) {
                     staggeredState.scrollToItem(savedIndex)
@@ -246,7 +250,7 @@ internal fun BrowseContent(
                     gridState.scrollToItem(savedIndex)
                 }
             }
-            viewModel.consumeRestoreScroll()
+            onConsumeRestoreScroll()
         }
     }
  
@@ -271,7 +275,7 @@ internal fun BrowseContent(
             WaterfallImageGrid(
                 images = images,
                 onImageClick = onImageClick,
-                getThumbnailUrl = viewModel::getThumbnailUrl,
+                getThumbnailUrl = getThumbnailUrl,
                 isFavorite = isFavorite,
                 onToggleFavorite = onToggleFavorite,
                 onFileLongClick = onFileLongClick,
@@ -300,7 +304,7 @@ internal fun BrowseContent(
                     when (file.mediaType) {
                         "video" -> VideoCard(
                             file = file,
-                            thumbnailUrl = viewModel.getThumbnailUrl(file),
+                            thumbnailUrl = getThumbnailUrl(file),
                             isFavorite = isFavorite(file.relativePath),
                             onToggleFavorite = toggle,
                             onClick = remember(file, onVideoClick) { { onVideoClick(file) } },
@@ -308,7 +312,7 @@ internal fun BrowseContent(
                         )
                         "image" -> ImageCard(
                             file = file,
-                            thumbnailUrl = viewModel.getThumbnailUrl(file),
+                            thumbnailUrl = getThumbnailUrl(file),
                             isFavorite = isFavorite(file.relativePath),
                             onToggleFavorite = toggle,
                             onClick = remember(file, onImageClick) { { onImageClick(file) } },
