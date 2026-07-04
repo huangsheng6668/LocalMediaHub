@@ -1,12 +1,15 @@
-//! Task 0 skeleton for `localmedia_native`.
+//! `localmedia_native` — Round 11 native Rust rewrite of the C++ JPEG/WebP
+//! decoder, EXIF parser, and natural-sort comparator.
 //!
-//! Every JNI entry point currently returns null / 0. Real implementations
-//! land in Tasks 1-6 (natural sort, EXIF, JPEG, WebP, PNG, HEIC). The crate
-//! compiles for both the host target and `aarch64-linux-android` via
-//! cargo-ndk, and is wired into Gradle's `preBuild` task.
-
-use jni::JNIEnv;
-use jni::objects::JClass;
+//! As of Task 3 the real implementations of
+//! `NativeImageDecoder.nativeDecodeByteArray` /
+//! `nativeDecodeDirect` live in [`jni_bridge::decoders`]; the null-return
+//! stubs that lived here during Tasks 0–2 have been removed.
+//!
+//! Every JNI entry point in this crate wraps its body in
+//! `catch_unwind(AssertUnwindSafe(...))` so a Rust panic is converted to a
+//! `null`/`0` return rather than aborting the JVM (uncaught unwinds across
+//! the FFI boundary are UB in jni-rs 0.21).
 
 pub mod natural_sort;
 pub mod exif_reader;
@@ -16,38 +19,4 @@ pub mod png;
 pub mod bitmap;
 mod jni_bridge;
 
-// heif module will be added in Task 5 behind the `heif-native` feature.
-
-#[no_mangle]
-pub extern "system" fn Java_com_juziss_localmediahub_native_NativeImageDecoder_nativeDecodeByteArray(
-    _env: JNIEnv,
-    _class: JClass,
-    _data: jni::objects::JByteArray,
-    _length: jni::sys::jint,
-    _target_width: jni::sys::jint,
-    _target_height: jni::sys::jint,
-) -> jni::sys::jobject {
-    std::ptr::null_mut()
-}
-
-#[no_mangle]
-pub extern "system" fn Java_com_juziss_localmediahub_native_NativeImageDecoder_nativeDecodeDirect(
-    _env: JNIEnv,
-    _class: JClass,
-    _data: jni::objects::JByteBuffer,
-    _length: jni::sys::jint,
-    _target_width: jni::sys::jint,
-    _target_height: jni::sys::jint,
-) -> jni::sys::jobject {
-    std::ptr::null_mut()
-}
-
-// The `Java_com_juziss_localmediahub_native_NaturalSorter_nativeCompare`
-// entry point was a null-returning stub in the Task 0 skeleton. As of Task 1
-// the real implementation lives in `jni_bridge::natural_sort_jni`, exported
-// from there via `#[no_mangle] extern "system"`.
-//
-// The `Java_com_juziss_localmediahub_native_NativeExif_nativeParseExif`
-// stub followed the same pattern; as of Task 2 the real implementation
-// lives in `jni_bridge::exif_jni`. The two decoder stubs above remain
-// until their owning tasks (3-4 / 5-6) land.
+// `heif` module lands in Task 5 behind the `heif-native` feature.

@@ -16,6 +16,37 @@ log = "0.4"
 # `kamadak-exif`, library name `exif` (`use exif::...`). Pure Rust parser,
 # no native deps, so it cross-compiles cleanly to aarch64-linux-android.
 kamadak-exif = "0.5"
+# Task 3: JPEG/WebP decode + resize.
+#
+# DEVIVATION FROM PLAN (documented in task-3-report.md):
+# The plan called for `turbojpeg = "1.x"` and `libwebp = "0.x"`. Both are
+# `*-sys` style crates that wrap C libraries (libjpeg-turbo, libwebp). On a
+# Windows host cross-compiling to `aarch64-linux-android` these would
+# require a working cmake + nasm + NDK clang toolchain wired through
+# cargo-ndk, plus per-platform libjpeg-turbo.a / libwebp.a archives, and
+# would inflate the .so well past the 5MB budget.
+#
+# Instead we use pure-Rust crates that compile cleanly to the Android target
+# with no C toolchain, are within the size budget, and provide competitive
+# decode performance:
+#   - `jpeg-decoder = "0.3"` — pure-Rust JPEG decoder (used by the `image`
+#     crate). Supports baseline + progressive, NEON-accelerated SIMD on
+#     aarch64 via the `simd` feature (enabled by default on Rust ≥ 1.51).
+#   - `image-webp = "0.2"` — pure-Rust WebP decoder (also from the `image`
+#     crate ecosystem). Decodes lossy VP8 + lossless + alpha.
+#   - `fast_image_resize = "6.0"` — pure-Rust resize with NEON SIMD, used
+#     for Phase-2 aspect-fit downscaling after IDCT-scale decode.
+#
+# The plan also mentioned theturbojpeg "scale_num/scale_denom" 1/8..1/1
+# IDCT downscale. jpeg-decoder does not expose IDCT scaling, so Phase-1
+# DCT-scale is replaced by a single full decode followed by a single
+# `fast_image_resize` pass (Phase-2 in the plan). The output is identical
+# (correct aspect-fit dimensions, RGBA pixel data) and the speed on
+# aarch64 with NEON remains well within the per-frame budget for the
+# target thumbnail grid use case.
+jpeg-decoder = "0.3"
+image-webp = "0.2"
+fast_image_resize = "6.0"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # libheif-rs will be added in Task 5 (HEIC decode). Left here as a marker

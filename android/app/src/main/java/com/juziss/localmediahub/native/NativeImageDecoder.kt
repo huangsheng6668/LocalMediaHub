@@ -5,65 +5,97 @@ import android.graphics.BitmapFactory
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.nio.ByteBuffer
 
-data class ImageInfo(
-    val width: Int,
-    val height: Int,
-    val format: Int
-)
-
+/**
+ * Native image decoder backed by Rust (`liblocalmedia_native.so`).
+ *
+ * Round 11 Task 3 rewrite: the legacy C++ decoder (`native-image-decoder`
+ * library with `nativeDecodeJpeg` / `nativeDecodeWebp` / `nativeGetImageInfo`)
+ * is gone. The new entry points are `nativeDecodeByteArray` and
+ * `nativeDecodeDirect` — both do format detection inside Rust so the Kotlin
+ * side no longer needs the pre-routing `getImageInfo` call (one JNI hop per
+ * decode instead of two).
+ *
+ * Host-JVM fallback pattern (Tasks 1 + 2): `init` wraps
+ * `System.loadLibrary` in a `try/catch UnsatisfiedLinkError`. On host JVM
+ * unit tests (Robolectric) the native library is absent, `nativeAvailable`
+ * stays `false`, and `decode()` transparently falls back to
+ * `BitmapFactory`. The flag is also used by callers (e.g.
+ * `NativeDecoderFactory`) to short-circuit native routing.
+ *
+ * The `getImageInfo()` method and the `ImageInfo` data class that the old
+ * C++ backend exposed have been deleted — Rust's `nativeDecodeByteArray`
+ * sniffs the magic bytes itself and routes to `jpeg::decode_scaled` /
+ * `webp::decode_scaled` internally.
+ */
 object NativeImageDecoder {
 
     private const val TAG = "NativeImageDecoder"
 
+    @Volatile
+    var nativeAvailable: Boolean = false
+        private set
+
     init {
-        System.loadLibrary("native-image-decoder")
+        try {
+            System.loadLibrary("localmedia_native")
+            nativeAvailable = true
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "liblocalmedia_native.so unavailable, using BitmapFactory fallback", e)
+        }
     }
 
     const val FORMAT_UNKNOWN = 0
     const val FORMAT_JPEG = 1
     const val FORMAT_WEBP = 2
+    const val FORMAT_PNG = 3
+    const val FORMAT_HEIC = 4
 
-    private external fun nativeDecodeJpeg(
+    // JNI: byte-array path — single copy from JVM heap into the Rust slice.
+    private external fun nativeDecodeByteArray(
         data: ByteArray,
+        length: Int,
         targetWidth: Int,
-        targetHeight: Int
+        targetHeight: Int,
     ): Bitmap?
 
-    private external fun nativeDecodeWebp(
-        data: ByteArray,
+    // JNI: DirectByteBuffer path — zero copy for off-heap buffers (e.g.
+    // Coil's SourceResult when backed by a direct ByteBuffer).
+    private external fun nativeDecodeDirect(
+        data: ByteBuffer,
+        length: Int,
         targetWidth: Int,
-        targetHeight: Int
+        targetHeight: Int,
     ): Bitmap?
 
-    private external fun nativeGetImageInfo(data: ByteArray): IntArray?
-
-    fun getImageInfo(data: ByteArray): ImageInfo? {
-        val info = nativeGetImageInfo(data) ?: return null
-        if (info.size != 3) return null
-        return ImageInfo(width = info[0], height = info[1], format = info[2])
-    }
-
+    /**
+     * Decode image bytes to a Bitmap, optionally aspect-fit downscaled to
+     * `(targetWidth, targetHeight)`. Falls back to `BitmapFactory` when the
+     * native library is unavailable (host JVM tests) or when Rust returns
+     * null (corrupt input, unsupported format).
+     *
+     * Routes on `Dispatchers.Default` because both the JNI call and the
+     * `BitmapFactory` fallback are blocking CPU work.
+     */
     suspend fun decode(
         data: ByteArray,
         targetWidth: Int = 0,
-        targetHeight: Int = 0
+        targetHeight: Int = 0,
     ): Bitmap = withContext(Dispatchers.Default) {
-        val info = getImageInfo(data)
-        when (info?.format) {
-            FORMAT_JPEG -> {
-                nativeDecodeJpeg(data, targetWidth, targetHeight)
-                    ?: fallbackDecode(data, targetWidth, targetHeight)
-            }
-            FORMAT_WEBP -> {
-                nativeDecodeWebp(data, targetWidth, targetHeight)
-                    ?: fallbackDecode(data, targetWidth, targetHeight)
-            }
-            else -> fallbackDecode(data, targetWidth, targetHeight)
+        if (!nativeAvailable) {
+            return@withContext fallbackDecode(data, targetWidth, targetHeight)
         }
+        nativeDecodeByteArray(data, data.size, targetWidth, targetHeight)
+            ?: fallbackDecode(data, targetWidth, targetHeight)
     }
 
-    private fun fallbackDecode(data: ByteArray, targetWidth: Int, targetHeight: Int): Bitmap {
+    /**
+     * Pure-`BitmapFactory` decode path used when the native library is
+     * missing or rejects the input. Public so unit tests can drive it
+     * directly without going through the JNI dispatch.
+     */
+    fun fallbackDecode(data: ByteArray, targetWidth: Int, targetHeight: Int): Bitmap {
         Log.w(TAG, "Falling back to BitmapFactory for decoding")
         if (targetWidth > 0 && targetHeight > 0) {
             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -77,7 +109,11 @@ object NativeImageDecoder {
             ?: throw IllegalArgumentException("Failed to decode image")
     }
 
-    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+    private fun calculateInSampleSize(
+        options: BitmapFactory.Options,
+        reqWidth: Int,
+        reqHeight: Int,
+    ): Int {
         val (height, width) = options.outHeight to options.outWidth
         var inSampleSize = 1
         if (height > reqHeight || width > reqWidth) {
