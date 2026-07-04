@@ -1,0 +1,33 @@
+[package]
+name = "localmedia_native"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Task 0 skeleton: only the two dependencies the placeholder lib.rs actually
+# needs. Heavy native deps (turbojpeg, libwebp, png, kamadak-exif,
+# fast_image_resize, android_logger, libheif-rs) are intentionally deferred
+# to the task that implements the module that uses them, so this task's
+# `cargo build` proves the toolchain end-to-end without dragging in C
+# libraries that need their own build-script validation.
+jni = "0.21"
+log = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# libheif-rs will be added in Task 5 (HEIC decode). Left here as a marker
+# for the future target-scoped block; intentionally empty for Task 0.
+
+[features]
+default = []
+# heif-native will be wired up in Task 5.
+# heif-native = ["libheif-rs"]
+
+[lib]
+crate-type = ["cdylib"]
+name = "localmedia_native"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"

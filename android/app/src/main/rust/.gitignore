@@ -1,0 +1,2 @@
+# Rust build artifacts — never commit the cargo target directory.
+/target

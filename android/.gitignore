@@ -12,3 +12,10 @@ local.properties
 keystore.properties
 *.keystore
 *.jks
+
+# Rust cargo-ndk build artifacts.
+# libffmpeg.so is already tracked by git (pre-built), so this rule does NOT
+# affect it — .gitignore only applies to untracked files. The rule prevents
+# the cargo-ndk output (liblocalmedia_native.so) from being committed.
+app/src/main/jniLibs/arm64-v8a/liblocalmedia_native.so
+

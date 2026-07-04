@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.io.File as JFile
 
 plugins {
     id("com.android.application")
@@ -50,7 +51,7 @@ android {
                 keyAlias = "androiddebugkey"
                 keyPassword = "android"
                 storePassword = "android"
-                storeFile = File("${System.getProperty("user.home")}/.android/debug.keystore")
+                storeFile = JFile("${System.getProperty("user.home")}/.android/debug.keystore")
             }
         }
     }
@@ -97,13 +98,12 @@ android {
     buildFeatures {
         compose = true
     }
-    // Native image decoder CMake build — uses pre-built static libs from cpp/libs/
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
-        }
-    }
+    // NOTE: The C++ CMake `externalNativeBuild` block used to live here. It has
+    // been removed in Task 0 of the Round 11 native Rust rewrite — the C++
+    // source under `src/main/cpp/` is no longer built by Gradle; it is
+    // scheduled for deletion in Task 3 once the Rust JPEG/WebP decoder is
+    // feature-complete. The replacement Rust build is wired up via the
+    // `buildRustNative` Exec task below (depends-on `preBuild`).
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
     }
@@ -116,6 +116,75 @@ android {
         unitTests.isIncludeAndroidResources = true
     }
 }
+
+// ----------------------------------------------------------------------------
+// Rust native decoder build (Round 11 rewrite, Task 0).
+//
+// Replaces the old C++ CMake `externalNativeBuild` block. Invokes cargo-ndk to
+// cross-compile `src/main/rust/` to a shared library for arm64-v8a, dropping
+// the resulting `liblocalmedia_native.so` into `src/main/jniLibs/arm64-v8a/`
+// (alongside the pre-built `libffmpeg.so`). Wired into `preBuild` so the .so
+// is rebuilt before the APK is packaged.
+//
+// The NDK location is resolved in this order:
+//   1. ANDROID_NDK_HOME / ANDROID_NDK_ROOT already in the build environment
+//   2. `ndk.dir` in local.properties
+//   3. The highest-versioned `<sdk>/ndk/<version>` directory inferred from
+//      `sdk.dir` in local.properties
+// ----------------------------------------------------------------------------
+val rustProjectDir = file("src/main/rust")
+val jniLibsDir = file("src/main/jniLibs")
+
+fun resolveNdkRoot(): String? {
+    val envHome = System.getenv("ANDROID_NDK_HOME")
+    if (!envHome.isNullOrEmpty()) return envHome
+    val envRoot = System.getenv("ANDROID_NDK_ROOT")
+    if (!envRoot.isNullOrEmpty()) return envRoot
+
+    val localPropsFile = rootProject.file("local.properties")
+    if (!localPropsFile.exists()) return null
+    val localProps = Properties()
+    FileInputStream(localPropsFile).use { localProps.load(it) }
+
+    val ndkDir = localProps.getProperty("ndk.dir")
+    if (!ndkDir.isNullOrEmpty()) return ndkDir
+
+    val sdkDir = localProps.getProperty("sdk.dir")
+    if (!sdkDir.isNullOrEmpty()) {
+        val ndkRoot = JFile(sdkDir, "ndk")
+        if (ndkRoot.isDirectory) {
+            // Only consider directories that actually contain a source.properties
+            // file — the SDK manager leaves stub directories for not-yet-
+            // downloaded NDK versions, which would break cargo-ndk.
+            val latest = ndkRoot.listFiles()
+                ?.filter { it.isDirectory && JFile(it, "source.properties").isFile }
+                ?.maxByOrNull { it.name }
+            if (latest != null) return latest.absolutePath
+        }
+    }
+    return null
+}
+
+val buildRustNative = tasks.register<Exec>("buildRustNative") {
+    group = "build"
+    description = "Cross-compiles the Rust native decoder crate to arm64-v8a via cargo-ndk."
+    workingDir = rustProjectDir
+
+    val ndkRoot = resolveNdkRoot()
+    if (ndkRoot != null) {
+        environment("ANDROID_NDK_HOME", ndkRoot)
+        environment("ANDROID_NDK_ROOT", ndkRoot)
+    }
+
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-o", jniLibsDir.absolutePath,
+        "build", "--release"
+    )
+}
+
+tasks.named("preBuild") { dependsOn(buildRustNative) }
 
 dependencies {
 
