@@ -3,8 +3,9 @@
 - **日期**: 2026-07-05
 - **范围**: Rust JNI bridge `nativeDecodeDirect` 长度校验（单文件改动）
 - **策略**: A — `min(length, capacity)` 静默裁剪
-- **状态**: 待评审
+- **状态**: 已审核修订
 - **前置**: Round 11（Rust 重写落地）；Round 11 final code review 标记 2 个 Important follow-ups，本轮修第 1 个
+- **审核修订**: 2026-07-05 — 修正 `get_direct_buffer_capacity` 返回类型（`jint`/`i32`，非 `jlong`/`i64`），同步更新代码示例、测试与决策表
 
 ---
 
@@ -12,7 +13,7 @@
 
 Round 11 final code review（commit `e8d535b..37c08ac`，opus 审核）标记了 2 个 Important 项：
 
-1. **`nativeDecodeDirect` 长度未校验** — `decoders.rs:154-161` 用 `slice::from_raw_parts(ptr, length as usize)`，直接信任 Kotlin 传入的 `length` 参数。若 caller-supplied `length` > DirectByteBuffer 实际容量 → OOB 读（Rust 安全契约违规，潜在 undefined behavior）。
+1. **`nativeDecodeDirect` 长度未校验** — `decoders.rs:154-161` 用 `slice::from_raw_parts(ptr, length as usize)`，直接信任 Kotlin 传入的 `length` 参数（`jint`/`i32`）。若 caller-supplied `length` > DirectByteBuffer 实际容量 → OOB 读（Rust 安全契约违规，潜在 undefined behavior）。
 2. Native 库加载失败可观测性缺失 — Kotlin 侧 `System.loadLibrary` 失败时仅 `Log.w`，生产环境静默回退。
 
 Round 13 解决第 1 项；第 2 项移到后续轮次（用户明确选最小范围）。
@@ -35,7 +36,7 @@ Round 13 解决第 1 项；第 2 项移到后续轮次（用户明确选最小�
 ## 2. 目标与非目标
 
 ### 目标
-1. **`nativeDecodeDirect` 加 capacity 校验**：用 `env.get_direct_buffer_capacity()` 取真实容量，`effective_length = min(length, capacity)`。
+1. **`nativeDecodeDirect` 加 capacity 校验**：用 `env.get_direct_buffer_capacity()` 取真实容量（返回 `jint`/`i32`），`effective_length = min(length, capacity)`。
 2. **早退无效 buffer**：capacity ≤ 0 时返回 null（防御性）。
 3. **加 Rust 单测**：验证 `min` 逻辑（不调真 JNI）。
 4. **保持现有行为**：所有现有测试不回归。
@@ -61,7 +62,7 @@ Round 13 解决第 1 项；第 2 项移到后续轮次（用户明确选最小�
 
 ### 3.2 修复实现
 
-**当前代码**（lines 149-174）：
+**当前代码**（lines 149-178，含函数签名）：
 
 ```rust
 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -95,13 +96,16 @@ let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
     // Defense-in-depth: clamp caller-supplied length to actual buffer capacity.
     // Without this, slice::from_raw_parts(ptr, length) would read OOB if a
     // caller's `length` exceeds the DirectByteBuffer's backing memory — Rust
-    // UB, with unpredictable compiler-optimized behavior. jni-rs 0.21 returns
-    // capacity as i64 (jlong); negative/zero means invalid buffer.
-    let capacity_i64 = env.get_direct_buffer_capacity(&data).ok()?;
-    if capacity_i64 <= 0 {
+    // UB, with unpredictable compiler-optimized behavior.
+    //
+    // jni-rs 0.21: get_direct_buffer_capacity returns Result<jint> (i32).
+    // JNI spec: GetDirectBufferCapacity returns jlong, but jni-rs 0.21 wraps
+    // it as jint; negative/zero means invalid buffer.
+    let capacity = env.get_direct_buffer_capacity(&data).ok()?;
+    if capacity <= 0 {
         return None;
     }
-    let effective_length = (length as usize).min(capacity_i64 as usize);
+    let effective_length = (length as usize).min(capacity as usize);
     let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, effective_length) };
 
     let decoded = decode_slice(slice, target_width, target_height)?;
@@ -112,10 +116,14 @@ let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 ### 3.3 jni-rs 0.21 API 验证
 
 `jni-rs 0.21` 提供：
-- `JNIEnv::get_direct_buffer_address(&self, buf: &JByteBuffer) -> Result<*mut u8, Error>`
-- `JNIEnv::get_direct_buffer_capacity(&self, buf: &JByteBuffer) -> Result<jlong, Error>` （`jlong = i64`）
+- `JNIEnv::get_direct_buffer_address(&mut self, buf: &JObject) -> Result<*mut c_void>`
+  - 现有代码用 `&JByteBuffer` 传参（自动 `Deref` 到 `&JObject`），返回值做 `ptr as *const u8` 转换
+- `JNIEnv::get_direct_buffer_capacity(&mut self, buf: &JObject) -> Result<jint>` （`jint = i32`）
+  - 同样 `&JByteBuffer` 可直接传参
 
-返回类型 `i64`（不是 `usize`）— 负值或 0 表示无效 buffer（理论不应发生但防御）。Cast 到 `usize` 前先做 `<= 0` 检查，避免负值 cast 陷阱（`-1i64 as usize` = `usize::MAX`）。
+> ⚠️ **审核修正**：原文档误将 capacity 返回类型标注为 `jlong`/`i64`，实际 jni-rs 0.21 返回 `jint`/`i32`。这并非 JNI 规范差异（JNI spec 的 `GetDirectBufferCapacity` 确实返回 `jlong`），而是 jni-rs 0.21 的包装层选择了 `jint`。对于本项目的 DirectByteBuffer（图片字节流），容量远小于 2GB，`i32` 足够覆盖。
+
+返回类型 `i32`（不是 `usize`）— 负值或 0 表示无效 buffer（理论不应发生但防御）。Cast 到 `usize` 前先做 `<= 0` 检查，避免负值 cast 陷阱（`-1i32 as usize` 在 64 位平台 = `usize::MAX`，因 sign-extension）。
 
 ---
 
@@ -131,8 +139,9 @@ mod tests {
     #[test]
     fn clamp_length_to_capacity_when_length_exceeds() {
         // Mirrors the runtime min() logic without calling real JNI.
+        // jni-rs 0.21: capacity is jint (i32), length param is also jint.
         let caller_length: usize = 1000;
-        let capacity: i64 = 500;
+        let capacity: i32 = 500;
         assert!(capacity > 0);
         let effective = caller_length.min(capacity as usize);
         assert_eq!(effective, 500);
@@ -141,7 +150,7 @@ mod tests {
     #[test]
     fn keep_length_when_within_capacity() {
         let caller_length: usize = 300;
-        let capacity: i64 = 500;
+        let capacity: i32 = 500;
         let effective = caller_length.min(capacity as usize);
         assert_eq!(effective, 300);
     }
@@ -149,15 +158,17 @@ mod tests {
     #[test]
     fn reject_non_positive_capacity() {
         // Mimics the early-return path: capacity <= 0 → null return
-        let capacity: i64 = 0;
+        let capacity: i32 = 0;
         assert!(!(capacity > 0));
-        let capacity: i64 = -1;
+        let capacity: i32 = -1;
         assert!(!(capacity > 0));
     }
 }
 ```
 
 > **测试范围限制：** 真正的 JNI 集成测试需要 mock `JNIEnv` 或在 instrumented test 中跑（host JVM 无法 mock DirectByteBuffer 的 native pointer）。本计划仅做 Rust 内部逻辑测试，覆盖 `min()` 早退逻辑。完整集成验证靠 `cargo test` 全过 + `assembleDebug` 全过 + 真机手工回归。
+>
+> **注意：** 由于 `decoders.rs` 当前没有 `#[cfg(test)] mod tests`（整个模块被 `#[cfg(target_os = "android")]` 门控），测试模块需要独立于 android gate 之外，或作为独立的 pure-logic 测试文件放置。建议在 `decoders.rs` 末尾新建不带 `cfg(target_os)` 门控的 `#[cfg(test)] mod tests` 块。
 
 ### 4.2 回归
 
@@ -191,8 +202,8 @@ git commit -m "fix(native): clamp nativeDecodeDirect length to buffer capacity (
 |---|---|---|
 | 范围 | 仅 `nativeDecodeDirect` OOB 修复 | 用户明确选最小范围 |
 | 超额处理 | `min(length, capacity)` 静默裁剪 | 生产友好、零回归 |
-| API | `env.get_direct_buffer_capacity()` (jni-rs 0.21) | 已存在、零新依赖 |
-| 负值 capacity | 早退返 null | 防御性，避免负值 cast 陷阱 |
+| API | `env.get_direct_buffer_capacity()` (jni-rs 0.21, 返回 `jint`/`i32`) | 已存在、零新依赖 |
+| 负值 capacity | 早退返 null | 防御性，避免 `i32` 负值 cast 到 `usize` 陷阱 |
 | 测试 | Rust 内部逻辑单测（3 个） | 真 JNI 集成需 instrumented test，超范围 |
 | 提交 | 单 commit | 单文件、单函数改动 |
 
@@ -215,3 +226,14 @@ git commit -m "fix(native): clamp nativeDecodeDirect length to buffer capacity (
 - **Round 11 6 个 Minor 项**：stale doc（jpeg.rs/png.rs/Cargo.toml typos）、重复 magic-byte sniff、CMYK 公式、`v[0]` 防御、`png.rs` buffer 零初始化
 - **Coil v3 升级**：原生"按访问时间淘汰"，解决 Round 12 mtime 限制
 - **可注入 Logger**：解决 Round 12 `isReturnDefaultValues = true` 全局 flag 的 fidelity 倒退
+
+---
+
+## 9. 审核修订记录
+
+| 日期 | 审核人 | 修订内容 |
+|---|---|---|
+| 2026-07-05 | Code Review | **[关键]** 修正 `get_direct_buffer_capacity` 返回类型：原文档标注为 `jlong`/`i64`，实际 jni-rs 0.21 返回 `jint`/`i32`。同步修正修复代码示例（变量名 `capacity_i64` → `capacity`，类型 `i64` → `i32`）、单测用例类型、3.3 节 API 签名说明、决策表。此错误若不修正将导致编译失败或类型隐式转换行为不符预期。 |
+| 2026-07-05 | Code Review | 补充 `get_direct_buffer_address` 实际返回 `Result<*mut c_void>` 而非 `Result<*mut u8>`（现有代码通过 `as *const u8` 转换，功能正确但签名描述需准确）。 |
+| 2026-07-05 | Code Review | 补充说明 `decoders.rs` 当前无 `#[cfg(test)]` 模块，且整文件受 `#[cfg(target_os = "android")]` 门控，测试模块的放置位置需注意。 |
+| 2026-07-05 | Code Review | 修正 `&self` → `&mut self`：jni-rs 0.21 的 `JNIEnv` 方法接收 `&mut self`。 |
