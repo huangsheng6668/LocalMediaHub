@@ -28,6 +28,7 @@ import com.juziss.localmediahub.R
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.ui.component.browse.BrowseFavoritesView
 import com.juziss.localmediahub.ui.component.browse.BrowseSearchView
+import com.juziss.localmediahub.ui.component.browse.BrowseContentState
 import com.juziss.localmediahub.ui.component.browse.BrowseStateContent
 import com.juziss.localmediahub.ui.component.browse.BrowseTopBar
 import kotlinx.coroutines.delay
@@ -54,6 +55,8 @@ fun BrowseScreen(
     val activeTagFilter by viewModel.activeTagFilter.collectAsState()
     val folderSort by viewModel.folderSortOrder.collectAsState()
     val fileSort by viewModel.fileSortOrder.collectAsState()
+    val restoreScrollTo by viewModel.restoreScrollTo.collectAsState()
+    val contentState = BrowseContentState(folderSort, fileSort, currentPath, restoreScrollTo)
  
     var isSearchMode by remember { mutableStateOf(false) }
     var showTagMenuForFile by remember { mutableStateOf<MediaFile?>(null) }
@@ -266,7 +269,7 @@ fun BrowseScreen(
             )
             else -> BrowseStateContent(
                 browseState = browseState,
-                currentPath = currentPath,
+                state = contentState,
                 isSystemBrowse = isSystemBrowse,
                 tags = tags,
                 activeTagFilter = activeTagFilter,
@@ -276,7 +279,15 @@ fun BrowseScreen(
                 isFavorite = isFavoriteCb,
                 onFileLongClick = onFileLongClickCb,
                 onFolderLongClick = { folder -> itemForActions = folder },
-                viewModel = viewModel,
+                onRetry = { if (isSystemBrowse) viewModel.loadSystemDrives() else viewModel.loadRoots() },
+                onBrowseFolder = viewModel::browseFolder,
+                onBrowseSystemPath = viewModel::browseSystemPath,
+                onActiveTagFilterChange = viewModel::setActiveTagFilter,
+                filterFilesByTag = viewModel::filterFilesByTag,
+                onSaveScrollPosition = viewModel::saveScrollPosition,
+                onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
+                getScrollPosition = viewModel::getScrollPosition,
+                getThumbnailUrl = viewModel::getThumbnailUrl,
                 innerPadding = innerPadding,
             )
         }

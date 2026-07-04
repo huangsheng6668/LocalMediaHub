@@ -22,12 +22,11 @@ import com.juziss.localmediahub.ui.component.FolderGrid
 import com.juziss.localmediahub.ui.component.SystemDrivesContent
 import com.juziss.localmediahub.ui.component.TagFilterBar
 import com.juziss.localmediahub.viewmodel.BrowseState
-import com.juziss.localmediahub.viewmodel.BrowseViewModel
 
 @Composable
 internal fun BrowseStateContent(
     browseState: BrowseState,
-    currentPath: String,
+    state: BrowseContentState,
     isSystemBrowse: Boolean,
     tags: List<Tag>,
     activeTagFilter: Tag?,
@@ -37,15 +36,18 @@ internal fun BrowseStateContent(
     isFavorite: (String) -> Boolean,
     onFileLongClick: (MediaFile) -> Unit,
     onFolderLongClick: (Folder) -> Unit,
-    viewModel: BrowseViewModel,
+    onRetry: () -> Unit,
+    onBrowseFolder: (path: String, name: String) -> Unit,
+    onBrowseSystemPath: (path: String, name: String) -> Unit,
+    onActiveTagFilterChange: (Tag?) -> Unit,
+    filterFilesByTag: (List<MediaFile>) -> List<MediaFile>,
+    onSaveScrollPosition: (String, Int) -> Unit,
+    onConsumeRestoreScroll: () -> Unit,
+    getScrollPosition: (String) -> Int,
+    getThumbnailUrl: (MediaFile) -> String,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
 ) {
-    val contentState = BrowseContentState(
-        folderSort = viewModel.folderSortOrder.value,
-        fileSort = viewModel.fileSortOrder.value,
-        currentPath = currentPath,
-        restoreScrollTo = viewModel.restoreScrollTo.value,
-    )
+    val currentPath = state.currentPath
     when (browseState) {
         is BrowseState.Idle -> {
             BrowseStateCard(
@@ -71,9 +73,7 @@ internal fun BrowseStateContent(
                     .fillMaxSize()
                     .padding(innerPadding),
                 actionLabel = stringResource(R.string.browse_retry),
-                onAction = {
-                    if (isSystemBrowse) viewModel.loadSystemDrives() else viewModel.loadRoots()
-                },
+                onAction = onRetry,
             )
         }
         is BrowseState.RootFolders -> {
@@ -95,7 +95,7 @@ internal fun BrowseStateContent(
                     folders = folders,
                     onFolderClick = { folder ->
                         val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath
-                        viewModel.browseFolder(path, folder.name)
+                        onBrowseFolder(path, folder.name)
                     },
                     modifier = Modifier.weight(1f),
                 )
@@ -119,7 +119,7 @@ internal fun BrowseStateContent(
                 SystemDrivesContent(
                     drives = drives,
                     onDriveClick = { drivePath ->
-                        viewModel.browseSystemPath(drivePath, drivePath)
+                        onBrowseSystemPath(drivePath, drivePath)
                     },
                     modifier = Modifier.weight(1f),
                 )
@@ -127,7 +127,7 @@ internal fun BrowseStateContent(
         }
         is BrowseState.SystemBrowsed -> {
             val result = browseState.result
-            val filteredFiles = viewModel.filterFilesByTag(result.files)
+            val filteredFiles = filterFilesByTag(result.files)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -145,7 +145,7 @@ internal fun BrowseStateContent(
                     folders = result.folders,
                     files = filteredFiles,
                     onFolderClick = { folder ->
-                        viewModel.browseSystemPath(folder.path, folder.name)
+                        onBrowseSystemPath(folder.path, folder.name)
                     },
                     onVideoClick = onVideoClick,
                     onImageClick = { file ->
@@ -156,17 +156,17 @@ internal fun BrowseStateContent(
                     onFileLongClick = onFileLongClick,
                     onFolderLongClick = onFolderLongClick,
                     modifier = Modifier.weight(1f),
-                    state = contentState,
-                    onSaveScrollPosition = viewModel::saveScrollPosition,
-                    onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
-                    getScrollPosition = viewModel::getScrollPosition,
-                    getThumbnailUrl = viewModel::getThumbnailUrl,
+                    state = state,
+                    onSaveScrollPosition = onSaveScrollPosition,
+                    onConsumeRestoreScroll = onConsumeRestoreScroll,
+                    getScrollPosition = getScrollPosition,
+                    getThumbnailUrl = getThumbnailUrl,
                 )
             }
         }
         is BrowseState.Browsed -> {
             val result = browseState.result
-            val filteredFiles = viewModel.filterFilesByTag(result.files)
+            val filteredFiles = filterFilesByTag(result.files)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -186,7 +186,7 @@ internal fun BrowseStateContent(
                             tags = tags,
                             activeTagFilter = activeTagFilter,
                             onTagClick = { tag ->
-                                viewModel.setActiveTagFilter(
+                                onActiveTagFilterChange(
                                     if (activeTagFilter?.id == tag.id) null else tag
                                 )
                             },
@@ -198,7 +198,7 @@ internal fun BrowseStateContent(
                     files = filteredFiles,
                     onFolderClick = { folder ->
                         val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath
-                        viewModel.browseFolder(path, folder.name)
+                        onBrowseFolder(path, folder.name)
                     },
                     onVideoClick = onVideoClick,
                     onImageClick = { file ->
@@ -209,11 +209,11 @@ internal fun BrowseStateContent(
                     onFileLongClick = onFileLongClick,
                     onFolderLongClick = onFolderLongClick,
                     modifier = Modifier.weight(1f),
-                    state = contentState,
-                    onSaveScrollPosition = viewModel::saveScrollPosition,
-                    onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
-                    getScrollPosition = viewModel::getScrollPosition,
-                    getThumbnailUrl = viewModel::getThumbnailUrl,
+                    state = state,
+                    onSaveScrollPosition = onSaveScrollPosition,
+                    onConsumeRestoreScroll = onConsumeRestoreScroll,
+                    getScrollPosition = getScrollPosition,
+                    getThumbnailUrl = getThumbnailUrl,
                 )
             }
         }
@@ -254,11 +254,11 @@ internal fun BrowseStateContent(
                         isFavorite = isFavorite,
                         onFileLongClick = onFileLongClick,
                         modifier = Modifier.weight(1f),
-                        state = contentState,
-                        onSaveScrollPosition = viewModel::saveScrollPosition,
-                        onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
-                        getScrollPosition = viewModel::getScrollPosition,
-                        getThumbnailUrl = viewModel::getThumbnailUrl,
+                        state = state,
+                        onSaveScrollPosition = onSaveScrollPosition,
+                        onConsumeRestoreScroll = onConsumeRestoreScroll,
+                        getScrollPosition = getScrollPosition,
+                        getThumbnailUrl = getThumbnailUrl,
                     )
                 }
             }
