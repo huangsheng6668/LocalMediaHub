@@ -2,6 +2,7 @@ package com.juziss.localmediahub.viewmodel
 
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
+import com.juziss.localmediahub.native.NaturalSorter
 
 /** Extract leading number from a string like "007_gjco" → 7.0, "abc" → null. */
 internal fun extractLeadingNumber(s: String): Double? {
@@ -10,21 +11,20 @@ internal fun extractLeadingNumber(s: String): Double? {
     return if (sb.isNotEmpty()) sb.toString().toDouble() else null
 }
 
-/** Compare two strings with natural/numeric ordering (e.g., "2" < "10"). */
-internal fun compareNatural(a: String, b: String): Int {
-    val regex = Regex("\\d+|\\D+")
-    val tokensA = regex.findAll(a.lowercase()).map { it.value }.toList()
-    val tokensB = regex.findAll(b.lowercase()).map { it.value }.toList()
-    for (i in 0 until minOf(tokensA.size, tokensB.size)) {
-        val ta = tokensA[i]
-        val tb = tokensB[i]
-        val numA = ta.toIntOrNull()
-        val numB = tb.toIntOrNull()
-        val cmp = if (numA != null && numB != null) numA.compareTo(numB) else ta.compareTo(tb)
-        if (cmp != 0) return cmp
-    }
-    return tokensA.size.compareTo(tokensB.size)
-}
+/**
+ * Compare two strings with natural/numeric ordering (e.g., "2" < "10").
+ *
+ * Delegates to the Rust-backed [NaturalSorter] for zero-allocation natural
+ * ordering. The previous Kotlin implementation used a `Regex` and two
+ * `List<String>` allocations per call; the Rust path performs a single
+ * byte-stream scan with no allocation beyond lowercase normalisation.
+ *
+ * On the host JVM (Robolectric unit tests) where the arm64 `.so` cannot
+ * load, [NaturalSorter] transparently falls back to a pure-Kotlin
+ * implementation with identical semantics, so `BrowseSorterTest` continues
+ * to pass without modification.
+ */
+internal fun compareNatural(a: String, b: String): Int = NaturalSorter.compare(a, b)
 
 /** Pure, stateless browse-grid sort logic. Extracted from BrowseViewModel for testability. */
 object BrowseSorter {

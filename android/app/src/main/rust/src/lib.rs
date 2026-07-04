@@ -52,12 +52,8 @@ pub extern "system" fn Java_com_juziss_localmediahub_native_NativeExif_nativePar
     std::ptr::null_mut()
 }
 
-#[no_mangle]
-pub extern "system" fn Java_com_juziss_localmediahub_native_NaturalSorter_compare(
-    _env: JNIEnv,
-    _class: JClass,
-    _a: jni::objects::JString,
-    _b: jni::objects::JString,
-) -> jni::sys::jint {
-    0
-}
+// The `Java_com_juziss_localmediahub_native_NaturalSorter_compare` entry point
+// was a null-returning stub in the Task 0 skeleton. As of Task 1 the real
+// implementation lives in `jni_bridge::natural_sort_jni`, exported from there
+// via `#[no_mangle] extern "system"`. The three decoder/EXIF stubs above
+// remain until their owning tasks (2-6) land.
