@@ -226,7 +226,9 @@ fun BrowseScreen(
             TagMenuDialog(
                 file = taggedFile,
                 tags = tags,
-                viewModel = viewModel,
+                fileTags = viewModel.getTagsForFile(taggedFile.relativePath),
+                onTagFile = { id -> viewModel.tagFile(id, taggedFile.relativePath) },
+                onUntagFile = { id -> viewModel.untagFile(id, taggedFile.relativePath) },
                 onDismiss = { showTagMenuForFile = null },
             )
         }

@@ -14,7 +14,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.Tag
-import com.juziss.localmediahub.viewmodel.BrowseViewModel
 
 @Composable
 internal fun TagFilterBar(
@@ -67,11 +66,11 @@ internal fun TagFilterBar(
 internal fun TagMenuDialog(
     file: MediaFile,
     tags: List<Tag>,
-    viewModel: BrowseViewModel,
+    fileTags: List<Tag>,
+    onTagFile: (tagId: String) -> Unit,
+    onUntagFile: (tagId: String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val fileTags = viewModel.getTagsForFile(file.relativePath)
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -93,22 +92,14 @@ internal fun TagMenuDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    if (isApplied) {
-                                        viewModel.untagFile(tag.id, file.relativePath)
-                                    } else {
-                                        viewModel.tagFile(tag.id, file.relativePath)
-                                    }
+                                    if (isApplied) onUntagFile(tag.id) else onTagFile(tag.id)
                                 }
                                 .padding(vertical = 4.dp),
                         ) {
                             Checkbox(
                                 checked = isApplied,
                                 onCheckedChange = { checked ->
-                                    if (checked) {
-                                        viewModel.tagFile(tag.id, file.relativePath)
-                                    } else {
-                                        viewModel.untagFile(tag.id, file.relativePath)
-                                    }
+                                    if (checked) onTagFile(tag.id) else onUntagFile(tag.id)
                                 },
                             )
                             Spacer(modifier = Modifier.width(8.dp))
