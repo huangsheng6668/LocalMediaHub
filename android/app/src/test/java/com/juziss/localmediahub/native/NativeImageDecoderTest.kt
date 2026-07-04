@@ -2,6 +2,7 @@ package com.juziss.localmediahub.native
 
 import android.graphics.Bitmap
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -33,12 +34,19 @@ class NativeImageDecoderTest {
 
     @Test
     fun nativeAvailableFlagReflectsLibraryLoad() {
-        // On the host JVM the native library is absent, so the flag must be
+        // On the host JVM the native library is absent, so the flag MUST be
         // false. On an Android device/instrumentation test it must be true.
-        // We don't assert either way — the contract is "flag matches
-        // reality" — but we do assert it's a stable boolean.
-        val flag: Boolean = NativeImageDecoder.nativeAvailable
-        assertTrue(flag || !flag) // always true; documents the read
+        // The contract pinned here is the host-JVM side: a missing
+        // `liblocalmedia_native.so` flips the flag to false and every
+        // `decode()` call must take the `BitmapFactory` fallback (verified
+        // by the decode* tests below, which exercise the same path).
+        //
+        // The device-side "flag flips to true" half of the contract is
+        // covered by instrumentation tests running against the bundled APK.
+        assertFalse(
+            "nativeAvailable must be false on host JVM (no .so loadable)",
+            NativeImageDecoder.nativeAvailable,
+        )
     }
 
     @Test
@@ -53,14 +61,35 @@ class NativeImageDecoderTest {
     @Test
     fun decodeJpegRespectsTargetSize() = runTest {
         val bytes = readTestImage("sample.jpg") ?: return@runTest
+        // First do a full-size decode to learn the source dimensions, then
+        // request a 200x200 target and assert BitmapFactory actually picked
+        // an `inSampleSize` that downscaled the image. The previous version
+        // of this test only asserted `bitmap.width <= 1456 && height <= 2054`
+        // — a no-op claim since BitmapFactory never upscales. The contract
+        // pinned here is stronger: the downscaled output must be strictly
+        // smaller than the source on BOTH axes, and at least one axis must
+        // be <= 2x the requested target (proving a real downscale happened
+        // rather than a passthrough at the source resolution).
+        val full = NativeImageDecoder.decode(bytes, 0, 0)
         val bitmap = NativeImageDecoder.decode(bytes, 200, 200)
-        // BitmapFactory inSampleSize picks the largest power-of-two factor
-        // that keeps both dimensions >= the target; for a 1456x2054 source
-        // with target 200x200, inSampleSize = 8 → 182x257. Both must be
-        // <= ~2x the target after sample (BitmapFactory never upscales).
         assertTrue(
-            "bitmap should be roughly within target bounds, got ${bitmap.width}x${bitmap.height}",
-            bitmap.width <= 1456 && bitmap.height <= 2054
+            "downscaled width ${bitmap.width} should be < source width ${full.width}",
+            bitmap.width < full.width,
+        )
+        assertTrue(
+            "downscaled height ${bitmap.height} should be < source height ${full.height}",
+            bitmap.height < full.height,
+        )
+        // Robolectric's BitmapFactory shadow rounds `inSampleSize` down to a
+        // power of two, so the shorter axis lands at ~2x target while the
+        // longer axis can be ~3-4x target on portrait sources. We assert
+        // that the SHORTER of the two output axes is within 2x of target —
+        // this still proves a meaningful downscale without being sensitive
+        // to the exact aspect ratio of `sample.jpg`.
+        val shorterOut = minOf(bitmap.width, bitmap.height)
+        assertTrue(
+            "shorter output axis $shorterOut should be <= 2x target 200",
+            shorterOut <= 400,
         )
     }
 

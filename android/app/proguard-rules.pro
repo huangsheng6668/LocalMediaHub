@@ -100,10 +100,23 @@
 
 # ----------------------------------------------------------------------------
 # JNI / native image decoder
-# Native methods are looked up by name from C++; the enclosing class and the
-# native method names must survive obfuscation. The decoder classes live under
+# Native methods are looked up by name from the `#[no_mangle]` symbols emitted
+# by the Rust crate; the enclosing class names and the native method names
+# must survive obfuscation exactly as written. The decoder classes live under
 # the `native` sub-package.
 # ----------------------------------------------------------------------------
+# Rust JNI native methods — keep class names exactly as expected by #no_mangle symbols
+-keep class com.juziss.localmediahub.native.NativeImageDecoder {
+    native <methods>;
+}
+-keep class com.juziss.localmediahub.native.NativeExif {
+    native <methods>;
+}
+-keep class com.juziss.localmediahub.native.NaturalSorter {
+    native <methods>;
+}
+# Factory + helpers in the same sub-package are referenced by reflection from
+# Coil / DI; keep the package surface stable.
 -keep class com.juziss.localmediahub.native.** { *; }
 -keepclasseswithmembernames class * {
     native <methods>;
