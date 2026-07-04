@@ -158,7 +158,25 @@ pub extern "system" fn Java_com_juziss_localmediahub_native_NativeImageDecoder_n
         if length <= 0 {
             return None;
         }
-        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, length as usize) };
+        // Defense-in-depth: clamp caller-supplied length to actual buffer capacity.
+        // Without this, `slice::from_raw_parts(ptr, length)` would read OOB if a
+        // caller's `length` exceeds the DirectByteBuffer's backing memory — Rust UB,
+        // with unpredictable compiler-optimized behavior.
+        //
+        // jni-rs 0.21: `get_direct_buffer_capacity` returns `Result<jint>` (i32).
+        // The JNI spec's `GetDirectBufferCapacity` returns `jlong`, but jni-rs 0.21
+        // wraps it as `jint`; for this project's image byte streams (well under 2GB)
+        // `i32` is sufficient.
+        //
+        // Negative/zero capacity means invalid buffer (defensive — shouldn't happen
+        // in practice). The `<= 0` check also guards against the i32→usize cast
+        // sign-extension trap (`-1i32 as usize` on 64-bit = `usize::MAX`).
+        let capacity = env.get_direct_buffer_capacity(&data).ok()?;
+        if capacity <= 0 {
+            return None;
+        }
+        let effective_length = (length as usize).min(capacity as usize);
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, effective_length) };
         let decoded = decode_slice(slice, target_width, target_height)?;
         let bitmap = crate::bitmap::create_android_bitmap(
             &mut env,
@@ -175,5 +193,43 @@ pub extern "system" fn Java_com_juziss_localmediahub_native_NativeImageDecoder_n
     match result {
         Ok(Some(ptr)) => ptr,
         _ => std::ptr::null_mut(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Unit tests for the capacity-clamp logic in `nativeDecodeDirect`.
+    // Pure logic — does NOT exercise the real JNI path, which is gated
+    // behind `#[cfg(target_os = "android")]` and only runs on-device.
+    //
+    // The clamp pattern is: `effective = (length as usize).min(capacity as usize)`
+    // preceded by an early-return when `capacity <= 0`.
+
+    #[test]
+    fn clamp_length_to_capacity_when_length_exceeds() {
+        // Mirrors the runtime min() logic without calling real JNI.
+        // jni-rs 0.21: capacity is jint (i32), length param is also jint.
+        let caller_length: usize = 1000;
+        let capacity: i32 = 500;
+        assert!(capacity > 0);
+        let effective = caller_length.min(capacity as usize);
+        assert_eq!(effective, 500);
+    }
+
+    #[test]
+    fn keep_length_when_within_capacity() {
+        let caller_length: usize = 300;
+        let capacity: i32 = 500;
+        let effective = caller_length.min(capacity as usize);
+        assert_eq!(effective, 300);
+    }
+
+    #[test]
+    fn reject_non_positive_capacity() {
+        // Mimics the early-return path: capacity <= 0 → null return
+        let capacity: i32 = 0;
+        assert!(!(capacity > 0));
+        let capacity: i32 = -1;
+        assert!(!(capacity > 0));
     }
 }
