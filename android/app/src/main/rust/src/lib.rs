@@ -42,18 +42,12 @@ pub extern "system" fn Java_com_juziss_localmediahub_native_NativeImageDecoder_n
     std::ptr::null_mut()
 }
 
-#[no_mangle]
-pub extern "system" fn Java_com_juziss_localmediahub_native_NativeExif_nativeParseExif(
-    _env: JNIEnv,
-    _class: JClass,
-    _data: jni::objects::JByteArray,
-    _length: jni::sys::jint,
-) -> jni::sys::jobject {
-    std::ptr::null_mut()
-}
-
-// The `Java_com_juziss_localmediahub_native_NaturalSorter_compare` entry point
-// was a null-returning stub in the Task 0 skeleton. As of Task 1 the real
-// implementation lives in `jni_bridge::natural_sort_jni`, exported from there
-// via `#[no_mangle] extern "system"`. The three decoder/EXIF stubs above
-// remain until their owning tasks (2-6) land.
+// The `Java_com_juziss_localmediahub_native_NaturalSorter_nativeCompare`
+// entry point was a null-returning stub in the Task 0 skeleton. As of Task 1
+// the real implementation lives in `jni_bridge::natural_sort_jni`, exported
+// from there via `#[no_mangle] extern "system"`.
+//
+// The `Java_com_juziss_localmediahub_native_NativeExif_nativeParseExif`
+// stub followed the same pattern; as of Task 2 the real implementation
+// lives in `jni_bridge::exif_jni`. The two decoder stubs above remain
+// until their owning tasks (3-4 / 5-6) land.
