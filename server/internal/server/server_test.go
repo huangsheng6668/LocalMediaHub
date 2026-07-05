@@ -142,3 +142,32 @@ func TestServerStartAndStopGracefulShutdown(t *testing.T) {
 		t.Fatalf("Start returned unexpected error: %v", err)
 	}
 }
+
+func TestPprofRoute_RegisteredUnderDebugPrefix(t *testing.T) {
+	// Verify the route is wired up. Auth coverage lives in
+	// middleware.PrivateNetOnly tests.
+	cacheDir := filepath.Join(t.TempDir(), "thumb")
+	cfg := &config.Config{
+		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0},
+		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: cacheDir, MaxSize: 64, Format: "jpeg",
+		},
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	routes := s.Echo.Routes()
+	found := false
+	for _, r := range routes {
+		if strings.HasPrefix(r.Path, "/debug/pprof") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no /debug/pprof route registered")
+	}
+}

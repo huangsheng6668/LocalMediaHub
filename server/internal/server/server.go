@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +102,11 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// the local network can drive the embedded Web UI (and its destructive
 	// endpoints). See allowedCORSOrigins for details.
 	s.Echo.Use(middleware.CORS(allowedCORSOrigins(s.Config.Server.Port)))
+
+	// pprof endpoints for live profiling. Restricted to private/loopback
+	// IPs to avoid leaking heap/goroutine data on accidental public exposure.
+	pprofGroup := s.Echo.Group("/debug/pprof", middleware.PrivateNetOnly())
+	pprofGroup.Any("/*", echo.WrapHandler(http.DefaultServeMux))
 
 	// Static Web UI Assets
 	s.Echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(web.Assets))))
