@@ -87,21 +87,27 @@ Round 11 final review 提到 `png.rs` 零初始化保守可接受。Round 14 顺
 
 ### 4.1 Commit 1: doc/typo 修复
 
-**`jpeg.rs` 修正 stale doc**（约 line 86）：
+**`jpeg.rs` 修正 stale doc**（line 85-87，`fast_downscale_rgba` 函数文档）：
 
 ```rust
-// 当前：
-//   - `3 => crate::png::decode(data),  // 阶段 4 实现`
+// 当前（line 86）：
+/// `webp::decode_scaled`, and (in Task 4) `png::decode`. Returns the resized
 // 改为：
-//   - `3 => crate::png::decode_scaled(data, tw, th),  // Task 4`
+/// `webp::decode_scaled`, and `png::decode_scaled`. Returns the resized
 ```
 
-**`png.rs` 修正 doc**（约 lines 14-15）：
+> 注：实际的 stale doc 在 `fast_downscale_rgba` 函数注释中（line 85-87），不是 JNI dispatch table。它说 `png::decode` 但实际调用方是 `png::decode_scaled`（png.rs:94），且 "(in Task 4)" 前瞻注释已过时。
+
+**`png.rs` 修正 doc**（line 12）：
 
 ```rust
-// 当前 doc 提："16-bit samples truncated via `set_format`"
-// 改为："16-bit samples truncated via `set_transformations(png::Transformations::STRIP_16)` (Task 4)"
+// 当前（line 12）：
+//! are truncated to 8 bit via the `set_format` call below (the thumbnail
+// 改为：
+//! are truncated to 8 bit via the `set_transformations` call below (the thumbnail
 ```
+
+> 注：代码 line 36 已使用 `decoder.set_transformations(png::Transformations::STRIP_16)`，仅 doc 注释未同步更新。
 
 **`Cargo.toml` typos**：
 
@@ -195,39 +201,71 @@ class NativeDecoderFactory(
 
 ### 4.3 Commit 3: Rust 防御性修复
 
-**`exif_reader.rs:71` `v[0]` 空检查**：
+**`exif_reader.rs:72` `v[0]` 空检查**：
 
 ```rust
-// 当前：
-let orientation = exif.get_field(Tag::Orientation)
-    .and_then(|f| if let Value::Short(ref v) = f.value {
-        Some(v[0] as i32)
-    } else { None })
+// 当前（lines 68-77）：
+let orientation = exif
+    .get_field(Tag::Orientation, In::PRIMARY)
+    .and_then(|f| {
+        if let Value::Short(ref v) = f.value {
+            Some(v[0] as i32)
+        } else {
+            None
+        }
+    })
     .unwrap_or(1);
 
 // 改为：
-let orientation = exif.get_field(Tag::Orientation)
-    .and_then(|f| if let Value::Short(ref v) = f.value {
-        v.first().copied().map(|x| x as i32)
-    } else { None })
+let orientation = exif
+    .get_field(Tag::Orientation, In::PRIMARY)
+    .and_then(|f| {
+        if let Value::Short(ref v) = f.value {
+            v.first().copied().map(|x| x as i32)
+        } else {
+            None
+        }
+    })
     .unwrap_or(1);
 ```
 
-**`jpeg.rs::cmyk_to_rgba` 公式修正**（Adobe 反转 CMYK 约定）：
+> 注：`get_field` 需要两个参数 `(Tag, In)` — 实际代码使用 `In::PRIMARY`。
+
+**`jpeg.rs::cmyk_to_rgba` 公式修正**（Adobe 反转 CMYK 约定，lines 158-176）：
+
+当前代码已将 C/M/Y 反转（`255 - chunk[n]`），但 K 通道未反转（`chunk[3] as i32` 直接使用），
+导致公式 `(255-C) * K / 255` 在 K=0（白色纸张）时错误地将 RGB 全部置零。
 
 ```rust
-// 当前（错误）：
-//   let r = (c * k / 255) as u8;
-// 改为（Adobe 标准）：
-fn cmyk_to_rgba(c: u8, m: u8, y: u8, k: u8) -> [u8; 4] {
-    // Adobe-style CMYK: c=255 means full cyan, so red=0.
+// 当前（错误，lines 163-169）：
+//   let c = 255 - chunk[0] as i32;
+//   ...（CMY 已反转）
+//   let k = chunk[3] as i32; // K channel already 0..255  ← 未反转
+//   let r = (c * k / 255).clamp(0, 255) as u8;  ← K=0 时 R=0（错误）
+
+// 改为（Adobe 标准，保持原函数签名 fn cmyk_to_rgba(cmyk: &[u8]) -> Vec<u8>）：
+fn cmyk_to_rgba(cmyk: &[u8]) -> Vec<u8> {
+    // Adobe-style inverted CMYK: all four channels are inverted.
     // Formula: rgb = (255 - channel) * (255 - k) / 255
-    let r = ((255 - c) as u32 * (255 - k) as u32 / 255) as u8;
-    let g = ((255 - m) as u32 * (255 - k) as u32 / 255) as u8;
-    let b = ((255 - y) as u32 * (255 - k) as u32 / 255) as u8;
-    [r, g, b, 255]
+    let mut out = Vec::with_capacity(cmyk.len() / 4 * 4);
+    for chunk in cmyk.chunks_exact(4) {
+        let c = chunk[0] as u32;  // already Adobe-inverted
+        let m = chunk[1] as u32;
+        let y = chunk[2] as u32;
+        let k = chunk[3] as u32;
+        let r = ((255 - c) * (255 - k) / 255) as u8;
+        let g = ((255 - m) * (255 - k) / 255) as u8;
+        let b = ((255 - y) * (255 - k) / 255) as u8;
+        out.push(r);
+        out.push(g);
+        out.push(b);
+        out.push(0xFF);
+    }
+    out
 }
 ```
+
+> ⚠️ **签名保持一致**：实际函数签名是 `fn cmyk_to_rgba(cmyk: &[u8]) -> Vec<u8>`（接受 slice，返回 Vec），不是 4 个独立参数 + `[u8; 4]` 返回值。修复必须保持原签名和 iterator 模式。
 
 > ⚠️ **CMYK 验证限制**：项目测试库无 CMYK JPEG 样本。此修复基于 Adobe 文档标准公式，host 单测无法验证。在 commit message + spec §8 显式记录此限制。
 
@@ -265,30 +303,25 @@ init {
 
 ### 4.5 Commit 5: PNG buffer 零初始化优化
 
-**`png.rs` 当前**：
+**`png.rs` 当前**（line 47-48）：
 
 ```rust
 let mut buf = vec![0u8; reader.output_buffer_size()];
-let info = reader.next_frame(&mut buf).ok()?;
+let frame_info = reader.next_frame(&mut buf).ok()?;
 ```
 
-**改为 `MaybeUninit`**：
+**改为 `unsafe set_len`**（更安全的惯用写法，避免 `transmute`）：
 
 ```rust
-use std::mem::MaybeUninit;
-
 let buf_size = reader.output_buffer_size();
-// Avoid the vec![0] zero-fill: next_frame fully writes the buffer.
-let mut uninit: Vec<MaybeUninit<u8>> = Vec::with_capacity(buf_size);
-// SAFETY: MaybeUninit<u8> has no Drop side effects; set_len is safe.
-unsafe { uninit.set_len(buf_size); }
-let info = reader.next_frame(unsafe {
-    std::slice::from_raw_parts_mut(uninit.as_mut_ptr() as *mut u8, buf_size)
-}).ok()?;
-// SAFETY: MaybeUninit<u8> and u8 have identical layout; next_frame
-// has initialized all bytes per png 0.17 contract.
-let buf: Vec<u8> = unsafe { std::mem::transmute(uninit) };
+// SAFETY: `next_frame` fully writes `buf_size` bytes per png 0.17 contract.
+// Skipping zero-fill saves one memset pass on large images.
+let mut buf: Vec<u8> = Vec::with_capacity(buf_size);
+unsafe { buf.set_len(buf_size); }
+let frame_info = reader.next_frame(&mut buf).ok()?;
 ```
+
+> ⚠️ **为何不用 `MaybeUninit` + `transmute`**：`std::mem::transmute::<Vec<MaybeUninit<u8>>, Vec<u8>>()` 依赖 `Vec` 内部布局兼容性，Rust 标准库**不保证** `Vec<MaybeUninit<T>>` 和 `Vec<T>` 具有相同 layout（虽然实际上是一样的）。直接在 `Vec<u8>` 上 `set_len` 是标准做法（与 `Read::read_to_end` 内部实现一致），且 SAFETY 论证更简洁：只需证明 `next_frame` 完全写入 buffer。
 
 > ⚠️ **依赖契约**：`png` crate 0.17 的 `next_frame` 必须完全写入 buf。文档明确这一点，但缺乏 formal proof。Round 11 final review 标注"保守接受零初始化"作为 Minor，Round 14 选择激进优化，加 SAFETY 注释解释依赖。
 
@@ -301,7 +334,7 @@ let buf: Vec<u8> = unsafe { std::mem::transmute(uninit) };
 | Commit | 现有测试 | 新测试 | 验证 |
 |---|---|---|---|
 | C1 doc/typo | cargo test, JVM test 全过 | 无 | doc/typo 不影响行为 |
-| C2 helper 提取 | `NativeDecoderFactoryTest`（已存在） | 无 | helper 行为等价 |
+| C2 helper 提取 | Gradle assembleDebug 通过 | ⚠️ 可选：新增 `NativeDecoderFactoryTest`（当前不存在） | helper 行为等价；建议补充 `nativeHandles()` 单元测试 |
 | C3 Rust 防御 | `cargo test` 43+ | 无（CMYK 无样本） | `v.first().copied()` 行为等价；CMYK 文档化限制 |
 | C4 加载可观测性 | 57 JVM tests 全过 | 可选：mock BuildConfig.DEBUG | Robolectric 跑 debug variant，仍走 fallback |
 | C5 buffer 优化 | `cargo test` PNG 解码测试 | 无 | `decode_real_png_rgb` + `decode_scaled_real_png_downscaled` 验证 |
@@ -349,7 +382,7 @@ let buf: Vec<u8> = unsafe { std::mem::transmute(uninit) };
 | 加载可观测性 | BuildConfig.DEBUG + release fast-fail | 用户明确选 |
 | 提交粒度 | 5 个 commit | 用户明确选 |
 | CMYK 公式 | Adobe 反转：`(255 - channel) * (255 - k) / 255` | Adobe 标准约定 |
-| Buffer 优化 | 直接 MaybeUninit，无 cfg 开关 | YAGNI，不做双路径 |
+| Buffer 优化 | 直接 `unsafe set_len`，无 cfg 开关 | YAGNI，不做双路径；避免 `transmute` |
 | Helper 提取 | `companion object nativeHandles`，删除实例方法 | 单一来源 |
 | proguard 简化 | 删除 per-class keep | catch-all 已覆盖 |
 
@@ -358,9 +391,10 @@ let buf: Vec<u8> = unsafe { std::mem::transmute(uninit) };
 ## 8. 已知限制（接受）
 
 1. **CMYK 修复无样本验证**：移动端 CMYK JPEG 极罕见；修复基于 Adobe 文档标准公式。如未来发现实际样本可补充测试。
-2. **PNG MaybeUninit 依赖 png crate 契约**：`next_frame` 必须完全写入 buffer。png 0.17 文档明确，但缺乏 formal proof。SAFETY 注释解释依赖。
+2. **PNG `unsafe set_len` 依赖 png crate 契约**：`next_frame` 必须完全写入 buffer。png 0.17 文档明确，但缺乏 formal proof。SAFETY 注释解释依赖。
 3. **加载可观测性 fast-fail 仅 release**：debug build（含 Robolectric）仍 fallback。这意味着开发者本地测试可能漏掉 release-only 的 .so 配置问题。CI 需加 release smoke test 弥补（不在本 spec 范围）。
 4. **v[0] 防御是防御性**：kamadak-exif 0.5 在 Tag::Orientation 上始终返回非空 vec，本修复是上游 API 变化的兜底。
+5. **`NativeDecoderFactoryTest` 不存在**：spec 原始版本声称该测试已存在，但实际项目中未找到。C2 helper 提取后应考虑补充 `nativeHandles()` 的单元测试。
 
 ---
 
