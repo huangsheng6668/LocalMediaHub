@@ -18,7 +18,7 @@ log = "0.4"
 kamadak-exif = "0.5"
 # Task 3: JPEG/WebP decode + resize.
 #
-# DEVIVATION FROM PLAN (documented in task-3-report.md):
+# DEVIATION FROM PLAN (documented in task-3-report.md):
 # The plan called for `turbojpeg = "1.x"` and `libwebp = "0.x"`. Both are
 # `*-sys` style crates that wrap C libraries (libjpeg-turbo, libwebp). On a
 # Windows host cross-compiling to `aarch64-linux-android` these would
@@ -37,7 +37,7 @@ kamadak-exif = "0.5"
 #   - `fast_image_resize = "6.0"` — pure-Rust resize with NEON SIMD, used
 #     for Phase-2 aspect-fit downscaling after IDCT-scale decode.
 #
-# The plan also mentioned theturbojpeg "scale_num/scale_denom" 1/8..1/1
+# The plan also mentioned the turbojpeg "scale_num/scale_denom" 1/8..1/1
 # IDCT downscale. jpeg-decoder does not expose IDCT scaling, so Phase-1
 # DCT-scale is replaced by a single full decode followed by a single
 # `fast_image_resize` pass (Phase-2 in the plan). The output is identical

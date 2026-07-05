@@ -83,7 +83,7 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
 }
 
 /// Shared aspect-fit downscaler. Used by `jpeg::decode_scaled`,
-/// `webp::decode_scaled`, and (in Task 4) `png::decode`. Returns the resized
+/// `webp::decode_scaled`, and `png::decode_scaled`. Returns the resized
 /// RGBA buffer plus the post-resize `(width, height)`.
 pub fn fast_downscale_rgba(
     rgba: &[u8],

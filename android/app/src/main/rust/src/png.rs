@@ -9,7 +9,7 @@
 //! paths. Indexed (palette) PNGs are normalised to RGBA by the `png` crate
 //! itself — by the time we see `next_frame`'s output it is one of
 //! `Rgb`/`Rgba`/`Grayscale`/`GrayscaleAlpha` (8 or 16 bit). 16-bit samples
-//! are truncated to 8 bit via the `set_format` call below (the thumbnail
+//! are truncated to 8 bit via the `set_transformations` call below (the thumbnail
 //! grid use case does not benefit from the extra precision and truncating
 //! keeps the pixel-expansion loop branch-free).
 
