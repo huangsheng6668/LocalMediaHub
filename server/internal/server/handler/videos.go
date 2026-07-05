@@ -57,7 +57,7 @@ func (h *Handler) GetVideoThumbnail(c echo.Context) error {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	thumbPath, err := h.thumbnail.GenerateThumbnail(resolved)
+	thumbBytes, err := h.thumbnail.GenerateThumbnailBytes(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "file not found")
@@ -66,7 +66,7 @@ func (h *Handler) GetVideoThumbnail(c echo.Context) error {
 	}
 
 	setMediaCacheHeaders(c)
-	return c.File(thumbPath)
+	return c.Blob(http.StatusOK, "image/jpeg", thumbBytes)
 }
 
 func (h *Handler) StreamVideo(c echo.Context) error {

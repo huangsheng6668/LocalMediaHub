@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/disintegration/imaging"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/localmediahub/server/internal/models"
 )
 
@@ -26,18 +27,23 @@ type ThumbnailService struct {
 	format     string
 	sem        chan struct{}
 	ffmpegPath string
+	memCache   *lru.Cache[string, []byte]
 }
 
 func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath string) (*ThumbnailService, error) {
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return nil, err
 	}
+	// golang-lru/v2 returns no error when size > 0; the explicit discard is
+	// documented. 200 entries ≈ 20 MB heap at ~100 KB per thumbnail.
+	memCache, _ := lru.NewWithEvict[string, []byte](200, nil)
 	return &ThumbnailService{
 		cacheDir:   cacheDir,
 		maxSize:    maxSize,
 		format:     format,
 		sem:        make(chan struct{}, runtime.NumCPU()),
 		ffmpegPath: ffmpegPath,
+		memCache:   memCache,
 	}, nil
 }
 
@@ -89,6 +95,14 @@ func (s *ThumbnailService) GetThumbnailPath(sourcePath string, modTime time.Time
 	key := sourcePath + "|" + modTime.Format(time.RFC3339Nano)
 	hash := fmt.Sprintf("%x", md5.Sum([]byte(key)))
 	return filepath.Join(s.cacheDir, hash+".jpg")
+}
+
+// thumbnailCacheKey returns the md5 hash used as both disk cache filename
+// (sans .jpg) and memory cache key. MUST match GetThumbnailPath's format
+// exactly — both use RFC3339Nano, NOT UnixNano().
+func (s *ThumbnailService) thumbnailCacheKey(sourcePath string, modTime time.Time) string {
+	key := sourcePath + "|" + modTime.Format(time.RFC3339Nano)
+	return fmt.Sprintf("%x", md5.Sum([]byte(key)))
 }
 
 func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePath string) (string, error) {
@@ -282,6 +296,51 @@ func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx c
 		}()
 	}
 	wg.Wait()
+}
+
+// generateBytesVia returns the JPEG bytes for [sourcePath], serving from
+// memCache on hit. On miss it calls [genFunc] to ensure the disk-cached
+// file exists, then reads it into memCache. The genFunc indirection lets
+// both GenerateThumbnailBytes and GenerateSystemThumbnailBytes share
+// logic — only the disk path differs.
+func (s *ThumbnailService) generateBytesVia(
+	sourcePath string,
+	genFunc func(string) (string, error),
+) ([]byte, error) {
+	fi, err := os.Stat(sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := s.thumbnailCacheKey(sourcePath, fi.ModTime())
+
+	if cached, ok := s.memCache.Get(cacheKey); ok {
+		return cached, nil
+	}
+
+	cachePath, err := genFunc(sourcePath)
+	if err != nil {
+		return nil, err
+	}
+
+	bytes, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil, err
+	}
+	s.memCache.Add(cacheKey, bytes)
+	return bytes, nil
+}
+
+// GenerateThumbnailBytes is the bytes-equivalent of GenerateThumbnail.
+// On memory-cache hit returns JPEG bytes without touching disk.
+func (s *ThumbnailService) GenerateThumbnailBytes(sourcePath string) ([]byte, error) {
+	return s.generateBytesVia(sourcePath, s.GenerateThumbnail)
+}
+
+// GenerateSystemThumbnailBytes is the bytes-equivalent of GenerateSystemThumbnail.
+// System thumbnails live under cacheDir/system/ but share the same memory
+// cache (keyed by md5(path + modtime) which is unique per source file).
+func (s *ThumbnailService) GenerateSystemThumbnailBytes(sourcePath string) ([]byte, error) {
+	return s.generateBytesVia(sourcePath, s.GenerateSystemThumbnail)
 }
 
 // DecodeImage decodes an image file and returns the Go image object.

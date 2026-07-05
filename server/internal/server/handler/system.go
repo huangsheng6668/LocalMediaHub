@@ -136,7 +136,7 @@ func (h *Handler) SystemThumbnail(c echo.Context) error {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	thumbPath, err := h.thumbnail.GenerateSystemThumbnail(resolved)
+	thumbBytes, err := h.thumbnail.GenerateSystemThumbnailBytes(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "file not found")
@@ -145,7 +145,7 @@ func (h *Handler) SystemThumbnail(c echo.Context) error {
 	}
 
 	setMediaCacheHeaders(c)
-	return c.File(thumbPath)
+	return c.Blob(http.StatusOK, "image/jpeg", thumbBytes)
 }
 
 func (h *Handler) SystemOriginal(c echo.Context) error {
