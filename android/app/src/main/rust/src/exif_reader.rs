@@ -69,7 +69,7 @@ pub fn parse(data: &[u8]) -> Option<ExifInfo> {
         .get_field(Tag::Orientation, In::PRIMARY)
         .and_then(|f| {
             if let Value::Short(ref v) = f.value {
-                Some(v[0] as i32)
+                v.first().copied().map(|x| x as i32)
             } else {
                 None
             }

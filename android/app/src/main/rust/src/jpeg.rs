@@ -156,17 +156,27 @@ fn l16_to_rgba(l: &[u8]) -> Vec<u8> {
 }
 
 fn cmyk_to_rgba(cmyk: &[u8]) -> Vec<u8> {
-    // CMYK in JPEG (Adobe convention) is inverted; convert via the standard
-    // C = 255 - C, then simple CMYK -> RGB.
+    // Adobe-style inverted CMYK: all four channels (C, M, Y, K) are inverted
+    // (255 = full ink, 0 = no ink). The previous code only inverted C/M/Y
+    // and used K directly, which produced black (RGB=0) when K=0 (white paper)
+    // — a real bug masked because CMYK JPEGs are rare in mobile test data.
+    //
+    // Standard Adobe formula: rgb = (255 - channel) * (255 - k) / 255
+    //   - C=255 (full cyan) → R = 0 (no red)
+    //   - K=255 (full black) → R = G = B = 0
+    //   - C=M=Y=K=0 (white) → R = G = B = 255
+    //
+    // Verified against Adobe CMYK sample conventions; no project test fixture
+    // for CMYK JPEGs (see spec §8 limitation #1).
     let mut out = Vec::with_capacity(cmyk.len() / 4 * 4);
     for chunk in cmyk.chunks_exact(4) {
-        let c = 255 - chunk[0] as i32;
-        let m = 255 - chunk[1] as i32;
-        let y = 255 - chunk[2] as i32;
-        let k = chunk[3] as i32; // K channel already 0..255
-        let r = (c * k / 255).clamp(0, 255) as u8;
-        let g = (m * k / 255).clamp(0, 255) as u8;
-        let b = (y * k / 255).clamp(0, 255) as u8;
+        let c = chunk[0] as u32;
+        let m = chunk[1] as u32;
+        let y = chunk[2] as u32;
+        let k = chunk[3] as u32;
+        let r = ((255 - c) * (255 - k) / 255) as u8;
+        let g = ((255 - m) * (255 - k) / 255) as u8;
+        let b = ((255 - y) * (255 - k) / 255) as u8;
         out.push(r);
         out.push(g);
         out.push(b);
