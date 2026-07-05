@@ -6,6 +6,12 @@ export const elements = {
     menuTags: document.getElementById('menu-tags'),
     menuSettings: document.getElementById('menu-settings'),
 
+    // Round 16 C1: Responsive sidebar drawer
+    hamburgerBtn: document.getElementById('btn-hamburger'),
+    sidebarBackdrop: document.getElementById('sidebar-backdrop'),
+    sidebar: document.querySelector('.sidebar'),
+
+
     pageTitle: document.getElementById('page-title'),
     btnTriggerScan: document.getElementById('btn-trigger-scan'),
     toastContainer: document.getElementById('toast-container'),

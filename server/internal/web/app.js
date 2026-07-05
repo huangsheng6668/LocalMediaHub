@@ -39,6 +39,12 @@ async function initApp() {
 // Router
 window.addEventListener('hashchange', () => {
     handleRoute(elements, renderDashboard, loadRoots, browsePath, renderTagsManager, renderSettings);
+    // Round 16 C1: 移动端路由切换后关闭 sidebar（桌面端 sidebar 无 .open class，不受影响）
+    if (elements.sidebar && elements.sidebar.classList.contains('open')) {
+        elements.sidebar.classList.remove('open');
+        elements.hamburgerBtn?.setAttribute('aria-expanded', 'false');
+        if (elements.sidebarBackdrop) elements.sidebarBackdrop.hidden = true;
+    }
 });
 
 // Set up Event Listeners
@@ -68,4 +74,20 @@ function setupEventListeners() {
 
     // Lightbox module listeners (image modal close/nav, stitch mode, keyboard shortcuts)
     setupLightboxListeners(elements);
+
+    // Round 16 C1: Hamburger toggle for tablet/mobile sidebar drawer
+    if (elements.hamburgerBtn) {
+        elements.hamburgerBtn.addEventListener('click', () => {
+            const expanded = elements.sidebar.classList.toggle('open');
+            elements.hamburgerBtn.setAttribute('aria-expanded', String(expanded));
+            elements.sidebarBackdrop.hidden = !expanded;
+        });
+    }
+    if (elements.sidebarBackdrop) {
+        elements.sidebarBackdrop.addEventListener('click', () => {
+            elements.sidebar.classList.remove('open');
+            elements.hamburgerBtn?.setAttribute('aria-expanded', 'false');
+            elements.sidebarBackdrop.hidden = true;
+        });
+    }
 }
