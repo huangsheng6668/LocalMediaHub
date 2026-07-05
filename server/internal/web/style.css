@@ -1494,11 +1494,18 @@ body {
     /* Close buttons: larger touch target, top-right corner.
        .btn-close on phone gets dark translucent backdrop for visibility over
        arbitrary modal content; .lightbox-close already has z-index 110 / dark
-       UI at base, but we still nudge position + size. */
+       UI at base, but we still nudge position + size.
+       Base .btn-close fixes width/height: 32px (style.css:258-259), so the
+       padding alone is inert — we override width/height to auto and enforce
+       WCAG 44px minimum touch target. */
     .btn-close,
     .lightbox-close {
         top: 8px !important;
         right: 8px !important;
+        width: auto !important;
+        height: auto !important;
+        min-width: 44px;
+        min-height: 44px;
         font-size: 24px;
         padding: 8px 12px;
         background: rgba(0, 0, 0, 0.6);
