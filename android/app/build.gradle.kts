@@ -97,6 +97,10 @@ android {
     }
     buildFeatures {
         compose = true
+        // AGP 8.x disables BuildConfig generation by default; the native
+        // loader needs BuildConfig.DEBUG to fast-fail on missing .so in
+        // release builds (Round 14 Task C4).
+        buildConfig = true
     }
     // NOTE: The C++ CMake `externalNativeBuild` block used to live here. It has
     // been removed in Task 0 of the Round 11 native Rust rewrite — the C++

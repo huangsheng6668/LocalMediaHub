@@ -3,6 +3,7 @@ package com.juziss.localmediahub.native
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Log
+import com.juziss.localmediahub.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
@@ -42,7 +43,20 @@ object NativeImageDecoder {
             System.loadLibrary("localmedia_native")
             nativeAvailable = true
         } catch (e: UnsatisfiedLinkError) {
-            Log.w(TAG, "liblocalmedia_native.so unavailable, using BitmapFactory fallback", e)
+            if (BuildConfig.DEBUG) {
+                // Debug build (incl. Robolectric unit tests on host JVM):
+                // native lib absent is expected; fall back gracefully.
+                Log.w(TAG, "liblocalmedia_native.so unavailable, using BitmapFactory fallback", e)
+            } else {
+                // Release build: missing .so means the build pipeline broke or
+                // R8 stripped the symbol. Silent fallback would hide a critical
+                // regression. Crash loudly so it surfaces in crash reports /
+                // user feedback.
+                throw IllegalStateException(
+                    "liblocalmedia_native.so failed to load — production builds must include the native library",
+                    e,
+                )
+            }
         }
     }
 

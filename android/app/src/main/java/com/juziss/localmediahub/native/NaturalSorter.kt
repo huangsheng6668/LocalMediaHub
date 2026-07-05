@@ -1,5 +1,7 @@
 package com.juziss.localmediahub.native
 
+import com.juziss.localmediahub.BuildConfig
+
 /**
  * Natural-order string comparison backed by a Rust implementation living in
  * `liblocalmedia_native.so`.
@@ -28,10 +30,20 @@ object NaturalSorter {
         try {
             System.loadLibrary("localmedia_native")
             nativeAvailable = true
-        } catch (_: UnsatisfiedLinkError) {
-            // Host JVM (unit tests) or device without the .so packaged —
-            // callers transparently fall back to [compareFallback].
-            nativeAvailable = false
+        } catch (e: UnsatisfiedLinkError) {
+            if (BuildConfig.DEBUG) {
+                // Debug build (incl. Robolectric unit tests on host JVM):
+                // callers transparently fall back to [compareFallback].
+                nativeAvailable = false
+            } else {
+                // Release build: missing .so means the build pipeline broke or
+                // R8 stripped the symbol. Silent fallback would hide a critical
+                // regression. Crash loudly so it surfaces in crash reports.
+                throw IllegalStateException(
+                    "liblocalmedia_native.so failed to load — production builds must include the native library",
+                    e,
+                )
+            }
         }
     }
 

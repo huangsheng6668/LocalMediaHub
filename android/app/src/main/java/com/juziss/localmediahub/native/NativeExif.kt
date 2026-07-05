@@ -1,5 +1,6 @@
 package com.juziss.localmediahub.native
 
+import com.juziss.localmediahub.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -35,11 +36,21 @@ object NativeExif {
         try {
             System.loadLibrary("localmedia_native")
             nativeAvailable = true
-        } catch (_: UnsatisfiedLinkError) {
-            // Host JVM (unit tests) or device without the .so packaged —
-            // [parse] will return null for every input, which downstream
-            // code already handles as the "no EXIF" case.
-            nativeAvailable = false
+        } catch (e: UnsatisfiedLinkError) {
+            if (BuildConfig.DEBUG) {
+                // Debug build (incl. Robolectric unit tests on host JVM):
+                // [parse] will return null for every input, which downstream
+                // code already handles as the "no EXIF" case.
+                nativeAvailable = false
+            } else {
+                // Release build: missing .so means the build pipeline broke or
+                // R8 stripped the symbol. Silent fallback would hide a critical
+                // regression. Crash loudly so it surfaces in crash reports.
+                throw IllegalStateException(
+                    "liblocalmedia_native.so failed to load — production builds must include the native library",
+                    e,
+                )
+            }
         }
     }
 
