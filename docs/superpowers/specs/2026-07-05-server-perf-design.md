@@ -3,7 +3,7 @@
 - **日期**: 2026-07-05
 - **范围**: Go 服务端（`server/internal/`）— 缩略图内存缓存 + pprof 诊断端点 + streaming Range 测试
 - **策略**: 3 commit 打包，每项独立可回滚
-- **状态**: 待评审
+- **状态**: 已评审（2026-07-05 审核修订）
 - **前置**: Round 4（scanner 类型缓存、search HasPrefix 优化、DownloadFolderZip FD 修复均已落地）；Round 12 spec §9 列出的剩余服务端 follow-ups
 
 ---
@@ -21,7 +21,7 @@ Round 15 brainstorming 阶段评估了 Go→Rust 迁移，结论是**负 ROI**�
 
 1. **缩略图 LRU 内存缓存**：当前 `c.File(thumbPath)` 每次都读磁盘。重复访问（如多客户端同时浏览同目录）能省掉磁盘 IO。
 2. **pprof 诊断端点**：当前无性能剖析入口。开发者诊断瓶颈需 copy 二进制 + 重启。生产 debug 体验差。
-3. **streaming Range 测试覆盖**：`streaming_test.go` 仅 78 行，关键 Range/206/416 路径未覆盖。
+3. **streaming Range 测试覆盖**：`streaming_test.go` 仅 79 行（2 个子测试），关键 suffix-range/206/416 路径未覆盖。
 
 ### 1.1 范围明确
 
@@ -58,12 +58,12 @@ Round 15 brainstorming 阶段评估了 Go→Rust 迁移，结论是**负 ROI**�
 
 | Commit | 文件 | 改动类型 |
 |---|---|---|
-| C1 | `server/internal/service/thumbnail.go` | 改：加 `memCache *lru.Cache[string, []byte]` + 新方法 `GenerateThumbnailBytes` |
+| C1 | `server/internal/service/thumbnail.go` | 改：加 `memCache *lru.Cache[string, []byte]` + 新方法 `GenerateThumbnailBytes` / `GenerateSystemThumbnailBytes` |
 | C1 | `server/internal/service/thumbnail_cache_test.go` | **新增**：缓存命中/淘汰/并发击穿测试 |
 | C1 | `server/internal/server/handler/images.go` | 改：`GetThumbnail` 改用 `GenerateThumbnailBytes` + `c.Blob`（命中内存缓存） |
 | C1 | `server/internal/server/handler/videos.go` | 改：`GetVideoThumbnail` 同上（如有同样模式） |
 | C1 | `server/internal/server/handler/media.go` | 改：`MediaThumbnail` 同上 |
-| C1 | `server/internal/server/handler/system.go` | 改：`SystemThumbnail` 同上 |
+| C1 | `server/internal/server/handler/system.go` | 改：`SystemThumbnail` 改用 `GenerateSystemThumbnailBytes`（注意：此处调的是 `GenerateSystemThumbnail`，非 `GenerateThumbnail`） |
 | C1 | `server/go.mod` / `go.sum` | 改：加 `github.com/hashicorp/golang-lru/v2` |
 | C2 | `server/internal/server/middleware/private_net.go` | **新增**：私网+loopback 白名单 middleware |
 | C2 | `server/internal/server/server.go` | 改：注册 `/debug/pprof/*` 路由 group + middleware |
@@ -78,7 +78,7 @@ Round 15 brainstorming 阶段评估了 Go→Rust 迁移，结论是**负 ROI**�
 - Echo v4 middleware 签名
 - pprof 用 `net/http/pprof` 默认 ServeMux（标准库惯例）
 - 缩略图 LRU 容量 200 项（~20MB 堆）
-- 缓存 key 与磁盘缓存一致：`md5(path + sourceModTime)`
+- 缓存 key 与磁盘缓存一致：`md5(path + "|" + modTime.Format(RFC3339Nano))`（注意：现有 `GetThumbnailPath` 用 `RFC3339Nano` 格式化，非 `UnixNano()`）
 - 所有 handler 改动保持 `setMediaCacheHeaders(c)` 调用不变（Round 3 已加）
 
 ---
@@ -137,9 +137,11 @@ func (s *ThumbnailService) GenerateThumbnailBytes(sourcePath string) ([]byte, er
 }
 
 // thumbnailCacheKey mirrors the disk cache key (md5 of path + modtime).
+// ⚠️ 审核修正：必须与 GetThumbnailPath 保持一致，用 RFC3339Nano 而非 UnixNano()。
 func (s *ThumbnailService) thumbnailCacheKey(sourcePath string, modTime time.Time) string {
-    h := md5.Sum([]byte(fmt.Sprintf("%s|%d", sourcePath, modTime.UnixNano())))
-    return hex.EncodeToString(h[:])
+    key := sourcePath + "|" + modTime.Format(time.RFC3339Nano)
+    h := md5.Sum([]byte(key))
+    return fmt.Sprintf("%x", h)
 }
 ```
 
@@ -169,7 +171,9 @@ func (h *Handler) GetThumbnail(c echo.Context) error {
 }
 ```
 
-> **同样的 `GenerateThumbnailBytes + c.Blob` 替换**应用到 `videos.go::GetVideoThumbnail`、`media.go::MediaThumbnail`、`system.go::SystemThumbnail`。`GetOriginal` 不变（原图不进缓存）。
+> **同样的 `GenerateThumbnailBytes + c.Blob` 替换**应用到 `videos.go::GetVideoThumbnail`、`media.go::MediaThumbnail`。`GetOriginal` 不变（原图不进缓存）。
+>
+> ⚠️ **审核注意：`system.go::SystemThumbnail` 需特殊处理**——当前代码调用的是 `h.thumbnail.GenerateSystemThumbnail(resolved)`（写入 `cacheDir/system/` 子目录），而非 `GenerateThumbnail`。因此需要额外实现 `GenerateSystemThumbnailBytes` 方法，逻辑与 `GenerateThumbnailBytes` 相同但内部委托 `GenerateSystemThumbnail`。不可直接复用 `GenerateThumbnailBytes`，否则缓存路径不一致。
 
 **并发击穿保护：** `golang-lru/v2` 的 `Get` 不是原子的——并发 miss 时多个 goroutine 会同时生成。`ThumbnailService` 已有 `sem chan struct{}` 信号量限流（`runtime.NumCPU()`），所以击穿不会过载。如需更严格，可加 `singleflight.Group`（已在 scanner.go 用过），但**YAGNI**——LRU 命中率本身高，少量冗余生成可接受。
 
@@ -301,7 +305,9 @@ func TestStreaming_UnsatisfiableRange(t *testing.T) {
 
 **测试策略：** 用 `httptest.NewServer` + 真实 server，发请求 + 断言。比 `httptest.NewRecorder` + 直接调 handler 重一些，但 Range 正确性靠 mock response writer 容易写错（`c.File` 内部用 `http.ServeContent`，需要真实 ResponseWriter 才能 exercise 完整流程）。
 
-> **不用 `httptest.NewRecorder` 的原因：** `http.ServeContent` 的 Range 处理依赖 `ResponseWriter.WriteHeader` + `io.CopyN` 的副作用，Recorder 不完整模拟 HTTP/1.1 chunked 行为，会掩盖真实 bug。
+> ⚠️ **审核注意：** 现有 `streaming_test.go` 实际已使用 `httptest.NewRecorder`（79 行），且已覆盖 200 + 单 Range 206 两个场景。此处声称 "不用 `httptest.NewRecorder`" 与现有代码实践矛盾。建议新增的 suffix-range 和 416 测试**延续现有风格**（`httptest.NewRecorder` + `svc.ServeFile`），保持测试文件风格一致。若确实需要 `httptest.NewServer`，应在单独测试文件中。
+
+> **原文关于不用 `httptest.NewRecorder` 的论述：** `http.ServeContent` 的 Range 处理依赖 `ResponseWriter.WriteHeader` + `io.CopyN` 的副作用，Recorder 不完整模拟 HTTP/1.1 chunked 行为，会掩盖真实 bug。（审核注：实际上 `httptest.NewRecorder` 对 `http.ServeContent` 的 Range 处理是足够的，标准库测试自身也使用 Recorder。现有 206 测试已证明可行。）
 
 ---
 
@@ -328,7 +334,7 @@ func TestStreaming_UnsatisfiableRange(t *testing.T) {
 
 3 个 commit，每个独立可提交：
 
-1. **C1 缩略图内存缓存**：service + 5 个 handler 改动 + 测试
+1. **C1 缩略图内存缓存**：service（含 `GenerateThumbnailBytes` + `GenerateSystemThumbnailBytes`）+ 4 个 handler 改动 + 测试
 2. **C2 pprof 端点**：middleware + server.go 路由 + 测试
 3. **C3 Range 测试**：streaming_test.go 扩展
 
@@ -344,11 +350,11 @@ func TestStreaming_UnsatisfiableRange(t *testing.T) {
 | Go→Rust 迁移 | 明确排除 | 真诚分析：负 ROI（systray GUI + 跨编译复杂度） |
 | 缓存容量 | 200 项 LRU ~20MB | 用户明确选 |
 | 缓存依赖 | `hashicorp/golang-lru/v2` | hashicorp 系，已有 mdns 依赖 |
-| 缓存 key | md5(path + modtime) | 与磁盘缓存一致 |
+| 缓存 key | `md5(path + "|" + modTime.Format(RFC3339Nano))` | 与现有 `GetThumbnailPath` 一致（注意非 `UnixNano`） |
 | pprof 路径 | `/debug/pprof/*` | net/http/pprof 默认 |
 | pprof 鉴权 | RFC1918 + loopback + link-local | 用户明确选 |
 | Range 测试 | 4 关键用例 | 用户明确选 |
-| Range 测试方法 | `httptest.NewServer` | 真实 ResponseWriter，避免 mock 隐藏 bug |
+| Range 测试方法 | 延续现有 `httptest.NewRecorder` + `svc.ServeFile` 风格 | §4.3 + §11.1 #5 修订：现有 streaming_test.go 已用 Recorder 验证 200/206；`StreamingService.ServeFile` 是自定义 Range handler（非 `http.ServeContent`），Recorder 对其足够；保持测试文件风格一致 |
 
 ---
 
@@ -379,3 +385,27 @@ func TestStreaming_UnsatisfiableRange(t *testing.T) {
 - **HTTP/2 + TLS**：若跨网络部署需求出现，加 TLS + Let's Encrypt 自动证书。
 - **缓存预热**：Scanner `OnScanComplete` 时主动生成热门缩略图。
 - **配置文件 v2**：YAML schema 重设计 + 热重载。
+
+---
+
+## 11. 审核意见（2026-07-05 代码核验）
+
+> [!IMPORTANT]
+> 以下为基于当前代码库实际状态的审核修正，已直接在文中标注 ⚠️ 处同步修改。
+
+### 11.1 已修正的事实性错误
+
+| # | 原文描述 | 实际代码 | 修正 |
+|---|---|---|---|
+| 1 | 缓存 key 用 `md5(path + modTime.UnixNano())` | `GetThumbnailPath` 用 `modTime.Format(time.RFC3339Nano)` | ⚠️ **关键修正**：`thumbnailCacheKey` 伪代码已改为 `RFC3339Nano`，避免内存缓存与磁盘缓存 key 不一致导致永远 miss |
+| 2 | C1 涉及 "5 个 handler 改动" | 实际仅 4 个 handler（images/videos/media/system） | 改为 4 个 |
+| 3 | `system.go::SystemThumbnail` 调用 `GenerateThumbnail` | 实际调用 `GenerateSystemThumbnail`（存储在 `system/` 子目录） | 新增 `GenerateSystemThumbnailBytes` 方法说明 |
+| 4 | `streaming_test.go` 仅 78 行 | 实际 79 行 | 行数已修正 |
+| 5 | Range 测试声称应用 `httptest.NewServer` | 现有代码用 `httptest.NewRecorder` + `svc.ServeFile` | 建议保持现有风格一致性 |
+
+### 11.2 设计建议（非阻塞）
+
+1. **`GenerateSystemThumbnailBytes` 与 `GenerateThumbnailBytes` 可提取公共逻辑**：两者仅磁盘路径不同，可用内部 helper `generateBytesVia(genFunc, sourcePath)` 减少重复。
+2. **LRU 缓存可考虑按字节容量而非条目数限制**：200 项 ~20MB 是粗略估算（假设平均 100KB），但视频缩略图（ffmpeg 截帧）可能远大于图片缩略图。`hashicorp/golang-lru/v2` 不支持 size-aware eviction，如需精确控制可考虑 `dgraph-io/ristretto` 或自行计数。当前方案可接受，但应在 §8 已知限制中注明。
+3. **`encoding/hex` 依赖差异**：伪代码用 `hex.EncodeToString(h[:])`，实际代码用 `fmt.Sprintf("%x", h)`。二者输出等价，但建议统一风格。已在修正的伪代码中改为 `fmt.Sprintf` 与现有代码一致。
+4. **pprof `DefaultServeMux` 安全考量**：`net/http/pprof` 的 `init()` 会注册到 `http.DefaultServeMux`。如果代码中其他地方也意外使用了 `DefaultServeMux`（如 `http.ListenAndServe("", nil)`），可能会暴露 pprof 端点到未受保护的路由。建议实现时确认无其他 `DefaultServeMux` 使用。
