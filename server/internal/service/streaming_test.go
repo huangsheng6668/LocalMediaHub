@@ -75,4 +75,57 @@ func TestServeFile_DirectStreamingHeaders(t *testing.T) {
 			t.Errorf("body mismatch, got %q", string(bodyBytes))
 		}
 	})
+
+	t.Run("Suffix range bytes=-N returns last N bytes with 206", func(t *testing.T) {
+		// bytes=-10 means "last 10 bytes" per RFC 7233 §2.1.
+		// File is 36 bytes, so last 10 = bytes 26..35 = "QRSTUVWXYZ".
+		req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+		req.Header.Set("Range", "bytes=-10")
+		rec := httptest.NewRecorder()
+
+		err := svc.ServeFile(rec, req, testFilePath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		res := rec.Result()
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusPartialContent {
+			t.Errorf("expected status 206, got %d", res.StatusCode)
+		}
+		if res.Header.Get("Content-Length") != "10" {
+			t.Errorf("expected Content-Length 10, got %q", res.Header.Get("Content-Length"))
+		}
+		if res.Header.Get("Content-Range") != "bytes 26-35/36" {
+			t.Errorf("expected Content-Range 'bytes 26-35/36', got %q", res.Header.Get("Content-Range"))
+		}
+
+		bodyBytes, _ := io.ReadAll(res.Body)
+		if string(bodyBytes) != "QRSTUVWXYZ" {
+			t.Errorf("body mismatch, got %q", string(bodyBytes))
+		}
+	})
+
+	t.Run("Range past EOF returns 416 Range Not Satisfiable", func(t *testing.T) {
+		// bytes=999999- is beyond the 36-byte file.
+		req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+		req.Header.Set("Range", "bytes=999999-")
+		rec := httptest.NewRecorder()
+
+		err := svc.ServeFile(rec, req, testFilePath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		res := rec.Result()
+		defer res.Body.Close()
+
+		if res.StatusCode != http.StatusRequestedRangeNotSatisfiable {
+			t.Errorf("expected status 416, got %d", res.StatusCode)
+		}
+		if res.Header.Get("Content-Range") != "bytes */36" {
+			t.Errorf("expected Content-Range 'bytes */36', got %q", res.Header.Get("Content-Range"))
+		}
+	})
 }

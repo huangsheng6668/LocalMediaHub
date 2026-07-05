@@ -118,25 +118,41 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 			w.WriteHeader(http.StatusBadRequest)
 			return nil
 		}
-		start, err = strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			start = 0
-		}
-		if parts[1] != "" {
-			end, err = strconv.ParseInt(parts[1], 10, 64)
-			if err != nil {
+		if parts[0] == "" {
+			// Suffix range: bytes=-N means "last N bytes" per RFC 7233 §2.1.
+			// If N is missing/invalid/unparseable, treat as full file.
+			suffixLen, parseErr := strconv.ParseInt(parts[1], 10, 64)
+			if parseErr != nil || suffixLen <= 0 {
+				start = 0
+				end = size - 1
+			} else {
+				if suffixLen > size {
+					suffixLen = size
+				}
+				start = size - suffixLen
 				end = size - 1
 			}
 		} else {
-			end = size - 1
-		}
-		if start < 0 || start >= size {
-			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
-			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
-			return nil
-		}
-		if end >= size {
-			end = size - 1
+			start, err = strconv.ParseInt(parts[0], 10, 64)
+			if err != nil {
+				start = 0
+			}
+			if parts[1] != "" {
+				end, err = strconv.ParseInt(parts[1], 10, 64)
+				if err != nil {
+					end = size - 1
+				}
+			} else {
+				end = size - 1
+			}
+			if start < 0 || start >= size {
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+				return nil
+			}
+			if end >= size {
+				end = size - 1
+			}
 		}
 	} else {
 		start = 0
