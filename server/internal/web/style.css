@@ -1446,3 +1446,72 @@ body {
         font-size: 13px;
     }
 }
+
+/* ─── Round 16 C3: Full-screen modal on phone ─── */
+
+@media (max-width: 767px) {
+    /* Video player + image lightbox modals: full viewport on phone.
+       Uses !important to override existing max-width: 800px on .modal-wrapper
+       (lightbox-wrapper is already 100vw/100vh at base but is included for
+       consistency and to absorb any future base-style change). */
+    .overlay-modal {
+        padding: 0 !important;
+    }
+    .modal-wrapper,
+    .lightbox-wrapper {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: none !important;
+        max-height: none !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    /* Modal content fills the wrapper.
+       Note: .video-modal-content is a spec-assumed name; the actual video
+       player uses .video-player-wrapper. .lightbox-content exists. */
+    .video-player-wrapper,
+    .lightbox-content,
+    .lightbox-single-view {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 0;
+    }
+    /* Media elements scale to viewport.
+       Note: spec used .lightbox-img but the actual element is #lightbox-img
+       (an ID, not a class). Video target is the <video> inside .video-player-wrapper. */
+    .video-player-wrapper video,
+    #lightbox-img {
+        width: 100%;
+        height: auto;
+        max-height: 85vh;
+        object-fit: contain;
+    }
+    /* Close buttons: larger touch target, top-right corner.
+       .btn-close on phone gets dark translucent backdrop for visibility over
+       arbitrary modal content; .lightbox-close already has z-index 110 / dark
+       UI at base, but we still nudge position + size. */
+    .btn-close,
+    .lightbox-close {
+        top: 8px !important;
+        right: 8px !important;
+        font-size: 24px;
+        padding: 8px 12px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        border-radius: 50%;
+        z-index: 110;
+    }
+    /* Hide prev/next arrow buttons on phone — overlay too dense.
+       Spec also lists .lightbox-prev / .lightbox-next but those classes do
+       not exist in the project; actual markup uses .lightbox-nav.nav-prev /
+       .lightbox-nav.nav-next, both covered by .lightbox-nav.
+       Users close + reopen; swipe gesture is YAGNI for this round. */
+    .lightbox-nav {
+        display: none !important;
+    }
+}
