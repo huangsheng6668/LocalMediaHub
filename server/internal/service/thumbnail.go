@@ -27,7 +27,16 @@ type ThumbnailService struct {
 	format     string
 	sem        chan struct{}
 	ffmpegPath string
-	memCache   *lru.Cache[string, []byte]
+	// memCache stores JPEG bytes keyed by md5(sourcePath + "|" + modTime).
+	// Both GenerateThumbnailBytes and GenerateSystemThumbnailBytes share this
+	// cache. The shared key is safe because the underlying
+	// generateThumbnailFromFile pipeline uses the same maxSize/format/quality
+	// for both call paths — the only difference is which disk subdirectory
+	// (cacheDir/ vs cacheDir/system/) the bytes are persisted to. So a cache
+	// hit from either path returns byte-identical output for the same source
+	// file. If the two pipelines ever diverge (different maxSize per path),
+	// the key MUST be namespaced (e.g. "regular:" / "system:" prefix).
+	memCache *lru.Cache[string, []byte]
 }
 
 func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath string) (*ThumbnailService, error) {
