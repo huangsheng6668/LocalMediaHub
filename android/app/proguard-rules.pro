@@ -105,16 +105,9 @@
 # must survive obfuscation exactly as written. The decoder classes live under
 # the `native` sub-package.
 # ----------------------------------------------------------------------------
-# Rust JNI native methods — keep class names exactly as expected by #no_mangle symbols
--keep class com.juziss.localmediahub.native.NativeImageDecoder {
-    native <methods>;
-}
--keep class com.juziss.localmediahub.native.NativeExif {
-    native <methods>;
-}
--keep class com.juziss.localmediahub.native.NaturalSorter {
-    native <methods>;
-}
+# Rust JNI native methods — the broad package keep below already preserves the
+# class and member names exactly as expected by the #no_mangle symbols, and the
+# generic `keepclasseswithmembernames` rule covers any other native methods.
 # Factory + helpers in the same sub-package are referenced by reflection from
 # Coil / DI; keep the package surface stable.
 -keep class com.juziss.localmediahub.native.** { *; }
