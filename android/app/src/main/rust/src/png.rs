@@ -44,7 +44,18 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
     // Allocate the exact buffer the decoder wants to write into. For 8-bit
     // sources this is `width * height * channels`; with STRIP_16 it is the
     // same even for 16-bit sources.
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    //
+    // Skip the vec![0] zero-fill: `next_frame` overwrites every byte per
+    // png 0.17's documented contract (`OutputInfo` size matches
+    // `output_buffer_size`). Saves one memset pass on large images.
+    let buf_size = reader.output_buffer_size();
+    let mut buf: Vec<u8> = Vec::with_capacity(buf_size);
+    // SAFETY: `next_frame` writes exactly `buf_size` bytes per the png 0.17
+    // contract (verified by `decode_real_png_rgb` test reading the buffer
+    // immediately after). `Vec::with_capacity` allocates without
+    // initialising; `set_len` marks the capacity as initialised without
+    // touching memory. All bytes are written before being read.
+    unsafe { buf.set_len(buf_size); }
     let frame_info = reader.next_frame(&mut buf).ok()?;
 
     let n = (iw as usize) * (ih as usize);
