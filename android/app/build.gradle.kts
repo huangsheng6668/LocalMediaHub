@@ -77,8 +77,9 @@ android {
         release {
             // Enable R8 code shrinking + resource shrinking for release builds.
             // ProGuard/R8 rules are maintained in proguard-rules.pro; see there
-            // for the reflection/JNI keep rules required by Retrofit, Gson,
-            // Compose, DataStore and the native image decoder.
+            // for the reflection/JNI keep rules required by Gson, Compose,
+            // DataStore and the native image decoder. (Retrofit was removed
+            // in Round 19 C3 — its keep rules are no longer needed.)
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -220,9 +221,8 @@ dependencies {
     kapt("com.google.dagger:hilt-android-compiler:2.50")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
-    // Network
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    // Network — Retrofit was removed in Round 19 C3: all API calls use
+    // OkHttp + Gson directly (see MediaRepository). Only OkHttp remains.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
@@ -239,8 +239,10 @@ dependencies {
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
 
-    // Serialization — version pinned to 2.8.9 to match converter-gson:2.9.0
-    // (Gson 2.10+ changed internal APIs: "Class cannot be cast to ParameterizedType").
+    // Serialization — Gson is used directly by MediaRepository (Retrofit's
+    // converter-gson was removed in Round 19 C3). Version pinned to 2.8.9
+    // because Gson 2.10+ changed internal APIs that broke generic TypeToken
+    // resolution under R8 minification.
     implementation("com.google.code.gson:gson:2.8.9")
 
     // Testing

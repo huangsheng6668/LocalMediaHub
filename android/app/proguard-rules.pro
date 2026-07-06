@@ -46,23 +46,13 @@
 -keep class java.lang.reflect.WildcardType
 
 # ----------------------------------------------------------------------------
-# Retrofit — interface methods and annotations are resolved by reflection.
-# ----------------------------------------------------------------------------
--keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations
--keepclassmembers,allowshrinking,allowobfuscation interface * {
-    @retrofit2.http.* <methods>;
-}
--dontwarn retrofit2.**
--keep class retrofit2.** { *; }
--keepclasseswithmembers class * {
-    @retrofit2.http.* <methods>;
-}
-# Keep our Retrofit API interface verbatim — method signatures matter.
--keep class com.juziss.localmediahub.network.MediaApi { *; }
-
-# ----------------------------------------------------------------------------
 # OkHttp / Okio
 # ----------------------------------------------------------------------------
+# NOTE: Retrofit keep rules were removed in Round 19 C3 — the app now uses
+# OkHttp + Gson directly (see MediaRepository). The annotation attribute keep
+# below is retained because Gson may still reflect over @SerializedName on
+# the classpath, and OkHttp uses runtime annotations internally.
+-keepattributes RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn org.conscrypt.**
