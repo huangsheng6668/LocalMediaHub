@@ -52,670 +52,305 @@ class BrowseViewModel @Inject constructor(
     private val downloadManager: DownloadManager,
 ) : ViewModel() {
 
-    /**
-     * One-shot toast messages for download events. The UI layer observes this
-     * and shows a Toast, then clears it. This keeps Toast creation out of the
-     * ViewModel (which has no valid Activity context) and lets the View decide
-     * how to surface the message.
-     */
+    // ── Delegates (Round 18 C1-C7) ───────────────────────────────
+
+    private val sharedState = BrowseSharedState()
+    private val navigator = BrowseNavigator(appContext, repository, recentActivityStore, sharedState)
+    private val favoritesController = FavoritesController(favoritesStore, repository, sharedState)
+    private val tagController = TagController(repository, sharedState)
+    private val searchController = SearchController(repository, sharedState)
+    private val downloadController = DownloadController(downloadManager, repository, downloadsStore, sharedState)
+    private val deleteController = DeleteController(repository, sharedState)
+
+    init {
+        favoritesController.startCollecting(viewModelScope)
+    }
+
+    // ── Toast (cross-cutting, stays in ViewModel) ─────────────────
+
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
 
-    /** Emit a toast to be consumed by the UI layer. */
     private fun showToast(msg: String) {
         _toastMessage.value = msg
     }
 
-    /** Called by the UI after it has shown the toast, to clear the pending value. */
     fun onToastShown() {
         _toastMessage.value = null
     }
 
-    val downloadedFiles = downloadsStore.downloadedFiles
+    // ── Public state: SharedState flows ───────────────────────────
 
-    fun removeDownload(file: MediaFile) {
-        viewModelScope.launch {
-            downloadsStore.removeDownload(file.relativePath)
-        }
-    }
+    val browseState: StateFlow<BrowseState>
+        get() = sharedState.browseState.asStateFlow()
 
-    fun removeDownloads(relativePaths: List<String>) {
-        viewModelScope.launch {
-            downloadsStore.removeDownloads(relativePaths)
-        }
-    }
+    val currentPath: StateFlow<String>
+        get() = sharedState.currentPath.asStateFlow()
 
-    private val _browseState = MutableStateFlow<BrowseState>(BrowseState.Idle)
-    val browseState: StateFlow<BrowseState> = _browseState.asStateFlow()
+    val isSystemBrowse: StateFlow<Boolean>
+        get() = sharedState.isSystemBrowse.asStateFlow()
 
-    private val _currentPath = MutableStateFlow("")
-    val currentPath: StateFlow<String> = _currentPath.asStateFlow()
+    val folderSortOrder: StateFlow<SortOrder>
+        get() = sharedState.folderSortOrder.asStateFlow()
 
-    private val _pathStack = MutableStateFlow<List<String>>(emptyList())
+    val fileSortOrder: StateFlow<SortOrder>
+        get() = sharedState.fileSortOrder.asStateFlow()
 
-    // Whether we're in system-wide browse mode (drives → arbitrary paths)
-    private val _isSystemBrowse = MutableStateFlow(false)
-    val isSystemBrowse: StateFlow<Boolean> = _isSystemBrowse.asStateFlow()
+    val activeTagFilter: StateFlow<Tag?>
+        get() = sharedState.activeTagFilter.asStateFlow()
 
-    // Raw unsorted results
-    private val _rawFolders = MutableStateFlow<List<Folder>>(emptyList())
-    private val _rawFiles = MutableStateFlow<List<MediaFile>>(emptyList())
+    // ── Public state: Navigator flows ─────────────────────────────
 
-    private val _folderSortOrder = MutableStateFlow(SortOrder.NAME_ASC)
-    val folderSortOrder: StateFlow<SortOrder> = _folderSortOrder.asStateFlow()
+    val restoreScrollTo: StateFlow<String?>
+        get() = navigator.restoreScrollTo
 
-    private val _fileSortOrder = MutableStateFlow(SortOrder.NAME_ASC)
-    val fileSortOrder: StateFlow<SortOrder> = _fileSortOrder.asStateFlow()
+    // ── Public state: Favorites flows ─────────────────────────────
 
-    // ── Scroll position persistence ──────────────────────────
-    private val _scrollPositions = mutableMapOf<String, Int>()
-    private val _restoreScrollTo = MutableStateFlow<String?>(null)
-    val restoreScrollTo: StateFlow<String?> = _restoreScrollTo.asStateFlow()
+    val favorites: StateFlow<Set<String>>
+        get() = favoritesController.favorites
 
-    fun saveScrollPosition(path: String, index: Int) {
-        if (index > 0) _scrollPositions[path] = index
-    }
+    val favoriteFiles: StateFlow<List<MediaFile>>
+        get() = favoritesController.favoriteFiles
 
-    fun getScrollPosition(path: String): Int = _scrollPositions[path] ?: 0
+    val showFavoritesOnly: StateFlow<Boolean>
+        get() = favoritesController.showFavoritesOnly
 
-    fun consumeRestoreScroll() {
-        _restoreScrollTo.value = null
-    }
+    // ── Public state: Tags flows ──────────────────────────────────
 
-    // ── Favorites ─────────────────────────────────────────────
+    val tags: StateFlow<List<Tag>>
+        get() = tagController.tags
 
-    private val _favorites = MutableStateFlow<Set<String>>(emptySet())
-    val favorites: StateFlow<Set<String>> = _favorites.asStateFlow()
+    val fileTags: StateFlow<Map<String, List<Tag>>>
+        get() = tagController.fileTags
 
-    private val _favoriteFiles = MutableStateFlow<List<MediaFile>>(emptyList())
-    val favoriteFiles: StateFlow<List<MediaFile>> = _favoriteFiles.asStateFlow()
+    // ── Public state: Search flows ────────────────────────────────
 
-    private val _favoriteAccessModes = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val searchQuery: StateFlow<String>
+        get() = searchController.searchQuery
 
-    private val _showFavoritesOnly = MutableStateFlow(false)
-    val showFavoritesOnly: StateFlow<Boolean> = _showFavoritesOnly.asStateFlow()
+    val searchState: StateFlow<SearchState>
+        get() = searchController.searchState
 
-    init {
-        viewModelScope.launch {
-            favoritesStore.favorites.collect { favoritePaths ->
-                _favorites.value = favoritePaths
-            }
-        }
-        viewModelScope.launch {
-            favoritesStore.favoriteFiles.collect { files ->
-                _favoriteFiles.value = files
-            }
-        }
-        viewModelScope.launch {
-            favoritesStore.favoriteEntries.collect { entries ->
-                _favoriteAccessModes.value = entries.associateFavoriteModes()
-            }
-        }
-    }
+    // ── Public state: Delete flows ────────────────────────────────
 
-    fun isFavorite(relativePath: String): Boolean {
-        return relativePath in _favorites.value
-    }
+    val deleteState: StateFlow<DeleteState>
+        get() = deleteController.deleteState
 
-    fun toggleFavorite(file: MediaFile, isSystemBrowse: Boolean = _isSystemBrowse.value) {
-        viewModelScope.launch {
-            favoritesStore.toggleFavorite(file, isSystemBrowse)
-        }
-    }
+    // ── Public state: Downloads flows ─────────────────────────────
 
-    fun setShowFavoritesOnly(show: Boolean) {
-        _showFavoritesOnly.value = show
-    }
+    val downloadedFiles = downloadController.downloadedFiles
 
-    /** Filter files to only show favorites when the filter is active. */
-    fun filterFilesByFavorites(files: List<MediaFile>): List<MediaFile> {
-        return if (_showFavoritesOnly.value) {
-            files.filter { it.relativePath in _favorites.value }
-        } else {
-            files
-        }
-    }
+    // ── Navigation ────────────────────────────────────────────────
 
-    /** Load root folders. */
     fun loadRoots() {
-        viewModelScope.launch {
-            _browseState.value = BrowseState.Loading
-            _isSystemBrowse.value = false
-            _activeTagFilter.value = null
-            when (val result = repository.getFolders()) {
-                is NetworkResult.Success -> {
-                    _browseState.value = BrowseState.RootFolders(result.data)
-                    _currentPath.value = ""
-                    _pathStack.value = emptyList()
-                }
-                is NetworkResult.Error -> {
-                    _browseState.value = BrowseState.Error(result.message)
-                }
-                is NetworkResult.Loading -> {}
-            }
-        }
+        viewModelScope.launch { navigator.loadRoots() }
     }
 
-    /** Load system drives (full filesystem browse mode). */
     fun loadSystemDrives() {
-        viewModelScope.launch {
-            _browseState.value = BrowseState.Loading
-            _isSystemBrowse.value = true
-            _activeTagFilter.value = null
-            when (val result = repository.getSystemDrives()) {
-                is NetworkResult.Success -> {
-                    val drives = result.data
-                    _browseState.value = BrowseState.SystemDrives(drives)
-                    _currentPath.value = ""
-                    _pathStack.value = emptyList()
-                }
-                is NetworkResult.Error -> {
-                    _browseState.value = BrowseState.Error(result.message)
-                }
-                is NetworkResult.Loading -> {}
-            }
-        }
+        viewModelScope.launch { navigator.loadSystemDrives() }
     }
 
-    /** Browse a system path (absolute path, any drive). */
     fun browseSystemPath(absolutePath: String, folderName: String) {
-        viewModelScope.launch {
-            // Save current scroll position before navigating
-            saveScrollPosition(_currentPath.value, 0) // will be updated by UI
-            _browseState.value = BrowseState.Loading
-            _pathStack.value = _pathStack.value + _currentPath.value
-            _currentPath.value = absolutePath
-            _isSystemBrowse.value = true
-
-            when (val result = repository.browseSystemPath(absolutePath)) {
-                is NetworkResult.Success -> {
-                    recentActivityStore.saveLastBrowseLocation(
-                        path = absolutePath,
-                        title = folderName,
-                        isSystemBrowse = true,
-                    )
-                    applySystemResult(result.data)
-                }
-                is NetworkResult.Error -> emitBrowseError(result.message)
-                is NetworkResult.Loading -> {}
-            }
-        }
+        viewModelScope.launch { navigator.browseSystemPath(absolutePath, folderName) }
     }
 
-    /** Browse into a specific folder. */
     fun browseFolder(relativePath: String, folderName: String) {
-        viewModelScope.launch {
-            _browseState.value = BrowseState.Loading
-            _pathStack.value = _pathStack.value + _currentPath.value
-            _currentPath.value = relativePath
-
-            when (val result = repository.browseFolder(relativePath)) {
-                is NetworkResult.Success -> {
-                    recentActivityStore.saveLastBrowseLocation(
-                        path = relativePath,
-                        title = folderName,
-                        isSystemBrowse = false,
-                    )
-                    applyFolderResult(result.data)
-                }
-                is NetworkResult.Error -> emitBrowseError(result.message)
-                is NetworkResult.Loading -> {}
-            }
-        }
+        viewModelScope.launch { navigator.browseFolder(relativePath, folderName) }
     }
 
-    /** Go back to previous path level. */
     fun navigateBack() {
-        val stack = _pathStack.value
-        if (stack.isEmpty()) {
-            if (_browseState.value is BrowseState.TagCollection) {
-                loadRoots()
-                return
-            }
-            if (_isSystemBrowse.value) {
-                loadSystemDrives()
-            } else {
-                loadRoots()
-            }
-            return
-        }
-        val previousPath = stack.last()
-        _pathStack.value = stack.dropLast(1)
-
-        viewModelScope.launch {
-            _currentPath.value = previousPath
-
-            if (previousPath.isEmpty()) {
-                if (_isSystemBrowse.value) {
-                    loadSystemDrives()
-                } else {
-                    loadRoots()
-                }
-            } else if (_isSystemBrowse.value) {
-                when (val result = repository.browseSystemPath(previousPath)) {
-                    is NetworkResult.Success -> {
-                        applySystemResult(result.data)
-                        _restoreScrollTo.value = previousPath
-                    }
-                    is NetworkResult.Error -> emitBrowseError(result.message)
-                    is NetworkResult.Loading -> {}
-                }
-            } else {
-                when (val result = repository.browseFolder(previousPath)) {
-                    is NetworkResult.Success -> {
-                        applyFolderResult(result.data)
-                        _restoreScrollTo.value = previousPath
-                    }
-                    is NetworkResult.Error -> emitBrowseError(result.message)
-                    is NetworkResult.Loading -> {}
-                }
-            }
-        }
+        viewModelScope.launch { navigator.navigateBack() }
     }
 
-    fun canGoBack(): Boolean = _pathStack.value.isNotEmpty()
+    fun canGoBack(): Boolean = navigator.canGoBack()
 
     fun setFolderSortOrder(order: SortOrder) {
-        _folderSortOrder.value = order
-        val rawFolders = _rawFolders.value
-        if (rawFolders.isEmpty()) return
-        viewModelScope.launch {
-            val sortedFolders = withContext(Dispatchers.Default) {
-                BrowseSorter.sortFolders(rawFolders, _folderSortOrder.value)
-            }
-            when (val state = _browseState.value) {
-                is BrowseState.Browsed -> {
-                    _browseState.value = BrowseState.Browsed(
-                        state.result.copy(folders = sortedFolders)
-                    )
-                }
-                is BrowseState.SystemBrowsed -> {
-                    _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
-                        currentPath = state.result.currentPath,
-                        drives = state.result.drives,
-                        folders = sortedFolders,
-                        files = state.result.files,
-                    ))
-                }
-                else -> {}
-            }
-        }
+        viewModelScope.launch { navigator.setFolderSortOrder(order) }
     }
 
     fun setFileSortOrder(order: SortOrder) {
-        _fileSortOrder.value = order
-        val rawFiles = _rawFiles.value
-        if (rawFiles.isEmpty()) return
-        viewModelScope.launch {
-            val sortedFiles = withContext(Dispatchers.Default) {
-                BrowseSorter.sortFiles(rawFiles, _fileSortOrder.value)
-            }
-            when (val state = _browseState.value) {
-                is BrowseState.Browsed -> {
-                    _browseState.value = BrowseState.Browsed(
-                        state.result.copy(files = sortedFiles)
-                    )
-                }
-                is BrowseState.SystemBrowsed -> {
-                    _browseState.value = BrowseState.SystemBrowsed(SystemBrowseResult(
-                        currentPath = state.result.currentPath,
-                        drives = state.result.drives,
-                        folders = state.result.folders,
-                        files = sortedFiles,
-                    ))
-                }
-                is BrowseState.TagCollection -> {
-                    _browseState.value = BrowseState.TagCollection(
-                        title = state.title,
-                        files = sortedFiles,
-                    )
-                }
-                else -> {}
-            }
-        }
+        viewModelScope.launch { navigator.setFileSortOrder(order) }
     }
 
-    /** 成功的文件夹浏览结果：存 raw、排序、emit Browsed。 */
-    private suspend fun applyFolderResult(data: BrowseResult) {
-        _rawFolders.value = data.folders
-        _rawFiles.value = data.files
-        val sortedFolders = withContext(Dispatchers.Default) {
-            BrowseSorter.sortFolders(data.folders, _folderSortOrder.value)
-        }
-        val sortedFiles = withContext(Dispatchers.Default) {
-            BrowseSorter.sortFiles(data.files, _fileSortOrder.value)
-        }
-        _browseState.value = BrowseState.Browsed(
-            data.copy(folders = sortedFolders, files = sortedFiles)
+    fun refreshCurrentDirectory() {
+        viewModelScope.launch { navigator.refreshCurrentDirectory() }
+    }
+
+    // ── Scroll ────────────────────────────────────────────────────
+
+    fun saveScrollPosition(path: String, index: Int) {
+        navigator.saveScrollPosition(path, index)
+    }
+
+    fun getScrollPosition(path: String): Int = navigator.getScrollPosition(path)
+
+    fun consumeRestoreScroll() {
+        navigator.consumeRestoreScroll()
+    }
+
+    // ── URL builders ──────────────────────────────────────────────
+
+    fun getVideoStreamUrl(file: MediaFile): String {
+        return navigator.getVideoStreamUrl(file)
+    }
+
+    fun getThumbnailUrl(file: MediaFile): String {
+        return navigator.getThumbnailUrl(file)
+    }
+
+    fun getOriginalImageUrl(file: MediaFile): String {
+        return navigator.getOriginalImageUrl(file)
+    }
+
+    // ── Favorites ─────────────────────────────────────────────────
+
+    fun isFavorite(relativePath: String): Boolean {
+        return favoritesController.isFavorite(relativePath)
+    }
+
+    fun toggleFavorite(file: MediaFile, isSystemBrowse: Boolean = sharedState.isSystemBrowse.value) {
+        viewModelScope.launch { favoritesController.toggleFavorite(file, isSystemBrowse) }
+    }
+
+    fun setShowFavoritesOnly(show: Boolean) {
+        favoritesController.setShowFavoritesOnly(show)
+    }
+
+    fun filterFilesByFavorites(files: List<MediaFile>): List<MediaFile> {
+        return favoritesController.filterFilesByFavorites(files)
+    }
+
+    fun isFavoriteSystemBrowse(file: MediaFile): Boolean {
+        return favoritesController.isFavoriteSystemBrowse(file)
+    }
+
+    fun getFavoriteVideoStreamUrl(file: MediaFile): String {
+        return favoritesController.getFavoriteVideoStreamUrl(file)
+    }
+
+    fun getFavoriteThumbnailUrl(file: MediaFile): String {
+        return favoritesController.getFavoriteThumbnailUrl(file)
+    }
+
+    fun getFavoriteOriginalImageUrl(file: MediaFile): String {
+        return favoritesController.getFavoriteOriginalImageUrl(file)
+    }
+
+    // ── Downloads ─────────────────────────────────────────────────
+
+    fun removeDownload(file: MediaFile) {
+        downloadController.removeDownload(file, viewModelScope)
+    }
+
+    fun removeDownloads(relativePaths: List<String>) {
+        downloadController.removeDownloads(relativePaths, viewModelScope)
+    }
+
+    fun downloadFile(file: MediaFile) {
+        downloadController.downloadFile(
+            file = file,
+            videoStreamUrl = getVideoStreamUrl(file),
+            imageUrl = getOriginalImageUrl(file),
+            onMessage = ::showToast,
+            scope = viewModelScope
         )
     }
 
-    /** 成功的系统浏览结果：存 raw、排序、emit SystemBrowsed。 */
-    private suspend fun applySystemResult(data: SystemBrowseResult) {
-        _rawFolders.value = data.folders
-        _rawFiles.value = data.files
-        val sortedFolders = withContext(Dispatchers.Default) {
-            BrowseSorter.sortFolders(data.folders, _folderSortOrder.value)
-        }
-        val sortedFiles = withContext(Dispatchers.Default) {
-            BrowseSorter.sortFiles(data.files, _fileSortOrder.value)
-        }
-        _browseState.value = BrowseState.SystemBrowsed(
-            SystemBrowseResult(
-                currentPath = data.currentPath,
-                drives = data.drives,
-                folders = sortedFolders,
-                files = sortedFiles,
-            )
+    fun downloadFolder(folder: Folder) {
+        downloadController.downloadFolder(
+            folder = folder,
+            onMessage = ::showToast,
+            scope = viewModelScope
+        )
+    }
+
+    // ── Tags ──────────────────────────────────────────────────────
+
+    fun loadTags() {
+        tagController.loadTags(viewModelScope)
+    }
+
+    fun createTag(name: String, color: String = "#808080") {
+        tagController.createTag(name, color, viewModelScope)
+    }
+
+    fun deleteTag(tagId: String) {
+        tagController.deleteTag(tagId, viewModelScope)
+    }
+
+    fun tagFile(tagId: String, filePath: String) {
+        tagController.tagFile(tagId, filePath, viewModelScope)
+    }
+
+    fun untagFile(tagId: String, filePath: String) {
+        tagController.untagFile(tagId, filePath, viewModelScope)
+    }
+
+    fun loadFileTagsForFile(filePath: String) {
+        tagController.loadFileTagsForFile(filePath, viewModelScope)
+    }
+
+    fun loadAllFileTags() {
+        tagController.loadAllFileTags(viewModelScope)
+    }
+
+    fun getTagsForFile(filePath: String): List<Tag> {
+        return tagController.getTagsForFile(filePath)
+    }
+
+    fun setActiveTagFilter(tag: Tag?) {
+        tagController.setActiveTagFilter(tag)
+    }
+
+    fun openCollection(tag: Tag) {
+        tagController.openCollection(tag, viewModelScope)
+    }
+
+    fun currentCollectionTag(): Tag? {
+        return tagController.currentCollectionTag()
+    }
+
+    fun filterFilesByTag(files: List<MediaFile>): List<MediaFile> {
+        return tagController.filterFilesByTag(files)
+    }
+
+    // ── Search ────────────────────────────────────────────────────
+
+    fun updateSearchQuery(query: String) {
+        searchController.updateSearchQuery(query)
+    }
+
+    fun search() {
+        searchController.search(viewModelScope)
+    }
+
+    fun clearSearch() {
+        searchController.clearSearch()
+    }
+
+    fun isSystemBrowseMode(): Boolean = sharedState.isSystemBrowse.value
+
+    // ── Deletion ──────────────────────────────────────────────────
+
+    fun clearDeleteState() {
+        deleteController.clearDeleteState()
+    }
+
+    suspend fun deletePathSync(path: String, recursive: Boolean): NetworkResult<String> {
+        return deleteController.deletePathSync(path, recursive)
+    }
+
+    fun deletePath(path: String, recursive: Boolean) {
+        deleteController.deletePath(
+            path = path,
+            recursive = recursive,
+            onRefresh = navigator::refreshCurrentDirectory,
+            scope = viewModelScope
         )
     }
 
     private fun emitBrowseError(message: String) {
-        _browseState.value = BrowseState.Error(message)
-    }
-
-    fun getVideoStreamUrl(file: MediaFile): String {
-        return repository.getMediaStreamUrl(file.path)
-    }
-
-    fun getThumbnailUrl(file: MediaFile): String {
-        return repository.getMediaThumbnailUrl(file.path)
-    }
-
-    fun getOriginalImageUrl(file: MediaFile): String {
-        return repository.getMediaOriginalImageUrl(file.path)
-    }
-
-    fun isFavoriteSystemBrowse(file: MediaFile): Boolean {
-        return _favoriteAccessModes.value[file.relativePath] == true
-    }
-
-    fun getFavoriteVideoStreamUrl(file: MediaFile): String {
-        return repository.getMediaStreamUrl(file.path)
-    }
-
-    fun getFavoriteThumbnailUrl(file: MediaFile): String {
-        return repository.getMediaThumbnailUrl(file.path)
-    }
-
-    fun getFavoriteOriginalImageUrl(file: MediaFile): String {
-        return repository.getMediaOriginalImageUrl(file.path)
-    }
-
-    fun downloadFile(file: MediaFile) {
-        viewModelScope.launch {
-            downloadManager.downloadFile(
-                file = file,
-                videoStreamUrl = getVideoStreamUrl(file),
-                imageUrl = getOriginalImageUrl(file),
-                onMessage = ::showToast
-            )
-        }
-    }
-
-    fun downloadFolder(folder: Folder) {
-        viewModelScope.launch {
-            downloadManager.downloadFolder(
-                folder = folder,
-                onMessage = ::showToast
-            )
-        }
-    }
-
-    // ── Tags ──────────────────────────────────────────────
-
-    private val _tags = MutableStateFlow<List<Tag>>(emptyList())
-    val tags: StateFlow<List<Tag>> = _tags.asStateFlow()
-
-    private val _fileTags = MutableStateFlow<Map<String, List<Tag>>>(emptyMap())
-    val fileTags: StateFlow<Map<String, List<Tag>>> = _fileTags.asStateFlow()
-
-    private val _activeTagFilter = MutableStateFlow<Tag?>(null)
-    val activeTagFilter: StateFlow<Tag?> = _activeTagFilter.asStateFlow()
-
-
-    fun loadTags() {
-        viewModelScope.launch {
-            when (val result = repository.getTags()) {
-                is NetworkResult.Success -> {
-                    _tags.value = result.data
-                    loadAllFileTags() // Preload all file-tag mappings
-                }
-                is NetworkResult.Error -> {}
-                is NetworkResult.Loading -> {}
-            }
-        }
-    }
-
-    fun createTag(name: String, color: String = "#808080") {
-        viewModelScope.launch {
-            when (repository.createTag(name, color)) {
-                is NetworkResult.Success -> {
-                    loadTags()
-                }
-                is NetworkResult.Error -> {}
-                is NetworkResult.Loading -> {}
-            }
-        }
-    }
-
-    fun deleteTag(tagId: String) {
-        viewModelScope.launch {
-            when (repository.deleteTag(tagId)) {
-                is NetworkResult.Success -> {
-                    loadTags()
-                }
-                is NetworkResult.Error -> {}
-                is NetworkResult.Loading -> {}
-            }
-        }
-    }
-
-    fun tagFile(tagId: String, filePath: String) {
-        viewModelScope.launch {
-            when (repository.tagFile(tagId, filePath)) {
-                is NetworkResult.Success -> {
-                    loadFileTagsForFile(filePath)
-                    currentCollectionTag()?.let { openCollection(it) }
-                }
-                is NetworkResult.Error -> {}
-                is NetworkResult.Loading -> {}
-            }
-        }
-    }
-
-    fun untagFile(tagId: String, filePath: String) {
-        viewModelScope.launch {
-            when (repository.untagFile(tagId, filePath)) {
-                is NetworkResult.Success -> {
-                    loadFileTagsForFile(filePath)
-                    currentCollectionTag()?.let { openCollection(it) }
-                }
-                is NetworkResult.Error -> {}
-                is NetworkResult.Loading -> {}
-            }
-        }
-    }
-
-    fun loadFileTagsForFile(filePath: String) {
-        viewModelScope.launch {
-            when (val result = repository.getFileTags(listOf(filePath))) {
-                is NetworkResult.Success -> {
-                    val current = _fileTags.value.toMutableMap()
-                    current[filePath] = result.data[filePath] ?: emptyList()
-                    _fileTags.value = current
-                }
-                else -> {
-                    val current = _fileTags.value.toMutableMap()
-                    current[filePath] = emptyList()
-                    _fileTags.value = current
-                }
-            }
-        }
-    }
-
-    fun loadAllFileTags() {
-        viewModelScope.launch {
-            when (val result = repository.getFileTags()) {
-                is NetworkResult.Success -> {
-                    _fileTags.value = result.data
-                }
-                else -> {}
-            }
-        }
-    }
-
-
-    fun getTagsForFile(filePath: String): List<Tag> {
-        return _fileTags.value[filePath] ?: emptyList()
-    }
-
-    fun setActiveTagFilter(tag: Tag?) {
-        _activeTagFilter.value = tag
-    }
-
-    fun openCollection(tag: Tag) {
-        viewModelScope.launch {
-            _browseState.value = BrowseState.Loading
-            _showFavoritesOnly.value = false
-            _activeTagFilter.value = tag
-            _currentPath.value = ""
-            _pathStack.value = emptyList()
-            _isSystemBrowse.value = false
-
-            when (val result = repository.getTaggedMedia(tag.id)) {
-                is NetworkResult.Success -> {
-                    _rawFolders.value = emptyList()
-                    _rawFiles.value = result.data
-                    val sortedFiles = withContext(Dispatchers.Default) {
-                        BrowseSorter.sortFiles(result.data, _fileSortOrder.value)
-                    }
-                    _browseState.value = BrowseState.TagCollection(
-                        title = tag.name,
-                        files = sortedFiles,
-                    )
-                }
-                is NetworkResult.Error -> {
-                    _browseState.value = BrowseState.Error(result.message)
-                }
-                is NetworkResult.Loading -> {}
-            }
-        }
-    }
-
-    fun currentCollectionTag(): Tag? {
-        val active = _browseState.value as? BrowseState.TagCollection ?: return null
-        return _activeTagFilter.value?.takeIf { it.name == active.title }
-    }
-
-    fun filterFilesByTag(files: List<MediaFile>): List<MediaFile> {
-        val activeTag = _activeTagFilter.value ?: return files
-        val taggedPaths = _fileTags.value.entries
-            .filter { (_, tags) -> tags.any { it.id == activeTag.id } }
-            .map { it.key }
-            .toSet()
-        return files.filter { it.relativePath in taggedPaths }
-    }
-
-    // ── Search ──────────────────────────────────────────────
-
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _searchState = MutableStateFlow<SearchState>(SearchState.Idle)
-    val searchState: StateFlow<SearchState> = _searchState.asStateFlow()
-
-    fun updateSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
-
-    fun search() {
-        val query = _searchQuery.value.trim()
-        if (query.isEmpty()) return
-        viewModelScope.launch {
-            _searchState.value = SearchState.Loading
-            when (val result = repository.search(query, _currentPath.value)) {
-                is NetworkResult.Success -> {
-                    _searchState.value = SearchState.Results(result.data)
-                }
-                is NetworkResult.Error -> {
-                    _searchState.value = SearchState.Error(result.message)
-                }
-                is NetworkResult.Loading -> {}
-            }
-        }
-    }
-
-    fun clearSearch() {
-        _searchQuery.value = ""
-        _searchState.value = SearchState.Idle
-    }
-
-    fun isSystemBrowseMode(): Boolean = _isSystemBrowse.value
-
-    // ── Deletion Flow ─────────────────────────────────────────
-
-    private val _deleteState = MutableStateFlow<DeleteState>(DeleteState.Idle)
-    val deleteState: StateFlow<DeleteState> = _deleteState.asStateFlow()
-
-    fun clearDeleteState() {
-        _deleteState.value = DeleteState.Idle
-    }
-
-    suspend fun deletePathSync(path: String, recursive: Boolean): NetworkResult<String> {
-        return repository.deletePath(path, recursive)
-    }
-
-    fun deletePath(path: String, recursive: Boolean) {
-        viewModelScope.launch {
-            _deleteState.value = DeleteState.Loading
-            when (val result = deletePathSync(path, recursive)) {
-                is NetworkResult.Success -> {
-                    _deleteState.value = DeleteState.Success(result.data)
-                    refreshCurrentDirectory()
-                }
-                is NetworkResult.Error -> {
-                    _deleteState.value = DeleteState.Error(result.message)
-                }
-                is NetworkResult.Loading -> {}
-            }
-        }
-    }
-
-    fun refreshCurrentDirectory() {
-        val path = _currentPath.value
-        val state = _browseState.value
-        viewModelScope.launch {
-            if (state is BrowseState.TagCollection) {
-                val tag = _activeTagFilter.value
-                if (tag != null) {
-                    openCollection(tag)
-                }
-                return@launch
-            }
-
-            if (_isSystemBrowse.value) {
-                if (path.isEmpty()) {
-                    loadSystemDrives()
-                } else {
-                    when (val result = repository.browseSystemPath(path)) {
-                        is NetworkResult.Success -> applySystemResult(result.data)
-                        is NetworkResult.Error -> emitBrowseError(result.message)
-                        is NetworkResult.Loading -> {}
-                    }
-                }
-            } else {
-                if (path.isEmpty()) {
-                    loadRoots()
-                } else {
-                    when (val result = repository.browseFolder(path)) {
-                        is NetworkResult.Success -> applyFolderResult(result.data)
-                        is NetworkResult.Error -> emitBrowseError(result.message)
-                        is NetworkResult.Loading -> {}
-                    }
-                }
-            }
-        }
+        sharedState.emitBrowseError(message)
     }
 }
 
