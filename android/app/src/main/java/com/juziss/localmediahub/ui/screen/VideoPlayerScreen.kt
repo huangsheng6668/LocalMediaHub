@@ -117,7 +117,8 @@ fun VideoPlayerScreen(
 
     // Tracks the current playback position across configuration changes (rotation)
     // so the new ExoPlayer can seek to the correct spot.
-    var savedPositionMs by rememberSaveable { mutableLongStateOf(initialPositionMs) }
+    // Round 20: key on streamUrl so switching videos resets position.
+    var savedPositionMs by rememberSaveable(streamUrl) { mutableLongStateOf(initialPositionMs) }
 
     // Wrap the caller's onProgress so this screen also tracks the position
     // for rememberSaveable (rotation survival). Both the periodic 5s timer
@@ -151,12 +152,28 @@ fun VideoPlayerScreen(
         val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
 
+        // Round 20: For transcoded streams, seekTo doesn't work because the
+        // server can't Range-slice a transcode. Instead, rebuild the URL with
+        // a `start` param so ffmpeg begins transcoding from savedPositionMs.
+        // For direct streams, seekTo before prepare is the correct sync path.
+        val isTranscoding = streamUrl.contains("transcode=true")
+        val finalUrl = if (isTranscoding && savedPositionMs > 0L) {
+            buildStreamUrl(streamUrl, true, savedPositionMs / 1000.0)
+        } else {
+            streamUrl
+        }
+
         ExoPlayer.Builder(context)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSource)
             .build().apply {
-                val mediaItem = MediaItem.fromUri(streamUrl)
+                val mediaItem = MediaItem.fromUri(finalUrl)
                 setMediaItem(mediaItem)
+                // Round 20: sync seek before prepare (only for non-transcoded).
+                // Transcoded streams are seeked via URL `start` param above.
+                if (!isTranscoding && savedPositionMs > 0L) {
+                    seekTo(savedPositionMs)
+                }
                 prepare()
                 playWhenReady = true
             }
@@ -202,17 +219,20 @@ fun VideoPlayerScreen(
                     }
                 }
             }
+
+            // Round 20: update savedPositionMs immediately on any user-initiated
+            // seek (scrubber drag, gesture). Without this, a rotation or process
+            // kill within 5s of a seek would lose the new position.
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                savedPositionMs = exoPlayer.currentPosition
+            }
         }
         exoPlayer.addListener(listener)
         onDispose { exoPlayer.removeListener(listener) }
-    }
-
-    // Initial seek on player creation only — NOT keyed on savedPositionMs,
-    // otherwise every 5s progress update re-seeks and fights the user's scrubber.
-    LaunchedEffect(exoPlayer) {
-        if (savedPositionMs > 0L) {
-            exoPlayer.seekTo(savedPositionMs)
-        }
     }
 
     LaunchedEffect(exoPlayer) {
