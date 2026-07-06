@@ -1,11 +1,8 @@
 package com.juziss.localmediahub.network
 
-import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import java.util.concurrent.TimeUnit
 
 /**
  * Singleton Retrofit client with dynamic baseUrl support.
@@ -16,6 +13,10 @@ object RetrofitClient {
 
     private var _baseUrl: String = ""
     private var _retrofit: Retrofit? = null
+    // Shared singleton OkHttpClient provided by Hilt OkHttpModule. Must be
+    // set via [setSharedClient] before [initialize] so the Retrofit builder
+    // reuses the shared client + connection pool. Round 17 C3.
+    private var sharedClient: OkHttpClient? = null
 
     val instance: Retrofit
         get() = _retrofit ?: throw IllegalStateException(
@@ -24,6 +25,15 @@ object RetrofitClient {
 
     val api: MediaApi
         get() = instance.create(MediaApi::class.java)
+
+    /**
+     * Set the shared OkHttpClient (provided by Hilt OkHttpModule). Must be
+     * called before [initialize] so the Retrofit builder reuses the shared
+     * client + connection pool. Round 17 C3.
+     */
+    fun setSharedClient(client: OkHttpClient) {
+        sharedClient = client
+    }
 
     fun initialize(baseUrl: String) {
         val normalized = baseUrl.trimEnd('/')
@@ -38,17 +48,9 @@ object RetrofitClient {
     fun getBaseUrl(): String = _baseUrl
 
     private fun buildRetrofit(baseUrl: String): Retrofit {
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        }
-
-        val client = OkHttpClient.Builder()
-            .addInterceptor(logging)
-            .connectionPool(ConnectionPool(15, 5, TimeUnit.MINUTES))
-            .connectTimeout(DEFAULT_TIMEOUT, TimeUnit.SECONDS)
-            .readTimeout(DEFAULT_TIMEOUT, TimeUnit.SECONDS)
-            .writeTimeout(DEFAULT_TIMEOUT, TimeUnit.SECONDS)
-            .build()
+        val client = sharedClient ?: throw IllegalStateException(
+            "RetrofitClient.setSharedClient() must be called before initialize()"
+        )
 
         return Retrofit.Builder()
             .baseUrl("$baseUrl/")

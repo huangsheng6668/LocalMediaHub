@@ -12,7 +12,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
 import java.io.IOException
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.RetrofitClient
@@ -27,21 +26,14 @@ import com.juziss.localmediahub.network.RetrofitClient
  * directly, the full generic signature is preserved at compile time and is
  * immune to R8 type-erasure.
  */
-class MediaRepository @Inject constructor() {
+class MediaRepository @Inject constructor(
+    private val http: OkHttpClient,
+) {
 
     private val baseUrl
         get() = RetrofitClient.getBaseUrl()
 
     private val gson = Gson()
-
-    private val http: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .connectionPool(okhttp3.ConnectionPool(15, 5, TimeUnit.MINUTES))
-            .build()
-    }
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 

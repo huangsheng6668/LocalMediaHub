@@ -56,7 +56,9 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.res.stringResource
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.juziss.localmediahub.R
+import com.juziss.localmediahub.viewmodel.VideoPlayerViewModel
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
@@ -103,6 +105,10 @@ fun VideoPlayerScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    // Composables can't receive Hilt constructor injection directly; this
+    // ViewModel is the injection seam for the shared singleton OkHttpClient
+    // (Round 17 C3 — replaces the per-screen OkHttpClient.Builder()).
+    val videoPlayerViewModel: VideoPlayerViewModel = hiltViewModel()
     // Pre-resolve these strings in the composition so they can be used inside
     // gesture callbacks (detectTapGestures) where stringResource() is not allowed.
     val pausedText = stringResource(R.string.video_paused)
@@ -134,14 +140,11 @@ fun VideoPlayerScreen(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // OkHttp-backed data source for better connection reuse and timeout
-        // handling on LAN — DefaultHttpDataSource can stall on some routers.
-        val okClient = okhttp3.OkHttpClient.Builder()
-            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
-            .callTimeout(0, java.util.concurrent.TimeUnit.SECONDS) // no overall timeout for streaming
-            .retryOnConnectionFailure(true)
-            .build()
+        // Use the shared singleton OkHttpClient from OkHttpModule (exposed via
+        // VideoPlayerViewModel). Round 17 C3 — single connection pool + 20MB
+        // cache shared with MediaRepository / RetrofitClient / LAN scan.
+        // DefaultHttpDataSource can stall on some routers, so OkHttp is used.
+        val okClient = videoPlayerViewModel.provideHttpClient()
         val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okClient)
             .setUserAgent("LocalMediaHub")
 

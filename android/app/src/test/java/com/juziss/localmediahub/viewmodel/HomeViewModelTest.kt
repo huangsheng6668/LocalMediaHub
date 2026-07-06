@@ -7,6 +7,7 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.ServerConfig
 import com.juziss.localmediahub.network.RetrofitClient
+import okhttp3.OkHttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -64,11 +65,16 @@ class HomeViewModelTest {
     fun `saved server config initializes retrofit before first refresh`() = runTest(dispatcher) {
         serverConfig.saveServerConfig("127.0.0.1", "1")
 
+        // Round 17 C3: MediaRepository now constructor-injects the shared
+        // OkHttpClient, and RetrofitClient.initialize() requires
+        // setSharedClient() first. Provide a plain OkHttpClient for the test.
+        val httpClient = OkHttpClient()
+        RetrofitClient.setSharedClient(httpClient)
         val viewModel = HomeViewModel(
             favoritesStore = FavoritesStore(context, CoroutineScope(Dispatchers.Unconfined)),
             recentActivityStore = RecentActivityStore(context),
             serverConfig = serverConfig,
-            repository = MediaRepository(),
+            repository = MediaRepository(httpClient),
         )
 
         advanceUntilIdle()
@@ -88,6 +94,11 @@ class HomeViewModelTest {
         RetrofitClient::class.java.getDeclaredField("_baseUrl").apply {
             isAccessible = true
             set(RetrofitClient, "")
+        }
+        // Round 17 C3: clear the shared client so each test must re-arm it.
+        RetrofitClient::class.java.getDeclaredField("sharedClient").apply {
+            isAccessible = true
+            set(RetrofitClient, null)
         }
     }
 }

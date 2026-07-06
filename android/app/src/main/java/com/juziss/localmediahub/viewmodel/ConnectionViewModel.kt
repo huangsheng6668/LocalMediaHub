@@ -44,6 +44,7 @@ class ConnectionViewModel @Inject constructor(
     application: Application,
     private val serverConfig: ServerConfig,
     private val repository: MediaRepository,
+    private val httpClient: OkHttpClient,
 ) : AndroidViewModel(application) {
 
     val savedIp = serverConfig.serverIp.stateIn(
@@ -118,6 +119,7 @@ class ConnectionViewModel @Inject constructor(
             _connectionState.value = ConnectionState.Testing
             try {
                 val url = "http://$ip:$port"
+                RetrofitClient.setSharedClient(httpClient)
                 RetrofitClient.initialize(url)
                 when (val result = repository.healthCheck()) {
                     is NetworkResult.Success -> {
@@ -292,7 +294,10 @@ class ConnectionViewModel @Inject constructor(
                 9000,
             ).filterNotNull().toIntArray()
 
-            val scanClient = OkHttpClient.Builder()
+            // Derive a short-timeout client that shares the singleton's connection
+            // pool. newBuilder() copies config + pool; we override only the
+            // timeouts needed for fast LAN IP probing (Round 17 C3).
+            val scanClient = httpClient.newBuilder()
                 .connectTimeout(250, TimeUnit.MILLISECONDS)
                 .readTimeout(250, TimeUnit.MILLISECONDS)
                 .build()
