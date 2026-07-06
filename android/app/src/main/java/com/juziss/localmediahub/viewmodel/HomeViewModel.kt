@@ -9,10 +9,10 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.PlaybackProgressEntry
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.RecentMediaEntry
-import com.juziss.localmediahub.data.ServerConfig
+import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.network.NetworkResult
-import com.juziss.localmediahub.network.RetrofitClient
+import com.juziss.localmediahub.network.ServerConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +46,7 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val favoritesStore: FavoritesStore,
     private val recentActivityStore: RecentActivityStore,
+    private val serverConfigStore: ServerConfigStore,
     private val serverConfig: ServerConfig,
     private val repository: MediaRepository,
 ) : ViewModel() {
@@ -75,7 +76,7 @@ class HomeViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            serverConfig.serverUrl.collect { url ->
+            serverConfigStore.serverUrl.collect { url ->
                 _uiState.value = _uiState.value.copy(serverLabel = url)
                 if (url.isBlank()) {
                     _uiState.value = _uiState.value.copy(isLoading = false)
@@ -187,10 +188,10 @@ class HomeViewModel @Inject constructor(
     }
 
     private fun ensureClientInitialized(serverUrl: String): Boolean {
-        if (serverUrl.isBlank()) return RetrofitClient.isInitialized()
+        if (serverUrl.isBlank()) return serverConfig.isInitialized()
 
-        if (!RetrofitClient.isInitialized() || RetrofitClient.getBaseUrl() != serverUrl) {
-            RetrofitClient.initialize(serverUrl)
+        if (!serverConfig.isInitialized() || serverConfig.getBaseUrl() != serverUrl) {
+            serverConfig.setBaseUrl(serverUrl)
         }
         return true
     }

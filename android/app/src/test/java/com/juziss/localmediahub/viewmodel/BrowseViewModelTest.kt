@@ -7,6 +7,7 @@ import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
+import com.juziss.localmediahub.network.ServerConfig
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +26,9 @@ class BrowseViewModelTest {
         val favoritesStore = FavoritesStore(appContext, CoroutineScope(Dispatchers.Unconfined))
         val recentActivityStore = RecentActivityStore(appContext)
         val downloadsStore = DownloadsStore(appContext)
-        val repository = MediaRepository(OkHttpClient())
+        val httpClient = OkHttpClient()
+        val serverConfig = ServerConfig(httpClient)
+        val repository = MediaRepository(httpClient, serverConfig)
         val downloadManager = DownloadManager(appContext, repository, downloadsStore)
         val viewModel = BrowseViewModel(
             appContext = appContext,

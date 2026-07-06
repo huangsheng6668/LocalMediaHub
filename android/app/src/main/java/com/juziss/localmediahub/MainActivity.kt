@@ -15,7 +15,7 @@ import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.PlaybackProgressEntry
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.RecentMediaEntry
-import com.juziss.localmediahub.data.ServerConfig
+import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.ui.screen.BrowseScreen
 import com.juziss.localmediahub.ui.screen.ConnectionScreen
 import com.juziss.localmediahub.ui.screen.DownloadsScreen
@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
 @InstallIn(SingletonComponent::class)
 interface AppStoresEntryPoint {
     fun recentActivityStore(): RecentActivityStore
-    fun serverConfig(): ServerConfig
+    fun serverConfig(): ServerConfigStore
 }
 
 @AndroidEntryPoint

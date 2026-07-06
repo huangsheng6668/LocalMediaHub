@@ -17,7 +17,7 @@ import javax.inject.Singleton
 
 /**
  * Hilt module providing a singleton [OkHttpClient] + [Cache] shared across
- * MediaRepository, RetrofitClient, VideoPlayerScreen, and ConnectionViewModel.
+ * MediaRepository, ServerConfig, VideoPlayerScreen, and ConnectionViewModel.
  *
  * Round 17 collapses 4 historical OkHttpClient instances into one. Cache
  * lives under `cacheDir/okhttp/` (sibling to Coil's `cacheDir/coil/`) and is

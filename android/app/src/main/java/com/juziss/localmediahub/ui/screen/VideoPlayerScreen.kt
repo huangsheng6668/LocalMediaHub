@@ -142,7 +142,7 @@ fun VideoPlayerScreen(
 
         // Use the shared singleton OkHttpClient from OkHttpModule (exposed via
         // VideoPlayerViewModel). Round 17 C3 — single connection pool + 20MB
-        // cache shared with MediaRepository / RetrofitClient / LAN scan.
+        // cache shared with MediaRepository / ServerConfig / LAN scan.
         // DefaultHttpDataSource can stall on some routers, so OkHttp is used.
         val okClient = videoPlayerViewModel.provideHttpClient()
         val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okClient)

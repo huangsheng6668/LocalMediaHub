@@ -23,7 +23,7 @@ data class KnownServer(
     val lastConnected: Long = System.currentTimeMillis(),
 )
 
-class ServerConfig @Inject constructor(@ApplicationContext private val context: Context) {
+class ServerConfigStore @Inject constructor(@ApplicationContext private val context: Context) {
 
     companion object {
         private val KEY_SERVER_URL = stringPreferencesKey("server_url")

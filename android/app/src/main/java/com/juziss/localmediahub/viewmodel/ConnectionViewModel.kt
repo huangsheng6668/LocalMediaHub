@@ -8,9 +8,9 @@ import android.net.wifi.WifiManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.juziss.localmediahub.data.MediaRepository
-import com.juziss.localmediahub.data.ServerConfig
+import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.network.NetworkResult
-import com.juziss.localmediahub.network.RetrofitClient
+import com.juziss.localmediahub.network.ServerConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
@@ -42,19 +42,20 @@ data class DiscoveredServer(
 @HiltViewModel
 class ConnectionViewModel @Inject constructor(
     application: Application,
+    private val serverConfigStore: ServerConfigStore,
     private val serverConfig: ServerConfig,
     private val repository: MediaRepository,
     private val httpClient: OkHttpClient,
 ) : AndroidViewModel(application) {
 
-    val savedIp = serverConfig.serverIp.stateIn(
+    val savedIp = serverConfigStore.serverIp.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), ""
     )
-    val savedPort = serverConfig.serverPort.stateIn(
+    val savedPort = serverConfigStore.serverPort.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), "8000"
     )
 
-    val knownServers = serverConfig.knownServers.stateIn(
+    val knownServers = serverConfigStore.knownServers.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList()
     )
 
@@ -119,11 +120,10 @@ class ConnectionViewModel @Inject constructor(
             _connectionState.value = ConnectionState.Testing
             try {
                 val url = "http://$ip:$port"
-                RetrofitClient.setSharedClient(httpClient)
-                RetrofitClient.initialize(url)
+                serverConfig.setBaseUrl(url)
                 when (val result = repository.healthCheck()) {
                     is NetworkResult.Success -> {
-                        serverConfig.saveServerConfig(ip, port)
+                        serverConfigStore.saveServerConfig(ip, port)
                         _connectionState.value = ConnectionState.Connected(url)
                     }
                     is NetworkResult.Error -> {

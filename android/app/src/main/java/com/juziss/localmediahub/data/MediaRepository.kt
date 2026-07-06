@@ -14,7 +14,7 @@ import java.io.IOException
 import java.net.URLEncoder
 import javax.inject.Inject
 import com.juziss.localmediahub.network.NetworkResult
-import com.juziss.localmediahub.network.RetrofitClient
+import com.juziss.localmediahub.network.ServerConfig
 
 /**
  * Repository layer: wraps API calls with error handling.
@@ -28,10 +28,11 @@ import com.juziss.localmediahub.network.RetrofitClient
  */
 class MediaRepository @Inject constructor(
     private val http: OkHttpClient,
+    private val serverConfig: ServerConfig,
 ) {
 
     private val baseUrl
-        get() = RetrofitClient.getBaseUrl()
+        get() = serverConfig.getBaseUrl()
 
     private val gson = Gson()
 

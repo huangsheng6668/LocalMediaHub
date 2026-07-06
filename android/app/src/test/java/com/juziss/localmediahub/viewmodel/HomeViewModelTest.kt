@@ -5,8 +5,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
-import com.juziss.localmediahub.data.ServerConfig
-import com.juziss.localmediahub.network.RetrofitClient
+import com.juziss.localmediahub.data.ServerConfigStore
+import com.juziss.localmediahub.network.ServerConfig
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +33,7 @@ class HomeViewModelTest {
 
     private val dispatcher = StandardTestDispatcher()
     private lateinit var context: Context
+    private lateinit var serverConfigStore: ServerConfigStore
     private lateinit var serverConfig: ServerConfig
 
     @Before
@@ -41,13 +42,12 @@ class HomeViewModelTest {
         context = ApplicationProvider.getApplicationContext<Context>()
             ?: RuntimeEnvironment.getApplication()
         deleteDatastoreFiles()
-        serverConfig = ServerConfig(context)
-        resetRetrofitClient()
+        serverConfigStore = ServerConfigStore(context)
+        serverConfig = ServerConfig(OkHttpClient())
     }
 
     @After
     fun tearDown() = runTest {
-        resetRetrofitClient()
         deleteDatastoreFiles()
         Dispatchers.resetMain()
     }
@@ -63,42 +63,26 @@ class HomeViewModelTest {
 
     @Test
     fun `saved server config initializes retrofit before first refresh`() = runTest(dispatcher) {
-        serverConfig.saveServerConfig("127.0.0.1", "1")
+        serverConfigStore.saveServerConfig("127.0.0.1", "1")
 
-        // Round 17 C3: MediaRepository now constructor-injects the shared
-        // OkHttpClient, and RetrofitClient.initialize() requires
-        // setSharedClient() first. Provide a plain OkHttpClient for the test.
+        // Round 19 C1: ServerConfig (network) is a Hilt @Singleton holding the
+        // shared OkHttpClient + baseUrl state. No reflection reset needed — it
+        // is recreated as a fresh instance per test.
         val httpClient = OkHttpClient()
-        RetrofitClient.setSharedClient(httpClient)
         val viewModel = HomeViewModel(
             favoritesStore = FavoritesStore(context, CoroutineScope(Dispatchers.Unconfined)),
             recentActivityStore = RecentActivityStore(context),
+            serverConfigStore = serverConfigStore,
             serverConfig = serverConfig,
-            repository = MediaRepository(httpClient),
+            repository = MediaRepository(httpClient, serverConfig),
         )
 
         advanceUntilIdle()
 
-        assertTrue(RetrofitClient.isInitialized())
+        assertTrue(serverConfig.isInitialized())
         assertNotEquals(
-            "RetrofitClient not initialized. Call initialize() first.",
+            "ServerConfig not initialized.",
             viewModel.uiState.value.errorMessage,
         )
-    }
-
-    private fun resetRetrofitClient() {
-        RetrofitClient::class.java.getDeclaredField("_retrofit").apply {
-            isAccessible = true
-            set(RetrofitClient, null)
-        }
-        RetrofitClient::class.java.getDeclaredField("_baseUrl").apply {
-            isAccessible = true
-            set(RetrofitClient, "")
-        }
-        // Round 17 C3: clear the shared client so each test must re-arm it.
-        RetrofitClient::class.java.getDeclaredField("sharedClient").apply {
-            isAccessible = true
-            set(RetrofitClient, null)
-        }
     }
 }

@@ -122,7 +122,7 @@ fun HomeScreen(
                     }
                 },
                 actions = {
-                    val url = com.juziss.localmediahub.network.RetrofitClient.getBaseUrl()
+                    val url = uiState.serverLabel
                     if (url.isNotBlank()) {
                         IconButton(onClick = {
                             try {
@@ -198,7 +198,7 @@ fun HomeScreen(
                     onOpenDownloads = onOpenDownloads,
                     onOpenWeb = {
                         try {
-                            val url = com.juziss.localmediahub.network.RetrofitClient.getBaseUrl()
+                            val url = uiState.serverLabel
                             if (url.isNotEmpty()) {
                                 val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
                                 context.startActivity(intent)
