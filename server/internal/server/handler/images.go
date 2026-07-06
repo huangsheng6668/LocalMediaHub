@@ -29,6 +29,7 @@ func (h *Handler) GetImages(c echo.Context) error {
 
 	start, end := paginateBounds(len(images), page, pageSize)
 
+	setJsonCacheStandard(c)
 	return c.JSON(http.StatusOK, models.PaginatedMediaFiles{
 		Items:    images[start:end],
 		Total:    len(images),

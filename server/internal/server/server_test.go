@@ -143,6 +143,49 @@ func TestServerStartAndStopGracefulShutdown(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesJsonCacheControl(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0},
+		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: filepath.Join(t.TempDir(), "thumb"), MaxSize: 64, Format: "jpeg",
+		},
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	cases := []struct {
+		path      string
+		wantCache string
+	}{
+		// brief = 60s — endpoints that change when scan/add/delete files
+		{"/api/v1/folders", "private, max-age=60"},
+		{"/api/v1/search?q=foo", "private, max-age=60"},
+		// standard = 300s — endpoints that change with tag operations / paging
+		{"/api/v1/videos", "private, max-age=300"},
+		{"/api/v1/images", "private, max-age=300"},
+		{"/api/v1/tags", "private, max-age=300"},
+		// static = 3600s — almost never change
+		{"/api/v1/system/drives", "private, max-age=3600"},
+		// not cached: /system/browse is path-sensitive
+		// (cannot easily test without a real path — skip in unit test)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			s.Echo.ServeHTTP(rec, req)
+			cc := rec.Header().Get("Cache-Control")
+			if cc != tc.wantCache {
+				t.Errorf("Cache-Control = %q, want %q (status=%d)", cc, tc.wantCache, rec.Code)
+			}
+		})
+	}
+}
+
 func TestPprofRoute_RegisteredUnderDebugPrefix(t *testing.T) {
 	// Verify the route is wired up. Auth coverage lives in
 	// middleware.PrivateNetOnly tests.

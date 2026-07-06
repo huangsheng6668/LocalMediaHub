@@ -17,6 +17,7 @@ type CreateTagRequest struct {
 }
 
 func (h *Handler) GetTags(c echo.Context) error {
+	setJsonCacheStandard(c)
 	return c.JSON(http.StatusOK, h.tags.GetAllTags())
 }
 
@@ -84,6 +85,7 @@ func (h *Handler) GetTaggedFiles(c echo.Context) error {
 	if files == nil {
 		files = []string{}
 	}
+	setJsonCacheStandard(c)
 	return c.JSON(http.StatusOK, files)
 }
 
@@ -95,6 +97,7 @@ func (h *Handler) GetTaggedMedia(c echo.Context) error {
 
 	taggedPaths := h.tags.GetFilesForTag(tagID)
 	if len(taggedPaths) == 0 {
+		setJsonCacheStandard(c)
 		return c.JSON(http.StatusOK, []models.MediaFile{})
 	}
 
@@ -122,6 +125,7 @@ func (h *Handler) GetTaggedMedia(c echo.Context) error {
 		}
 	}
 
+	setJsonCacheStandard(c)
 	return c.JSON(http.StatusOK, result)
 }
 
@@ -133,9 +137,11 @@ func (h *Handler) GetFileTags(c echo.Context) error {
 	paths := c.QueryParams()["path"]
 	if len(paths) == 0 {
 		result := h.tags.GetAllFileTags()
+		setJsonCacheStandard(c)
 		return c.JSON(http.StatusOK, result)
 	}
 	result := h.tags.GetTagsForFiles(paths)
+	setJsonCacheStandard(c)
 	return c.JSON(http.StatusOK, result)
 }
 

@@ -66,6 +66,7 @@ func (h *Handler) Search(c echo.Context) error {
 
 	matchedFiles := h.searchFiles(files, searchPath, query, limit)
 
+	setJsonCacheBrief(c)
 	return c.JSON(http.StatusOK, models.SearchResult{
 		Query:   query,
 		Folders: matchedFolders,

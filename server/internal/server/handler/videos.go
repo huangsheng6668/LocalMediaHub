@@ -29,6 +29,7 @@ func (h *Handler) GetVideos(c echo.Context) error {
 
 	start, end := paginateBounds(len(videos), page, pageSize)
 
+	setJsonCacheStandard(c)
 	return c.JSON(http.StatusOK, models.PaginatedMediaFiles{
 		Items:    videos[start:end],
 		Total:    len(videos),

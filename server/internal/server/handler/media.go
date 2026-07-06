@@ -84,6 +84,7 @@ func (h *Handler) MediaDuration(c echo.Context) error {
 		return respondInternalError(c, err)
 	}
 
+	setJsonCacheStandard(c)
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"duration": duration,
 	})

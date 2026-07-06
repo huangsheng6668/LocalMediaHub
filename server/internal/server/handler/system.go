@@ -18,6 +18,7 @@ func (h *Handler) GetDrives(c echo.Context) error {
 	if roots == nil {
 		roots = []string{}
 	}
+	setJsonCacheStatic(c)
 	return c.JSON(http.StatusOK, roots)
 }
 

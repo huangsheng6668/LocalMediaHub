@@ -31,6 +31,7 @@ func (h *Handler) GetFolders(c echo.Context) error {
 			ModifiedTime: fi.ModTime(),
 		})
 	}
+	setJsonCacheBrief(c)
 	return c.JSON(http.StatusOK, folders)
 }
 
@@ -84,6 +85,7 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 			}
 		}
 
+		setJsonCacheBrief(c)
 		return c.JSON(http.StatusOK, matchedFiles)
 	}
 
@@ -166,6 +168,7 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 		}
 	}
 
+	setJsonCacheBrief(c)
 	return c.JSON(http.StatusOK, models.BrowseResult{
 		CurrentPath: pathStr,
 		Folders:     folders,

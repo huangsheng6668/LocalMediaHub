@@ -100,6 +100,24 @@ func setMediaCacheHeaders(c echo.Context) {
 	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
 }
 
+// JSON Cache-Control policy tiers.
+//
+// JSON responses are 'private' (not for CDN/proxy caching) because they
+// contain path / file metadata specific to this server's filesystem.
+// Contrast with media endpoints which use 'public, max-age=86400' (Round 3).
+const (
+	// cacheBrief: 60s — endpoints that change when scan/add/delete files.
+	cacheBrief = "private, max-age=60"
+	// cacheStandard: 300s — endpoints that change with tag operations / paging.
+	cacheStandard = "private, max-age=300"
+	// cacheStatic: 3600s — endpoints that almost never change.
+	cacheStatic = "private, max-age=3600"
+)
+
+func setJsonCacheBrief(c echo.Context)    { c.Response().Header().Set("Cache-Control", cacheBrief) }
+func setJsonCacheStandard(c echo.Context) { c.Response().Header().Set("Cache-Control", cacheStandard) }
+func setJsonCacheStatic(c echo.Context)   { c.Response().Header().Set("Cache-Control", cacheStatic) }
+
 // paginateBounds returns the [start, end) slice indices for a page-based
 // pagination, clamped to [0, total]. Used by GetVideos / GetImages which
 // previously duplicated this logic verbatim.
