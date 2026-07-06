@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
@@ -79,10 +80,12 @@ fun LocalMediaHubApp() {
     // Shared state for passing media data between screens
     // Keep media navigation payloads in memory only. Saving whole MediaFile objects and
     // image lists can stall the UI when opening large folders or image sets.
-    var currentVideoFile by remember { mutableStateOf<MediaFile?>(null) }
-    var currentVideoUrl by remember { mutableStateOf("") }
-    var currentVideoUsesSystemUrl by remember { mutableStateOf(false) }
-    var currentVideoStartPositionMs by remember { mutableLongStateOf(0L) }
+    // Round 20: rememberSaveable for process-death recovery.
+    // MediaFile is @Parcelize so it serializes to SavedStateHandle automatically.
+    var currentVideoFile by rememberSaveable { mutableStateOf<MediaFile?>(null) }
+    var currentVideoUrl by rememberSaveable { mutableStateOf("") }
+    var currentVideoUsesSystemUrl by rememberSaveable { mutableStateOf(false) }
+    var currentVideoStartPositionMs by rememberSaveable { mutableLongStateOf(0L) }
 
     var currentImageFile by remember { mutableStateOf<MediaFile?>(null) }
     var imageList by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
