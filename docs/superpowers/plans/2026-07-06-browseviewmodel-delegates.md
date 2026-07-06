@@ -33,7 +33,7 @@
 
 **Interfaces:**
 - Consumes: 无
-- Produces: `BrowseSharedState` 类（internal），含 `browseState` / `currentPath` / `pathStack` / `isSystemBrowse` / `rawFolders` / `rawFiles` 六个 `MutableStateFlow` + `emitBrowseError()` helper
+- Produces: `BrowseSharedState` 类（internal），含 `browseState` / `currentPath` / `pathStack` / `isSystemBrowse` / `rawFolders` / `rawFiles` / `folderSortOrder` / `fileSortOrder` / `activeTagFilter` / `showFavoritesOnly` 十个 `MutableStateFlow` + `emitBrowseError()` helper
 
 - [ ] **Step 1: Create BrowseSharedState.kt**
 
@@ -42,6 +42,9 @@ Create `android/app/src/main/java/com/juziss/localmediahub/viewmodel/BrowseShare
 ```kotlin
 package com.juziss.localmediahub.viewmodel
 
+import com.juziss.localmediahub.data.Folder
+import com.juziss.localmediahub.data.MediaFile
+import com.juziss.localmediahub.data.Tag
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -62,6 +65,12 @@ internal class BrowseSharedState {
     val isSystemBrowse = MutableStateFlow(false)
     val rawFolders = MutableStateFlow<List<Folder>>(emptyList())
     val rawFiles = MutableStateFlow<List<MediaFile>>(emptyList())
+
+    val folderSortOrder = MutableStateFlow(SortOrder.NAME_ASC)
+    val fileSortOrder = MutableStateFlow(SortOrder.NAME_ASC)
+
+    val activeTagFilter = MutableStateFlow<Tag?>(null)
+    val showFavoritesOnly = MutableStateFlow(false)
 
     fun emitBrowseError(message: String) {
         browseState.value = BrowseState.Error(message)
@@ -100,7 +109,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `appContext: Context`, `repository: MediaRepository`, `recentActivityStore: RecentActivityStore`, `sharedState: BrowseSharedState`
-- Produces: `BrowseNavigator` 类（internal）—— navigation + sort + scroll + 9 URL builders
+- Produces: `BrowseNavigator` 类（internal）—— navigation + sort + scroll + 6 URL builders
 
 **Extract these from BrowseViewModel into BrowseNavigator：**
 
@@ -111,7 +120,7 @@ EOF
 - `browseFolder(relativePath: String, folderName: String)` (line ~246)
 - `navigateBack()` (line ~268)
 - `canGoBack()` (line ~316)
-- `refreshCurrentDirectory()` (line ~685)
+- `refreshCurrentDirectory(onRefreshTagCollection: (suspend (Tag) -> Unit)? = null)` (line ~685)
 - `setFolderSortOrder(order: SortOrder)` (line ~318)
 - `setFileSortOrder(order: SortOrder)` (line ~345)
 - `saveScrollPosition(path: String, index: Int)` (line ~115)
@@ -120,13 +129,10 @@ EOF
 - `getVideoStreamUrl(file: MediaFile): String` (line ~417)
 - `getThumbnailUrl(file: MediaFile): String` (line ~421)
 - `getOriginalImageUrl(file: MediaFile): String` (line ~425)
-- `getFavoriteVideoStreamUrl(file: MediaFile): String` (line ~433)
-- `getFavoriteThumbnailUrl(file: MediaFile): String` (line ~437)
-- `getFavoriteOriginalImageUrl(file: MediaFile): String` (line ~441)
 - `emitBrowseError(message: String)` (line ~413) → `sharedState.emitBrowseError(message)`
 - 私有 helper：`applyFolderResult(data: BrowseResult)` (line ~379)、`applySystemResult(data: SystemBrowseResult)` (line ~394)
 
-**State 迁移：** 所有 `_folderSortOrder` / `_fileSortOrder` / `_scrollPositions` / `_restoreScrollTo` 从 BrowseViewModel 搬到 BrowseNavigator 作为私有字段。暴露 `val folderSortOrder: StateFlow<SortOrder>`、`val fileSortOrder: StateFlow<SortOrder>`、`val restoreScrollTo: StateFlow<String?>` 等 public 属性。
+**State 迁移：** `_scrollPositions` / `_restoreScrollTo` 从 BrowseViewModel 搬到 BrowseNavigator 作为私有字段。`_folderSortOrder` / `_fileSortOrder` 移至 BrowseSharedState。暴露 `val restoreScrollTo: StateFlow<String?>` 等 public 属性。
 
 **函数体内引用替换：**
 - `_browseState` → `sharedState.browseState`
@@ -135,6 +141,9 @@ EOF
 - `_isSystemBrowse` → `sharedState.isSystemBrowse`
 - `_rawFolders` → `sharedState.rawFolders`
 - `_rawFiles` → `sharedState.rawFiles`
+- `_folderSortOrder` → `sharedState.folderSortOrder`
+- `_fileSortOrder` → `sharedState.fileSortOrder`
+- `_activeTagFilter` → `sharedState.activeTagFilter`
 
 - [ ] **Step 1: Create BrowseNavigator.kt with all extracted functions**
 
@@ -144,12 +153,6 @@ Open `android/app/src/main/java/com/juziss/localmediahub/viewmodel/BrowseViewMod
 
 BrowseNavigator 的 state 结构（在类体内声明）：
 ```kotlin
-private val _folderSortOrder = MutableStateFlow(SortOrder.NAME_ASC)
-val folderSortOrder: StateFlow<SortOrder> = _folderSortOrder.asStateFlow()
-
-private val _fileSortOrder = MutableStateFlow(SortOrder.NAME_ASC)
-val fileSortOrder: StateFlow<SortOrder> = _fileSortOrder.asStateFlow()
-
 private val _scrollPositions = mutableMapOf<String, Int>()
 private val _restoreScrollTo = MutableStateFlow<String?>(null)
 val restoreScrollTo: StateFlow<String?> = _restoreScrollTo.asStateFlow()
@@ -197,11 +200,12 @@ EOF
 | `toggleFavorite(file, isSystemBrowse)` (line ~160) | 完整搬迁；`viewModelScope.launch { ... }` 改为 `suspend fun toggleFavorite(...)`
 | `isFavorite(relativePath): Boolean` | 完整搬迁 |
 | `isFavoriteSystemBrowse(file): Boolean` | 完整搬迁 |
-| `setShowFavoritesOnly(show)` | 完整搬迁 |
-| `filterFilesByFavorites(files): List<MediaFile>` | 完整搬迁 |
-| `getFavoriteVideoStreamUrl(file): String` | 完整搬迁（BrowseNavigator 也有 URL builders——这两个有 favorites 前缀，留 FavoritesController）|
-| `getFavoriteThumbnailUrl(file): String` | 同上 |
-| `getFavoriteOriginalImageUrl(file): String` | 同上 |
+| `setShowFavoritesOnly(show)` | 完整搬迁（写 `sharedState.showFavoritesOnly`） |
+| `filterFilesByFavorites(files): List<MediaFile>` | 完整搬迁（读 `sharedState.showFavoritesOnly`） |
+| `getFavoriteVideoStreamUrl(file): String` | 完整搬迁（与 getVideoStreamUrl 统一依赖 repository）|
+| `getFavoriteThumbnailUrl(file): String` | 完整搬迁 |
+| `getFavoriteOriginalImageUrl(file): String` | 完整搬迁 |
+| `associateFavoriteModes()` helper | 完整搬迁（private extension function） |
 | 3 个 init collectors (lines ~139-153) | 抽象为 `fun startCollecting(scope: CoroutineScope)` |
 
 **State 迁移：**
@@ -211,8 +215,7 @@ val favorites: StateFlow<Set<String>> = _favorites.asStateFlow()
 private val _favoriteFiles = MutableStateFlow<List<MediaFile>>(emptyList())
 val favoriteFiles: StateFlow<List<MediaFile>> = _favoriteFiles.asStateFlow()
 private val _favoriteAccessModes = MutableStateFlow<Map<String, Boolean>>(emptyMap())
-private val _showFavoritesOnly = MutableStateFlow(false)
-val showFavoritesOnly: StateFlow<Boolean> = _showFavoritesOnly.asStateFlow()
+// showFavoritesOnly 放在 BrowseSharedState，FavoritesController 中暴露 val showFavoritesOnly = sharedState.showFavoritesOnly.asStateFlow()
 ```
 
 - [ ] **Step 1: Create FavoritesController.kt — 搬迁上述函数 + state**
@@ -234,7 +237,7 @@ git commit -m "refactor(viewmodel): extract FavoritesController delegate (round 
 - Consumes: `repository: MediaRepository`, `sharedState: BrowseSharedState`
 - Produces: `TagController` 类（internal）—— tags state + CRUD + collection
 
-**Extract from BrowseViewModel：** 12 个 tags 相关函数（lines ~466-618）+ 3 个 state flows。`openCollection(tag)` 函数体引用 `sharedState.rawFolders` / `sharedState.rawFiles` / `_fileSortOrder` → 需格外小心。
+**Extract from BrowseViewModel：** 12 个 tags 相关函数（lines ~466-618）+ 2 个 state flows (`_tags`, `_fileTags`)。`_activeTagFilter` 已包含在 `sharedState.activeTagFilter`。`openCollection(tag)` 函数体修改 `sharedState.browseState` / `sharedState.showFavoritesOnly` / `sharedState.activeTagFilter` / `sharedState.currentPath` / `sharedState.pathStack` / `sharedState.isSystemBrowse` / `sharedState.rawFolders` / `sharedState.rawFiles` 并使用 `sharedState.fileSortOrder` 排序。
 
 - [ ] **Step 1: Create TagController.kt**
 - [ ] **Step 2: Verify build + tests**
