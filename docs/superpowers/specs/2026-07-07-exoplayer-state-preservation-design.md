@@ -12,22 +12,14 @@
 
 当前 ExoPlayer 播放状态有两个问题：
 
-### 1.1 旋转屏后不 seekTo
+### 1.1 旋转屏后 seek 恢复不完美与转码视频失效
 
-`VideoPlayerScreen.kt` 已有 `rememberSaveable { mutableLongStateOf(initialPositionMs) }` 保存 `savedPositionMs`，`wrappedOnProgress` 每 5 秒更新该值。但 ExoPlayer 在 `remember(streamUrl)` 块内创建时：
+虽然 `VideoPlayerScreen.kt` 已有 `rememberSaveable { mutableLongStateOf(initialPositionMs) }` 保存 `savedPositionMs`，并尝试在 `LaunchedEffect(exoPlayer)` 中进行 `seekTo`，但这存在以下主要问题：
 
-```kotlin
-ExoPlayer.Builder(context)
-    .setLoadControl(loadControl)
-    .setMediaSourceFactory(mediaSource)
-    .build().apply {
-        setMediaItem(mediaItem)
-        prepare()       // ← 没有 seekTo(savedPositionMs)
-        playWhenReady = true
-    }
-```
-
-旋转后 ExoPlayer 重建，从头开始播放——`savedPositionMs` 保存了但从未使用。
+1. **异步 Seek 导致画面闪烁**：`LaunchedEffect` 在 Composable 首次组合并渲染后才在协程中异步执行。此时 ExoPlayer 已经开始调用 `prepare()` 并播放（`playWhenReady = true`），因此会先从 0 秒播放几帧再跳转到 `savedPositionMs`，导致画面闪烁或短暂的“声音/画面回弹”。
+2. **转码视频 seekTo 失效**：若当前流为转码流（URL 中带有 `transcode=true`），由于服务端不支持 Range 分块请求，对其直接调用 `exoPlayer.seekTo(savedPositionMs)` 会失效或导致卡顿。必须通过 `buildStreamUrl(streamUrl, true, savedPositionMs / 1000.0)` 重新构造带 `start` 参数的播放 URL 让服务端从指定位置开始转码。
+3. **未绑定 Key 导致状态污染**：`rememberSaveable` 未绑定 `streamUrl` 作为 Key，当在同一个 Screen 实例中切换不同视频时，上一个视频的播放位置可能会残留并污染新视频。
+4. **Seek 动作不同步**：当用户在界面上手势拖拽或使用系统控制条 Seek 时，`savedPositionMs` 只能等 5 秒定时器触发后才更新。在此期间若发生旋转或进程被杀，会丢失最近一次 Seek 的进度。
 
 ### 1.2 进程被杀后无法恢复
 
@@ -56,7 +48,11 @@ var currentVideoStartPositionMs by remember { mutableLongStateOf(0L) }
 ## 2. 目标与非目标
 
 ### 目标
-1. **C1 旋转屏 seekTo**：ExoPlayer 创建时 `seekTo(savedPositionMs)`（`prepare()` 之前），`savedPositionMs > 0` 时才 seek。
+1. **C1 旋转屏与进程恢复时精准 Seek**：
+   - **普通视频（直链）**：在 `remember(streamUrl)` 块内、ExoPlayer 调用 `prepare()` 之前同步执行 `seekTo(savedPositionMs)`，避免异步 seek 的画面闪烁。
+   - **转码视频（`transcode=true`）**：若 `savedPositionMs > 0`，在 `remember(streamUrl)` 块内使用 `buildStreamUrl` 重新构造带 `start` 参数的媒体源 URL，代替直接 `seekTo`，实现对转码视频的精准进度恢复。
+   - **绑定 Key**：`rememberSaveable` 绑定 `streamUrl` 作为输入 Key，确保切换视频时状态能正确重置。
+   - **即时更新**：监听 `Player.Listener.onPositionDiscontinuity`，在发生 Seek 动作时立即同步更新 `savedPositionMs`。
 2. **C2 进程被杀恢复**：`currentVideoFile` / `currentVideoUrl` / `currentVideoUsesSystemUrl` / `currentVideoStartPositionMs` 改为 `rememberSaveable`，进程被杀后 Activity 重建时自动恢复。
 3. **零行为变化（首次播放）**：首次播放时 `savedPositionMs = 0`，不 seekTo，从头播放。
 4. **现有测试不回归**：57 JVM tests 全过。
@@ -81,9 +77,10 @@ var currentVideoStartPositionMs by remember { mutableLongStateOf(0L) }
 ### 3.2 关键约束
 
 - `MediaFile` 已 `@Parcelize : Parcelable`（`Models.kt:10-22`，已验证）——可直接存入 `rememberSaveable`
-- `seekTo` 必须在 `prepare()` 之前（ExoPlayer 文档推荐）
-- `savedPositionMs > 0` 时才 seekTo（避免首次播放无意义 seek）
-- `rememberSaveable` 替换后，Compose Navigation back stack 自动持久化到 `SavedStateHandle`
+- `seekTo` / 转码 URL 重构必须在 `prepare()` 之前（ExoPlayer 文档推荐，规避异步 seek 闪烁）
+- `savedPositionMs > 0` 时才 seekTo 或重构转码 URL（避免首次播放无意义 seek/重构）
+- `rememberSaveable(streamUrl)` 必须使用 `streamUrl` 作为 key，防止切换视频时数据残留
+- `Player.Listener` 需增加 `onPositionDiscontinuity` 监听，保证拖动进度条或手势 seek 时立刻更新 `savedPositionMs`
 - `playWhenReady = true` 保持不变（不保留暂停状态 — YAGNI）
 - Compose Navigation 已配置 `navController.navigate("videoPlayer")`，进程恢复时 back stack 自动重建
 
@@ -91,9 +88,21 @@ var currentVideoStartPositionMs by remember { mutableLongStateOf(0L) }
 
 ## 4. 实现细节
 
-### 4.1 C1: 旋转屏 seekTo
+### 4.1 C1: 旋转屏 seekTo 优化
 
-**`ui/screen/VideoPlayerScreen.kt` — `remember(streamUrl)` 块：**
+**1. 状态定义优化（增加 key）：**
+
+当前：
+```kotlin
+var savedPositionMs by rememberSaveable { mutableLongStateOf(initialPositionMs) }
+```
+
+改为：
+```kotlin
+var savedPositionMs by rememberSaveable(streamUrl) { mutableLongStateOf(initialPositionMs) }
+```
+
+**2. `remember(streamUrl)` 块内逻辑优化（支持转码流 seek）：**
 
 当前（约 line 154-163）：
 ```kotlin
@@ -110,20 +119,81 @@ ExoPlayer.Builder(context)
 
 改为：
 ```kotlin
-ExoPlayer.Builder(context)
-    .setLoadControl(loadControl)
-    .setMediaSourceFactory(mediaSource)
-    .build().apply {
-        val mediaItem = MediaItem.fromUri(streamUrl)
-        setMediaItem(mediaItem)
-        // Round 20: seek to saved position before prepare.
-        // savedPositionMs is rememberSaveable so it survives rotation.
-        // Only seek if > 0 to avoid no-op on first play.
-        if (savedPositionMs > 0) {
-            seekTo(savedPositionMs)
+val isTranscoding = streamUrl.contains("transcode=true")
+val finalUrl = if (isTranscoding && savedPositionMs > 0L) {
+    buildStreamUrl(streamUrl, true, savedPositionMs / 1000.0)
+} else {
+    streamUrl
+}
+
+val exoPlayer = remember(streamUrl) {
+    // ... loadControl, dataSourceFactory, mediaSource 定义保持不变 ...
+
+    ExoPlayer.Builder(context)
+        .setLoadControl(loadControl)
+        .setMediaSourceFactory(mediaSource)
+        .build().apply {
+            val mediaItem = MediaItem.fromUri(finalUrl)
+            setMediaItem(mediaItem)
+            // Round 20: seek to saved position before prepare (only for non-transcoded streams).
+            // Transcoded streams are seeked via url parameters reconstruction.
+            if (!isTranscoding && savedPositionMs > 0L) {
+                seekTo(savedPositionMs)
+            }
+            prepare()
+            playWhenReady = true
         }
-        prepare()
-        playWhenReady = true
+}
+```
+
+**3. 移除原有的 LaunchedEffect 初始化 seek：**
+
+原有代码：
+```kotlin
+    // Initial seek on player creation only — NOT keyed on savedPositionMs,
+    // otherwise every 5s progress update re-seeks and fights the user's scrubber.
+    LaunchedEffect(exoPlayer) {
+        if (savedPositionMs > 0L) {
+            exoPlayer.seekTo(savedPositionMs)
+        }
+    }
+```
+**直接将其全部删除**。因为在 ExoPlayer 构建阶段已完成了同步 seek 或转码 URL 的重构，此处的异步 seek 已是冗余且可能引发竞态或直接 seek 转码视频报错。
+
+**4. 增加 `Player.Listener` 监听以实现即时进度同步：**
+
+在 `DisposableEffect(exoPlayer)` 注册 of `Player.Listener` 中（约 line 188-208）新增 `onPositionDiscontinuity` 回调，以实时捕捉进度变化：
+```kotlin
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    wrappedOnProgress(exoPlayer.duration, exoPlayer.duration)
+                }
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    val activity = context as? Activity ?: return
+                    activity.requestedOrientation = if (videoSize.width >= videoSize.height) {
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    } else {
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    }
+                }
+            }
+
+            // Round 20: Update savedPositionMs immediately on any seek/discontinuity.
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                savedPositionMs = exoPlayer.currentPosition
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener) }
     }
 ```
 
@@ -205,7 +275,7 @@ var currentVideoStartPositionMs by rememberSaveable { mutableLongStateOf(0L) }
 
 1. **`playWhenReady` 不保留**：旋转/进程恢复后自动播放。如果用户暂停后旋转，会自动恢复播放。YAGNI 当前轮。
 2. **进程被杀恢复依赖 Compose Navigation back stack**：如果用户在 videoPlayer 页面被杀，恢复时直接进 videoPlayer。如果用户在 Browse 页面被杀，恢复后不会自动跳到 videoPlayer——这是正确行为（用户不在视频页）。
-3. **`savedPositionMs` 每 5 秒更新一次**：旋转或杀进程时可能丢失最多 5 秒进度。可接受（视频通常长得多）。
+3. **`savedPositionMs` 进度保存时效**：对于常规播放进度，每 5 秒更新一次，可能会在非正常进程被杀时丢失最多 5 秒进度。但对于主动 Seek 动作（包括手势拖动与控制栏拖动），已通过 `onPositionDiscontinuity` 实现了毫秒级即时同步保存，不会丢失 Seek 后的进度。
 4. **无 `ActivityScenario` 集成测试**：进程被杀场景难以 JVM 单测。手工验证为主。
 
 ---
