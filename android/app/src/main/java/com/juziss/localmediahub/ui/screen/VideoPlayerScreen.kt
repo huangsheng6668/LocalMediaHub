@@ -23,11 +23,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -100,7 +97,6 @@ fun VideoPlayerScreen(
     initialPositionMs: Long = 0L,
     onProgress: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     onBack: () -> Unit,
-    onDelete: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -260,9 +256,6 @@ fun VideoPlayerScreen(
     var playPauseIndicator by remember { mutableStateOf(GestureIndicator()) }
     var brightnessIndicator by remember { mutableStateOf(GestureIndicator()) }
     var volumeIndicator by remember { mutableStateOf(GestureIndicator()) }
-
-    // ---- Delete confirm (G2) ----
-    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     // Auto-hide play/pause indicator
     LaunchedEffect(playPauseIndicator.visible) {
@@ -518,48 +511,17 @@ fun VideoPlayerScreen(
             }
         }
 
-        // Back + Delete buttons (top-start row)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        // Back button
+        IconButton(
+            onClick = onBack,
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(top = 8.dp, start = 4.dp)
+                .padding(top = 8.dp, start = 4.dp),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.back),
-                    tint = Color.White,
-                )
-            }
-            if (onDelete != null) {
-                IconButton(onClick = { showDeleteConfirm = true }) {
-                    Icon(
-                        Icons.Filled.Delete,
-                        contentDescription = stringResource(R.string.delete),
-                        tint = Color.White,
-                    )
-                }
-            }
-        }
-
-        // Delete confirmation dialog (only when onDelete is provided)
-        if (showDeleteConfirm && onDelete != null) {
-            AlertDialog(
-                onDismissRequest = { showDeleteConfirm = false },
-                title = { Text(stringResource(R.string.video_delete_title)) },
-                text = { Text(stringResource(R.string.video_delete_desc)) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showDeleteConfirm = false
-                        onDelete?.invoke()
-                    }) { Text(stringResource(R.string.delete)) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDeleteConfirm = false }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                }
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.back),
+                tint = Color.White,
             )
         }
     }
