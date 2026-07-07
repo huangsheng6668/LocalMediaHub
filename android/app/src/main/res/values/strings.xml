@@ -29,6 +29,12 @@
     <string name="home_section_collections_desc">通过标签一键直达，无需层层翻找文件夹</string>
     <string name="home_section_continue">继续播放</string>
     <string name="home_section_continue_desc">继续播放未看完的视频，精确恢复上次的播放进度</string>
+
+    <!-- ── Resume playback dialog ─────────────────────────── -->
+    <string name="resume_dialog_title">继续播放</string>
+    <string name="resume_dialog_message">上次看到 %1$s，是否从该进度继续播放？</string>
+    <string name="resume_dialog_btn_restart">从头开始</string>
+    <string name="resume_dialog_btn_resume">继续播放</string>
     <string name="home_section_recent">最近浏览</string>
     <string name="home_section_recent_desc">快速重新打开您最近浏览过的视频或图片</string>
     <string name="home_section_favorites">我的最爱</string>
