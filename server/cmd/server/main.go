@@ -24,7 +24,7 @@ func main() {
 	}
 
 	// Start mDNS
-	mdnsSvc, err := localmdns.NewService(cfg.Server.Host, cfg.Server.Port)
+	mdnsSvc, err := localmdns.NewService()
 	if err != nil {
 		slog.Warn("Failed to create mDNS service", "error", err)
 	} else {
