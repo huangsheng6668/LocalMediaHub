@@ -94,7 +94,7 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
 - **网络:** Retrofit + OkHttp。
 - **图片:** Coil（含 NativeDecoderFactory）。
 - **视频:** Media3 (ExoPlayer) + 预编译 libffmpeg.so。
-- **原生解码:** Rust crate `localmedia_native`（`android/app/src/main/rust/`），通过 `cargo-ndk` 交叉编译到 `arm64-v8a`，Gradle `buildRustNative` task 在 `preBuild` 阶段自动调用。Kotlin 侧入口在 `native/`（`NativeImageDecoder` / `NativeExif` / `NaturalSorter`）。**仓库根目录的 `build_native_libs.sh` 是遗留脚本，针对已删除的 `cpp/` C 实现，请勿使用。**
+- **原生解码:** Rust crate `localmedia_native`（`android/app/src/main/rust/`），通过 `cargo-ndk` 交叉编译到 `arm64-v8a`，Gradle `buildRustNative` task 在 `preBuild` 阶段自动调用。Kotlin 侧入口在 `native/`（`NativeImageDecoder` / `NativeExif` / `NaturalSorter`）。
 - **异步:** Coroutines。
 
 ## Go Server 架构

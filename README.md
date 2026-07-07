@@ -288,8 +288,6 @@ cargo install cargo-ndk
 
 `cargo-ndk` 会自动探测 `ANDROID_NDK_HOME` / `ANDROID_NDK_ROOT`（或 build.gradle.kts 中的 NDK 解析逻辑）。目标架构仅 `arm64-v8a`。
 
-> 注：仓库根目录的 `build_native_libs.sh` 是**遗留脚本**，针对已被取代的 C/C++ 实现路径（`cpp/` 目录已删除），不再有效，请勿使用。
-
 `libffmpeg.so` 为预编译产物，直接放在 `jniLibs/arm64-v8a/` 下，不参与 Rust 构建链。
 
 ## 开发与同步
