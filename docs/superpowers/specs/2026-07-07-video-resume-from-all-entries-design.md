@@ -102,61 +102,128 @@ suspend fun getPlaybackProgress(
 但设计上:"继续观看"卡片**不应显示进度 ≥95% 的条目**——否则会变成一个永远从头播的卡片。
 过滤逻辑复用 `isCompleted`。
 
-### 3. 统一的"打开视频"辅助函数(`MainActivity.kt`)
+### 3. 统一的"打开视频"校验与逻辑控制 (`MainActivity.kt`)
 
-把 6 个入口里重复的"`currentVideoXxx = ...` + `navController.navigate("videoPlayer")`"
-抽成一个 suspend 辅助函数(顶层私有函数,挂在 `MainActivity.kt` 文件里):
+为了避免传递过多繁琐的回调，利用 Kotlin 的 `sealed class` 优雅地表达"直接播放"与"弹窗确认"两种业务分支：
 
 ```kotlin
-private suspend fun openVideoWithResume(
+sealed class VideoOpenAction {
+    data class PlayDirectly(val positionMs: Long) : VideoOpenAction()
+    data class ShowCompletedDialog(val positionMs: Long, val durationMs: Long) : VideoOpenAction()
+}
+```
+
+在 `MainActivity.kt` 中实现私有 `suspend` 辅助函数，自动把视频点击加入最近打开历史，并查询/判定应当执行的动作：
+
+```kotlin
+private suspend fun checkPlaybackProgress(
     file: MediaFile,
     isSystemBrowse: Boolean,
-    streamUrl: String,
     store: RecentActivityStore,
-    onReady: (file: MediaFile, url: String, positionMs: Long, isSystemBrowse: Boolean) -> Unit,
-    onCompletedDialog: (file: MediaFile, positionMs: Long, durationMs: Long, resumeAction: () -> Unit) -> Unit,
-    navigateToVideoPlayer: () -> Unit,
+): VideoOpenAction {
+    // 自动保存至最近浏览列表，避免各入口重复编写 addRecentMedia 逻辑
+    store.addRecentMedia(file, isSystemBrowse)
+    
+    val progress = store.getPlaybackProgress(file, isSystemBrowse)
+    return if (progress != null && isValidProgress(progress.positionMs, progress.durationMs)) {
+        if (isCompleted(progress.positionMs, progress.durationMs)) {
+            VideoOpenAction.ShowCompletedDialog(progress.positionMs, progress.durationMs)
+        } else {
+            VideoOpenAction.PlayDirectly(progress.positionMs)
+        }
+    } else {
+        VideoOpenAction.PlayDirectly(0L)
+    }
+}
+```
+
+在 `LocalMediaHubApp` 顶层，使用局部 lambda `playVideo` 收拢 setter 赋值和导航跳转：
+
+```kotlin
+val playVideo = { file: MediaFile, url: String, positionMs: Long, isSys: Boolean ->
+    currentVideoFile = file
+    currentVideoUrl = url
+    currentVideoStartPositionMs = positionMs
+    currentVideoUsesSystemUrl = isSys
+    navController.navigate("videoPlayer")
+}
+```
+
+各个点击入口（共 6 个受影响入口）直接调用 `checkPlaybackProgress` 配合 `when` 进行分支处理。以 `BrowseScreen` 的 `onVideoClick` 为例：
+
+```kotlin
+onVideoClick = { file ->
+    appScope.launch {
+        val isSystemBrowse = browseViewModel.isSystemBrowseMode()
+        val streamUrl = browseViewModel.getVideoStreamUrl(file)
+        when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
+            is VideoOpenAction.PlayDirectly -> {
+                playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
+            }
+            is VideoOpenAction.ShowCompletedDialog -> {
+                resumeRequest = ResumePlaybackRequest(
+                    file = file,
+                    isSystemBrowse = isSystemBrowse,
+                    streamUrl = streamUrl,
+                    positionMs = action.positionMs,
+                    durationMs = action.durationMs
+                )
+            }
+        }
+    }
+}
+```
+
+### 4. 确认弹窗与状态维护 (`ResumePlaybackDialog`)
+
+在 `ui/component/` 新增 `ResumePlaybackDialog`，其状态由挂在 `LocalMediaHubApp` 顶层的 `mutableStateOf<ResumePlaybackRequest?>` 维护：
+
+```kotlin
+data class ResumePlaybackRequest(
+    val file: MediaFile,
+    val isSystemBrowse: Boolean,
+    val streamUrl: String,
+    val positionMs: Long,
+    val durationMs: Long,
 )
 ```
 
-行为:
+**交互分支与状态清理规则**：
+- **点击“继续播放”**：调用 `playVideo(req.file, req.streamUrl, req.positionMs, req.isSystemBrowse)` 并设置 `resumeRequest = null`。
+- **点击“从头开始”**：在 `appScope` 中启动协程异步调用 `recentActivityStore.clearPlaybackProgress(req.file, req.isSystemBrowse)`，随后调用 `playVideo(req.file, req.streamUrl, 0L, req.isSystemBrowse)`，并将 `resumeRequest = null`。
+- **取消 / 点击外部 / 物理返回键**：直接设置 `resumeRequest = null`（页面保持原样，取消任何界面跳转）。
 
-1. 调 `store.getPlaybackProgress(file, isSystemBrowse)`
-2. 分三种情况:
-   - `null`(没记录 / 播放不到 10 秒)→ `onReady(file, url, 0L, isSystemBrowse)` + `navigateToVideoPlayer()`
-   - 有记录且 `!isCompleted` → `onReady(file, url, progress.positionMs, isSystemBrowse)` + `navigateToVideoPlayer()`
-   - 有记录且 `isCompleted` → 调 `onCompletedDialog(...)`,把以下两种选择交给 UI:
-     - 选"继续" → 同上一种情况(position = progress.positionMs)
-     - 选"从头" → 调 `store.clearPlaybackProgress(file, isSystemBrowse)` 后 `onReady(file, url, 0L, isSystemBrowse)` + navigate
+**规范与优化**：
+- **时间格式化复用**：将 `HomeComponents.kt` 中私有的 `formatTime` 提取至公共工具类 `com.juziss.localmediahub.util.TimeUtil` 中，并在 `ResumePlaybackDialog` 和 `HomeComponents` 中实现复用，避免代码冗余。
+- **硬编码消除与汉化**：弹窗的所有文字必须采用 `strings.xml` 资源，并遵循中文规范：
+  ```xml
+  <string name="resume_dialog_title">继续播放</string>
+  <string name="resume_dialog_message">上次看到 %1$s，是否从该进度继续播放？</string>
+  <string name="resume_dialog_btn_restart">从头开始</string>
+  <string name="resume_dialog_btn_resume">继续播放</string>
+  ```
+- **默认聚焦优化（分段策略）**：本弹窗**仅在视频已播放完毕（进度 ≥95%）时**展示。为了同时覆盖"几乎看完想重看"和"接近看完但被打断、仍想继续"两种场景，默认焦点按进度阈值分段：
+  - **95% ≤ progress < 98%**：默认聚焦 **"继续播放"**。这种情况通常是网络中断、手机断电、误退出等"非真正看完"场景，用户大概率想接着看。
+  - **progress ≥ 98%**：默认聚焦 **"从头开始"**。这种情况视频已实质看完，再次打开大概率是为了重看；同时如果默认聚焦"继续"会瞬间跳转至片尾然后黑屏/退出，体验差。
 
-`onReady` 回调就是把 `MainActivity` 里的 `currentVideoFile = ...` 等四个 setter 收拢成一行。
-
-### 4. 对话框 Composable
-
-新增 `ResumePlaybackDialog`(放在 `ui/component/` 下,具体文件待实现时决定):
-
-- 内容:`上次看到 ${formatTimestamp(positionMs)},继续?`
-- 两个按钮:`[从头开始]` `[继续]`(默认聚焦"继续")
-- 时间戳格式:超过 60 分钟显示 `H:MM:SS`,否则 `MM:SS`
-
-对话框状态由一个 `mutableStateOf<ResumeRequest?>`(`sealed class` 或 `data class`)
-挂在 `LocalMediaHubApp` 顶层。`onCompletedDialog` 回调把请求塞进去,UI 层渲染对话框,
-用户点按钮后调对应分支并清空状态。
+  阈值常量 `COMPLETED_FOCUS_THRESHOLD = 0.98` 与 `isCompleted` 用的 `0.95` 一并定义在 `RecentActivityStore.kt` 顶层（或 `TimeUtil.kt` 邻近的常量区），避免散落 magic number。这同样修正了原 Brainstorm 阶段的 D2 决定，以更细粒度地匹配真实用户意图。
 
 ### 5. 数据流总览
 
 ```
-用户点击视频(任意入口)
-  → openVideoWithResume(file, isSystemBrowse, streamUrl, ...)
-  → store.getPlaybackProgress(file, isSystemBrowse)
-       ├─ null / < 10s
-       │     → onReady(pos = 0) → navigate("videoPlayer")
-       ├─ 10s ≤ pos < 95%
-       │     → onReady(pos = progress.positionMs) → navigate("videoPlayer")
-       └─ pos ≥ 95% (已看完)
-             → 显示 ResumePlaybackDialog
-                  ├─ 点"继续"  → onReady(pos = progress.positionMs) → navigate
-                  └─ 点"从头" → clearPlaybackProgress + onReady(pos = 0) → navigate
+用户点击视频 (6 个不同入口)
+  → 调用 checkPlaybackProgress(file, isSystemBrowse, store)
+  → 添加最近打开历史 (store.addRecentMedia) 并查询进度 (store.getPlaybackProgress)
+       ├─ 无进度 / 进度记录失效 (< 10s)
+       │     → 返回 PlayDirectly(pos = 0L) → 调 playVideo() → 导航至播放器
+       ├─ 未看完 (10s <= progress < 95%)
+       │     → 返回 PlayDirectly(pos = positionMs) → 调 playVideo() → 导航至播放器
+       └─ 已看完 (progress >= 95%)
+             → 返回 ShowCompletedDialog → 赋值给顶层状态 resumeRequest
+             → 渲染展现 ResumePlaybackDialog
+                  ├─ 点击“继续” → 调 playVideo(pos = positionMs) 并清空 resumeRequest
+                  ├─ 点击“从头” → 异步清除进度并调 playVideo(pos = 0L) 并清空 resumeRequest
+                  └─ 点击外部/返回键 → 清空 resumeRequest (留在当前页面)
 ```
 
 播放过程中 VideoPlayerScreen 的 `onProgress` 继续周期性保存(已有逻辑,不动)。
@@ -198,10 +265,11 @@ private suspend fun openVideoWithResume(
 - **首次进入新服务器**:`relativePath` 是相对路径,跨服务器可能重复——但这是现有
   机制已经接受的行为,本设计不引入新风险。
 
-## 开放问题
+## 开放问题与修订建议
 
-无。所有关键决定已在 brainstorming 阶段敲定:
-- Q3 = E(所有入口都续播)
-- Q4 = c(看完弹窗)
-- D1 = b(简洁文案"上次看到 MM:SS,继续?")
-- D2 = "继续"作为默认聚焦按钮
+所有关键决策已根据用户体验（UX）与工程最佳实践进行了细化与修正：
+- **Q3 (入口支持)**: 所有 6 个打开入口均集成该进度校验机制。
+- **Q4 (触发条件)**: 仅在视频进度 ≥95% 时触发选择弹窗；<95% 进度时系统自动无缝续播。
+- **D1 (文案设计)**: 采用规范的汉化文案 `"上次看到 MM:SS，是否从该进度继续播放？"`。
+- **D2 (聚焦按钮)**: **修正为按进度分段策略**。`95% ≤ progress < 98%` 默认聚焦"继续播放"(覆盖断电/断网等非真正看完的场景),`progress ≥ 98%` 默认聚焦"从头开始"(实质看完,避免瞬间跳转片尾黑屏)。阈值常量统一在 `RecentActivityStore.kt` 顶层定义。
+- **公共抽取**: `formatTime` 转移到 `TimeUtil.kt`，实现两个 Composable 模块之间的最佳代码复用。
