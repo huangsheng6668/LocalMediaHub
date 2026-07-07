@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // largeStreamBuffer is the read/write buffer size for direct (non-transcoded)
@@ -270,11 +271,22 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// killOnce guarantees cmd.Process.Kill() is called at most once and only
+	// when cmd.Process is non-nil, eliminating the prior nil-deref panic and
+	// the double-kill risk between the ctx-cancel goroutine and the write-fail
+	// branch in the main loop below.
+	var killOnce sync.Once
+	killCmd := func() {
+		killOnce.Do(func() {
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+		})
+	}
+
 	go func() {
 		<-ctx.Done()
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-		}
+		killCmd()
 	}()
 
 	// Use a large buffer + explicit flush for transcoded streams too.
@@ -286,7 +298,7 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 		n, readErr := bufReader.Read(buf)
 		if n > 0 {
 			if _, wErr := w.Write(buf[:n]); wErr != nil {
-				cmd.Process.Kill()
+				killCmd()
 				return nil
 			}
 			if flusher != nil {
