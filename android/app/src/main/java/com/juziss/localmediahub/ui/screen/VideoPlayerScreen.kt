@@ -99,6 +99,7 @@ fun VideoPlayerScreen(
     initialPositionMs: Long = 0L,
     onProgress: (positionMs: Long, durationMs: Long) -> Unit = { _, _ -> },
     onBack: () -> Unit,
+    // G2 will wire this to a top-bar delete IconButton
     onDelete: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
