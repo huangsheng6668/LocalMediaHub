@@ -63,7 +63,7 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 
 ### Server (Go, 当前版本)
 
-- **语言**: Go 1.22+
+- **语言**: Go 1.24+
 - **框架**: Echo v4
 - **依赖**: getlantern/systray (系统托盘), hashicorp/mdns
 - **配置**: YAML 文件
@@ -108,23 +108,28 @@ localResourcesToPhone/
 │
 ├── android/                      # Android 客户端
 │   ├── app/
-│   │   ├── build.gradle.kts      # 模块构建配置
+│   │   ├── build.gradle.kts      # 模块构建配置（compileSdk 34, minSdk 26, targetSdk 34）
 │   │   ├── CMakeLists.txt        # NDK 原生编译
 │   │   └── src/main/
 │   │       ├── java/com/juziss/localmediahub/
-│   │       │   ├── MainActivity.kt
-│   │       │   ├── data/         # Model + Repository + DataStore
+│   │       │   ├── LocalMediaHubApplication.kt  # Hilt Application
+│   │       │   ├── MainActivity.kt              # 入口 + NavHost 路由 + 视频续播调度
+│   │       │   ├── data/         # Model + Repository + DataStore（收藏、最近活动、播放进度、下载、路由）
+│   │       │   ├── di/           # Hilt 模块（CoroutineScopesModule）
 │   │       │   ├── network/      # Retrofit 接口 + OkHttp
 │   │       │   ├── native/       # NativeDecoderFactory (Coil)
 │   │       │   ├── ui/
-│   │       │   │   ├── screen/   # 页面 Composable
+│   │       │   │   ├── screen/   # 页面 Composable（Home / Connection / Browse / VideoPlayer / ImagePreview / Downloads）
 │   │       │   │   └── component/# 可复用组件
-│   │       │   └── viewmodel/    # ViewModel 层
+│   │       │   │       ├── home/    # 首页卡片（Hero / Library / ContinueWatching / RecentMedia …）
+│   │       │   │       └── browse/  # 浏览子组件（TopBar / Sort / Search / Favorites / Delete 对话框 …）
+│   │       │   ├── util/         # 公共工具（TimeUtil、NetUtil、CacheCleanup）
+│   │       │   └── viewmodel/    # ViewModel 层（Home / Browse 主 VM + Browse delegate：Navigator / Sorter / Search / Tag / Favorites / Download / Delete）
 │   │       ├── cpp/              # JNI 原生代码
 │   │       └── jniLibs/          # 预编译 .so (FFmpeg)
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-└── docs/                         # 文档
+└── docs/                         # 文档（含 superpowers/specs 与 superpowers/plans）
 ```
 
 ## 快速开始
@@ -157,7 +162,7 @@ server:
 
 scan:
   video_extensions: [.mp4, .mkv, .avi, .mov, .wmv, .flv, .ts]
-  image_extensions: [.jpg, .jpeg, .png, .gif, .bmp, .webp]
+  image_extensions: [.jpg, .jpeg, .png, .gif, .bmp, .webp, .pdf]
 
 thumbnail:
   cache_dir: ".cache/thumbnails"
