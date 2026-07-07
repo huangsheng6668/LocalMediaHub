@@ -180,3 +180,53 @@
 - [x] **#17 路线:** ~~Wails 桌面应用 vs 当前 systray + 内嵌 Web,保留哪个?(影响是否删 `server/frontend/`)~~ → **已决策: 保留托盘 + 内联 Web 模式**
 - [x] **#13 国际化范围:** ~~仅中文 strings.xml,还是预留多语言?~~ → **已决策:仅中文 strings.xml**
 - [x] **#15 DI:** ~~是否引入 Hilt?~~ → **已决策:引入 Hilt**
+
+---
+
+## Round 23 — 全面体检后优化批次（2026-07-08）
+
+> 基于 2026-07-07 对 Go 服务端 + Android 客户端 + Web UI 三大模块的全面代码体检（剔除测试覆盖维度）。
+> Spec: `docs/superpowers/specs/2026-07-07-round-23-cleanup-player-home-design.md`
+> Plan: `docs/superpowers/plans/2026-07-07-round-23-cleanup-player-home.md`
+> Worktree: `.claude/worktrees/round-23-cleanup` (12 commits, 485a1f5..18c5212)
+
+### G1 — 死代码与 bug 清理（10 项）
+
+| # | commit | 说明 |
+|---|---|---|
+| G1-1 | fe60f87 | 删除 `searchFolders` 死代码 |
+| G1-2/3 | 99ef4db | 删除 `var _ models.FileTag` + 修 `%2F` 双重解码 |
+| G1-5 | 7f38c52 | 删除 BrowseViewModel 4 个未用 import + `associateFavoriteModes` 死函数 |
+| G1-6/7 | fd156fc | `mdns.NewService()` 简化签名 + `fmt.Printf` → `slog.Info` |
+| G1-8 | b108cdf | DeletePath 错误响应改用 `respondError`，停止泄露内部原因 |
+| G1-9 | fc013f9 | 转码流 `start` 参数校验（NaN/负数/>86400 拒绝） |
+| G1-10 | 5eda1aa | Range 解析失败返回 400 而非静默 fallback |
+| G1-11 | 3220000 | Scanner `bgCtx`/`bgCancel` 加锁，修数据竞争 |
+| G1-12 | 67ffd76 | `serveTranscoded` 用 `sync.Once` 包裹 `Kill()`，防 nil panic + double-kill |
+| G1-4 | c155842 | VideoPlayerScreen.onDelete 加 TODO 注释（G2 激活后移除） |
+
+### G3 — 首页状态合并（1 项）
+
+| # | commit | 说明 |
+|---|---|---|
+| G3 | 7c75c17 | HomeViewModel 6 个独立 launch 合并为 1 个 `combine` flow + 1 个 `serverUrl` 副作用 launch；自定义 6 参数 combine 扩展函数；`favoriteAccessModes` 改为不可变 Map 整体替换 |
+
+### G2 — 视频播放器体验（2 项，合并提交）
+
+| # | commit | 说明 |
+|---|---|---|
+| G2-1 + G2-2 | 18c5212 | VideoPlayerScreen 加 STATE_BUFFERING 缓冲圈 overlay；删除按钮（与 back 同 Row）+ AlertDialog 确认；MainActivity 已传 onDelete，无需改动；strings 复用 `back`/`delete`/`cancel`/`video_delete_title`/`video_delete_desc` |
+
+### 已剔除（不在本轮范围）
+
+- B1（搜索 O(n)）、B2（cap 预估）、B4（sync.Pool）、B5（扫描并发调优）— 待真实瓶颈
+- C2/C3（admin 鉴权）— 单独议题
+- D3/D4/D6/E2/E3/E5 — 收益小或非阻塞
+
+### 验证
+
+- ✅ Go `go test ./...` 全部通过（race 检测因环境无 gcc 跳过）
+- ✅ Android `./gradlew testDebugUnitTest assembleDebug` 通过
+- ✅ 死代码 grep 全部清除（`searchFolders` / `%2F` / `var _ models` / `fmt.Printf` in mdns）
+- ⚠️ UI 行为（缓冲圈/删除按钮）需设备实测
+
