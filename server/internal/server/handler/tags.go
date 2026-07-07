@@ -48,7 +48,6 @@ func (h *Handler) DeleteTag(c echo.Context) error {
 func (h *Handler) AssociateTag(c echo.Context) error {
 	tagID := c.Param("tag_id")
 	pathStr := c.Param("*")
-	pathStr = strings.ReplaceAll(pathStr, "%2F", "/")
 
 	if !h.tags.TagExists(tagID) {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
@@ -68,7 +67,6 @@ func (h *Handler) AssociateTag(c echo.Context) error {
 func (h *Handler) DisassociateTag(c echo.Context) error {
 	tagID := c.Param("tag_id")
 	pathStr := c.Param("*")
-	pathStr = strings.ReplaceAll(pathStr, "%2F", "/")
 
 	if err := h.tags.DisassociateFile(tagID, pathStr); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -128,9 +126,6 @@ func (h *Handler) GetTaggedMedia(c echo.Context) error {
 	setJsonCacheStandard(c)
 	return c.JSON(http.StatusOK, result)
 }
-
-// ensure models import is used
-var _ models.FileTag
 
 // GetFileTags returns tags for all files, or specific files if paths are provided.
 func (h *Handler) GetFileTags(c echo.Context) error {
