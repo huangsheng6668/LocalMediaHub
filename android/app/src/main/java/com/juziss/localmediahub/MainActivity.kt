@@ -102,7 +102,7 @@ fun LocalMediaHubApp() {
             ConnectionScreen(
                 onConnected = {
                     navController.navigate("home") {
-                        popUpTo("connection") { inclusive = false }
+                        popUpTo("connection") { inclusive = true }
                     }
                 },
                 onBrowseOffline = {
