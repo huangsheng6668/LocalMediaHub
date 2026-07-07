@@ -59,12 +59,31 @@ internal fun mergeRecentMedia(
         .take(limit)
 }
 
-internal fun shouldKeepPlaybackProgress(
-    positionMs: Long,
-    durationMs: Long,
-): Boolean {
-    if (positionMs < 10_000L || durationMs <= 0L) return false
-    return positionMs < (durationMs * 0.95).toLong()
+/** 进度低于此值(毫秒)的播放不保存。 */
+internal const val MIN_KEEP_POSITION_MS: Long = 10_000L
+
+/** 进度达到 duration × 此比例视为"已看完",会触发弹窗。 */
+internal const val COMPLETED_RATIO: Double = 0.95
+
+/** 进度达到 duration × 此比例时,弹窗默认聚焦"从头开始"。 */
+internal const val COMPLETED_FOCUS_RATIO: Double = 0.98
+
+/** 进度是否值得保存(>= 10 秒且有时长)。 */
+internal fun isValidProgress(positionMs: Long, durationMs: Long): Boolean {
+    if (positionMs < MIN_KEEP_POSITION_MS || durationMs <= 0L) return false
+    return true
+}
+
+/** 进度是否视为"已看完"(>= 95%)。仅在有时长时有意义。 */
+internal fun isCompleted(positionMs: Long, durationMs: Long): Boolean {
+    if (durationMs <= 0L) return false
+    return positionMs >= (durationMs * COMPLETED_RATIO).toLong()
+}
+
+/** 弹窗是否应当默认聚焦"从头开始"(>= 98%)。仅在有时长时有意义。 */
+internal fun shouldFocusRestart(positionMs: Long, durationMs: Long): Boolean {
+    if (durationMs <= 0L) return false
+    return positionMs >= (durationMs * COMPLETED_FOCUS_RATIO).toLong()
 }
 
 internal fun mergePlaybackProgress(
@@ -143,7 +162,7 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
     ) {
         context.recentActivityDataStore.edit { preferences ->
             val current = decodePlaybackProgress(preferences[playbackProgressKey])
-            if (!shouldKeepPlaybackProgress(positionMs, durationMs)) {
+            if (!isValidProgress(positionMs, durationMs)) {
                 preferences[playbackProgressKey] = gson.toJson(
                     current.filterNot {
                         it.file.relativePath == file.relativePath && it.isSystemBrowse == isSystemBrowse

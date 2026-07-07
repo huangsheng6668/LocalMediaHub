@@ -43,10 +43,36 @@ class RecentActivityStoreTest {
     }
 
     @Test
-    fun `shouldKeepPlaybackProgress only keeps meaningful unfinished playback`() {
-        assertFalse(shouldKeepPlaybackProgress(positionMs = 5_000L, durationMs = 120_000L))
-        assertTrue(shouldKeepPlaybackProgress(positionMs = 30_000L, durationMs = 120_000L))
-        assertFalse(shouldKeepPlaybackProgress(positionMs = 119_000L, durationMs = 120_000L))
+    fun `isValidProgress rejects sub-threshold positions and invalid durations`() {
+        assertFalse(isValidProgress(positionMs = 5_000L, durationMs = 120_000L))
+        assertTrue(isValidProgress(positionMs = 10_000L, durationMs = 120_000L))
+        assertFalse(isValidProgress(positionMs = 30_000L, durationMs = 0L))
+        assertFalse(isValidProgress(positionMs = 30_000L, durationMs = -1L))
+    }
+
+    @Test
+    fun `isCompleted treats positions at or above 95 percent as completed`() {
+        assertFalse(isCompleted(positionMs = 94_999L, durationMs = 100_000L))
+        assertTrue(isCompleted(positionMs = 95_000L, durationMs = 100_000L))
+        assertTrue(isCompleted(positionMs = 99_999L, durationMs = 100_000L))
+        // 无效时长不算完成
+        assertFalse(isCompleted(positionMs = 95_000L, durationMs = 0L))
+    }
+
+    @Test
+    fun `shouldFocusRestart only true at or above 98 percent`() {
+        assertFalse(shouldFocusRestart(positionMs = 97_999L, durationMs = 100_000L))
+        assertTrue(shouldFocusRestart(positionMs = 98_000L, durationMs = 100_000L))
+        assertTrue(shouldFocusRestart(positionMs = 100_000L, durationMs = 100_000L))
+        assertFalse(shouldFocusRestart(positionMs = 98_000L, durationMs = 0L))
+    }
+
+    @Test
+    fun `isValidProgress allows completed-level positions to be saved`() {
+        // 与旧 shouldKeepPlaybackProgress 不同,新逻辑允许 95% 以上的进度被保存。
+        // savePlaybackProgress 改用 isValidProgress 后,这一行为变化通过此测试锁定。
+        assertTrue(isValidProgress(positionMs = 95_000L, durationMs = 100_000L))
+        assertTrue(isValidProgress(positionMs = 100_000L, durationMs = 100_000L))
     }
 
     @Test
