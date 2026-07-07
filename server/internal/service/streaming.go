@@ -136,12 +136,16 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 		} else {
 			start, err = strconv.ParseInt(parts[0], 10, 64)
 			if err != nil {
-				start = 0
+				w.Header().Del("Accept-Ranges")
+				w.WriteHeader(http.StatusBadRequest)
+				return nil
 			}
 			if parts[1] != "" {
 				end, err = strconv.ParseInt(parts[1], 10, 64)
 				if err != nil {
-					end = size - 1
+					w.Header().Del("Accept-Ranges")
+					w.WriteHeader(http.StatusBadRequest)
+					return nil
 				}
 			} else {
 				end = size - 1
