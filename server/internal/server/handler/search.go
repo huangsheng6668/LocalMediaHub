@@ -108,10 +108,6 @@ func (h *Handler) searchFiles(files []models.MediaFile, scopedPath, query string
 	return matchedFiles
 }
 
-func (h *Handler) searchFolders(scopedPath, query string, limit int) ([]models.Folder, error) {
-	return h.searchFoldersCtx(context.Background(), scopedPath, query, limit)
-}
-
 // searchFoldersCtx walks the roots looking for folders whose name matches the
 // query. The ctx lets the walk abort early when the request is cancelled, so a
 // slow search doesn't keep eating IO after the client has disconnected.
