@@ -17,6 +17,12 @@ import com.juziss.localmediahub.data.PlaybackProgressEntry
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.RecentMediaEntry
 import com.juziss.localmediahub.data.ServerConfigStore
+import com.juziss.localmediahub.data.isCompleted
+import com.juziss.localmediahub.data.isValidProgress
+import com.juziss.localmediahub.data.shouldFocusRestart
+import com.juziss.localmediahub.ui.component.ResumePlaybackDialog
+import com.juziss.localmediahub.ui.component.ResumePlaybackRequest
+import com.juziss.localmediahub.ui.component.VideoOpenAction
 import com.juziss.localmediahub.ui.screen.BrowseScreen
 import com.juziss.localmediahub.ui.screen.ConnectionScreen
 import com.juziss.localmediahub.ui.screen.DownloadsScreen
@@ -91,11 +97,21 @@ fun LocalMediaHubApp() {
     var imageList by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
     var currentImageUsesSystemUrl by remember { mutableStateOf(false) }
     var currentImageIsLocal by remember { mutableStateOf(false) }
- 
+
+    var resumeRequest by remember { mutableStateOf<ResumePlaybackRequest?>(null) }
+
     val appScope = rememberCoroutineScope()
     val browseViewModel: BrowseViewModel = hiltViewModel()
     val homeViewModel: HomeViewModel = hiltViewModel()
     val downloadedEntries by browseViewModel.downloadedFiles.collectAsState(initial = emptyList())
+
+    val playVideo = { file: MediaFile, url: String, positionMs: Long, isSys: Boolean ->
+        currentVideoFile = file
+        currentVideoUrl = url
+        currentVideoStartPositionMs = positionMs
+        currentVideoUsesSystemUrl = isSys
+        navController.navigate("videoPlayer")
+    }
 
     NavHost(navController = navController, startDestination = "connection") {
         composable("connection") {
@@ -150,36 +166,54 @@ fun LocalMediaHubApp() {
                     )
                 },
                 onOpenRecentMedia = { entry ->
-                    openRecentMedia(
-                        entry = entry,
-                        homeViewModel = homeViewModel,
-                        navController = navController,
-                        onVideoReady = { file, url ->
-                            currentVideoFile = file
-                            currentVideoUrl = url
-                        },
-                        onImageReady = { file, images ->
-                            currentImageFile = file
-                            imageList = images
-                            currentImageUsesSystemUrl = entry.isSystemBrowse
-                            currentImageIsLocal = false
-                        },
-                    )
-                },
-                onFavoriteClick = { file ->
                     appScope.launch {
-                        recentActivityStore.addRecentMedia(
-                            file = file,
-                            isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file),
+                        openRecentMedia(
+                            entry = entry,
+                            homeViewModel = homeViewModel,
+                            recentActivityStore = recentActivityStore,
+                            onVideoReady = { file, url, positionMs ->
+                                currentVideoFile = file
+                                currentVideoUrl = url
+                                currentVideoStartPositionMs = positionMs
+                                currentVideoUsesSystemUrl = entry.isSystemBrowse
+                            },
+                            onShowResumeDialog = { req -> resumeRequest = req },
+                            onImageReady = { file, images ->
+                                currentImageFile = file
+                                imageList = images
+                                currentImageUsesSystemUrl = entry.isSystemBrowse
+                                currentImageIsLocal = false
+                            },
+                            navigateToVideoPlayer = { navController.navigate("videoPlayer") },
+                            navigateToImagePreview = { navController.navigate("imagePreview") },
                         )
                     }
+                },
+                onFavoriteClick = { file ->
                     if (file.mediaType == "video") {
-                        currentVideoFile = file
-                        currentVideoUrl = homeViewModel.getFavoriteStreamUrl(file)
-                        currentVideoUsesSystemUrl = homeViewModel.isFavoriteSystemBrowse(file)
-                        currentVideoStartPositionMs = 0L
-                        navController.navigate("videoPlayer")
+                        appScope.launch {
+                            val isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file)
+                            val streamUrl = homeViewModel.getFavoriteStreamUrl(file)
+                            when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
+                                is VideoOpenAction.PlayDirectly ->
+                                    playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
+                                is VideoOpenAction.ShowCompletedDialog ->
+                                    resumeRequest = ResumePlaybackRequest(
+                                        file = file,
+                                        isSystemBrowse = isSystemBrowse,
+                                        streamUrl = streamUrl,
+                                        positionMs = action.positionMs,
+                                        durationMs = action.durationMs,
+                                    )
+                            }
+                        }
                     } else {
+                        appScope.launch {
+                            recentActivityStore.addRecentMedia(
+                                file = file,
+                                isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file),
+                            )
+                        }
                         currentImageFile = file
                         imageList = listOf(file)
                         currentImageUsesSystemUrl = homeViewModel.isFavoriteSystemBrowse(file)
@@ -199,11 +233,21 @@ fun LocalMediaHubApp() {
                 onOpenDownloads = { navController.navigate("downloads") },
                 onDownloadClick = { entry ->
                     if (entry.file.mediaType == "video") {
-                        currentVideoFile = entry.file
-                        currentVideoUrl = "file://${entry.localPath}"
-                        currentVideoUsesSystemUrl = false
-                        currentVideoStartPositionMs = 0L
-                        navController.navigate("videoPlayer")
+                        appScope.launch {
+                            val streamUrl = "file://${entry.localPath}"
+                            when (val action = checkPlaybackProgress(entry.file, false, recentActivityStore)) {
+                                is VideoOpenAction.PlayDirectly ->
+                                    playVideo(entry.file, streamUrl, action.positionMs, false)
+                                is VideoOpenAction.ShowCompletedDialog ->
+                                    resumeRequest = ResumePlaybackRequest(
+                                        file = entry.file,
+                                        isSystemBrowse = false,
+                                        streamUrl = streamUrl,
+                                        positionMs = action.positionMs,
+                                        durationMs = action.durationMs,
+                                    )
+                            }
+                        }
                     } else {
                         currentImageFile = entry.file
                         imageList = listOf(entry.file)
@@ -221,16 +265,21 @@ fun LocalMediaHubApp() {
                 onExitBrowse = { navController.popBackStack() },
                 onVideoClick = { file ->
                     appScope.launch {
-                        recentActivityStore.addRecentMedia(
-                            file = file,
-                            isSystemBrowse = browseViewModel.isSystemBrowseMode(),
-                        )
+                        val isSystemBrowse = browseViewModel.isSystemBrowseMode()
+                        val streamUrl = browseViewModel.getVideoStreamUrl(file)
+                        when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
+                            is VideoOpenAction.PlayDirectly ->
+                                playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
+                            is VideoOpenAction.ShowCompletedDialog ->
+                                resumeRequest = ResumePlaybackRequest(
+                                    file = file,
+                                    isSystemBrowse = isSystemBrowse,
+                                    streamUrl = streamUrl,
+                                    positionMs = action.positionMs,
+                                    durationMs = action.durationMs,
+                                )
+                        }
                     }
-                    currentVideoFile = file
-                    currentVideoUrl = browseViewModel.getVideoStreamUrl(file)
-                    currentVideoUsesSystemUrl = browseViewModel.isSystemBrowseMode()
-                    currentVideoStartPositionMs = 0L
-                    navController.navigate("videoPlayer")
                 },
                 onImageClick = { file, images ->
                     appScope.launch {
@@ -247,16 +296,20 @@ fun LocalMediaHubApp() {
                 },
                 onFavoriteVideoClick = { file, isSystemBrowse ->
                     appScope.launch {
-                        recentActivityStore.addRecentMedia(
-                            file = file,
-                            isSystemBrowse = isSystemBrowse,
-                        )
+                        val streamUrl = browseViewModel.getFavoriteVideoStreamUrl(file)
+                        when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
+                            is VideoOpenAction.PlayDirectly ->
+                                playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
+                            is VideoOpenAction.ShowCompletedDialog ->
+                                resumeRequest = ResumePlaybackRequest(
+                                    file = file,
+                                    isSystemBrowse = isSystemBrowse,
+                                    streamUrl = streamUrl,
+                                    positionMs = action.positionMs,
+                                    durationMs = action.durationMs,
+                                )
+                        }
                     }
-                    currentVideoFile = file
-                    currentVideoUrl = browseViewModel.getFavoriteVideoStreamUrl(file)
-                    currentVideoUsesSystemUrl = isSystemBrowse
-                    currentVideoStartPositionMs = 0L
-                    navController.navigate("videoPlayer")
                 },
                 onFavoriteImageClick = { file, images, isSystemBrowse ->
                     appScope.launch {
@@ -350,11 +403,21 @@ fun LocalMediaHubApp() {
             DownloadsScreen(
                 onBack = { navController.popBackStack() },
                 onVideoClick = { file, localPath ->
-                    currentVideoFile = file
-                    currentVideoUrl = "file://$localPath"
-                    currentVideoUsesSystemUrl = false
-                    currentVideoStartPositionMs = 0L
-                    navController.navigate("videoPlayer")
+                    appScope.launch {
+                        val streamUrl = "file://$localPath"
+                        when (val action = checkPlaybackProgress(file, false, recentActivityStore)) {
+                            is VideoOpenAction.PlayDirectly ->
+                                playVideo(file, streamUrl, action.positionMs, false)
+                            is VideoOpenAction.ShowCompletedDialog ->
+                                resumeRequest = ResumePlaybackRequest(
+                                    file = file,
+                                    isSystemBrowse = false,
+                                    streamUrl = streamUrl,
+                                    positionMs = action.positionMs,
+                                    durationMs = action.durationMs,
+                                )
+                        }
+                    }
                 },
                 onImageClick = { file, images ->
                     currentImageFile = file
@@ -367,23 +430,64 @@ fun LocalMediaHubApp() {
             )
         }
     }
+
+    resumeRequest?.let { req ->
+        val focusResume = !shouldFocusRestart(req.positionMs, req.durationMs)
+        ResumePlaybackDialog(
+            request = req,
+            focusResume = focusResume,
+            onRestart = {
+                appScope.launch {
+                    recentActivityStore.clearPlaybackProgress(req.file, req.isSystemBrowse)
+                    playVideo(req.file, req.streamUrl, 0L, req.isSystemBrowse)
+                    resumeRequest = null
+                }
+            },
+            onResume = {
+                playVideo(req.file, req.streamUrl, req.positionMs, req.isSystemBrowse)
+                resumeRequest = null
+            },
+            onDismiss = {
+                resumeRequest = null
+            },
+        )
+    }
 }
 
-private fun openRecentMedia(
+private suspend fun openRecentMedia(
     entry: RecentMediaEntry,
     homeViewModel: HomeViewModel,
-    navController: NavHostController,
-    onVideoReady: (MediaFile, String) -> Unit,
+    recentActivityStore: RecentActivityStore,
+    onVideoReady: (MediaFile, String, Long) -> Unit,
+    onShowResumeDialog: (ResumePlaybackRequest) -> Unit,
     onImageReady: (MediaFile, List<MediaFile>) -> Unit,
+    navigateToVideoPlayer: () -> Unit,
+    navigateToImagePreview: () -> Unit,
 ) {
     if (entry.file.mediaType == "video") {
-        onVideoReady(entry.file, homeViewModel.getVideoStreamUrl(entry))
-        navController.navigate("videoPlayer")
+        val streamUrl = homeViewModel.getVideoStreamUrl(entry)
+        when (val action = checkPlaybackProgress(entry.file, entry.isSystemBrowse, recentActivityStore)) {
+            is VideoOpenAction.PlayDirectly -> {
+                onVideoReady(entry.file, streamUrl, action.positionMs)
+                navigateToVideoPlayer()
+            }
+            is VideoOpenAction.ShowCompletedDialog -> {
+                onShowResumeDialog(
+                    ResumePlaybackRequest(
+                        file = entry.file,
+                        isSystemBrowse = entry.isSystemBrowse,
+                        streamUrl = streamUrl,
+                        positionMs = action.positionMs,
+                        durationMs = action.durationMs,
+                    )
+                )
+            }
+        }
         return
     }
 
     onImageReady(entry.file, listOf(entry.file))
-    navController.navigate("imagePreview")
+    navigateToImagePreview()
 }
 
 private fun openPlaybackProgress(
@@ -399,4 +503,25 @@ private fun openPlaybackProgress(
         entry.isSystemBrowse,
     )
     navController.navigate("videoPlayer")
+}
+
+/**
+ * 检查视频是否有可恢复的播放进度,并返回应执行的动作。
+ * 副作用:把该视频加入"最近打开"列表。
+ */
+private suspend fun checkPlaybackProgress(
+    file: MediaFile,
+    isSystemBrowse: Boolean,
+    store: RecentActivityStore,
+): VideoOpenAction {
+    store.addRecentMedia(file, isSystemBrowse)
+    val progress = store.getPlaybackProgress(file, isSystemBrowse)
+        ?: return VideoOpenAction.PlayDirectly(0L)
+    return if (!isValidProgress(progress.positionMs, progress.durationMs)) {
+        VideoOpenAction.PlayDirectly(0L)
+    } else if (isCompleted(progress.positionMs, progress.durationMs)) {
+        VideoOpenAction.ShowCompletedDialog(progress.positionMs, progress.durationMs)
+    } else {
+        VideoOpenAction.PlayDirectly(progress.positionMs)
+    }
 }
