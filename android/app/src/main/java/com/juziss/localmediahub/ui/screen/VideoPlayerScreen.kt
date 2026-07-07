@@ -21,13 +21,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Brightness6
-import androidx.compose.material.icons.filled.FastForward
-import androidx.compose.material.icons.filled.FastRewind
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
@@ -351,7 +348,7 @@ fun VideoPlayerScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Icon(
-                    if (seekState.offsetMs >= 0) Icons.Default.FastForward else Icons.Default.FastRewind,
+                    painter = painterResource(if (seekState.offsetMs >= 0) R.drawable.ic_fast_forward else R.drawable.ic_fast_rewind),
                     contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.size(24.dp)
@@ -378,8 +375,15 @@ fun VideoPlayerScreen(
                     .size(64.dp)
                     .background(Color.Black.copy(alpha = 0.6f), CircleShape)
             ) {
+                val iconResId = playPauseIndicator.iconResId
+                val iconVector = playPauseIndicator.icon
+                val playPausePainter = when {
+                    iconResId != null -> painterResource(iconResId)
+                    iconVector != null -> rememberVectorPainter(iconVector)
+                    else -> rememberVectorPainter(Icons.Default.PlayArrow)
+                }
                 Icon(
-                    playPauseIndicator.icon ?: Icons.Default.PlayArrow,
+                    painter = playPausePainter,
                     contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.size(36.dp)
@@ -400,7 +404,7 @@ fun VideoPlayerScreen(
                     .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Icon(Icons.Default.Brightness6, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(painterResource(R.drawable.ic_brightness_6), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(brightnessIndicator.text, color = Color.White, fontSize = 14.sp)
             }
@@ -419,7 +423,7 @@ fun VideoPlayerScreen(
                     .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(painterResource(R.drawable.ic_volume_up), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(volumeIndicator.text, color = Color.White, fontSize = 14.sp)
             }

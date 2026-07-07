@@ -19,8 +19,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.res.painterResource
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.viewmodel.SortOrder
 
@@ -33,7 +33,7 @@ internal fun BrowseSortMenu(
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
     IconButton(onClick = { showSortMenu = true }) {
-        Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = stringResource(R.string.sort))
+        Icon(painterResource(R.drawable.ic_sort), contentDescription = stringResource(R.string.sort))
     }
     DropdownMenu(
         expanded = showSortMenu,

@@ -14,12 +14,9 @@ import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -189,7 +186,7 @@ fun DownloadsScreen(
                         modifier = Modifier.padding(24.dp)
                     ) {
                         Icon(
-                            Icons.Filled.CloudOff,
+                            painterResource(R.drawable.ic_cloud_off),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                             modifier = Modifier.size(64.dp)
@@ -219,7 +216,7 @@ fun DownloadsScreen(
                         modifier = Modifier.padding(24.dp)
                     ) {
                         Icon(
-                            Icons.Filled.FolderOpen,
+                            painterResource(R.drawable.ic_folder_open),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                             modifier = Modifier.size(64.dp)
@@ -420,7 +417,7 @@ private fun FolderItemCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Folder,
+                    painter = painterResource(R.drawable.ic_folder),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(28.dp)
@@ -538,7 +535,7 @@ private fun DownloadItemCard(
                     )
                 } else {
                     Icon(
-                        Icons.Filled.Movie,
+                        painterResource(R.drawable.ic_movie),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(32.dp)

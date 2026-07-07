@@ -10,8 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Movie
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -88,7 +87,7 @@ internal fun FolderCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
-                        Icons.Filled.Folder,
+                        painterResource(R.drawable.ic_folder),
                         contentDescription = stringResource(R.string.folder),
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary,
@@ -151,7 +150,7 @@ internal fun VideoCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.Filled.Movie,
+                        painterResource(R.drawable.ic_movie),
                         contentDescription = null,
                         modifier = Modifier.size(32.dp),
                         tint = MaterialTheme.colorScheme.secondary

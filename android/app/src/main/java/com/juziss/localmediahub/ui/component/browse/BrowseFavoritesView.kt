@@ -3,8 +3,7 @@ package com.juziss.localmediahub.ui.component.browse
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -28,7 +27,7 @@ internal fun BrowseFavoritesView(
         modifier = modifier.fillMaxSize(),
     ) {
         BrowseSummaryCard(
-            icon = Icons.Outlined.FavoriteBorder,
+            icon = painterResource(R.drawable.ic_favorite_border_outline),
             title = stringResource(R.string.browse_favorites),
             message = stringResource(R.string.browse_fav_card_desc),
             meta = "共 ${favoriteFiles.size} 个收藏",

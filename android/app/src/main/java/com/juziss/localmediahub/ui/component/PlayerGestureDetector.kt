@@ -6,13 +6,11 @@ import android.media.AudioManager
 import android.view.MotionEvent
 import android.view.View
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Brightness6
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.juziss.localmediahub.R
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import kotlin.math.abs
@@ -25,6 +23,7 @@ data class SeekState(
 
 data class GestureIndicator(
     val visible: Boolean = false,
+    val iconResId: Int? = null,
     val icon: ImageVector? = null,
     val text: String = "",
 )
@@ -163,7 +162,7 @@ fun rememberPlayerGestureListener(
                                 onBrightnessIndicatorChange(
                                     GestureIndicator(
                                         visible = true,
-                                        icon = Icons.Default.Brightness6,
+                                        iconResId = R.drawable.ic_brightness_6,
                                         text = "${(newBrightness * 100).toInt()}%"
                                     )
                                 )
@@ -172,13 +171,13 @@ fun rememberPlayerGestureListener(
                                 val delta = (progress * maxVol).toInt()
                                 val newVol = (volumeStart + delta).coerceIn(0, maxVol)
                                 setVolume(ctx, newVol)
-                                onVolumeIndicatorChange(
-                                    GestureIndicator(
-                                        visible = true,
-                                        icon = Icons.AutoMirrored.Filled.VolumeUp,
-                                        text = "$newVol/$maxVol"
-                                    )
-                                )
+                                 onVolumeIndicatorChange(
+                                     GestureIndicator(
+                                         visible = true,
+                                         iconResId = R.drawable.ic_volume_up,
+                                         text = "$newVol/$maxVol"
+                                     )
+                                 )
                             }
                         }
                     }
@@ -203,7 +202,7 @@ fun rememberPlayerGestureListener(
                                 onPlayPauseIndicatorChange(
                                     GestureIndicator(
                                         visible = true,
-                                        icon = Icons.Default.Pause,
+                                        iconResId = R.drawable.ic_pause,
                                         text = pausedText
                                     )
                                 )

@@ -5,10 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmarks
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -84,7 +81,7 @@ internal fun BrowseStateContent(
                     .padding(innerPadding),
             ) {
                 BrowseSummaryCard(
-                    icon = Icons.Filled.Storage,
+                    icon = painterResource(R.drawable.ic_storage),
                     title = stringResource(R.string.browse_lib_card_title),
                     message = stringResource(R.string.browse_lib_card_desc),
                     meta = "共 ${folders.size} 个共享盘符",
@@ -109,7 +106,7 @@ internal fun BrowseStateContent(
                     .padding(innerPadding),
             ) {
                 BrowseSummaryCard(
-                    icon = Icons.Filled.Storage,
+                    icon = painterResource(R.drawable.ic_storage),
                     title = stringResource(R.string.browse_drive_card_title),
                     message = stringResource(R.string.browse_drive_card_desc),
                     meta = "检测到 ${drives.size} 个磁盘分区",
@@ -134,7 +131,7 @@ internal fun BrowseStateContent(
                     .padding(innerPadding),
             ) {
                 BrowseSummaryCard(
-                    icon = Icons.Filled.Storage,
+                    icon = painterResource(R.drawable.ic_storage),
                     title = stringResource(R.string.browse_path_title),
                     message = result.currentPath ?: currentPath,
                     meta = "${result.folders.size} 文件夹 · ${filteredFiles.size} 文件",
@@ -173,7 +170,7 @@ internal fun BrowseStateContent(
                     .padding(innerPadding),
             ) {
                 BrowseSummaryCard(
-                    icon = Icons.Filled.Folder,
+                    icon = painterResource(R.drawable.ic_folder),
                     title = if (currentPath.isBlank()) stringResource(R.string.browse_browsed_title) else currentPath,
                     message = stringResource(R.string.browse_browsed_desc),
                     meta = "${result.folders.size} 文件夹 · ${filteredFiles.size} 文件",
@@ -225,7 +222,7 @@ internal fun BrowseStateContent(
                     .padding(innerPadding),
             ) {
                 BrowseSummaryCard(
-                    icon = Icons.Filled.Bookmarks,
+                    icon = painterResource(R.drawable.ic_bookmarks),
                     title = collection.title,
                     message = stringResource(R.string.browse_collection_desc),
                     meta = "共 ${collection.files.size} 个媒体文件",

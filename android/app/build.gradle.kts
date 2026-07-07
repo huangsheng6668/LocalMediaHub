@@ -71,6 +71,9 @@ android {
         ndk {
             abiFilters += "arm64-v8a"
         }
+
+        // Round 21 D1.1: strip translations from third-party libs down to zh + en.
+        resourceConfigurations += listOf("zh", "en")
     }
 
     buildTypes {
@@ -115,6 +118,8 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // Round 21 D3: OkHttp Public Suffix List resource exclusion
+            excludes += "okhttp3/internal/publicsuffix/publicsuffixes.gz"
         }
     }
     testOptions {
@@ -208,7 +213,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    // Round 21 D2: material-icons-extended removed
     implementation("androidx.compose.foundation:foundation")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
@@ -227,7 +232,8 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
     // Image loading
-    implementation("io.coil-kt:coil-compose:2.5.0")
+    // Round 21 D4: Coil 2.6.0 upgrade
+    implementation("io.coil-kt:coil-compose:2.6.0")
 
     // Video player
     implementation("androidx.media3:media3-exoplayer:1.2.0")

@@ -19,15 +19,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Language
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -165,7 +160,7 @@ fun HeroCard(
                     if (uiState.serverLabel.isNotBlank()) {
                         IconButton(onClick = onOpenWeb) {
                             Icon(
-                                Icons.Filled.Language,
+                                painterResource(R.drawable.ic_language),
                                 contentDescription = stringResource(R.string.home_open_web),
                                 tint = MaterialTheme.colorScheme.primary
                             )
@@ -191,7 +186,7 @@ fun HeroCard(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Icon(
-                            Icons.Filled.History,
+                            painterResource(R.drawable.ic_history),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                         )
@@ -228,7 +223,7 @@ fun HeroCard(
                         onClick = { onResumeBrowse(location) },
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Filled.History, contentDescription = null)
+                        Icon(painterResource(R.drawable.ic_history), contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("继续浏览 ${location.title}")
                     }
@@ -253,7 +248,7 @@ fun HeroCard(
                         contentColor = MaterialTheme.colorScheme.onTertiaryContainer
                     )
                 ) {
-                    Icon(Icons.Filled.Folder, contentDescription = null)
+                    Icon(painterResource(R.drawable.ic_folder), contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.home_offline_downloaded))
                 }
@@ -342,7 +337,7 @@ fun LibraryCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
-                        Icons.Filled.Folder,
+                        painterResource(R.drawable.ic_folder),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp),
@@ -397,7 +392,7 @@ fun CollectionChip(
         label = { Text("${collection.tag.name} · ${collection.itemCount}") },
         leadingIcon = {
             Icon(
-                Icons.Filled.Bookmarks,
+                painterResource(R.drawable.ic_bookmarks),
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
             )
@@ -490,7 +485,7 @@ fun RecentMediaCard(
             ) {
                 if (entry.file.mediaType == "video") {
                     Icon(
-                        Icons.Filled.Movie,
+                        painterResource(R.drawable.ic_movie),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(34.dp),
@@ -687,7 +682,7 @@ fun DownloadedPreviewCard(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        Icons.Filled.Movie,
+                        painterResource(R.drawable.ic_movie),
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(34.dp),

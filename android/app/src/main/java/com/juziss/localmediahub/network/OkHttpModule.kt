@@ -45,6 +45,7 @@ object OkHttpModule {
     fun provideOkHttpClient(cache: Cache): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .cache(cache)
+            .cookieJar(okhttp3.CookieJar.NO_COOKIES)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

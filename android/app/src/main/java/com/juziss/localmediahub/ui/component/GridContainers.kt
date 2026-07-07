@@ -12,9 +12,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FolderOff
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -89,7 +87,7 @@ internal fun FolderGrid(
 ) {
     if (folders.isEmpty()) {
         GridEmptyState(
-            icon = Icons.Filled.FolderOff,
+            icon = painterResource(R.drawable.ic_folder_off),
             title = stringResource(R.string.grid_no_folders),
             message = stringResource(R.string.grid_no_folders_desc),
             modifier = modifier,
@@ -118,7 +116,7 @@ internal fun SystemDrivesContent(
 ) {
     if (drives.isEmpty()) {
         GridEmptyState(
-            icon = Icons.Filled.Storage,
+            icon = painterResource(R.drawable.ic_storage),
             title = stringResource(R.string.grid_no_drives),
             message = stringResource(R.string.grid_no_drives_desc),
             modifier = modifier,
@@ -155,7 +153,7 @@ internal fun SystemDrivesContent(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Icon(
-                                Icons.Filled.Storage,
+                                painterResource(R.drawable.ic_storage),
                                 contentDescription = "Drive",
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.primary,
@@ -184,7 +182,7 @@ internal fun SystemDrivesContent(
 
 @Composable
 private fun GridEmptyState(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
     title: String,
     message: String,
     modifier: Modifier = Modifier,
@@ -208,7 +206,7 @@ private fun GridEmptyState(
                     shape = MaterialTheme.shapes.large,
                 ) {
                     Icon(
-                        icon,
+                        painter = icon,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(12.dp),

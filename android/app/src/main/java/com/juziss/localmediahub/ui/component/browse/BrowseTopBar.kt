@@ -4,8 +4,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -90,7 +89,7 @@ internal fun BrowseTopBar(
                 if (showLibraryActions) {
                     IconButton(onClick = onToggleSystemMode) {
                         Icon(
-                            Icons.Filled.Storage,
+                            painterResource(R.drawable.ic_storage),
                             contentDescription = if (isSystemBrowse) stringResource(R.string.browse_libraries) else stringResource(R.string.browse_title_drive),
                         )
                     }
@@ -98,7 +97,7 @@ internal fun BrowseTopBar(
                 if (showLibraryActions) {
                     IconButton(onClick = onShowFavorites) {
                         Icon(
-                            Icons.Outlined.FavoriteBorder,
+                            painterResource(R.drawable.ic_favorite_border_outline),
                             contentDescription = stringResource(R.string.browse_favorites),
                         )
                     }

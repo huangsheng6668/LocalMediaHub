@@ -15,7 +15,7 @@ import com.juziss.localmediahub.R
 
 @Composable
 fun BrowseSummaryCard(
-    icon: ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
     title: String,
     message: String,
     meta: String,
@@ -38,7 +38,7 @@ fun BrowseSummaryCard(
                 shape = RoundedCornerShape(10.dp),
             ) {
                 Icon(
-                    icon,
+                    painter = icon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(10.dp),

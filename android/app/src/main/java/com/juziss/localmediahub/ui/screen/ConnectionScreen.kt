@@ -22,11 +22,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -175,7 +173,7 @@ fun ConnectionScreen(
             when (connectionState) {
                 is ConnectionState.Testing -> {
                     StatusCard(
-                        icon = Icons.Filled.Storage,
+                        icon = painterResource(R.drawable.ic_storage),
                         title = stringResource(R.string.conn_detecting),
                         message = stringResource(R.string.conn_detecting_desc),
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -184,7 +182,7 @@ fun ConnectionScreen(
                 }
                 is ConnectionState.Connected -> {
                     StatusCard(
-                        icon = Icons.Filled.CheckCircle,
+                        icon = rememberVectorPainter(Icons.Filled.CheckCircle),
                         title = stringResource(R.string.conn_ready),
                         message = "已成功连接至 ${(connectionState as ConnectionState.Connected).serverUrl}",
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -193,7 +191,7 @@ fun ConnectionScreen(
                 }
                 is ConnectionState.Error -> {
                     StatusCard(
-                        icon = Icons.Filled.Error,
+                        icon = painterResource(R.drawable.ic_error),
                         title = stringResource(R.string.conn_failed),
                         message = (connectionState as ConnectionState.Error).message,
                         containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -206,7 +204,7 @@ fun ConnectionScreen(
             when (val state = discoveryState) {
                 is DiscoveryState.NotFound -> {
                     StatusCard(
-                        icon = Icons.Filled.Search,
+                        icon = rememberVectorPainter(Icons.Filled.Search),
                         title = stringResource(R.string.conn_not_found),
                         message = stringResource(R.string.conn_not_found_desc),
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -215,7 +213,7 @@ fun ConnectionScreen(
                 }
                 is DiscoveryState.Error -> {
                     StatusCard(
-                        icon = Icons.Filled.Error,
+                        icon = painterResource(R.drawable.ic_error),
                         title = stringResource(R.string.conn_error),
                         message = state.message,
                         containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -224,7 +222,7 @@ fun ConnectionScreen(
                 }
                 is DiscoveryState.FoundMultiple -> {
                     StatusCard(
-                        icon = Icons.Filled.CheckCircle,
+                        icon = rememberVectorPainter(Icons.Filled.CheckCircle),
                         title = "发现 ${state.servers.size} 个可用服务器",
                         message = if (state.servers.size == 1) {
                             "在 ${state.servers.first().ip}:${state.servers.first().port} 发现 LocalMediaHub 服务器。正在连接..."
@@ -275,7 +273,7 @@ fun ConnectionScreen(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             Icon(
-                                Icons.Filled.Folder,
+                                painterResource(R.drawable.ic_folder),
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.size(24.dp),
@@ -362,7 +360,7 @@ private fun ServerSelectionSheet(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Icon(
-                            Icons.Filled.Storage,
+                            painterResource(R.drawable.ic_storage),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                         )
@@ -461,7 +459,7 @@ private fun ConnectionHeroCard(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Icon(
-                            Icons.Filled.History,
+                            painterResource(R.drawable.ic_history),
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                         )
@@ -686,7 +684,7 @@ private fun ManualConnectionCard(
  
 @Composable
 private fun StatusCard(
-    icon: ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
     title: String,
     message: String,
     containerColor: androidx.compose.ui.graphics.Color,
@@ -705,7 +703,7 @@ private fun StatusCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            Icon(icon, contentDescription = null, tint = contentColor)
+            Icon(painter = icon, contentDescription = null, tint = contentColor)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = title,
