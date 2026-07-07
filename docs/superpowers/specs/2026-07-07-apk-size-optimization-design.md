@@ -1,11 +1,11 @@
 # APK 体积优化设计（Round 21 - Batch D）
 
 - **日期**: 2026-07-07
-- **范围**: Android 客户端 `app/build.gradle.kts` + `gradle.properties` + Kotlin 图标 import + OkHttp 配置 + FFmpeg 重编
-- **策略**: 2 commits — C1 (D1+D2+D3+D4 gradle/代码层) → C2 (D5 FFmpeg native 重编)
+- **范围**: Android 客户端 `app/build.gradle.kts` + `gradle.properties` + Kotlin 图标 import + OkHttp 配置 + Rust Cargo 配置 + FFmpeg 重编
+- **策略**: 2 commits — C1 (D1+D1.1+D2+D3+D4+D6 gradle/代码/配置层) → C2 (D5 FFmpeg native 重编)
 - **状态**: 待评审
 - **前置**: Round 11（Rust 原生解码器）；Round 19 C3（Retrofit 移除）
-- **目标**: APK 从 **7.15 MB → ≤ 6.0 MB**（节省 ≥ 1.15 MB）
+- **目标**: APK 从 **7.15 MB → ≤ 5.8 MB**（相比原目标 ≤ 6.0 MB，新增优化点可额外节省 ~200-400KB）
 
 ---
 
@@ -33,24 +33,23 @@
 - 当前 R8 配置：`isMinifyEnabled = true` + `isShrinkResources = true`，但是 **default mode**（不是 `android.enableR8.fullMode=true`）
 - 当前依赖：`material-icons-extended`（5000+ 图标）、`okhttp:4.12.0`、`coil:2.5.0`
 - FFmpeg：预编译 `.so` 直接放在 `jniLibs/arm64-v8a/`，未做模块裁剪
+- Rust Native 解码器：在 `Cargo.toml` 中 release profile 使用 `panic = "unwind"`，存在瘦身空间
 
 ---
 
 ## 2. 目标与非目标
 
 ### 目标
-1. **APK ≤ 6.0 MB**（节省 ≥ 1.15 MB）
-2. C1（D1-D4）单独交付有价值：DEX 与依赖层瘦身
-3. C2（D5）FFmpeg 重编：native 层瘦身
+1. **APK ≤ 5.8 MB**（原目标为 ≤ 6.0 MB，新增 D1.1 与 D6 可进一步压减）
+2. C1（D1-D4, D6等）单独交付有价值：DEX、依赖、编译配置与 Rust native 层瘦身
+3. C2（D5）FFmpeg 重编：native 视频解码层瘦身
 4. 所有功能不退化（运行时反射 / JNI / 转码 / 缩略图）
 
 ### 非目标
 - APK splits / AAB（项目不走 Play Store）
-- 改 `res/`（占比 < 2%，没空间）
-- 改依赖到 alpha/beta
 - 移除 Hilt / Gson / OkHttp（架构不动）
 - 改 R8 默认行为之外的网络/反射配置（除非 D1 报错）
-- 改 native Rust 解码器（Round 11 已优化，1.07MB 已合理）
+- 重构/修改 native Rust 解码器业务代码（通过优化编译配置 D6 瘦身，不改动功能）
 
 ---
 
@@ -72,6 +71,28 @@ android.enableR8.fullMode=true
 
 **验证**：smoke test（见 §5）
 
+### D1.1 — 限制资源语言配置（resourceConfigurations）
+
+**当前**：未配置特定语言，打包时会引入三方库（如 Jetpack Compose, Material3, AndroidX 等）中包含的 70+ 种语言的多国语言翻译资源。
+
+**改动**：在 `app/build.gradle.kts` 的 `defaultConfig` 块中配置支持的语言：
+```kotlin
+android {
+    defaultConfig {
+        ...
+        resourceConfigurations += listOf("zh", "en")
+    }
+}
+```
+
+**机制**：强制 Gradle 仅打包中文（zh）和英文（en）资源，自动剔除其他不相关的本地化字符串与资源文件，从而缩减资源表 `resources.arsc` 和 `res/` 目录的体积。
+
+**预期节省**：**100-200KB**
+
+**风险**：极低（本应用仅需要支持中英双语）。
+
+---
+
 ### D2 — `material-icons-extended` 精简
 
 **当前**：`build.gradle.kts:211`
@@ -83,13 +104,16 @@ implementation("androidx.compose.material:material-icons-extended")
 **改动**：
 1. **第一步**：移除 `material-icons-extended` 依赖
 2. **第二步**：扫整个 `android/app/src/main/java/` 找所有 `androidx.compose.material.icons.filled.*` / `.outlined.*` / `.rounded.*` 的 import
-3. **第三步**：换成 `material-icons-core`（默认随 material3 进来），其中只包含常用 ~100 个 filled 图标。**如果某个图标 core 包没有**，要么换近似图标，要么单独把那个图标的 `ImageVector` 定义拷过来（极端情况）
+3. **第三步**：换成 `material-icons-core`（默认随 material3 进来），其中只包含常用 ~100 个 filled 图标。
+4. **第四步（扩展优化）**：**若某个图标 core 包中没有**，不再采用拷贝复杂且冗长的 Kotlin `ImageVector` 构造代码的方案，而是直接从官方获取对应的 SVG/XML Vector Asset 放置在 `app/src/main/res/drawable/` 目录下，并在 Compose 中使用 `painterResource(id = R.drawable.my_icon)` 引入。XML 矢量图体积极小（几百字节），且比 Kotlin 代码更具可读性和易维护性。
 
 **预期节省**：100-400KB（取决于 full mode 实际效果）
 
 **风险**：枚举不全 → 编译失败（不是运行时崩溃，所以可接受；CI 会立刻报错）
 
 **验证**：`./gradlew assembleDebug` 编译成功 = D2 完成
+
+---
 
 ### D3 — 移除 OkHttp publicsuffixes.gz
 
@@ -99,11 +123,20 @@ implementation("androidx.compose.material:material-icons-extended")
 - **(a) 接受这个体积**（41KB，占比 < 0.5%，ROI 低）
 - **(b) 移除**：自定义 `CookieJar` 接口（不接受 cookie，或简单 `NoOpCookieJar`），让 R8 能 tree-shake 整个 `PublicSuffixDatabase`
 
-**决策**：**采用 (b)**——`OkHttpModule.kt`（Hilt 模块）中当前已有 `OkHttpClient` 构建，加一个 `@Provides` 提供 `CookieJar.NO_COOKIES` 或更激进的 `NoOpCookieJar`，配合 `-assumenosideeffects` ProGuard 规则移除 `PublicSuffixDatabase` 加载。
+**决策**：**采用 (b) 并结合 Gradle 物理资源过滤（双重保障）** ——
+1. 在 `app/build.gradle.kts` 的 `packaging` 块中配置物理剔除，确保无论 R8 的 tree-shaking 结果如何，该 41KB 的 gz 资源都不会被打包进 APK：
+   ```kotlin
+   packaging {
+       resources {
+           excludes += "okhttp3/internal/publicsuffix/publicsuffixes.gz"
+       }
+   }
+   ```
+2. 配合在 `OkHttpModule.kt`（Hilt 模块）中加一个 `@Provides` 提供 `CookieJar.NO_COOKIES` 或自定义 `NoOpCookieJar`。局域网串流场景完全不依赖 cookie 安全策略。
 
 **预期节省**：~40KB（解压前）+ heap 减少 0.5-1MB（运行时）
 
-**风险**：低（局域网串流场景完全不依赖 cookie 安全策略）
+**风险**：低（局域网串流场景完全不依赖 cookie 安全策略，OkHttp 找不到该文件时会自动捕获异常并降级，不会导致崩溃）
 
 ### D4 — Coil 2.5.0 → 2.6.0
 
@@ -142,22 +175,42 @@ implementation("io.coil-kt:coil-compose:2.6.0")
 - 功能回归：误删某个 decoder 会导致某些视频无法播放 / 转码 / 抽帧
 - 缓解：先记录"当前能播的视频格式清单"，重编后逐一验证
 
-**降级方案**：如果 D5 因工具链问题无法完成，C1（D1-D4）单独交付仍然有价值；D5 可推迟到下一轮
+**降级方案**：如果 D5 因工具链问题无法完成，C1（gradle 与配置层）单独交付仍然有价值；D5 可推迟到下一轮
+
+---
+
+### D6 — Rust 动态链接库编译配置优化（panic = "abort"）
+
+**机制**：当前 Rust native decoder 的 release 编译 profile 使用了 `panic = "unwind"`。由于它是作为 JNI 动态链接库（`liblocalmedia_native.so`）打包进 Android 安装包，Android JNI 层本身并不支持且不需要跨边界的 panic unwind。将其更改为 `panic = "abort"` 可以消除 Rust 编译生成的异常捕获调用栈信息（landing pads）与异常回溯符号表。
+
+**改动**：修改 `android/app/src/main/rust/Cargo.toml` 中 `[profile.release]` 的配置：
+```toml
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort" # 从 unwind 改为 abort
+```
+
+**预期节省**：`liblocalmedia_native.so` 的二进制体积预期可下降 **10% - 20%**（约 **100KB-200KB** 节省）。
+
+**风险**：极低（若发生 Rust panic，进程会直接 abort，但在 JNI 动态库中，任何未捕获的 panic 本身就会直接导致 App 闪退。此改动在性能和功能上没有负面影响）。
 
 ---
 
 ## 4. 实施计划（提交粒度）
 
-### C1: gradle + 代码层瘦身（D1 + D2 + D3 + D4）
+### C1: gradle + 代码与配置层瘦身（D1 + D1.1 + D2 + D3 + D4 + D6）
 
-**单 commit**，预期省 0.4-1.2 MB（保守估计）
+**单 commit**，预期省 **0.8-1.6 MB**（加上 D1.1 和 D6 优化后，收益更加明显）
 
 涉及文件：
 - `gradle.properties`（新增 `android.enableR8.fullMode=true`）
-- `app/build.gradle.kts`（移除 material-icons-extended，升 Coil 2.6）
+- `app/build.gradle.kts`（配置 `resourceConfigurations` / `packaging.resources.excludes`，移除 material-icons-extended，升 Coil 2.6）
+- `app/src/main/rust/Cargo.toml`（修改 `panic = "abort"`）
 - `app/proguard-rules.pro`（可能补 keep 规则，如果 full mode 报错）
 - `app/src/main/java/.../network/OkHttpModule.kt`（加 CookieJar 配置）
-- `app/src/main/java/**`（所有图标 import 替换）
+- `app/src/main/java/**`（所有图标 import 替换，或引入 XML 图标）
 
 ### C2: FFmpeg native 重编（D5）
 
@@ -213,7 +266,7 @@ unzip -l app/build/outputs/apk/release/app-release.apk | sort -k1,1 -rn | head -
 
 ## 7. 决策点
 
-- **D2 图标替换策略**：先扫描枚举，如果用到的图标 > 30 个且部分 core 包没有，是否接受拷贝图标定义？（影响 D2 工作量）
-  - 推荐：是。Coil Material 图标定义是简单的 `ImageVector`，拷贝成本远小于保留整个 extended 包
+- **D2 图标替换策略**：先扫描枚举，如果用到的图标 > 30 个且部分 core 包没有，是否采用 SVG/XML 矢量图替代？（影响 D2 工作量）
+  - 推荐：是。优先采用 SVG/XML 矢量图形式放置于 `res/drawable/` 并在 Compose 中使用 `painterResource` 引入。相比拷贝庞大的 Kotlin `ImageVector` 更加规范、可读且利于后期维护。
 - **D5 是否本期交付**：
   - 推荐：是，但**允许在工具链不足时单独抽出**到下一轮（C1 单独有价值）
