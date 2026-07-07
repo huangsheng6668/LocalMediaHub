@@ -56,8 +56,8 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 | 继续播放 | 精准记录视频播放时间戳，从任意入口（浏览、收藏、下载、最近打开等）打开同一视频都自动恢复进度；播放至 95% 时弹窗询问"继续 / 从头开始"，续播时右下角提供 3 秒"从头开始"快捷入口 |
 | 最近项目 | 记录最近打开的媒体与最近浏览位置，一键重回上次上下文 |
 | 自动连接 | 优先尝试上次成功连接的服务端，失败后自动回退到 NSD 局域网自发现 |
-| 原生解码 | NDK/CMake 编译的 JPEG/WebP 原生解码器，提升大图与多图懒加载性能 |
-| FFmpeg 扩展 | 预编译 FFmpeg 库，原生支持更多罕见和超清视频格式 |
+| 原生解码 | Rust 编译的 JPEG/PNG/WebP 原生解码器（cargo-ndk 交叉编译到 arm64-v8a，pure-Rust crates，无 C 依赖），含 EXIF orientation 自动校正；提升大图与多图懒加载性能 |
+| FFmpeg 扩展 | 预编译 libffmpeg.so，原生支持更多罕见和超清视频格式 |
 
 ## 技术栈
 
@@ -78,7 +78,7 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 - **图片**: Coil (含 NativeDecoderFactory)
 - **视频**: Media3 (ExoPlayer) + FFmpeg 扩展
 - **存储**: DataStore (偏好设置 + 收藏)
-- **原生**: NDK/CMake (libjpeg-turbo + libwebp)
+- **原生**: Rust 2021 + cargo-ndk（交叉编译到 arm64-v8a；pure-Rust crates：jpeg-decoder / image-png / webp / kamadak-exif / fast-image-resize，输出 liblocalmedia_native.so）+ 预编译 libffmpeg.so
 - **导航**: Navigation Compose
 
 ## 项目结构
@@ -117,7 +117,7 @@ localResourcesToPhone/
 │   │       │   ├── data/         # Model + Repository + DataStore（收藏、最近活动、播放进度、下载、路由）
 │   │       │   ├── di/           # Hilt 模块（CoroutineScopesModule）
 │   │       │   ├── network/      # Retrofit 接口 + OkHttp
-│   │       │   ├── native/       # NativeDecoderFactory (Coil)
+│   │       │   ├── native/       # Kotlin JNI 入口（NativeImageDecoder / NativeExif / NaturalSorter / NativeDecoderFactory for Coil）
 │   │       │   ├── ui/
 │   │       │   │   ├── screen/   # 页面 Composable（Home / Connection / Browse / VideoPlayer / ImagePreview / Downloads）
 │   │       │   │   └── component/# 可复用组件
@@ -125,9 +125,13 @@ localResourcesToPhone/
 │   │       │   │       └── browse/  # 浏览子组件（TopBar / Sort / Search / Favorites / Delete 对话框 …）
 │   │       │   ├── util/         # 公共工具（TimeUtil、NetUtil、CacheCleanup）
 │   │       │   └── viewmodel/    # ViewModel 层（Home / Browse 主 VM + Browse delegate：Navigator / Sorter / Search / Tag / Favorites / Download / Delete）
-│   │       ├── cpp/              # JNI 原生代码
-│   │       └── jniLibs/          # 预编译 .so (FFmpeg)
-│   ├── build.gradle.kts
+│   │       ├── rust/             # Rust 原生解码 crate（cargo-ndk 交叉编译到 arm64-v8a）
+│   │       │   ├── Cargo.toml    # crate: localmedia_native（pure-Rust: jpeg-decoder / image-png / webp / kamadak-exif / fast-image-resize）
+│   │       │   └── src/
+│   │       │       ├── lib.rs / bitmap.rs (EXIF orientation 旋转) / exif_reader.rs / jpeg.rs / png.rs / webp.rs / heif.rs / natural_sort.rs
+│   │       │       └── jni_bridge/  # JNI 暴露给 Kotlin native/ 的桥接层
+│   │       └── jniLibs/arm64-v8a/ # 编译产物：liblocalmedia_native.so（Rust 输出）+ libffmpeg.so（预编译 FFmpeg 扩展）
+│   ├── build.gradle.kts          # 含 `buildRustNative` task：preBuild 阶段自动 `cargo ndk build --release`
 │   └── settings.gradle.kts
 └── docs/                         # 文档（含 superpowers/specs 与 superpowers/plans）
 ```
@@ -263,15 +267,30 @@ APK 输出位置：`android/app/build/outputs/apk/`
 
 服务端内置了 Web 管理器界面，可以通过浏览器直接访问服务端地址（如 `http://localhost:8000`），在页面中直观地浏览媒体资源、查看仪表盘统计信息、管理标签以及配置扫描目录。
 
-## 原生库编译 (可选)
+## 原生库编译
 
-Android 端使用 NDK 编译了 JPEG/WebP 原生解码库以提升性能。如需重新编译：
+Android 端的图片解码由 Rust crate `localmedia_native`（位于 `android/app/src/main/rust/`）提供，通过 `cargo-ndk` 交叉编译到 `arm64-v8a`。
+
+**正常构建无需手动操作** —— `android/app/build.gradle.kts` 注册了 `buildRustNative` Gradle task，挂在 `preBuild` 阶段，会在 `./gradlew assembleDebug` / `assembleRelease` 之前自动执行：
 
 ```bash
-bash build_native_libs.sh
+cargo ndk -t arm64-v8a -o jniLibs/ build --release
 ```
 
-依赖：Android NDK r27+，目标架构 arm64-v8a。
+输出 `liblocalmedia_native.so`，由 Kotlin 的 `native/NativeImageDecoder.kt` / `NativeExif.kt` / `NaturalSorter.kt` 通过 JNI 调用。
+
+**首次环境准备：**
+
+```bash
+rustup target add aarch64-linux-android
+cargo install cargo-ndk
+```
+
+`cargo-ndk` 会自动探测 `ANDROID_NDK_HOME` / `ANDROID_NDK_ROOT`（或 build.gradle.kts 中的 NDK 解析逻辑）。目标架构仅 `arm64-v8a`。
+
+> 注：仓库根目录的 `build_native_libs.sh` 是**遗留脚本**，针对已被取代的 C/C++ 实现路径（`cpp/` 目录已删除），不再有效，请勿使用。
+
+`libffmpeg.so` 为预编译产物，直接放在 `jniLibs/arm64-v8a/` 下，不参与 Rust 构建链。
 
 ## 开发与同步
 

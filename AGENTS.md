@@ -70,7 +70,14 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
         - `RoutePath.kt`: 浏览路径与系统/库模式标记
     - `app/src/main/java/.../di/`: Hilt 模块（`CoroutineScopesModule`）
     - `app/src/main/java/.../util/`: 公共工具（`TimeUtil.formatTime`、`NetUtil`、`CacheCleanup`）
-    - `app/src/main/java/.../native/`: `NativeDecoderFactory`（Coil JPEG/WebP 原生解码）
+    - `app/src/main/java/.../native/`: Rust JNI 入口（Kotlin 侧）
+        - `NativeImageDecoder.kt` / `NativeExif.kt` / `NaturalSorter.kt` / `NativeDecoderFactory.kt`（Coil 集成）
+    - `app/src/main/rust/`: Rust 原生解码 crate（`localmedia_native`，cargo-ndk 交叉编译到 arm64-v8a）
+        - `Cargo.toml`: pure-Rust deps（`jpeg-decoder` / `image-png` / `webp` / `kamadak-exif` / `fast-image-resize`），无 C 依赖
+        - `src/`: `lib.rs`、`bitmap.rs`（EXIF orientation 旋转）、`exif_reader.rs`、`jpeg.rs`、`png.rs`、`webp.rs`、`heif.rs`、`natural_sort.rs`
+        - `src/jni_bridge/`: JNI 桥（`decoders.rs` / `exif_jni.rs` / `natural_sort_jni.rs` / `mod.rs`）
+    - `app/src/main/jniLibs/arm64-v8a/`: 编译产物 —— `liblocalmedia_native.so`（Rust 输出，由 `buildRustNative` Gradle task 在 `preBuild` 阶段自动生成）+ `libffmpeg.so`（预编译 FFmpeg 扩展）
+    - `app/build.gradle.kts`: 注册 `buildRustNative` task（`cargo ndk -t arm64-v8a -o jniLibs/ build --release`），挂载到 `preBuild`
 
 ## 编码规则
 
@@ -86,7 +93,8 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
 - **UI:** Jetpack Compose，MVVM 架构。
 - **网络:** Retrofit + OkHttp。
 - **图片:** Coil（含 NativeDecoderFactory）。
-- **视频:** Media3 (ExoPlayer) + FFmpeg。
+- **视频:** Media3 (ExoPlayer) + 预编译 libffmpeg.so。
+- **原生解码:** Rust crate `localmedia_native`（`android/app/src/main/rust/`），通过 `cargo-ndk` 交叉编译到 `arm64-v8a`，Gradle `buildRustNative` task 在 `preBuild` 阶段自动调用。Kotlin 侧入口在 `native/`（`NativeImageDecoder` / `NativeExif` / `NaturalSorter`）。**仓库根目录的 `build_native_libs.sh` 是遗留脚本，针对已删除的 `cpp/` C 实现，请勿使用。**
 - **异步:** Coroutines。
 
 ## Go Server 架构
@@ -114,9 +122,10 @@ Handler struct 接收所有 service 引用，方法挂在 struct 上。
 7. **媒体处理:** 视频流传输（Range）、缩略图生成、标签系统、标签下媒体聚合
 8. **受限系统浏览:** `/api/v1/system/*` 仅允许访问 `config.yaml` 中 `system.allowed_roots` 范围
 9. **双模式:** GUI（系统托盘）或 headless（无窗口）
-10. **中文汉化与视觉美观度优化**: 深度汉化原生 Android 界面所有硬编码文案。引入柔和的线性色彩渐变（Linear Gradients）与高阶毛玻璃面板拟态（Glassmorphism）胶囊，为多媒体和文件夹卡片引入精致超细描边及按压阻尼动态立体悬浮效果。
-11. **Web 管理界面**: 内置精致的 Web Single Page App，提供仪表盘、媒体共享库浏览、标签增删改查、以及系统设置功能。
-12. **统一媒体访问**: `/api/v1/media/*` 通过绝对路径 `?path=` 统一提供缩略图、原图、视频流与时长，覆盖扫描根目录与 `system.allowed_roots`，均经路径与边界校验。
+10. **Rust 原生解码:** Rust crate `localmedia_native`（JPEG/PNG/WebP 解码 + EXIF orientation 校正 + 自然排序），pure-Rust 依赖，通过 cargo-ndk 交叉编译到 arm64-v8a，Gradle `buildRustNative` task 在 `preBuild` 阶段自动构建。Kotlin 侧通过 JNI（`native/NativeImageDecoder.kt` 等）调用。
+11. **中文汉化与视觉美观度优化**: 深度汉化原生 Android 界面所有硬编码文案。引入柔和的线性色彩渐变（Linear Gradients）与高阶毛玻璃面板拟态（Glassmorphism）胶囊，为多媒体和文件夹卡片引入精致超细描边及按压阻尼动态立体悬浮效果。
+12. **Web 管理界面**: 内置精致的 Web Single Page App，提供仪表盘、媒体共享库浏览、标签增删改查、以及系统设置功能。
+13. **统一媒体访问**: `/api/v1/media/*` 通过绝对路径 `?path=` 统一提供缩略图、原图、视频流与时长，覆盖扫描根目录与 `system.allowed_roots`，均经路径与边界校验。
 
 > **同步政策:** 任何本地代码改动将自动同步推送至 GitHub `master` 分支（个人项目约定）。
 
