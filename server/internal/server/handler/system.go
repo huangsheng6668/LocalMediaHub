@@ -191,22 +191,22 @@ type DeleteRequest struct {
 
 func (h *Handler) DeletePath(c echo.Context) error {
 	if !h.cfg.System.EnableDelete {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": "remote deletion is disabled on the server"})
+		return respondError(c, http.StatusForbidden, "remote deletion is disabled")
 	}
 
 	var req DeleteRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return respondError(c, http.StatusBadRequest, "invalid request body", err)
 	}
 
 	if req.Path == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "path required"})
+		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
 	allRoots := append(append([]string{}, h.cfg.Scan.GetRoots()...), h.cfg.GetSystemAllowedRoots()...)
 	resolved, err := service.ValidateDeletion(req.Path, allRoots)
 	if err != nil {
-		return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
 	fi, err := os.Stat(resolved)

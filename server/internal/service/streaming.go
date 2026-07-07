@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // largeStreamBuffer is the read/write buffer size for direct (non-transcoded)
@@ -135,12 +137,16 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 		} else {
 			start, err = strconv.ParseInt(parts[0], 10, 64)
 			if err != nil {
-				start = 0
+				w.Header().Del("Accept-Ranges")
+				w.WriteHeader(http.StatusBadRequest)
+				return nil
 			}
 			if parts[1] != "" {
 				end, err = strconv.ParseInt(parts[1], 10, 64)
 				if err != nil {
-					end = size - 1
+					w.Header().Del("Accept-Ranges")
+					w.WriteHeader(http.StatusBadRequest)
+					return nil
 				}
 			} else {
 				end = size - 1
@@ -218,9 +224,14 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 		return fmt.Errorf("ffmpeg not found, cannot transcode")
 	}
 
-	startSec := r.URL.Query().Get("start")
-	if startSec == "" {
-		startSec = "0"
+	startSecStr := r.URL.Query().Get("start")
+	var startSec float64 = 0
+	if startSecStr != "" {
+		parsed, parseErr := strconv.ParseFloat(startSecStr, 64)
+		if parseErr != nil || math.IsNaN(parsed) || parsed < 0 || parsed > 86400 {
+			return fmt.Errorf("invalid start parameter")
+		}
+		startSec = parsed
 	}
 
 	w.Header().Set("Content-Type", "video/mp4")
@@ -228,8 +239,8 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Accept-Ranges", "none")
 
 	args := []string{}
-	if startSec != "0" {
-		args = append(args, "-ss", startSec)
+	if startSec != 0 {
+		args = append(args, "-ss", strconv.FormatFloat(startSec, 'f', 3, 64))
 	}
 	args = append(args, "-i", filePath)
 
@@ -260,11 +271,22 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	// killOnce guarantees cmd.Process.Kill() is called at most once and only
+	// when cmd.Process is non-nil, eliminating the prior nil-deref panic and
+	// the double-kill risk between the ctx-cancel goroutine and the write-fail
+	// branch in the main loop below.
+	var killOnce sync.Once
+	killCmd := func() {
+		killOnce.Do(func() {
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+		})
+	}
+
 	go func() {
 		<-ctx.Done()
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-		}
+		killCmd()
 	}()
 
 	// Use a large buffer + explicit flush for transcoded streams too.
@@ -276,7 +298,7 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 		n, readErr := bufReader.Read(buf)
 		if n > 0 {
 			if _, wErr := w.Write(buf[:n]); wErr != nil {
-				cmd.Process.Kill()
+				killCmd()
 				return nil
 			}
 			if flusher != nil {

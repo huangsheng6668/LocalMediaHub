@@ -30,6 +30,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -177,6 +178,14 @@ fun VideoPlayerScreen(
             }
     }
 
+    // ---- Buffering indicator state (G2) ----
+    // Declared right after exoPlayer remember and before the
+    // DisposableEffect(exoPlayer) that captures it. Using explicit MutableState
+    // (not `by` delegate) so the anonymous Player.Listener inner class can
+    // write `.value` — Kotlin forbids writing delegated vars from inner classes.
+    val isBufferingState = remember { mutableStateOf(false) }
+    val isBuffering: Boolean by isBufferingState
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
@@ -202,6 +211,7 @@ fun VideoPlayerScreen(
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                isBufferingState.value = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_ENDED) {
                     wrappedOnProgress(exoPlayer.duration, exoPlayer.duration)
                 }
@@ -250,6 +260,9 @@ fun VideoPlayerScreen(
     var playPauseIndicator by remember { mutableStateOf(GestureIndicator()) }
     var brightnessIndicator by remember { mutableStateOf(GestureIndicator()) }
     var volumeIndicator by remember { mutableStateOf(GestureIndicator()) }
+
+    // ---- Delete confirm (G2) ----
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     // Auto-hide play/pause indicator
     LaunchedEffect(playPauseIndicator.visible) {
@@ -488,21 +501,67 @@ fun VideoPlayerScreen(
             }
         }
 
-        // Back button
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 8.dp, start = 4.dp),
+        // Buffering indicator
+        AnimatedVisibility(
+            visible = isBuffering,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
         ) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = Color.White,
-            )
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(72.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+            ) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
+            }
         }
 
+        // Back + Delete buttons (top-start row)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 8.dp, start = 4.dp)
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.back),
+                    tint = Color.White,
+                )
+            }
+            if (onDelete != null) {
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = stringResource(R.string.delete),
+                        tint = Color.White,
+                    )
+                }
+            }
+        }
 
+        // Delete confirmation dialog (only when onDelete is provided)
+        if (showDeleteConfirm && onDelete != null) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = { Text(stringResource(R.string.video_delete_title)) },
+                text = { Text(stringResource(R.string.video_delete_desc)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeleteConfirm = false
+                        onDelete?.invoke()
+                    }) { Text(stringResource(R.string.delete)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text(stringResource(R.string.cancel))
+                    }
+                }
+            )
+        }
     }
 }
 

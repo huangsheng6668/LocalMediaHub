@@ -2,6 +2,7 @@ package mdns
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 
 	"github.com/hashicorp/mdns"
@@ -12,7 +13,7 @@ type Service struct {
 	quit   chan struct{}
 }
 
-func NewService(host string, port int) (*Service, error) {
+func NewService() (*Service, error) {
 	return &Service{quit: make(chan struct{})}, nil
 }
 
@@ -46,7 +47,7 @@ func (s *Service) Start(host string, port int) error {
 	}
 
 	s.server = server
-	fmt.Printf("mDNS: advertising _localmediahub._tcp.local. on %s:%d\n", ip, port)
+	slog.Info("mDNS advertising", "service", "_localmediahub._tcp.local.", "ip", ip, "port", port)
 	return nil
 }
 

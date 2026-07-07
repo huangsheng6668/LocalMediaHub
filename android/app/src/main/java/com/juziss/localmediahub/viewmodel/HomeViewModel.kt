@@ -2,6 +2,7 @@ package com.juziss.localmediahub.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.juziss.localmediahub.data.FavoriteMediaEntry
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.LastBrowseLocation
 import com.juziss.localmediahub.data.MediaFile
@@ -14,6 +15,7 @@ import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.ServerConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,37 +56,49 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    // Single combine collector over the 6 store flows feeding HomeUiState.
+    // Replaces the prior 6 independent launches, each of which did its own
+    // _uiState.value.copy(...) — this version emits one state update per
+    // upstream change, reducing redundant Compose recompositions.
     init {
         viewModelScope.launch {
-            favoritesStore.favoriteFiles.collect { files ->
-                _uiState.value = _uiState.value.copy(favoriteFiles = files.take(6))
-            }
-        }
-        viewModelScope.launch {
-            recentActivityStore.recentMedia.collect { recent ->
-                _uiState.value = _uiState.value.copy(recentMedia = recent)
-            }
-        }
-        viewModelScope.launch {
-            recentActivityStore.playbackProgress.collect { progress ->
+            combine(
+                favoritesStore.favoriteFiles,
+                recentActivityStore.recentMedia,
+                recentActivityStore.playbackProgress,
+                recentActivityStore.lastBrowseLocation,
+                serverConfigStore.serverUrl,
+                favoritesStore.favoriteEntries,
+            ) { favs, recent, progress, loc, url, favEntries ->
+                HomeRawInputs(favs, recent, progress, loc, url, favEntries)
+            }.collect { raw ->
                 _uiState.value = _uiState.value.copy(
-                    continueWatching = filterContinueWatching(progress),
+                    favoriteFiles = raw.favoriteFiles.take(6),
+                    recentMedia = raw.recentMedia,
+                    continueWatching = filterContinueWatching(raw.playbackProgress),
+                    lastBrowseLocation = raw.lastBrowseLocation,
+                    serverLabel = raw.serverUrl,
                 )
+                favoriteAccessModes = raw.favoriteEntries.associate {
+                    it.file.relativePath to it.isSystemBrowse
+                }
+                if (raw.serverUrl.isBlank()) {
+                    _uiState.value = _uiState.value.copy(isLoading = false)
+                }
             }
         }
-        viewModelScope.launch {
-            recentActivityStore.lastBrowseLocation.collect { location ->
-                _uiState.value = _uiState.value.copy(lastBrowseLocation = location)
-            }
-        }
+    }
+
+    // Side-effect launch: serverUrl changes trigger refresh(). Separated from
+    // the combine collector above so the data projection and the refresh side
+    // effect are independent. Using collect (not drop) preserves the original
+    // behavior where the first non-blank url also triggers refresh.
+    init {
         viewModelScope.launch {
             serverConfigStore.serverUrl.collect { url ->
-                _uiState.value = _uiState.value.copy(serverLabel = url)
                 if (url.isBlank()) {
-                    _uiState.value = _uiState.value.copy(isLoading = false)
                     return@collect
                 }
-
                 ensureClientInitialized(url)
                 refresh()
             }
@@ -146,18 +160,7 @@ class HomeViewModel @Inject constructor(
         return repository.getMediaStreamUrl(entry.file.path)
     }
 
-    private val favoriteAccessModes = mutableMapOf<String, Boolean>()
-
-    init {
-        viewModelScope.launch {
-            favoritesStore.favoriteEntries.collect { entries ->
-                favoriteAccessModes.clear()
-                entries.forEach { entry ->
-                    favoriteAccessModes[entry.file.relativePath] = entry.isSystemBrowse
-                }
-            }
-        }
-    }
+    private var favoriteAccessModes: Map<String, Boolean> = emptyMap()
 
     fun isFavoriteSystemBrowse(file: MediaFile): Boolean {
         return favoriteAccessModes[file.relativePath] == true
@@ -206,5 +209,43 @@ internal fun filterContinueWatching(
     return entries.filterNot { entry ->
         com.juziss.localmediahub.data.isCompleted(entry.positionMs, entry.durationMs)
     }
+}
+
+/** Snapshot of all store flows that feed HomeUiState. Internal only. */
+private data class HomeRawInputs(
+    val favoriteFiles: List<MediaFile> = emptyList(),
+    val recentMedia: List<RecentMediaEntry> = emptyList(),
+    val playbackProgress: List<PlaybackProgressEntry> = emptyList(),
+    val lastBrowseLocation: LastBrowseLocation? = null,
+    val serverUrl: String = "",
+    val favoriteEntries: List<FavoriteMediaEntry> = emptyList(),
+)
+
+/**
+ * 6-parameter combine for Flow. kotlinx.coroutines.flow.combine's typed
+ * overloads only go up to 5 flows; this wrapper delegates to the varargs
+ * Array<Any?> form to support 6 typed flows with compile-time type safety
+ * at the call site.
+ */
+@Suppress("UNCHECKED_CAST")
+private fun <T1, T2, T3, T4, T5, T6, R> combine(
+    flow1: Flow<T1>,
+    flow2: Flow<T2>,
+    flow3: Flow<T3>,
+    flow4: Flow<T4>,
+    flow5: Flow<T5>,
+    flow6: Flow<T6>,
+    transform: suspend (T1, T2, T3, T4, T5, T6) -> R,
+): Flow<R> = kotlinx.coroutines.flow.combine(
+    flow1, flow2, flow3, flow4, flow5, flow6,
+) { args ->
+    transform(
+        args[0] as T1,
+        args[1] as T2,
+        args[2] as T3,
+        args[3] as T4,
+        args[4] as T5,
+        args[5] as T6,
+    )
 }
 

@@ -67,15 +67,25 @@ func (s *Scanner) ImageExts() map[string]bool {
 // background scans never run concurrently.
 func (s *Scanner) TriggerScan(roots []string) {
 	// Cancel any in-flight background scan before starting a new one.
-	s.bgCancel()
+	// s.mu guards bgCtx/bgCancel against concurrent Shutdown/TriggerScan.
+	s.mu.Lock()
+	if s.bgCancel != nil {
+		s.bgCancel()
+	}
 	s.bgCtx, s.bgCancel = context.WithCancel(context.Background())
-	go s.Scan(s.bgCtx, roots)
+	ctx := s.bgCtx
+	s.mu.Unlock()
+	go s.Scan(ctx, roots)
 }
 
 // Shutdown cancels any in-flight background scan. Call this on server stop so
 // triggered scans don't outlive the process.
 func (s *Scanner) Shutdown() {
-	s.bgCancel()
+	s.mu.Lock()
+	if s.bgCancel != nil {
+		s.bgCancel()
+	}
+	s.mu.Unlock()
 }
 
 // Scan walks the given roots concurrently, collecting media files. The provided
