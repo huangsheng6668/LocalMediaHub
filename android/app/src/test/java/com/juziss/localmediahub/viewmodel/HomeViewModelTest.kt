@@ -3,7 +3,9 @@ package com.juziss.localmediahub.viewmodel
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.juziss.localmediahub.data.FavoritesStore
+import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.MediaRepository
+import com.juziss.localmediahub.data.PlaybackProgressEntry
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.network.ServerConfig
@@ -17,6 +19,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -84,5 +87,17 @@ class HomeViewModelTest {
             "ServerConfig not initialized.",
             viewModel.uiState.value.errorMessage,
         )
+    }
+
+    @Test
+    fun `filterContinueWatching excludes completed entries`() {
+        val fileA = MediaFile("a.mp4", "F:/Media/a.mp4", "F:/Media/a.mp4", 1, "", "video", "mp4")
+        val fileB = MediaFile("b.mp4", "F:/Media/b.mp4", "F:/Media/b.mp4", 1, "", "video", "mp4")
+        val input = listOf(
+            PlaybackProgressEntry(fileA, isSystemBrowse = false, positionMs = 50_000L, durationMs = 100_000L, updatedAt = 1L),
+            PlaybackProgressEntry(fileB, isSystemBrowse = false, positionMs = 96_000L, durationMs = 100_000L, updatedAt = 2L),
+        )
+        val filtered = filterContinueWatching(input)
+        assertEquals(listOf("a.mp4"), filtered.map { it.file.name })
     }
 }

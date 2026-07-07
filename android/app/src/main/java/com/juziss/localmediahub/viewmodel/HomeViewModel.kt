@@ -67,7 +67,9 @@ class HomeViewModel @Inject constructor(
         }
         viewModelScope.launch {
             recentActivityStore.playbackProgress.collect { progress ->
-                _uiState.value = _uiState.value.copy(continueWatching = progress)
+                _uiState.value = _uiState.value.copy(
+                    continueWatching = filterContinueWatching(progress),
+                )
             }
         }
         viewModelScope.launch {
@@ -194,6 +196,15 @@ class HomeViewModel @Inject constructor(
             serverConfig.setBaseUrl(serverUrl)
         }
         return true
+    }
+}
+
+/** 过滤掉"已看完"(进度 >= 95%)的条目,只保留还会用到的续播记录。 */
+internal fun filterContinueWatching(
+    entries: List<PlaybackProgressEntry>,
+): List<PlaybackProgressEntry> {
+    return entries.filterNot { entry ->
+        com.juziss.localmediahub.data.isCompleted(entry.positionMs, entry.durationMs)
     }
 }
 
