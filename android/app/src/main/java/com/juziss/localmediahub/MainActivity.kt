@@ -348,28 +348,6 @@ fun LocalMediaHubApp() {
                         }
                     },
                     onBack = { navController.popBackStack() },
-                    onDelete = {
-                        val file = currentVideoFile
-                        if (file != null) {
-                            appScope.launch {
-                                when (val result = browseViewModel.deletePathSync(file.path, false)) {
-                                    is com.juziss.localmediahub.network.NetworkResult.Success -> {
-                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                            android.widget.Toast.makeText(context, context.getString(R.string.main_delete_success), android.widget.Toast.LENGTH_SHORT).show()
-                                            navController.popBackStack()
-                                            browseViewModel.refreshCurrentDirectory()
-                                        }
-                                    }
-                                    is com.juziss.localmediahub.network.NetworkResult.Error -> {
-                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                            android.widget.Toast.makeText(context, context.getString(R.string.main_delete_failed, result.message), android.widget.Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                    else -> {}
-                                }
-                            }
-                        }
-                    }
                 )
             }
         }
