@@ -46,7 +46,9 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
         - `HomeViewModel.kt`: 首页推荐与继续播放数据聚合
     - `app/src/main/java/.../network/`: Retrofit 接口
     - `app/src/main/java/.../data/`: 模型与仓库层
-        - `RecentActivityStore.kt`: 最近活动与浏览状态持久化
+        - `RecentActivityStore.kt`: 最近活动与浏览状态持久化、播放进度查询（`getPlaybackProgress`）
+    - `app/src/main/java/.../ui/component/`: Compose 组件
+        - `ResumePlaybackDialog.kt`: 视频已看完（≥95%）时的"继续 / 从头开始"对话框
 
 ## 编码规则
 
@@ -84,10 +86,11 @@ Handler struct 接收所有 service 引用，方法挂在 struct 上。
 1. **全盘浏览:** 自动检测 Windows 驱动器，浏览任意目录，只显示媒体文件
 2. **发现机制:** mDNS 注册 + Android NSD 自动发现
 3. **首页体验:** Android 首页聚合 Libraries、最近活动、继续播放、收藏和标签集合
-4. **浏览恢复:** 记录最近浏览路径、滚动位置和最近打开媒体，支持一键回到上次上下文
-5. **媒体处理:** 视频流传输（Range）、缩略图生成、标签系统、标签下媒体聚合
-6. **受限系统浏览:** `/api/v1/system/*` 仅允许访问 `config.yaml` 中 `system.allowed_roots` 范围
-7. **双模式:** GUI（系统托盘）或 headless（无窗口）
+4. **视频续播:** 任意入口（浏览 / 收藏 / 下载 / 最近打开等）打开同一视频都自动从上次进度恢复；进度 ≥95% 时弹窗询问"继续 / 从头开始"；自动续播时右下角提供 3 秒"从头开始"快捷入口
+5. **浏览恢复:** 记录最近浏览路径、滚动位置和最近打开媒体，支持一键回到上次上下文
+6. **媒体处理:** 视频流传输（Range）、缩略图生成、标签系统、标签下媒体聚合
+7. **受限系统浏览:** `/api/v1/system/*` 仅允许访问 `config.yaml` 中 `system.allowed_roots` 范围
+8. **双模式:** GUI（系统托盘）或 headless（无窗口）
 8. **同步政策**: 任何本地代码改动将自动同步推送至 GitHub `master` 分支。
 9. **中文汉化与视觉美观度优化**: 深度汉化原生 Android 界面所有硬编码文案。引入柔和的线性色彩渐变（Linear Gradients）与高阶毛玻璃面板拟态（Glassmorphism）胶囊，为多媒体和文件夹卡片引入精致超细描边及按压阻尼动态立体悬浮效果。
 10. **Web 管理界面**: 内置精致的 Web Single Page App，提供仪表盘、媒体共享库浏览、标签增删改查、以及系统设置功能。
