@@ -16,6 +16,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -275,6 +276,19 @@ fun VideoPlayerScreen(
     // need a URL rebuild with ?start=<seconds> instead of a byte-range seek.
     var isTranscodingEnabled by remember { mutableStateOf(streamUrl.contains("transcode=true")) }
 
+    // Round 22: when resuming from a non-zero position, show a temporary
+    // "restart from beginning" affordance at the bottom-right for 3 seconds.
+    // Gives users a one-tap escape if they actually wanted to start over.
+    var showRestartChip by remember {
+        mutableStateOf(initialPositionMs > 0L)
+    }
+    LaunchedEffect(showRestartChip) {
+        if (showRestartChip) {
+            delay(3_000)
+            showRestartChip = false
+        }
+    }
+
     // Apply seek on gesture end
     LaunchedEffect(seekState.isSeeking) {
         if (!seekState.isSeeking && seekState.offsetMs != 0L) {
@@ -426,6 +440,51 @@ fun VideoPlayerScreen(
                 Icon(painterResource(R.drawable.ic_volume_up), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(volumeIndicator.text, color = Color.White, fontSize = 14.sp)
+            }
+        }
+
+        // Round 22: "restart from beginning" chip — shown for 3s after resuming
+        // a non-zero position. Tap to seek back to 0 without reloading.
+        AnimatedVisibility(
+            visible = showRestartChip,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomEnd)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .padding(end = 16.dp, bottom = 24.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                    .clickable {
+                        if (isTranscodingEnabled) {
+                            // Transcoded streams can't byte-seek; rebuild URL
+                            // without the ?start= param and re-prepare.
+                            val restartedUrl = buildStreamUrl(streamUrl, true, 0.0)
+                            exoPlayer.setMediaItem(MediaItem.fromUri(restartedUrl))
+                            exoPlayer.prepare()
+                            exoPlayer.seekTo(0L)
+                            exoPlayer.play()
+                        } else {
+                            exoPlayer.seekTo(0L)
+                        }
+                        savedPositionMs = 0L
+                        showRestartChip = false
+                    }
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_fast_rewind),
+                    contentDescription = stringResource(R.string.video_restart_from_beginning),
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = stringResource(R.string.resume_dialog_btn_restart),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                )
             }
         }
 
