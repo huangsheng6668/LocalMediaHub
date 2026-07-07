@@ -8,6 +8,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
@@ -96,6 +97,17 @@ internal fun mergePlaybackProgress(
     })
         .sortedByDescending { it.updatedAt }
         .take(limit)
+}
+
+/** 在已保存的进度列表中按 key 查找单条记录。 */
+internal fun findPlaybackProgress(
+    list: List<PlaybackProgressEntry>,
+    file: MediaFile,
+    isSystemBrowse: Boolean,
+): PlaybackProgressEntry? {
+    return list.firstOrNull {
+        it.file.relativePath == file.relativePath && it.isSystemBrowse == isSystemBrowse
+    }
 }
 
 class RecentActivityStore @Inject constructor(@ApplicationContext private val context: Context) {
@@ -197,6 +209,17 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
                 }
             )
         }
+    }
+
+    /** 查询单个视频当前已保存的进度。无记录返回 null。 */
+    suspend fun getPlaybackProgress(
+        file: MediaFile,
+        isSystemBrowse: Boolean,
+    ): PlaybackProgressEntry? {
+        val current = context.recentActivityDataStore.data.map { preferences ->
+            decodePlaybackProgress(preferences[playbackProgressKey])
+        }.firstOrNull() ?: emptyList()
+        return findPlaybackProgress(current, file, isSystemBrowse)
     }
 
     private fun decodeRecentMedia(json: String?): List<RecentMediaEntry> {

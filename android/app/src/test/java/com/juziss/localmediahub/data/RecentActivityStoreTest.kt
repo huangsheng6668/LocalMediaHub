@@ -2,6 +2,7 @@ package com.juziss.localmediahub.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -73,6 +74,29 @@ class RecentActivityStoreTest {
         // savePlaybackProgress 改用 isValidProgress 后,这一行为变化通过此测试锁定。
         assertTrue(isValidProgress(positionMs = 95_000L, durationMs = 100_000L))
         assertTrue(isValidProgress(positionMs = 100_000L, durationMs = 100_000L))
+    }
+
+    @Test
+    fun `findPlaybackProgress matches on relativePath and isSystemBrowse`() {
+        val fileA = MediaFile("a.mp4", "F:/Media/a.mp4", "F:/Media/a.mp4", 1, "", "video", "mp4")
+        val fileB = MediaFile("b.mp4", "F:/Media/b.mp4", "F:/Media/b.mp4", 1, "", "video", "mp4")
+        val list = listOf(
+            PlaybackProgressEntry(fileA, isSystemBrowse = false, positionMs = 10_000L, durationMs = 100_000L, updatedAt = 1L),
+            PlaybackProgressEntry(fileB, isSystemBrowse = true, positionMs = 20_000L, durationMs = 100_000L, updatedAt = 2L),
+        )
+
+        val match = findPlaybackProgress(list, fileA, isSystemBrowse = false)
+        assertEquals(10_000L, match?.positionMs)
+
+        // 同 relativePath 但 isSystemBrowse 不同 → null
+        assertNull(findPlaybackProgress(list, fileA, isSystemBrowse = true))
+
+        // 不存在的 relativePath → null
+        val fileC = MediaFile("c.mp4", "F:/Media/c.mp4", "F:/Media/c.mp4", 1, "", "video", "mp4")
+        assertNull(findPlaybackProgress(list, fileC, isSystemBrowse = false))
+
+        // 空列表 → null
+        assertNull(findPlaybackProgress(emptyList(), fileA, isSystemBrowse = false))
     }
 
     @Test
