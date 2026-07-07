@@ -3,7 +3,6 @@ package com.juziss.localmediahub.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.juziss.localmediahub.data.BrowseResult
-import com.juziss.localmediahub.data.FavoriteMediaEntry
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
@@ -25,10 +24,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import android.content.Context
-import android.os.Environment
-import java.io.File
-import java.io.FileOutputStream
-import java.util.zip.ZipFile
 import javax.inject.Inject
 
 enum class SortOrder(val label: String) {
@@ -352,10 +347,6 @@ class BrowseViewModel @Inject constructor(
     private fun emitBrowseError(message: String) {
         sharedState.emitBrowseError(message)
     }
-}
-
-private fun List<FavoriteMediaEntry>.associateFavoriteModes(): Map<String, Boolean> {
-    return associate { entry -> entry.file.relativePath to entry.isSystemBrowse }
 }
 
 sealed class BrowseState {
