@@ -1,5 +1,8 @@
 package com.juziss.localmediahub
 
+import android.app.PictureInPictureParams
+import android.content.IntentFilter
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -7,6 +10,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -20,6 +24,9 @@ import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.data.isCompleted
 import com.juziss.localmediahub.data.isValidProgress
 import com.juziss.localmediahub.data.shouldFocusRestart
+import com.juziss.localmediahub.pip.PipActionReceiver
+import com.juziss.localmediahub.pip.PipController
+import com.juziss.localmediahub.pip.PipControllerStore
 import com.juziss.localmediahub.ui.component.ResumePlaybackDialog
 import com.juziss.localmediahub.ui.component.ResumePlaybackRequest
 import com.juziss.localmediahub.ui.component.VideoOpenAction
@@ -37,6 +44,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -54,6 +64,13 @@ interface AppStoresEntryPoint {
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    private val _isInPipMode = MutableStateFlow(false)
+    /** 暴露给 Composable 读取的 PiP 状态。 */
+    val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
+
+    private var pipReceiverRegistered = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -62,6 +79,61 @@ class MainActivity : ComponentActivity() {
                 LocalMediaHubApp()
             }
         }
+    }
+
+    /**
+     * 由 VideoPlayerScreen 的「悬浮窗」按钮调用。返回 true 表示成功进入 PiP。
+     *
+     * 在进入 PiP 前动态注册 [PipActionReceiver] (RECEIVER_NOT_EXPORTED) 以便接收
+     * RemoteAction 的 PendingIntent 派发。退出 PiP 时在
+     * [onPictureInPictureModeChanged] 中解绑。
+     */
+    fun enterPipMode(width: Int, height: Int, isPlaying: Boolean): Boolean {
+        if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
+            return false
+        }
+        val params = PipController.buildParams(this, width, height, isPlaying)
+        return try {
+            val entered = enterPictureInPictureMode(params)
+            if (entered && !pipReceiverRegistered) {
+                ContextCompat.registerReceiver(
+                    this,
+                    PipActionReceiver(),
+                    IntentFilter(PipController.ACTION_PLAY_PAUSE),
+                    ContextCompat.RECEIVER_NOT_EXPORTED,
+                )
+                pipReceiverRegistered = true
+            }
+            entered
+        } catch (e: IllegalStateException) {
+            // 部分 ROM 在 Activity 非 resumed 时调用 enterPictureInPictureMode 会抛。
+            false
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        _isInPipMode.value = isInPictureInPictureMode
+        if (!isInPictureInPictureMode && pipReceiverRegistered) {
+            try {
+                unregisterReceiver(PipActionReceiver())
+            } catch (_: IllegalArgumentException) {
+                // already unregistered
+            }
+            pipReceiverRegistered = false
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (pipReceiverRegistered) {
+            try { unregisterReceiver(PipActionReceiver()) } catch (_: IllegalArgumentException) {}
+            pipReceiverRegistered = false
+        }
+        PipControllerStore.unbind()
     }
 }
 
