@@ -336,6 +336,10 @@ func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx c
 // file exists, then reads it into memCache. The genFunc indirection lets
 // both GenerateThumbnailBytes and GenerateSystemThumbnailBytes share
 // logic — only the disk path differs.
+//
+// singleflight 包裹 genFunc + ReadFile + memCache.Add：多客户端并发请求同一
+// 未缓存视频时只 fork 一次 ffmpeg/ffprobe，follower 等待 leader 写入 memCache
+// 后直接拿到字节返回。
 func (s *ThumbnailService) generateBytesVia(
 	sourcePath string,
 	genFunc func(string) (string, error),
@@ -346,21 +350,29 @@ func (s *ThumbnailService) generateBytesVia(
 	}
 	cacheKey := s.thumbnailCacheKey(sourcePath, fi.ModTime())
 
+	// 快速路径：memCache 命中直接返回，不进入 singleflight。
 	if cached, ok := s.memCache.Get(cacheKey); ok {
 		return cached, nil
 	}
 
-	cachePath, err := genFunc(sourcePath)
+	// 慢路径：用 cacheKey（含 modTime）作为 singleflight key。文件被替换后
+	// modTime 变化 → key 变化 → 新 leader 重新生成，不会串版本。
+	val, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) {
+		cachePath, err := genFunc(sourcePath)
+		if err != nil {
+			return nil, err
+		}
+		bytes, err := os.ReadFile(cachePath)
+		if err != nil {
+			return nil, err
+		}
+		s.memCache.Add(cacheKey, bytes)
+		return bytes, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	bytes, err := os.ReadFile(cachePath)
-	if err != nil {
-		return nil, err
-	}
-	s.memCache.Add(cacheKey, bytes)
-	return bytes, nil
+	return val.([]byte), nil
 }
 
 // GenerateThumbnailBytes is the bytes-equivalent of GenerateThumbnail.
