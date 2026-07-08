@@ -13,6 +13,8 @@
     <string name="unknown_size">未知大小</string>
     <string name="folder">文件夹</string>
     <string name="play">播放</string>
+    <string name="pip_button">悬浮窗</string>
+    <string name="pip_unsupported">当前设备不支持悬浮窗，请在系统设置中开启画中画权限</string>
     <string name="video">视频</string>
     <string name="image">图片</string>
     <string name="confirm_delete">确认删除</string>
