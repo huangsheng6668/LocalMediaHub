@@ -6,6 +6,7 @@ import com.juziss.localmediahub.ui.component.rememberPlayerGestureListener
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.view.MotionEvent
@@ -243,6 +244,16 @@ fun VideoPlayerScreen(
                 isBufferingState.value = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_ENDED) {
                     wrappedOnProgress(exoPlayer.duration, exoPlayer.duration)
+                    // Spec §4.3: 视频在 PiP 中自然结束 → 退出 PiP 回全屏结束画面
+                    // Android 没有直接 exitPictureInPictureMode() API；通过启动自己 + REORDER_TO_FRONT
+                    // 把 Activity 拉回前台，触发 onPictureInPictureModeChanged(false)。
+                    val act = context as? MainActivity
+                    if (act != null && act.isInPipMode.value) {
+                        val bringToFront = Intent(act, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                        }
+                        act.startActivity(bringToFront)
+                    }
                 }
             }
 
