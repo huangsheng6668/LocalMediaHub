@@ -1,8 +1,12 @@
 package service
 
 import (
+	"encoding/json"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestParseFFprobeDuration(t *testing.T) {
@@ -64,5 +68,145 @@ func TestFFprobeSibling(t *testing.T) {
 	}
 	if got, want := ffprobeSibling(filepath.Join("dir", "avconv.exe")), "ffprobe"; got != want {
 		t.Errorf("non-ffmpeg base -> %q, want %q", got, want)
+	}
+}
+
+// TestDurationCache_PersistRoundTrip 验证：写 durCache → Shutdown 落盘 →
+// 新建 service 读回 → 内容一致。
+func TestDurationCache_PersistRoundTrip(t *testing.T) {
+	cacheDir := t.TempDir()
+	svc1, err := NewThumbnailService(cacheDir, 150, "jpg", "")
+	if err != nil {
+		t.Fatalf("NewThumbnailService svc1: %v", err)
+	}
+
+	// 手动注入 3 条 entry
+	mt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	key1 := "/path/a.mp4|" + mt.Format(time.RFC3339Nano)
+	key2 := "/path/b.mp4|" + mt.Format(time.RFC3339Nano)
+	key3 := "/path/c.mp4|" + mt.Format(time.RFC3339Nano)
+
+	svc1.durMu.Lock()
+	svc1.durCache[key1] = durationEntry{Duration: 10.5, ModTime: mt}
+	svc1.durCache[key2] = durationEntry{Duration: 60.0, ModTime: mt}
+	svc1.durCache[key3] = durationEntry{Duration: 120.25, ModTime: mt}
+	svc1.durDirty = true
+	svc1.durMu.Unlock()
+
+	// Shutdown 同步落盘
+	svc1.Shutdown()
+
+	// durations.json 文件应存在
+	data, err := os.ReadFile(filepath.Join(cacheDir, "durations.json"))
+	if err != nil {
+		t.Fatalf("read durations.json: %v", err)
+	}
+
+	var persisted map[string]durationEntry
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("unmarshal durations.json: %v", err)
+	}
+	if len(persisted) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(persisted))
+	}
+
+	// 新 service 启动应加载到相同内容
+	svc2, err := NewThumbnailService(cacheDir, 150, "jpg", "")
+	if err != nil {
+		t.Fatalf("NewThumbnailService svc2: %v", err)
+	}
+	defer svc2.Shutdown()
+
+	svc2.durMu.RLock()
+	defer svc2.durMu.RUnlock()
+	if len(svc2.durCache) != 3 {
+		t.Fatalf("svc2 durCache len = %d, want 3", len(svc2.durCache))
+	}
+	if e, ok := svc2.durCache[key1]; !ok || e.Duration != 10.5 {
+		t.Fatalf("svc2 durCache[key1] = %+v ok=%v", e, ok)
+	}
+	if e, ok := svc2.durCache[key2]; !ok || e.Duration != 60.0 {
+		t.Fatalf("svc2 durCache[key2] = %+v ok=%v", e, ok)
+	}
+	if e, ok := svc2.durCache[key3]; !ok || e.Duration != 120.25 {
+		t.Fatalf("svc2 durCache[key3] = %+v ok=%v", e, ok)
+	}
+}
+
+// TestDurationCache_LoadCorruptFile_NoCrash 验证：durations.json 内容损坏时
+// NewThumbnailService 不 panic、不返回 error，而是用空 cache 启动。
+func TestDurationCache_LoadCorruptFile_NoCrash(t *testing.T) {
+	cacheDir := t.TempDir()
+
+	// 写入损坏的 JSON
+	corrupt := []byte("{ this is not valid json }}}")
+	if err := os.WriteFile(filepath.Join(cacheDir, "durations.json"), corrupt, 0644); err != nil {
+		t.Fatalf("write corrupt file: %v", err)
+	}
+
+	svc, err := NewThumbnailService(cacheDir, 150, "jpg", "")
+	if err != nil {
+		t.Fatalf("NewThumbnailService with corrupt file should not error: %v", err)
+	}
+	defer svc.Shutdown()
+
+	svc.durMu.RLock()
+	defer svc.durMu.RUnlock()
+	if len(svc.durCache) != 0 {
+		t.Fatalf("expected empty durCache after corrupt load, got %d entries", len(svc.durCache))
+	}
+
+	// 损坏文件应仍存在（不删除，等下次 miss 覆盖重写）
+	if _, err := os.Stat(filepath.Join(cacheDir, "durations.json")); err != nil {
+		t.Fatalf("corrupt durations.json should still exist: %v", err)
+	}
+}
+
+// TestVideoDurationCached_HitAfterMiss 验证：第一次调用 miss（durCache 空）
+// 时返回有效值并写入 durCache；第二次调用直接命中 durCache。
+//
+// 注意：本测试需要 ffprobe 可用。如 CI 环境无 ffprobe，本测试会失败 ——
+// 用 t.Skip 标记但 log 警告，方便本地验证。这是唯一允许 t.Skip 的特例。
+func TestVideoDurationCached_HitAfterMiss(t *testing.T) {
+	svc, err := NewThumbnailService(t.TempDir(), 150, "jpg", "")
+	if err != nil {
+		t.Fatalf("NewThumbnailService: %v", err)
+	}
+	defer svc.Shutdown()
+
+	if !svc.HasFFmpeg() {
+		t.Skip("ffprobe not available, skipping duration cache integration test")
+	}
+
+	// 找一个真实存在的视频文件做测试源。若 repo 没有测试视频，跳过。
+	// 这里用一个 1 秒的合成 mp4：依赖 ffmpeg 生成，若 ffmpeg 也无则跳过。
+	srcDir := t.TempDir()
+	src := filepath.Join(srcDir, "sample.mp4")
+	gen := exec.Command(svc.getFFmpegCmd(), "-y", "-f", "lavfi", "-i",
+		"color=red:size=2x2:duration=1", "-frames:v", "10", src)
+	if err := gen.Run(); err != nil {
+		t.Skipf("ffmpeg unavailable or lavfi not supported, skipping: %v", err)
+	}
+
+	// Miss 路径：durCache 应为空，调用后写入
+	d1, ok1 := svc.videoDurationCached(src)
+	if !ok1 || d1 <= 0 {
+		t.Fatalf("first call: videoDurationCached = (%v, %v), want (>0, true)", d1, ok1)
+	}
+
+	svc.durMu.RLock()
+	cacheLen := len(svc.durCache)
+	svc.durMu.RUnlock()
+	if cacheLen == 0 {
+		t.Fatal("durCache empty after miss path; expected at least 1 entry")
+	}
+
+	// Hit 路径：再次调用应直接命中 durCache 返回相同值
+	d2, ok2 := svc.videoDurationCached(src)
+	if !ok2 {
+		t.Fatal("second call: expected cache hit, got ok=false")
+	}
+	if d2 != d1 {
+		t.Fatalf("cache hit returned different duration: first=%v second=%v", d1, d2)
 	}
 }

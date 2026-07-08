@@ -115,6 +115,33 @@ func (s *ThumbnailService) videoDuration(sourcePath string) (float64, bool) {
 	return parseFFprobeDuration(string(out))
 }
 
+// videoDurationCached 是 videoDuration 的缓存版本：先查内存 durCache（读锁），
+// miss 时 fork ffprobe 并写回 durCache（写锁）+ 标记 dirty 触发防抖落盘。
+// os.Stat 失败时 fallback 到原 videoDuration（无缓存），与历史行为一致。
+func (s *ThumbnailService) videoDurationCached(sourcePath string) (float64, bool) {
+	fi, err := os.Stat(sourcePath)
+	if err != nil {
+		return s.videoDuration(sourcePath)
+	}
+	key := sourcePath + "|" + fi.ModTime().Format(time.RFC3339Nano)
+
+	s.durMu.RLock()
+	if entry, ok := s.durCache[key]; ok {
+		s.durMu.RUnlock()
+		return entry.Duration, true
+	}
+	s.durMu.RUnlock()
+
+	d, ok := s.videoDuration(sourcePath)
+	if ok {
+		s.durMu.Lock()
+		s.durCache[key] = durationEntry{Duration: d, ModTime: fi.ModTime()}
+		s.markDurDirty()
+		s.durMu.Unlock()
+	}
+	return d, ok
+}
+
 func isVideoFile(filePath string) bool {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
@@ -156,7 +183,7 @@ func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePat
 		// Seek to a representative frame (video midpoint when ffprobe is
 		// available, else the prior default of 5s). Fall back to 0s on failure.
 		ffmpegCmd := s.getFFmpegCmd()
-		seek := midpointSeek(s.videoDuration(sourcePath))
+		seek := midpointSeek(s.videoDurationCached(sourcePath))
 		cmd := exec.Command(ffmpegCmd, "-y", "-ss", seek, "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
 		if err := cmd.Run(); err != nil {
 			// 2. If it fails (e.g. video is too short), fallback to 0 seconds
@@ -448,10 +475,88 @@ type durationEntry struct {
 }
 
 // loadDurationCache 启动时从 cacheDir/durations.json 加载视频时长缓存。
-// 本任务先放空实现；真实加载逻辑在 Task 3 实现。
+// 文件不存在视为空 cache（首次启动）；解析失败 log warn 后用空 cache 启动，
+// 不删除文件（避免误删有用数据），下次 miss 会覆盖式重写。
 func (s *ThumbnailService) loadDurationCache() {
-	// stub: 真正实现在 Task 3
-	// 预留 imports 引用以避免编译器报错（下一任务会真实使用）
-	_, _ = json.Marshal(nil)
-	_ = slog.Default()
+	filePath := filepath.Join(s.cacheDir, "durations.json")
+	bytes, err := os.ReadFile(filePath)
+	if err != nil {
+		// 文件不存在或读失败：保持构造函数里初始化的空 map
+		return
+	}
+
+	var cache map[string]durationEntry
+	if err := json.Unmarshal(bytes, &cache); err != nil {
+		slog.Warn("Failed to unmarshal durations.json, starting with empty cache", "error", err)
+		return
+	}
+
+	s.durMu.Lock()
+	s.durCache = cache
+	s.durMu.Unlock()
+}
+
+// markDurDirty 必须在持有 durMu.Lock() 时调用：标记数据脏并启动 5s 防抖落盘
+// 协程（如尚未启动）。释放锁后才执行磁盘 I/O，避免阻塞查询路径。
+func (s *ThumbnailService) markDurDirty() {
+	s.durDirty = true
+	if s.durTimerPending {
+		return
+	}
+	s.durTimerPending = true
+
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			// 服务退出：Shutdown 方法会做同步落盘，本协程直接返回
+			return
+		case <-time.After(5 * time.Second):
+		}
+
+		s.durMu.Lock()
+		if !s.durDirty {
+			s.durTimerPending = false
+			s.durMu.Unlock()
+			return
+		}
+		s.durTimerPending = false
+		s.durMu.Unlock()
+
+		s.persistDurationCache()
+	}()
+}
+
+// persistDurationCache 把 durCache 落盘到 cacheDir/durations.json。
+// 先持锁 marshal + 清 dirty 标记，再释放锁执行磁盘 I/O。
+// 写入失败时恢复 dirty 标记以便下次重试。
+func (s *ThumbnailService) persistDurationCache() {
+	s.durMu.Lock()
+	if !s.durDirty {
+		s.durMu.Unlock()
+		return
+	}
+	bytes, err := json.Marshal(s.durCache)
+	s.durDirty = false
+	s.durMu.Unlock()
+
+	if err != nil {
+		slog.Warn("Failed to marshal duration cache", "error", err)
+		return
+	}
+
+	filePath := filepath.Join(s.cacheDir, "durations.json")
+	if err := os.WriteFile(filePath, bytes, 0644); err != nil {
+		slog.Warn("Failed to write durations.json", "error", err)
+		// 写入失败：恢复脏标记，下次 markDurDirty 时会再次尝试
+		s.durMu.Lock()
+		s.durDirty = true
+		s.durMu.Unlock()
+	}
+}
+
+// Shutdown 取消防抖协程并同步落盘。由 Server.Stop() 调用。
+// 幂等：多次调用安全（durCancel 可重入，persistDurationCache 自带 dirty 守卫）。
+func (s *ThumbnailService) Shutdown() {
+	s.durCancel()
+	s.persistDurationCache()
 }
