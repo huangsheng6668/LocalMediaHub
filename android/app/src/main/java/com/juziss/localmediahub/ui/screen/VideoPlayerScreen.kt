@@ -53,9 +53,12 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.juziss.localmediahub.MainActivity
 import com.juziss.localmediahub.R
+import com.juziss.localmediahub.pip.PipControllerStore
 import com.juziss.localmediahub.viewmodel.VideoPlayerViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.abs
 
 
@@ -99,6 +102,16 @@ fun VideoPlayerScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val activity = context as? MainActivity
+    // Read PiP mode defensively: the screen might be hosted by a non-MainActivity
+    // context in tests — fall back to a MutableStateFlow(false) then.
+    val isInPipMode by (activity?.isInPipMode ?: MutableStateFlow(false))
+        .collectAsState()
+    // Captured from ExoPlayer.onVideoSizeChanged so enterPipMode can build the
+    // correct aspect-ratio params. Defaults to 0 (PipController falls back to
+    // 16:9 when width/height are not positive).
+    var videoWidth by remember { mutableStateOf(0) }
+    var videoHeight by remember { mutableStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     // Composables can't receive Hilt constructor injection directly; this
     // ViewModel is the injection seam for the shared singleton OkHttpClient
@@ -169,6 +182,13 @@ fun VideoPlayerScreen(
                 if (!isTranscoding && savedPositionMs > 0L) {
                     seekTo(savedPositionMs)
                 }
+                // Hand off audio focus to ExoPlayer so playback pauses other
+                // media apps and resumes when focus returns (Task 5 Step 2).
+                val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+                    .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                    .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build()
+                setAudioAttributes(audioAttributes, /* handleAudioFocus = */ true)
                 prepare()
                 playWhenReady = true
             }
@@ -185,7 +205,17 @@ fun VideoPlayerScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
-                exoPlayer.pause()
+                // Read the live PiP state at callback time rather than the
+                // compose-captured value: entering PiP delivers ON_PAUSE and the
+                // StateFlow is updated by onPictureInPictureModeChanged before
+                // the lifecycle callback fires. Falling back to false keeps the
+                // screen testable in non-MainActivity hosts.
+                val inPip = activity?.isInPipMode?.value ?: false
+                // PiP 模式下进入后台：不要暂停，让浮窗继续播放。
+                // 非 PiP 模式（普通切后台）：正常暂停。
+                if (!inPip) {
+                    exoPlayer.pause()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -195,9 +225,12 @@ fun VideoPlayerScreen(
     }
 
     DisposableEffect(Unit) {
+        // 让 PipActionReceiver 能拿到 ExoPlayer 实例
+        PipControllerStore.bind(exoPlayer)
         onDispose {
             wrappedOnProgress(exoPlayer.currentPosition, exoPlayer.duration)
             exoPlayer.release()
+            PipControllerStore.unbind()
             (context as? Activity)?.requestedOrientation =
                 ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
@@ -214,6 +247,8 @@ fun VideoPlayerScreen(
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
+                videoWidth = videoSize.width
+                videoHeight = videoSize.height
                 if (videoSize.width > 0 && videoSize.height > 0) {
                     val activity = context as? Activity ?: return
                     activity.requestedOrientation = if (videoSize.width >= videoSize.height) {
@@ -248,8 +283,11 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Handle system back button
-    BackHandler(onBack = onBack)
+    // Handle system back button (disabled in PiP so the system back action
+    // exits PiP / navigates outside the app rather than popping the screen).
+    if (!isInPipMode) {
+        BackHandler(onBack = onBack)
+    }
 
     // ---- Gesture state ----
     var seekState by remember { mutableStateOf(SeekState()) }
@@ -341,13 +379,18 @@ fun VideoPlayerScreen(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
-                    useController = true
+                    useController = !isInPipMode
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-                    setOnTouchListener(gestureListener)
+                    if (!isInPipMode) setOnTouchListener(gestureListener)
                 }
+            },
+            update = { view ->
+                // Toggle controls + gesture layer when crossing the PiP boundary.
+                view.useController = !isInPipMode
+                if (isInPipMode) view.setOnTouchListener(null) else view.setOnTouchListener(gestureListener)
             },
             modifier = Modifier.fillMaxSize(),
         )
@@ -508,6 +551,34 @@ fun VideoPlayerScreen(
                     .background(Color.Black.copy(alpha = 0.6f), CircleShape)
             ) {
                 CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
+            }
+        }
+
+        // PiP 按钮（只在非 PiP 全屏模式下显示）
+        if (!isInPipMode) {
+            IconButton(
+                onClick = {
+                    val act = activity ?: return@IconButton
+                    val ok = act.enterPipMode(videoWidth, videoHeight, exoPlayer.isPlaying)
+                    if (!ok) {
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(R.string.pip_unsupported),
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 4.dp),
+            ) {
+                Icon(
+                    painter = painterResource(
+                        android.R.drawable.ic_menu_crop  // 系统自带 "缩放/裁剪" 图标，近似悬浮窗概念
+                    ),
+                    contentDescription = stringResource(R.string.pip_button),
+                    tint = Color.White,
+                )
             }
         }
 
