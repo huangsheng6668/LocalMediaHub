@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.material.icons.filled.PlayArrow
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile

@@ -45,7 +45,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.DownloadEntry
 import com.juziss.localmediahub.data.LastBrowseLocation

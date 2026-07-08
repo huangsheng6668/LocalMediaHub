@@ -69,7 +69,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.juziss.localmediahub.data.DownloadEntry
 import com.juziss.localmediahub.data.LastBrowseLocation
 import androidx.compose.ui.res.stringResource

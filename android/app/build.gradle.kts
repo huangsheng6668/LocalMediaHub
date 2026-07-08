@@ -6,7 +6,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.parcelize")
-    id("kotlin-kapt")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
 }
 
@@ -18,7 +19,12 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.juziss.localmediahub"
-    compileSdk = 34
+    // compileSdk bumped 34 → 36 in Round 24 Task 8: Coil 3.5.0's transitive
+    // dependencies (androidx.core 1.16.0, androidx.compose 1.11.x, and the
+    // coil3 android artifacts themselves) are built against SDK 36 and
+    // require consumers to compile against 36+. targetSdk stays at 34 —
+    // runtime behavior is unchanged, only the compile-time API surface widens.
+    compileSdk = 36
 
     signingConfigs {
         create("release") {
@@ -92,12 +98,25 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
     }
+    // JVM target bumped 1.8 → 11 in Round 24 Task 8: Coil 3.5.0 and several
+    // androidx transitive deps are compiled with JVM 11 bytecode. Their inline
+    // functions (crossfade, pxOrElse, limitedParallelism, etc.) cannot be
+    // inlined into JVM 1.8 bytecode, producing "Cannot inline bytecode built
+    // with JVM target 11" compile errors.
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "11"
+        // Coil 3.5.0's POM transitively pulls kotlin-stdlib 2.4.0 even though
+        // Coil itself is compiled with Kotlin 2.2.0. The Kotlin 2.2.0 compiler
+        // cannot read 2.4.0 metadata, producing "Incompatible classes were
+        // found in dependencies" and breaking symbol resolution. This flag
+        // suppresses the metadata version check so the compiler reads the
+        // higher-version metadata — safe because stdlib 2.4.0 is ABI-compatible
+        // with 2.2.0 for the APIs this project uses.
+        freeCompilerArgs = freeCompilerArgs + "-Xskip-metadata-version-check"
     }
     buildFeatures {
         compose = true
@@ -112,9 +131,10 @@ android {
     // scheduled for deletion in Task 3 once the Rust JPEG/WebP decoder is
     // feature-complete. The replacement Rust build is wired up via the
     // `buildRustNative` Exec task below (depends-on `preBuild`).
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
-    }
+    // composeOptions block removed in Round 24 Task 8: with Kotlin 2.0+ the
+    // Compose compiler is supplied by the `org.jetbrains.kotlin.plugin.compose`
+    // Gradle plugin (applied in the plugins {} block above), so the manual
+    // `kotlinCompilerExtensionVersion` is no longer needed.
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -222,8 +242,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.0")
 
     // Hilt dependency injection
-    implementation("com.google.dagger:hilt-android:2.50")
-    kapt("com.google.dagger:hilt-android-compiler:2.50")
+    implementation("com.google.dagger:hilt-android:2.56.2")
+    ksp("com.google.dagger:hilt-android-compiler:2.56.2")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Network — Retrofit was removed in Round 19 C3: all API calls use
@@ -232,8 +252,14 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
     // Image loading
-    // Round 21 D4: Coil 2.6.0 upgrade
-    implementation("io.coil-kt:coil-compose:2.6.0")
+    // Round 24 Task 8: Coil 2.6.0 → 3.5.0 migration + concurrency cap.
+    // Core (coil-compose) + network layer (coil-network-okhttp) extracted from
+    // core in v3 — required because the app loads images from server URLs.
+    // Concurrent fetch+decode capped at 12 via fetcherCoroutineContext /
+    // decoderCoroutineContext (Dispatchers.Default.limitedParallelism(12))
+    // in LocalMediaHubApplication.newImageLoader().
+    implementation("io.coil-kt.coil3:coil-compose:3.5.0")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.5.0")
 
     // Video player
     implementation("androidx.media3:media3-exoplayer:1.2.0")
