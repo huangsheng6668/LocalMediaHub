@@ -2,12 +2,13 @@ package com.juziss.localmediahub.native
 
 import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
-import coil.decode.DecodeResult
-import coil.decode.Decoder
-import coil.fetch.SourceResult
-import coil.request.Options
-import coil.size.Size
-import coil.size.pxOrElse
+import coil3.asImage
+import coil3.decode.DecodeResult
+import coil3.decode.Decoder
+import coil3.fetch.SourceFetchResult
+import coil3.request.Options
+import coil3.size.Size
+import coil3.size.pxOrElse
 
 /**
  * Coil `Decoder` that routes image formats we have a native (Rust) decoder
@@ -25,13 +26,15 @@ import coil.size.pxOrElse
  * helper — one source of truth for the format routing rule.
  */
 class NativeDecoderFactory(
-    private val sourceResult: SourceResult,
+    private val sourceResult: SourceFetchResult,
     private val size: Size,
     private val options: Options,
 ) : Decoder {
 
     override suspend fun decode(): DecodeResult {
-        val bytes = sourceResult.source.source().buffer().readByteArray()
+        // Coil 3: ImageSource.source() returns BufferedSource directly
+        // (Coil 2's nested `.source().buffer()` collapses to `.source()`).
+        val bytes = sourceResult.source.source().readByteArray()
         val targetWidth = size.width.pxOrElse { 0 }
         val targetHeight = size.height.pxOrElse { 0 }
 
@@ -43,18 +46,19 @@ class NativeDecoderFactory(
         }
 
         return DecodeResult(
-            drawable = BitmapDrawable(options.context.resources, bitmap),
+            image = BitmapDrawable(options.context.resources, bitmap).asImage(),
             isSampled = true,
         )
     }
 
     class Factory : Decoder.Factory {
         override fun create(
-            result: SourceResult,
+            result: SourceFetchResult,
             options: Options,
-            imageLoader: coil.ImageLoader,
+            imageLoader: coil3.ImageLoader,
         ): Decoder? {
-            val bufferedSource = result.source.source().buffer()
+            // Coil 3: ImageSource.source() returns BufferedSource directly.
+            val bufferedSource = result.source.source()
             val header = try {
                 bufferedSource.peek().readByteArray(12)
             } catch (_: Exception) {

@@ -79,9 +79,16 @@ func (h *Handler) MediaDuration(c echo.Context) error {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
-	duration, err := h.streaming.GetVideoDuration(resolved)
-	if err != nil {
-		return respondInternalError(c, err)
+	// 优先从缩略图服务的时长缓存查询（共享 durations.json，避免重复 fork ffprobe）。
+	// Cache miss 时 fallback 到 streaming.GetVideoDuration（会 fork ffprobe 并返回
+	// error 表示失败，与历史行为一致）。
+	duration, ok := h.thumbnail.VideoDuration(resolved)
+	if !ok {
+		var err error
+		duration, err = h.streaming.GetVideoDuration(resolved)
+		if err != nil {
+			return respondInternalError(c, err)
+		}
 	}
 
 	setJsonCacheStandard(c)

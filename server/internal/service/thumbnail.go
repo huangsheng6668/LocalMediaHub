@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/jpeg"
 	_ "image/png"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +21,7 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/hashicorp/golang-lru/v2"
 	"github.com/localmediahub/server/internal/models"
+	"golang.org/x/sync/singleflight"
 )
 
 type ThumbnailService struct {
@@ -37,6 +40,20 @@ type ThumbnailService struct {
 	// file. If the two pipelines ever diverge (different maxSize per path),
 	// the key MUST be namespaced (e.g. "regular:" / "system:" prefix).
 	memCache *lru.Cache[string, []byte]
+
+	// sf 防止多客户端同时请求同一未缓存视频时重复 fork ffmpeg/ffprobe。
+	// Do 的 key 用 thumbnailCacheKey(sourcePath, modTime)，含 modTime 所以
+	// 文件被替换后会自然产生新 key，不会把新旧版本串到一起。
+	sf singleflight.Group
+
+	// durations.json 持久化缓存：避免视频缩略图 miss 时每次都 fork ffprobe。
+	// 也通过 VideoDuration 导出方法共享给 /api/v1/media/duration handler。
+	durMu           sync.RWMutex
+	durCache        map[string]durationEntry
+	durDirty        bool               // 内存数据是否脏（待落盘）
+	durTimerPending bool               // 是否已启动 5s 延迟落盘协程
+	ctx             context.Context    // 用于 goroutine 生命周期控制
+	durCancel       context.CancelFunc // 用于在服务停止时取消 goroutine
 }
 
 func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath string) (*ThumbnailService, error) {
@@ -46,14 +63,21 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 	// golang-lru/v2 returns no error when size > 0; the explicit discard is
 	// documented. 200 entries ≈ 20 MB heap at ~100 KB per thumbnail.
 	memCache, _ := lru.NewWithEvict[string, []byte](200, nil)
-	return &ThumbnailService{
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &ThumbnailService{
 		cacheDir:   cacheDir,
 		maxSize:    maxSize,
 		format:     format,
 		sem:        make(chan struct{}, runtime.NumCPU()),
 		ffmpegPath: ffmpegPath,
 		memCache:   memCache,
-	}, nil
+		durCache:   make(map[string]durationEntry),
+		ctx:        ctx,
+		durCancel:  cancel,
+	}
+	s.loadDurationCache()
+	return s, nil
 }
 
 func (s *ThumbnailService) getFFmpegCmd() string {
@@ -89,6 +113,41 @@ func (s *ThumbnailService) videoDuration(sourcePath string) (float64, bool) {
 		return 0, false
 	}
 	return parseFFprobeDuration(string(out))
+}
+
+// videoDurationCached 是 videoDuration 的缓存版本：先查内存 durCache（读锁），
+// miss 时 fork ffprobe 并写回 durCache（写锁）+ 标记 dirty 触发防抖落盘。
+// os.Stat 失败时 fallback 到原 videoDuration（无缓存），与历史行为一致。
+func (s *ThumbnailService) videoDurationCached(sourcePath string) (float64, bool) {
+	fi, err := os.Stat(sourcePath)
+	if err != nil {
+		return s.videoDuration(sourcePath)
+	}
+	key := sourcePath + "|" + fi.ModTime().Format(time.RFC3339Nano)
+
+	s.durMu.RLock()
+	if entry, ok := s.durCache[key]; ok {
+		s.durMu.RUnlock()
+		return entry.Duration, true
+	}
+	s.durMu.RUnlock()
+
+	d, ok := s.videoDuration(sourcePath)
+	if ok {
+		s.durMu.Lock()
+		s.durCache[key] = durationEntry{Duration: d, ModTime: fi.ModTime()}
+		s.markDurDirty()
+		s.durMu.Unlock()
+	}
+	return d, ok
+}
+
+// VideoDuration 是 videoDurationCached 的导出版本，供 handler 层
+// （/api/v1/media/duration）共享同一份时长缓存，避免重复 fork ffprobe。
+// 行为与 videoDurationCached 完全一致：先查内存 cache，miss 时 fork ffprobe
+// 并写回 cache + 标记 dirty。
+func (s *ThumbnailService) VideoDuration(sourcePath string) (float64, bool) {
+	return s.videoDurationCached(sourcePath)
 }
 
 func isVideoFile(filePath string) bool {
@@ -132,7 +191,7 @@ func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePat
 		// Seek to a representative frame (video midpoint when ffprobe is
 		// available, else the prior default of 5s). Fall back to 0s on failure.
 		ffmpegCmd := s.getFFmpegCmd()
-		seek := midpointSeek(s.videoDuration(sourcePath))
+		seek := midpointSeek(s.videoDurationCached(sourcePath))
 		cmd := exec.Command(ffmpegCmd, "-y", "-ss", seek, "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
 		if err := cmd.Run(); err != nil {
 			// 2. If it fails (e.g. video is too short), fallback to 0 seconds
@@ -312,6 +371,10 @@ func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx c
 // file exists, then reads it into memCache. The genFunc indirection lets
 // both GenerateThumbnailBytes and GenerateSystemThumbnailBytes share
 // logic — only the disk path differs.
+//
+// singleflight 包裹 genFunc + ReadFile + memCache.Add：多客户端并发请求同一
+// 未缓存视频时只 fork 一次 ffmpeg/ffprobe，follower 等待 leader 写入 memCache
+// 后直接拿到字节返回。
 func (s *ThumbnailService) generateBytesVia(
 	sourcePath string,
 	genFunc func(string) (string, error),
@@ -322,21 +385,29 @@ func (s *ThumbnailService) generateBytesVia(
 	}
 	cacheKey := s.thumbnailCacheKey(sourcePath, fi.ModTime())
 
+	// 快速路径：memCache 命中直接返回，不进入 singleflight。
 	if cached, ok := s.memCache.Get(cacheKey); ok {
 		return cached, nil
 	}
 
-	cachePath, err := genFunc(sourcePath)
+	// 慢路径：用 cacheKey（含 modTime）作为 singleflight key。文件被替换后
+	// modTime 变化 → key 变化 → 新 leader 重新生成，不会串版本。
+	val, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) {
+		cachePath, err := genFunc(sourcePath)
+		if err != nil {
+			return nil, err
+		}
+		bytes, err := os.ReadFile(cachePath)
+		if err != nil {
+			return nil, err
+		}
+		s.memCache.Add(cacheKey, bytes)
+		return bytes, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	bytes, err := os.ReadFile(cachePath)
-	if err != nil {
-		return nil, err
-	}
-	s.memCache.Add(cacheKey, bytes)
-	return bytes, nil
+	return val.([]byte), nil
 }
 
 // GenerateThumbnailBytes is the bytes-equivalent of GenerateThumbnail.
@@ -401,4 +472,99 @@ func midpointSeek(duration float64, ok bool) string {
 		return "5"
 	}
 	return strconv.FormatFloat(duration/2, 'f', 2, 64)
+}
+
+// durationEntry 是 durations.json 持久化缓存的单条记录。
+// key 形如 "<sourcePath>|<RFC3339Nano modTime>"，ModTime 仅作信息记录，
+// 真正的失效由 key 中的 modTime 字符串变化来保证。
+type durationEntry struct {
+	Duration float64   `json:"duration"` // seconds
+	ModTime  time.Time `json:"modTime"`  // source file mtime; mismatch → invalidate
+}
+
+// loadDurationCache 启动时从 cacheDir/durations.json 加载视频时长缓存。
+// 文件不存在视为空 cache（首次启动）；解析失败 log warn 后用空 cache 启动，
+// 不删除文件（避免误删有用数据），下次 miss 会覆盖式重写。
+func (s *ThumbnailService) loadDurationCache() {
+	filePath := filepath.Join(s.cacheDir, "durations.json")
+	bytes, err := os.ReadFile(filePath)
+	if err != nil {
+		// 文件不存在或读失败：保持构造函数里初始化的空 map
+		return
+	}
+
+	var cache map[string]durationEntry
+	if err := json.Unmarshal(bytes, &cache); err != nil {
+		slog.Warn("Failed to unmarshal durations.json, starting with empty cache", "error", err)
+		return
+	}
+
+	s.durMu.Lock()
+	s.durCache = cache
+	s.durMu.Unlock()
+}
+
+// markDurDirty 必须在持有 durMu.Lock() 时调用：标记数据脏并启动 5s 防抖落盘
+// 协程（如尚未启动）。释放锁后才执行磁盘 I/O，避免阻塞查询路径。
+func (s *ThumbnailService) markDurDirty() {
+	s.durDirty = true
+	if s.durTimerPending {
+		return
+	}
+	s.durTimerPending = true
+
+	go func() {
+		select {
+		case <-s.ctx.Done():
+			// 服务退出：Shutdown 方法会做同步落盘，本协程直接返回
+			return
+		case <-time.After(5 * time.Second):
+		}
+
+		s.durMu.Lock()
+		if !s.durDirty {
+			s.durTimerPending = false
+			s.durMu.Unlock()
+			return
+		}
+		s.durTimerPending = false
+		s.durMu.Unlock()
+
+		s.persistDurationCache()
+	}()
+}
+
+// persistDurationCache 把 durCache 落盘到 cacheDir/durations.json。
+// 先持锁 marshal + 清 dirty 标记，再释放锁执行磁盘 I/O。
+// 写入失败时恢复 dirty 标记以便下次重试。
+func (s *ThumbnailService) persistDurationCache() {
+	s.durMu.Lock()
+	if !s.durDirty {
+		s.durMu.Unlock()
+		return
+	}
+	bytes, err := json.Marshal(s.durCache)
+	s.durDirty = false
+	s.durMu.Unlock()
+
+	if err != nil {
+		slog.Warn("Failed to marshal duration cache", "error", err)
+		return
+	}
+
+	filePath := filepath.Join(s.cacheDir, "durations.json")
+	if err := os.WriteFile(filePath, bytes, 0644); err != nil {
+		slog.Warn("Failed to write durations.json", "error", err)
+		// 写入失败：恢复脏标记，下次 markDurDirty 时会再次尝试
+		s.durMu.Lock()
+		s.durDirty = true
+		s.durMu.Unlock()
+	}
+}
+
+// Shutdown 取消防抖协程并同步落盘。由 Server.Stop() 调用。
+// 幂等：多次调用安全（durCancel 可重入，persistDurationCache 自带 dirty 守卫）。
+func (s *ThumbnailService) Shutdown() {
+	s.durCancel()
+	s.persistDurationCache()
 }

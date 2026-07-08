@@ -193,6 +193,9 @@ func (s *Server) Stop() error {
 		s.preGenCancel()
 	}
 	s.preGenMu.Unlock()
+	// Flush duration cache (durations.json) and cancel debounce goroutines.
+	// Idempotent and safe to call even if nothing was ever cached.
+	s.Thumbnail.Shutdown()
 	// Drain in-flight requests (notably folder-zip downloads) before returning,
 	// so Ctrl+C / tray-quit doesn't corrupt a half-written download.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

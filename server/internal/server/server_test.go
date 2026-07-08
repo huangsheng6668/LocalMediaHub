@@ -78,6 +78,9 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected thumbnail route to return 200, got %d with body %s", rec.Code, rec.Body.String())
 	}
+	// Cache-Control header is for browser clients (embedded web gallery loads
+	// thumbnails via <img> tags). Coil 3.x on Android ignores these headers
+	// (bypasses OkHttp Cache), but browsers honor them. See setMediaCacheHeaders.
 	if got := rec.Result().Header.Get("Cache-Control"); got != "public, max-age=86400" {
 		t.Fatalf("expected thumbnail Cache-Control 'public, max-age=86400', got %q", got)
 	}
