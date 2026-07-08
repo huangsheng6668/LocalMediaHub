@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/jpeg"
 	_ "image/png"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +21,7 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/hashicorp/golang-lru/v2"
 	"github.com/localmediahub/server/internal/models"
+	"golang.org/x/sync/singleflight"
 )
 
 type ThumbnailService struct {
@@ -37,6 +40,20 @@ type ThumbnailService struct {
 	// file. If the two pipelines ever diverge (different maxSize per path),
 	// the key MUST be namespaced (e.g. "regular:" / "system:" prefix).
 	memCache *lru.Cache[string, []byte]
+
+	// sf 防止多客户端同时请求同一未缓存视频时重复 fork ffmpeg/ffprobe。
+	// Do 的 key 用 thumbnailCacheKey(sourcePath, modTime)，含 modTime 所以
+	// 文件被替换后会自然产生新 key，不会把新旧版本串到一起。
+	sf singleflight.Group
+
+	// durations.json 持久化缓存：避免视频缩略图 miss 时每次都 fork ffprobe。
+	// 也通过 VideoDuration 导出方法共享给 /api/v1/media/duration handler。
+	durMu           sync.RWMutex
+	durCache        map[string]durationEntry
+	durDirty        bool               // 内存数据是否脏（待落盘）
+	durTimerPending bool               // 是否已启动 5s 延迟落盘协程
+	ctx             context.Context    // 用于 goroutine 生命周期控制
+	durCancel       context.CancelFunc // 用于在服务停止时取消 goroutine
 }
 
 func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath string) (*ThumbnailService, error) {
@@ -46,14 +63,21 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 	// golang-lru/v2 returns no error when size > 0; the explicit discard is
 	// documented. 200 entries ≈ 20 MB heap at ~100 KB per thumbnail.
 	memCache, _ := lru.NewWithEvict[string, []byte](200, nil)
-	return &ThumbnailService{
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &ThumbnailService{
 		cacheDir:   cacheDir,
 		maxSize:    maxSize,
 		format:     format,
 		sem:        make(chan struct{}, runtime.NumCPU()),
 		ffmpegPath: ffmpegPath,
 		memCache:   memCache,
-	}, nil
+		durCache:   make(map[string]durationEntry),
+		ctx:        ctx,
+		durCancel:  cancel,
+	}
+	s.loadDurationCache()
+	return s, nil
 }
 
 func (s *ThumbnailService) getFFmpegCmd() string {
@@ -401,4 +425,21 @@ func midpointSeek(duration float64, ok bool) string {
 		return "5"
 	}
 	return strconv.FormatFloat(duration/2, 'f', 2, 64)
+}
+
+// durationEntry 是 durations.json 持久化缓存的单条记录。
+// key 形如 "<sourcePath>|<RFC3339Nano modTime>"，ModTime 仅作信息记录，
+// 真正的失效由 key 中的 modTime 字符串变化来保证。
+type durationEntry struct {
+	Duration float64   `json:"duration"` // seconds
+	ModTime  time.Time `json:"modTime"`  // source file mtime; mismatch → invalidate
+}
+
+// loadDurationCache 启动时从 cacheDir/durations.json 加载视频时长缓存。
+// 本任务先放空实现；真实加载逻辑在 Task 3 实现。
+func (s *ThumbnailService) loadDurationCache() {
+	// stub: 真正实现在 Task 3
+	// 预留 imports 引用以避免编译器报错（下一任务会真实使用）
+	_, _ = json.Marshal(nil)
+	_ = slog.Default()
 }
