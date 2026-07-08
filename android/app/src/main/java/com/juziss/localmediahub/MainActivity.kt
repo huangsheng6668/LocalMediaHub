@@ -69,7 +69,14 @@ class MainActivity : ComponentActivity() {
     /** 暴露给 Composable 读取的 PiP 状态。 */
     val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
 
-    private var pipReceiverRegistered = false
+    /**
+     * 已注册的 [PipActionReceiver] 实例，或 null 表示当前未注册。
+     *
+     * 必须保存注册时创建的同一个实例：Android 的 [android.content.Context.unregisterReceiver]
+     * 按 binder 身份（对象相等性）匹配，而不是按类匹配。如果用新构造的实例去解绑，永远抛
+     * `IllegalArgumentException: Receiver not registered`，真正注册的接收器会泄漏。
+     */
+    private var pipReceiver: PipActionReceiver? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,21 +95,26 @@ class MainActivity : ComponentActivity() {
      * RemoteAction 的 PendingIntent 派发。退出 PiP 时在
      * [onPictureInPictureModeChanged] 中解绑。
      */
+    @Suppress("DEPRECATION")
     fun enterPipMode(width: Int, height: Int, isPlaying: Boolean): Boolean {
         if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
             return false
         }
         val params = PipController.buildParams(this, width, height, isPlaying)
         return try {
+            // compileSdk 36 上单参 enterPictureInPictureMode(PictureInPictureParams) 被弃用，
+            // 替换签名要求 API 36+ 的 Executor + Consumer，超出本次范围；我们的 minSdk 26
+            // 不支持新重载，且旧的弃用调用在所有 API 26+ 设备上仍工作正常。
             val entered = enterPictureInPictureMode(params)
-            if (entered && !pipReceiverRegistered) {
+            if (entered && pipReceiver == null) {
+                val receiver = PipActionReceiver()
                 ContextCompat.registerReceiver(
                     this,
-                    PipActionReceiver(),
+                    receiver,
                     IntentFilter(PipController.ACTION_PLAY_PAUSE),
                     ContextCompat.RECEIVER_NOT_EXPORTED,
                 )
-                pipReceiverRegistered = true
+                pipReceiver = receiver
             }
             entered
         } catch (e: IllegalStateException) {
@@ -117,23 +129,28 @@ class MainActivity : ComponentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         _isInPipMode.value = isInPictureInPictureMode
-        if (!isInPictureInPictureMode && pipReceiverRegistered) {
-            try {
-                unregisterReceiver(PipActionReceiver())
-            } catch (_: IllegalArgumentException) {
-                // already unregistered
-            }
-            pipReceiverRegistered = false
+        if (!isInPictureInPictureMode) {
+            unregisterPipReceiver()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (pipReceiverRegistered) {
-            try { unregisterReceiver(PipActionReceiver()) } catch (_: IllegalArgumentException) {}
-            pipReceiverRegistered = false
-        }
+        unregisterPipReceiver()
         PipControllerStore.unbind()
+    }
+
+    /**
+     * 解绑已注册的 [pipReceiver]（按 binder 身份匹配）。重复调用或未注册时静默忽略。
+     */
+    private fun unregisterPipReceiver() {
+        val receiver = pipReceiver ?: return
+        try {
+            unregisterReceiver(receiver)
+        } catch (_: IllegalArgumentException) {
+            // already unregistered
+        }
+        pipReceiver = null
     }
 }
 
