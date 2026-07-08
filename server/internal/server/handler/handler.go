@@ -91,6 +91,19 @@ func respondNotFound(c echo.Context, msg string) error {
 	return c.JSON(http.StatusNotFound, map[string]string{"error": msg})
 }
 
+// setMediaCacheHeaders marks a thumbnail/original response as browser-cacheable
+// for one day. The thumbnail cache key includes the source file's modtime, so a
+// changed source produces a new cache file with a different modtime and browsers
+// revalidating via If-Modified-Since get a 200 — correct outside the max-age
+// window. Not applied to stream endpoints (different Range semantics).
+//
+// Round 24 note: Coil 3.x on Android bypasses OkHttp's Cache and ignores these
+// headers, but the embedded web gallery (browser <img> tags) still honors them.
+// Kept for the web client's benefit.
+func setMediaCacheHeaders(c echo.Context) {
+	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
+}
+
 // JSON Cache-Control policy tiers.
 //
 // JSON responses are 'private' (not for CDN/proxy caching) because they

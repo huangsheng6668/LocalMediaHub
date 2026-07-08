@@ -145,6 +145,7 @@ func (h *Handler) SystemThumbnail(c echo.Context) error {
 		return respondInternalError(c, err)
 	}
 
+	setMediaCacheHeaders(c)
 	return c.Blob(http.StatusOK, "image/jpeg", thumbBytes)
 }
 
@@ -159,6 +160,7 @@ func (h *Handler) SystemOriginal(c echo.Context) error {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
+	setMediaCacheHeaders(c)
 	return c.File(resolved)
 }
 

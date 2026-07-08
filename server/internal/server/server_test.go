@@ -78,12 +78,11 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected thumbnail route to return 200, got %d with body %s", rec.Code, rec.Body.String())
 	}
-	// Round 24: thumbnail Cache-Control header was removed (setMediaCacheHeaders
-	// dropped) because Coil 3.x's NetworkFetcher bypasses OkHttp's Cache and
-	// does not respect Cache-Control by default. Coil's own DiskCache (100MB LRU)
-	// provides client-side caching. Only assert that no Cache-Control is set.
-	if got := rec.Result().Header.Get("Cache-Control"); got != "" {
-		t.Fatalf("expected thumbnail to have no Cache-Control header, got %q", got)
+	// Cache-Control header is for browser clients (embedded web gallery loads
+	// thumbnails via <img> tags). Coil 3.x on Android ignores these headers
+	// (bypasses OkHttp Cache), but browsers honor them. See setMediaCacheHeaders.
+	if got := rec.Result().Header.Get("Cache-Control"); got != "public, max-age=86400" {
+		t.Fatalf("expected thumbnail Cache-Control 'public, max-age=86400', got %q", got)
 	}
 }
 
