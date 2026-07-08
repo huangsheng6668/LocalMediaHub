@@ -210,3 +210,49 @@ func TestVideoDurationCached_HitAfterMiss(t *testing.T) {
 		t.Fatalf("cache hit returned different duration: first=%v second=%v", d1, d2)
 	}
 }
+
+// TestVideoDuration_CacheAndFallback 验证导出方法 VideoDuration：
+// 1. durCache 已有 entry 时直接返回（不 fork ffprobe）
+// 2. durCache miss 时调用底层 videoDuration 并写入 cache
+//
+// 测试 1 不依赖 ffprobe 可用性，重点验证 cache hit 路径。
+func TestVideoDuration_CacheAndFallback(t *testing.T) {
+	cacheDir := t.TempDir()
+	svc, err := NewThumbnailService(cacheDir, 150, "jpg", "")
+	if err != nil {
+		t.Fatalf("NewThumbnailService: %v", err)
+	}
+	defer svc.Shutdown()
+
+	// 手动注入一条 cache entry（不依赖 ffprobe）
+	mt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	srcPath := filepath.Join(cacheDir, "fake.mp4")
+	if err := os.WriteFile(srcPath, []byte("fake"), 0644); err != nil {
+		t.Fatalf("write fake src: %v", err)
+	}
+	if err := os.Chtimes(srcPath, mt, mt); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// 从实际文件的 os.Stat 结果派生 key（与 videoDurationCached 一致）。
+	// 不能用 mt.Format(RFC3339Nano)，因为 Windows os.Chtimes 会把 UTC 转成本地
+	// 时区，导致 stat 返回的 modTime 与注入的 mt 格式化字符串不一致。
+	fi, err := os.Stat(srcPath)
+	if err != nil {
+		t.Fatalf("stat fake src: %v", err)
+	}
+	key := srcPath + "|" + fi.ModTime().Format(time.RFC3339Nano)
+	svc.durMu.Lock()
+	svc.durCache[key] = durationEntry{Duration: 42.5, ModTime: fi.ModTime()}
+	svc.durMu.Unlock()
+
+	// Cache hit：应直接返回 42.5，不 fork ffprobe（fake.mp4 不是真视频，
+	// 如果走 ffprobe 路径会失败或返回 0/false）
+	d, ok := svc.VideoDuration(srcPath)
+	if !ok {
+		t.Fatal("VideoDuration cache hit: expected ok=true")
+	}
+	if d != 42.5 {
+		t.Fatalf("VideoDuration cache hit: got %v, want 42.5", d)
+	}
+}

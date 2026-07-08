@@ -142,6 +142,14 @@ func (s *ThumbnailService) videoDurationCached(sourcePath string) (float64, bool
 	return d, ok
 }
 
+// VideoDuration 是 videoDurationCached 的导出版本，供 handler 层
+// （/api/v1/media/duration）共享同一份时长缓存，避免重复 fork ffprobe。
+// 行为与 videoDurationCached 完全一致：先查内存 cache，miss 时 fork ffprobe
+// 并写回 cache + 标记 dirty。
+func (s *ThumbnailService) VideoDuration(sourcePath string) (float64, bool) {
+	return s.videoDurationCached(sourcePath)
+}
+
 func isVideoFile(filePath string) bool {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
