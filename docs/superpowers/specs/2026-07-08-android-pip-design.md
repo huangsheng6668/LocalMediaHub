@@ -35,24 +35,24 @@
 
 | 文件 | 改动 |
 |---|---|
-| `AndroidManifest.xml` | MainActivity 增加 `android:supportsPictureInPicture="true"` |
-| `MainActivity.kt` | 增加 PiP 进入/退出包装、`onUserLeaveHint`、`onPictureInPictureModeChanged` 回调、`isInPipMode` 状态持有 |
-| `VideoPlayerScreen.kt` | 右上角新增「悬浮窗」按钮；监听 PiP 状态切换 UI（全屏控件 vs PiP 极简） |
-| `VideoPlayerViewModel.kt` | 暴露 `isInPipMode` 状态流（或通过 CompositionLocal）；保留当前视频宽高比给 PiP 参数构造 |
-| **新增** `PipController.kt`（~80 行） | 封装 `PictureInPictureParams.Builder` 与 RemoteAction 的构造，让 MainActivity 保持精简 |
+| `AndroidManifest.xml` | MainActivity 增加 `android:supportsPictureInPicture="true"` 和 `android:launchMode="singleTask"`（确保桌面再点图标时复用实例并自动退出 PiP）；确保已声明 `android:configChanges` 包含 `orientation|screenSize|screenLayout|smallestScreenSize`（防止 Activity 在 PiP 切换时重建） |
+| `MainActivity.kt` | 增加 PiP 进入/退出包装、`onPictureInPictureModeChanged` 回调、`isInPipMode` 状态持有、动态注册/解绑 PiP 播放控制 BroadcastReceiver |
+| `VideoPlayerScreen.kt` | 右上角新增「悬浮窗」按钮；监听 PiP 状态切换 UI（全屏控件 vs PiP 极简）；调整 `LifecycleEventObserver` 逻辑，在 PiP 模式下 `onPause` 时不暂停 ExoPlayer |
+| `VideoPlayerViewModel.kt` | 暴露 `isInPipMode` 状态流；保留当前视频宽高比给 PiP 参数构造 |
+| **新增** `PipController.kt`（~90 行） | 封装 `PictureInPictureParams.Builder` 与 RemoteAction 的构造，解耦广播接收器注册逻辑，让 MainActivity 保持精简 |
 
 ### 2.2 运行时组件分工
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  MainActivity (ComponentActivity)                           │
-│  ├─ supportsPictureInPicture = true                         │
+│  ├─ supportsPictureInPicture = true, launchMode = singleTask│
 │  ├─ 持有 isInPipMode: StateFlow<Boolean>                    │
 │  ├─ enterPipMode()  ← 由 VideoPlayerScreen 的按钮调用       │
 │  ├─ onPictureInPictureModeChanged(isInPip, params)          │
-│  │    → 更新 isInPipMode、构建 RemoteAction Receiver        │
-│  └─ onPause() / onResume() — 感知 isInPipMode 决定是否暂停  │
-│         ExoPlayer                                            │
+│  │    → 更新 isInPipMode、动态注册/解绑 PipActionReceiver   │
+│  │      (注意 targetSdk 34 的 RECEIVER_NOT_EXPORTED 安全要求)│
+│  └─ 仅分发 PiP 模式切换状态，不直接侵入 ExoPlayer 的实例管理 │
 └─────────────────────────────────────────────────────────────┘
               ▲                              ▲
               │ 调用 enterPipMode()          │ 读取 isInPipMode
@@ -76,6 +76,12 @@
 3. **RemoteAction 用系统机制**：浮窗中央的播放/暂停按钮通过 `PictureInPictureParams.Builder().setActions(...)` 注册，点击触发 `BroadcastReceiver` → 调用 ExoPlayer 的 `play()` / `pause()`。Android 官方做法，不依赖自绘 overlay。
 
 4. **PipController 单独成类**：把 PiP 参数构造和 Action Receiver 逻辑从 MainActivity 抽出来，MainActivity 保持精简（当前 506 行，加 PiP 不希望膨胀到 700+）。
+
+5. **动态 Receiver 安全合规 (targetSdk 34)**：针对 Android 14 (API 34) 的新规，动态注册 `PipActionReceiver` 时必须显式指定 `ContextCompat.RECEIVER_NOT_EXPORTED`，防止系统抛出安全异常（SecurityException）导致崩溃。
+
+6. **PendingIntent 不可变性 (Android 12+)**：注册 `RemoteAction` 时使用的 `PendingIntent` 必须显式携带 `PendingIntent.FLAG_IMMUTABLE` 标志，以满足 Android 12+ 的安全性约束。
+
+7. **ExoPlayer 自动音频焦点管理**：在 `VideoPlayerScreen` 中初始化 ExoPlayer 时，为其配置 `setAudioAttributes(audioAttributes, true)`。开启自动音频焦点管理，确保视频在浮窗（后台）播放时，如果被其他媒体应用夺走音频焦点，能自动暂停并响应，提升后台表现。
 
 ## 3. 数据流与时序
 
@@ -115,12 +121,12 @@ VideoPlayerScreen 观察到 isInPipMode=true
 ### 3.2 PiP 中切到别的 App
 
 ```
-用户按 Home 键 → MainActivity.onPause() 被调用
+用户按 Home 键 → VideoPlayerScreen 绑定的 LifecycleObserver 监听到 ON_PAUSE
         │
-        ├─ 检查 isInPipMode == true ?
-        │     YES → 不调用 exoPlayer.pause()
+        ├─ 检查 activity.isInPictureInPictureMode == true ?
+        │     YES → 拦截 onPause 行为，不调用 exoPlayer.pause()
         │           视频继续播放 ✓
-        │     NO  → 正常暂停（保持现状）
+        │     NO  → 正常调用 exoPlayer.pause() 暂停播放（普通切后台）
         ▼
 用户在微信/浏览器/任意 App 操作
         │
@@ -154,26 +160,22 @@ VideoPlayerScreen 恢复全屏 UI
 （视频未暂停，无缝继续全屏播放）
 ```
 
-### 3.4 点系统 × 关闭按钮 → 关闭浮窗
+### 3.4 点系统 × 关闭按钮（或滑走关闭）→ 关闭浮窗
 
 ```
-用户点击 PiP 浮窗右上角的系统 × （或上滑浮窗）
+用户点击 PiP 浮窗右上角的系统 × （或向屏幕边缘滑走关闭）
         │
         ▼
-系统销毁 PiP 窗口 → onPictureInPictureModeChanged(false)
+系统关闭并销毁 Activity (MainActivity)
         │
-        ├─ MainActivity 更新 isInPipMode = false
-        ├─ 检查是否为「关闭式退出」
-        │     系统 × 退出时 isInPipMode=false 且 Activity 状态=DESTROYED
-        │     → VideoPlayerScreen 释放 ExoPlayer (exoPlayer.release())
-        │     → 触发 onBack() → navController.popBackStack("videoPlayer")
-        │        → 回到上一屏（首页/Browse）
-        │
+        ├─ Compose 自动触发 VideoPlayerScreen 的 onDispose 块
+        │     → 自动调用 exoPlayer.release() 释放播放器资源
+        │     → 自动调用 wrappedOnProgress(...) 将当前播放进度保存至本地数据库
         ▼
-浮窗消失，视频停止，用户在浏览页
+应用完全退出/关闭（符合 Single-Activity 架构下画中画关闭的 Android 标准行为）
 ```
 
-**3.3 与 3.4 的区分**：两者都触发 `onPictureInPictureModeChanged(false)`，区分点是 **Activity 是否被销毁**。系统 × 关闭会销毁 PiP 窗口（Activity 进入 STOPPED 然后可能 DESTROYED）；点主体退出 PiP 时 Activity 保持 RESUMED。
+**3.3 与 3.4 的区分**：两者触发的生命周期和销毁机制完全不同。点主体退出 PiP 时 Activity 保持存活并返回前台，仅触发 `onPictureInPictureModeChanged(false)`，UI 状态重组为全屏播放；而点击 × 关闭（或滑走）会使系统直接 finish 并 destroy 该 Activity，进而通过 Compose `onDispose` 释放资源并落库进度，不需要我们在 `onPictureInPictureModeChanged` 里手动做判断或调用 `popBackStack`。
 
 ### 3.5 PiP 激活时，用户从桌面/通知再点 App 图标（B2 决策）
 
@@ -184,16 +186,17 @@ VideoPlayerScreen 恢复全屏 UI
 Launcher 启动 MainActivity 的 launch Intent
         │
         ▼
-Android 原生行为：自动把 PiP 状态的 Activity 退出 PiP，拉到前台全屏
+由于已配置 launchMode="singleTask"：
+Android 系统自动复用现有的 MainActivity 实例并将其拉回前台
         │
         ▼
 onPictureInPictureModeChanged(false) → isInPipMode = false
         │
         ▼
-VideoPlayerScreen 恢复全屏 UI，视频无缝继续
+VideoPlayerScreen 恢复全屏 UI，视频无缝继续播放
 ```
 
-**B2 的本质**：完全依赖 Android 原生默认行为，**不需要我们写额外代码**。这是相对 B1（保持 PiP + 显示首页）的简化取舍 —— 牺牲了「同时看浮窗 + 首页」的能力，换取零闪烁、零额外代码、零状态混乱风险。
+**B2 的本质**：依赖 `launchMode="singleTask"` 结合 Android 原生默认行为实现。如果在 Manifest 中缺失 `launchMode="singleTask"`，Launcher 会启动一个新的 `MainActivity` 实例，导致画中画浮窗（旧实例）与前台全屏（新实例）共存的严重 Bug。
 
 ### 3.6 PiP 中点 RemoteAction 播放/暂停按钮
 
@@ -201,17 +204,17 @@ VideoPlayerScreen 恢复全屏 UI，视频无缝继续
 用户点击浮窗中央播放/暂停按钮
         │
         ▼
-系统派发 PendingIntent → PipActionReceiver.onReceive()
+系统派发 PendingIntent (携带 FLAG_IMMUTABLE) → PipActionReceiver.onReceive()
         │
-        ├─ 读取当前 isPlaying 状态
-        ├─ if (isPlaying) exoPlayer.pause()  else exoPlayer.play()
-        └─ 更新 RemoteAction 图标（切换 play ↔ pause 图标）
-        │
-        ▼
-通过 setPictureInPictureParamsAsync() 刷新 actions
+        ├─ 从应用层/ExoPlayer 读取当前播放状态
+        ├─ 执行播放状态切换：isPlaying ? exoPlayer.pause() : exoPlayer.play()
+        └─ 更新并构建新的 RemoteAction (切换 play ↔ pause 图标)
         │
         ▼
-浮窗按钮图标立即更新
+通过 setPictureInPictureParamsAsync() 刷新 params 包含的 actions
+        │
+        ▼
+浮窗中央的按钮图标立即更新
 ```
 
 ## 4. 错误处理与边界情况
@@ -239,8 +242,8 @@ VideoPlayerScreen 恢复全屏 UI，视频无缝继续
 **触发**：视频在浮窗里播完了。
 
 **处理**：
-- 退出 PiP，回到全屏播放界面，停留在结束画面
-- 触发现有的 `onProgress(positionMs, durationMs)` 回调保存进度（已有逻辑）
+- **退出 PiP**：由于 Android 框架层没有直接提供 `exitPictureInPictureMode()` 的 API，需要通过再次启动 `MainActivity` 并携带 `Intent.FLAG_ACTIVITY_REORDER_TO_FRONT` 标志来将 Activity 重新拉回前台全屏，以退出画中画状态并停留在播放结束画面。
+- 触发现有的 `onProgress(positionMs, durationMs)` 回调保存进度（已有逻辑）。
 
 ### 4.4 PiP 模式下的返回键防御
 
@@ -282,9 +285,18 @@ VideoPlayerScreen 恢复全屏 UI，视频无缝继续
 | 场景 | 处理 |
 |---|---|
 | 进入 PiP + 切换到别的 App | 不释放，不暂停 |
-| 点 × 关闭浮窗 | 释放 ExoPlayer（`onPictureInPictureModeChanged(false)` 且 Activity STOPPED） |
-| 点主体回全屏 | 不释放（继续全屏播） |
+| 点 × 关闭浮窗（或滑走关闭） | 自动触发 Compose 的 `onDispose` 回调，在此处调用 `exoPlayer.release()` 释放播放器且保存进度，Activity 被销毁 |
+| 点主体回全屏 | 不释放（继续全屏播放） |
 | 系统因内存压力杀进程 | ExoPlayer 随进程销毁，无需特殊处理 |
+
+### 4.9 音频焦点 (Audio Focus) 自动挂起与恢复
+
+**触发**：在画中画后台播放状态下，用户使用其他 App 播放音频/视频，或突然接听电话。
+
+**处理**：
+- 在 `VideoPlayerScreen` 中初始化 ExoPlayer 时，通过 `.setAudioAttributes(audioAttributes, true)` 将音频焦点托管给系统。
+- 焦点丢失时，ExoPlayer 自动触发 `pause()`。
+- 焦点重新获得时，如果属于短暂丢失，自动触发 `play()` 继续播放。
 
 ## 5. 测试策略
 
@@ -360,11 +372,11 @@ VideoPlayerScreen 恢复全屏 UI，视频无缝继续
 
 ## 6. 实现顺序建议（供 writing-plans 参考）
 
-1. Manifest 改动 + MainActivity 基础 PiP 进入（不带 RemoteAction）→ 真机验证最小可用
+1. Manifest 改动（supportsPictureInPicture, launchMode）+ MainActivity 基础 PiP 进入（不带 RemoteAction）→ 真机验证最小可用
 2. `PipController` 抽出 + 单元测试
 3. `VideoPlayerScreen` 悬浮窗按钮 + isInPipMode 状态联动
-4. `onPause` 不暂停逻辑（跨 App 持续播放）→ 真机验证核心场景
-5. RemoteAction（播放/暂停）+ PipActionReceiver
-6. × 关闭 vs 主体点击 的区分逻辑
-7. 边界情况（失败 toast、视频结束、返回键防御）
+4. `VideoPlayerScreen` 里的 `LifecycleObserver` 逻辑调整（PiP 模式下不暂停，非 PiP 模式正常暂停）→ 真机验证核心场景
+5. RemoteAction（播放/暂停）+ PipActionReceiver（带有安全合规的 Export 标志和 Immutable PendingIntent）
+6. × 关闭时的销毁释放与进度自动落库验证
+7. 边界情况（失败 toast、播放结束触发 launchActivity 回前台全屏、返回键防御、自动音频焦点管理）
 8. 仪器测试补全
