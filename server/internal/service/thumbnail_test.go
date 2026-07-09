@@ -434,3 +434,66 @@ func TestEncodeThumbnailToCache_AtomicWriteNoPartialFile(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerateThumbnailFromFile_Video_ProducesValidJPEG 验证视频分支生成的 cachePath
+// 是合法 JPEG 字节。需要 ffmpeg + 测试视频，否则跳过。
+func TestGenerateThumbnailFromFile_Video_ProducesValidJPEG(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	if !svc.HasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	videoPath := ensureTestVideo(t, svc)
+	if videoPath == "" {
+		t.Skip("could not generate test video")
+	}
+
+	cachePath := filepath.Join(svc.cacheDir, "videothumb.jpg")
+	got, err := svc.generateThumbnailFromFile(videoPath, cachePath)
+	if err != nil {
+		t.Fatalf("generateThumbnailFromFile video failed: %v", err)
+	}
+	if got != cachePath {
+		t.Errorf("returned path = %q, want %q", got, cachePath)
+	}
+
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+
+	if _, _, err := image.Decode(f); err != nil {
+		t.Errorf("generated thumbnail is not valid JPEG: %v", err)
+	}
+}
+
+// TestGenerateThumbnailFromFile_Video_NoTempFileLeftover 验证视频分支不再产生
+// 旧的 videothumb-* 临时文件（C1 改用 image2pipe 后应无残留）。
+func TestGenerateThumbnailFromFile_Video_NoTempFileLeftover(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	if !svc.HasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	videoPath := ensureTestVideo(t, svc)
+	if videoPath == "" {
+		t.Skip("could not generate test video")
+	}
+
+	cachePath := filepath.Join(svc.cacheDir, "videothumb.jpg")
+	if _, err := svc.generateThumbnailFromFile(videoPath, cachePath); err != nil {
+		t.Fatalf("generateThumbnailFromFile video failed: %v", err)
+	}
+
+	// 检查系统 TempDir 下无 videothumb-* 残留（旧逻辑的临时文件前缀）
+	tmpDir := os.TempDir()
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Logf("cannot read TempDir %s: %v (skip residual check)", tmpDir, err)
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "videothumb-") {
+			t.Errorf("old-style temp file leftover in TempDir: %s (C1 should have removed this)", e.Name())
+		}
+	}
+}

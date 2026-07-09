@@ -253,50 +253,23 @@ func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePat
 			return "", fmt.Errorf("ffmpeg not found, cannot generate video thumbnail")
 		}
 
-		// Create a temporary JPG file
-		tempFile, err := os.CreateTemp("", "videothumb-*.jpg")
-		if err != nil {
-			return "", err
-		}
-		tempPath := tempFile.Name()
-		tempFile.Close()
-		defer os.Remove(tempPath)
-
-		// Seek to a representative frame (video midpoint when ffprobe is
-		// available, else the prior default of 5s). Fall back to 0s on failure.
-		ffmpegCmd := s.getFFmpegCmd()
 		seek := midpointSeek(s.videoDurationCached(sourcePath))
-		cmd := exec.Command(ffmpegCmd, "-y", "-ss", seek, "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
-		if err := cmd.Run(); err != nil {
-			// 2. If it fails (e.g. video is too short), fallback to 0 seconds
-			cmdFallback := exec.Command(ffmpegCmd, "-y", "-ss", "0", "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
-			if err := cmdFallback.Run(); err != nil {
+
+		// 主路径：seek 到 midpoint 抽帧
+		src, err := s.extractVideoFrameToImage(sourcePath, seek)
+		if err != nil {
+			// fallback：seek=0 重试（视频太短或 midpoint 越界）
+			src, err = s.extractVideoFrameToImage(sourcePath, "0")
+			if err != nil {
 				return "", fmt.Errorf("failed to extract video frame: %w", err)
 			}
 		}
 
-		// Open the extracted image
-		src, err := imaging.Open(tempPath)
-		if err != nil {
-			return "", fmt.Errorf("failed to open extracted video frame: %w", err)
-		}
-
-		// Generate the thumbnail
-		thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
-
-		out, err := os.Create(cachePath)
-		if err != nil {
-			return "", err
-		}
-		defer out.Close()
-
-		if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
-			return "", err
-		}
-
-		return cachePath, nil
+		// C1: 传递未缩放的 src，由 encodeThumbnailToCache 完成缩放和落盘
+		return s.encodeThumbnailToCache(src, cachePath)
 	}
 
+	// 图片分支（C1 阶段保留旧逻辑；C2 Task 4 改用 helper）
 	src, err := imaging.Open(sourcePath)
 	if err != nil {
 		return "", err
