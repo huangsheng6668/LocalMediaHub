@@ -103,15 +103,21 @@
 
 ### 4.2 改造方案
 
-引入 helper `extractVideoFrameToImage`，封装 ffmpeg stdout pipe → image.Image：
+引入 helper `extractVideoFrameToImage`，封装 ffmpeg stdout pipe → image.Image。同时引入 `encodeThumbnailToCache` 统一缩略图缩放及原子写入磁盘缓存逻辑，消除并发写冲突和文件损坏风险。
 
+#### 1. 抽帧辅助函数（支持 Early Close 与 Wait 优化）
 ```go
 // extractVideoFrameToImage 调用 ffmpeg 从 sourcePath 的 seek 秒位置抽取一帧，
 // 通过 stdout pipe 直接返回 image.Image，避免临时文件 IO。
 // 失败时返回 error，由 caller 决定 fallback 策略。
+// 需要在 thumbnail.go 中引入 "bytes" 包。
 func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (image.Image, error) {
+    // 限制 ffmpeg 子进程执行时间，防止损坏视频导致永久挂起
+    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+    defer cancel()
+
     ffmpegCmd := s.getFFmpegCmd()
-    cmd := exec.Command(ffmpegCmd,
+    cmd := exec.CommandContext(ctx, ffmpegCmd,
         "-y", "-ss", seek, "-i", sourcePath,
         "-vframes", "1",
         "-f", "image2pipe",
@@ -123,27 +129,62 @@ func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (im
     if err != nil {
         return nil, err
     }
+    // 捕获 stderr 用于错误诊断
+    var stderr bytes.Buffer
+    cmd.Stderr = &stderr
+
     if err := cmd.Start(); err != nil {
         return nil, err
     }
 
-    // imaging.Decode 内部用 image.Decode，自动识别 mjpeg → jpeg decoding
-    img, decodeErr := imaging.Decode(stdout)
-    // 必须等 ffmpeg 退出，避免 zombie 进程 + 释放 pipe 资源
+    // Go 标准库 image.Decode 自动识别 mjpeg -> jpeg decoding
+    img, _, decodeErr := image.Decode(stdout)
+    
+    // 显式关闭 pipe 读端。若 Decode 提前退出/报错，这会向 ffmpeg 写入端发送 SIGPIPE/EPIPE，避免 ffmpeg 进程因 pipe 缓冲区满而阻塞挂起
+    _ = stdout.Close()
+    
+    // 等待 ffmpeg 退出以释放子进程资源，避免 zombie 进程
     waitErr := cmd.Wait()
 
     if decodeErr != nil {
-        return nil, fmt.Errorf("failed to decode ffmpeg pipe: %w", decodeErr)
+        return nil, fmt.Errorf("failed to decode ffmpeg pipe: %w (wait err: %v, stderr: %s)", decodeErr, waitErr, stderr.String())
     }
-    if waitErr != nil {
-        return nil, fmt.Errorf("ffmpeg exited with error: %w", waitErr)
-    }
+    // 若 decodeErr == nil，说明图片数据已完整成功解析，可安全忽略 Wait 的 exit status 1/EPIPE 等管道关闭引起的次要错误
     return img, nil
 }
 ```
 
-`generateThumbnailFromFile` 视频分支改造（保留 seek=X → fallback seek=0 两阶段重试）：
+#### 2. 缩略图编码与原子缓存写入函数（C1 阶段保留 Box 缩放）
+```go
+// encodeThumbnailToCache 把 src 等比缩放到 max×max 框内并写入 cachePath。
+// 在 C1 阶段暂保留 imaging.Thumbnail 与 Box 缩放器，C2 阶段再优化为 BiLinear 缩放。
+// 为防并发写入冲突或进程崩溃产生损坏的缩略图文件，先写临时文件再原子 Rename。
+func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
+    thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
 
+    tempFile, err := os.CreateTemp(filepath.Dir(cachePath), "thumb-tmp-*.jpg")
+    if err != nil {
+        return "", err
+    }
+    tempPath := tempFile.Name()
+    defer os.Remove(tempPath) // 出错提前返回时自动清理
+
+    if err := jpeg.Encode(tempFile, thumb, &jpeg.Options{Quality: 85}); err != nil {
+        tempFile.Close()
+        return "", err
+    }
+    if err := tempFile.Close(); err != nil {
+        return "", err
+    }
+
+    if err := os.Rename(tempPath, cachePath); err != nil {
+        return "", err
+    }
+    return cachePath, nil
+}
+```
+
+#### 3. `generateThumbnailFromFile` 整体流程改造
 ```go
 func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePath string) (string, error) {
     if isVideoFile(sourcePath) {
@@ -163,29 +204,36 @@ func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePat
             }
         }
 
-        thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
-        return s.encodeThumbnailToCache(thumb, cachePath)
+        // C1: 传递未缩放的 src，由 encodeThumbnailToCache 完成缩放和落盘，避免二次缩放
+        return s.encodeThumbnailToCache(src, cachePath)
     }
 
-    // 图片分支（C2 改造，见 §5）
-    ...
+    // 图片分支
+    src, err := imaging.Open(sourcePath)
+    if err != nil {
+        return "", err
+    }
+    return s.encodeThumbnailToCache(src, cachePath)
 }
 ```
 
-**注意**：`imaging.Decode(reader)` 来自 `disintegration/imaging`，内部就是 `image.Decode`，能自动识别 mjpeg 输出（ffmpeg `-vcodec mjpeg` 输出的是标准 JPEG 字节流）。
+**注意**：Go 标准库 `image.Decode(reader)` 在 `thumbnail.go` 中有 `image/jpeg` 和 `_ "image/png"` 导入注册，可以自动识别并解码 ffmpeg 输出的 JPEG 流。同时需要在 `thumbnail.go` 头部补充引入 `"bytes"` 包以支持 `bytes.Buffer`。
+
 
 ### 4.3 涉及文件
 
 | 文件 | 改动类型 |
 |---|---|
-| `server/internal/service/thumbnail.go` | 改：新增 `extractVideoFrameToImage` helper；`generateThumbnailFromFile` 视频分支改用 helper；删除 `os.CreateTemp` / `defer os.Remove(tempPath)` 临时文件逻辑；`os`/`imaging` import 不变 |
+| `server/internal/service/thumbnail.go` | 改：新增 `extractVideoFrameToImage` helper 与 `encodeThumbnailToCache` helper；`generateThumbnailFromFile` 视频及图片分支改用 helper；删除原视频分支 `os.CreateTemp` / `defer os.Remove(tempPath)` 临时文件逻辑；引入 `"bytes"` 导入包。 |
 
 ### 4.4 风险与缓解
 
 1. **ffmpeg stdout pipe 阻塞**：若 ffmpeg 输出速率 > Go 读取速率，pipe 缓冲区满会阻塞 ffmpeg。`imaging.Decode` 是流式读取，缓冲区默认 64KB 足够单帧 mjpeg（典型 50-200KB），偶发阻塞无影响（ffmpeg 等一下即可）。
 2. **ffmpeg 退出码非 0 但 pipe 已写部分字节**：先 `Decode` 后 `Wait`，`Decode` 成功即返回 image；若 `Wait` 报错，返回 error 让 caller fallback。**Decode 和 Wait 都成功才算成功**。
-3. **mjpeg pipe vs image2 文件字节差异**：`-f image2pipe -vcodec mjpeg` 输出的字节流与 `-f image2 file.jpg` 文件内容**语义等价**（都是 JPEG 格式），decode 后的 image.Image 像素完全一致。**缩略图字节内容完全不变**（下游 `imaging.Thumbnail` + `jpeg.Encode` 完全相同）。
+3. **mjpeg pipe vs image2 文件字节差异**：`-f image2pipe -vcodec mjpeg` 输出的字节流与 `-f image2 file.jpg` 文件内容**语义等价**（都是 JPEG 格式），decode 后的 image.Image 像素完全一致。**缩略图字节内容语义等价**。
 4. **imaging.Decode 错误处理**：`image.Decode` 失败时返回的 error 由 caller fallback 到 seek=0 重试，与现状行为一致。
+5. **子进程挂起风险**：使用 `exec.CommandContext` 绑定 15 秒超时 context，确保损坏文件或极端情况不会导致 ffmpeg 永久挂起，避免泄露系统资源。
+6. **错误诊断困难**：通过 `cmd.Stderr` 捕获 ffmpeg 错误流，在退出失败时带入 error message，提升日志可读性。
 
 ---
 
@@ -204,21 +252,31 @@ thumb := imaging.Thumbnail(src, max, max, imaging.Box) // Box filter ≈ Lanczos
 
 ### 5.2 改造方案
 
-引入 helper `encodeThumbnailToCache`（C1 已用），把缩放 + 写 cache 逻辑统一。用 `imaging.Fit` + `imaging.BiLinear`：
+更新 C1 中引入的 `encodeThumbnailToCache` 辅助函数，将缩放算法从 `imaging.Thumbnail` + `Box` 替换为更高效的 `imaging.Fit` + `imaging.BiLinear`：
 
 ```go
 // encodeThumbnailToCache 把 src 等比缩放到 max×max 框内并写入 cachePath。
-// 使用 BiLinear 缩放器（300×300 缩略图场景视觉等价 Lanczos，速度快 3-5 倍）。
+// C2 优化：使用 BiLinear 缩放器与 Fit 模式（300×300 缩略图场景下与 Lanczos 视觉等价，速度快 3-5 倍）。
 func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
     thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.BiLinear)
 
-    out, err := os.Create(cachePath)
+    // 为防并发写入冲突或进程崩溃导致产生损坏的缩略图文件，先写临时文件再原子 Rename
+    tempFile, err := os.CreateTemp(filepath.Dir(cachePath), "thumb-tmp-*.jpg")
     if err != nil {
         return "", err
     }
-    defer out.Close()
+    tempPath := tempFile.Name()
+    defer os.Remove(tempPath) // 出错提前返回时自动清理
 
-    if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
+    if err := jpeg.Encode(tempFile, thumb, &jpeg.Options{Quality: 85}); err != nil {
+        tempFile.Close()
+        return "", err
+    }
+    if err := tempFile.Close(); err != nil {
+        return "", err
+    }
+
+    if err := os.Rename(tempPath, cachePath); err != nil {
         return "", err
     }
     return cachePath, nil
@@ -227,31 +285,14 @@ func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath str
 
 **选择 `imaging.Fit` 而非 `imaging.Resize`/`imaging.Thumbnail` 的理由**：
 
-- `imaging.Resize(src, w, h, filter)` 拉伸到精确 w×h，**不保比** —— 直接用会变形
-- `imaging.Fit(src, w, h, filter)` 等比缩放到 w×h 框内（短边 = w/h，长边 ≤），**保比**
-- `imaging.Thumbnail(src, w, h, filter)` = `Fit` + `Center Crop` 到精确 w×h
+- `imaging.Resize(src, w, h, filter)` 拉伸到精确 w×h，**不保比** —— 直接用会变形。
+- `imaging.Fit(src, w, h, filter)` 等比缩放到 w×h 框内（短边 = w/h，长边 ≤），**保比**。
+- `imaging.Thumbnail(src, w, h, filter)` = `Fit` + `Center Crop` 到精确 w×h。
 
 源图缩放后短边 = 300、长边 ≤ 300 时，`Thumbnail` 的 crop 操作无实际裁剪（已是正方形目标），因此 `Fit` 与 `Thumbnail` 在本场景下**行为完全等价**，选更轻量的 `Fit`。
 
-`generateThumbnailFromFile` 图片分支：
+图片分支与视频分支由于在 C1 阶段已重构调用 `encodeThumbnailToCache`，所以在 C2 阶段它们的代码**无需任何改动**，即自动享受 BiLinear 带来的性能提升。
 
-```go
-// 图片分支
-src, err := imaging.Open(sourcePath)
-if err != nil {
-    return "", err
-}
-return s.encodeThumbnailToCache(src, cachePath)
-```
-
-视频分支（C1 改造后）也复用 `encodeThumbnailToCache`：
-
-```go
-// 视频分支（C1 改造后）
-src, err := s.extractVideoFrameToImage(sourcePath, seek)
-if err != nil { ... fallback ... }
-return s.encodeThumbnailToCache(src, cachePath)
-```
 
 ### 5.3 涉及文件
 
@@ -265,6 +306,7 @@ return s.encodeThumbnailToCache(src, cachePath)
 2. **缩略图质量退化**：300×300 JPEG Quality 85 + BiLinear，理论上比 Lanczos 略软。家用浏览场景（手机 6 寸屏看缩略图）肉眼不可辨。
 3. **极端边缘 case**：源图本身就是 300×300 以下小图，`imaging.Fit` 不放大（与 `imaging.Thumbnail` 一致），无副作用。
 4. **回归测试覆盖**：现有 `thumbnail_test.go` / `thumbnail_cache_test.go` 不断言具体字节内容，只断言生成成功 + memCache hit/miss 行为，**不会因 BiLinear 字节变化而失败**。
+5. **写入中断损坏缓存**：如果在 `jpeg.Encode` 过程中服务重启或中断，可能在 `cachePath` 留下半截损坏的缩略图。通过使用 `os.CreateTemp` + `os.Rename` 原子化写入过程，消除损坏缓存的风险。
 
 ---
 
@@ -302,7 +344,7 @@ type Scanner struct {
 }
 ```
 
-**Scan 函数改造**：walk goroutine 通过 `sync.Mutex` 保护的共享 `dirMap` 收集目录（目录数远少于文件数，锁竞争可忽略）：
+**Scan 函数改造**：walk goroutine 遇到媒体文件时，通过 `sync.Mutex` 保护的共享 `dirMap` 递归收集其父级目录及所有祖先目录（直至 `root` 边界），以便能搜索到不直接包含媒体文件但子目录中含有媒体文件的中间文件夹。为了防止在 Windows 根目录或 UNC 路径等场景下陷入死循环，必须在向上溯源时进行 `parent == dir` 根边界校验。需要注意在 `scanner.go` 头部导入 `"runtime"` 与 `"sort"`。
 
 ```go
 var dirMu sync.Mutex
@@ -311,51 +353,55 @@ dirMap := make(map[string]time.Time)
 for i, root := range roots {
     i, root := i, root
     g.Go(func() error {
-        var localFiles []models.MediaFile
+        cleanRoot := filepath.Clean(root)
         err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-            // ... existing WalkDir 逻辑：ctx 检查、ext 判断、stat、append localFiles ...
+            if err != nil {
+                return nil
+            }
+            // ... existing WalkDir 逻辑：ctx 检查、ext 判断 ...
 
             if isVideo || isImage {
-                // ... existing MediaFile append 到 localFiles ...
+                // 递归收集该文件所属的父目录及所有祖先目录，直到 root 边界
+                dir := filepath.Clean(filepath.Dir(path))
+                for dir != "" && dir != cleanRoot {
+                    dirMu.Lock()
+                    if _, exists := dirMap[dir]; !exists {
+                        // 首次加入时，执行 os.Stat 获取目录 ModifiedTime
+                        var mtime time.Time
+                        if info, err := os.Stat(dir); err == nil {
+                            mtime = info.ModTime()
+                        }
+                        dirMap[dir] = mtime
+                        dirMu.Unlock()
 
-                // 收集父目录到共享 dirMap
-                dir := filepath.Dir(path)
-                dirMu.Lock()
-                if _, exists := dirMap[dir]; !exists {
-                    if dirInfo, err := os.Stat(dir); err == nil {
-                        dirMap[dir] = dirInfo.ModTime()
+                        parent := filepath.Clean(filepath.Dir(dir))
+                        if parent == dir {
+                            break // 已到文件系统根节点，退出以防止死循环
+                        }
+                        dir = parent
                     } else {
-                        dirMap[dir] = time.Time{} // fallback 空 mtime
+                        // 祖先目录此前必然已被完整加入，可安全提前 break 减少锁竞争
+                        dirMu.Unlock()
+                        break
                     }
                 }
-                dirMu.Unlock()
             }
             return nil
         })
-        // ... existing: results[i] = localFiles ...
+        // ...
     })
 }
 ```
 
-**Scan 结束写入 cacheDirs**（`dirMap` 由 walk goroutine 共享填充，合并阶段直接转存）：
+**Scan 结束写入 cacheDirs**：
 
 ```go
 s.mu.Lock()
-s.cache["all"] = allFiles
-s.cache["video"] = videoFiles
-s.cache["image"] = imageFiles
-// 把 dirMap 转为排序切片（按字典序，便于后续前缀匹配二分查找）
-cacheDirs := make([]string, 0, len(dirMap))
-cacheDirMap := make(map[string]time.Time, len(dirMap))
-for dir, mtime := range dirMap {
-    cacheDirs = append(cacheDirs, dir)
-    cacheDirMap[dir] = mtime
-}
+// ... 合并 dirMap 到 s.cacheDirs 和 s.cacheDirMap ...
 sort.Strings(cacheDirs)
 s.cacheDirs = cacheDirs
 s.cacheDirMap = cacheDirMap
 s.cacheTime = time.Now()
-// ... callback ...
 s.mu.Unlock()
 ```
 
@@ -363,16 +409,13 @@ s.mu.Unlock()
 
 ```go
 // GetCachedDirs 返回已知目录列表，可选按 scope 前缀过滤。
-// scope="" 返回全部；scope="D:/Media" 返回该前缀下的目录。
-// 与 GetCached 共享 TTL + singleflight（cache miss 时触发 Scan 填充 cacheDirs）。
-// 返回 (dirs, mtimes, error)：mtimes[dir] 为目录 mtime，调用方可查。
 func (s *Scanner) GetCachedDirs(ctx context.Context, roots []string, scope string) ([]string, map[string]time.Time, error) {
     dirs, mtimes, err := s.peekCachedDirs(scope)
     if err == nil {
         return dirs, mtimes, nil
     }
 
-    // cache miss → 触发 Scan（singleflight 防击穿）
+    // cache miss → 触发 Scan
     _, err, _ = s.sf.Do("scan", func() (interface{}, error) {
         return s.Scan(ctx, roots)
     })
@@ -401,26 +444,34 @@ func (s *Scanner) peekCachedDirs(scope string) ([]string, map[string]time.Time, 
     return dirs, mtimes, nil
 }
 
-// filterDirsByScope 持读锁调用，返回 scope 前缀下的目录（已排序）。
+// filterDirsByScope 持读锁调用，返回 scope 前缀下的目录。
 // scope="" 返回全部。scope 不以 filepath.Separator 结尾时内部补齐。
+// 为兼容 Windows 路径大小写不敏感特性，在 Windows 下使用无内存分配的 case-insensitive 前缀判定（strings.EqualFold 截取对比）。
 func (s *Scanner) filterDirsByScope(scope string) []string {
     if scope == "" {
         out := make([]string, len(s.cacheDirs))
         copy(out, s.cacheDirs)
         return out
     }
-    // cacheDirs 已排序，二分查找前缀范围
     prefix := scope
     if !strings.HasSuffix(prefix, string(filepath.Separator)) {
         prefix += string(filepath.Separator)
     }
-    start := sort.SearchStrings(s.cacheDirs, prefix)
-    end := start
-    for end < len(s.cacheDirs) && strings.HasPrefix(s.cacheDirs[end], prefix) {
-        end++
+
+    out := make([]string, 0)
+    isWindows := runtime.GOOS == "windows"
+    for _, dir := range s.cacheDirs {
+        if isWindows {
+            // Windows 下进行大小写折叠的无分配前缀匹配
+            if len(dir) >= len(prefix) && strings.EqualFold(dir[:len(prefix)], prefix) {
+                out = append(out, dir)
+            }
+        } else {
+            if strings.HasPrefix(dir, prefix) {
+                out = append(out, dir)
+            }
+        }
     }
-    out := make([]string, end-start)
-    copy(out, s.cacheDirs[start:end])
     return out
 }
 ```
@@ -445,6 +496,7 @@ func (s *Scanner) InvalidateCache() {
 ```go
 // searchFoldersCached 从 scanner cache 中按 scope + query 过滤目录名。
 // 替代原 searchFoldersCtx 的 WalkDir，从磁盘 IO 改为内存扫。
+// 需要在 search.go 中引入 "runtime" 包。
 func (h *Handler) searchFoldersCached(ctx context.Context, scopedPath, query string, limit int) ([]models.Folder, error) {
     roots := h.cfg.Scan.GetRoots()
     scope := scopedPath
@@ -462,13 +514,22 @@ func (h *Handler) searchFoldersCached(ctx context.Context, scopedPath, query str
 
     lowerQuery := strings.ToLower(query)
     out := make([]models.Folder, 0, limit)
+    isWindows := runtime.GOOS == "windows"
     for _, dir := range dirs {
         if ctx.Err() != nil {
             break
         }
-        // 排除 scope 根自身（与原 WalkDir 行为一致：path == root 时跳过）
-        if scope != "" && dir == strings.TrimSuffix(scope, string(filepath.Separator)) {
-            continue
+        // 排除 scope 根自身，使用 Clean 并针对 Windows 进行大小写无关的 EqualFold 比对
+        if scopedPath != "" {
+            isRootSelf := false
+            if isWindows {
+                isRootSelf = strings.EqualFold(filepath.Clean(dir), filepath.Clean(scopedPath))
+            } else {
+                isRootSelf = filepath.Clean(dir) == filepath.Clean(scopedPath)
+            }
+            if isRootSelf {
+                continue
+            }
         }
         name := filepath.Base(dir)
         if !strings.Contains(strings.ToLower(name), lowerQuery) {
@@ -499,8 +560,8 @@ matchedFolders, err := h.searchFoldersCached(c.Request().Context(), searchPath, 
 
 | 文件 | 改动类型 |
 |---|---|
-| `server/internal/service/scanner.go` | 改：Scanner struct 加 `cacheDirs []string` + `cacheDirMap map[string]time.Time`；Scan walk goroutine 收集父目录到共享 `dirMap`（mutex 保护）；Scan 合并阶段写 `cacheDirs`（排序）+ `cacheDirMap`；新增 `GetCachedDirs` + `peekCachedDirs` + `filterDirsByScope`；`InvalidateCache` 同步清理；`NewScanner` 初始化新字段 |
-| `server/internal/server/handler/search.go` | 改：`searchFoldersCtx` → `searchFoldersCached`，改用 `h.scanner.GetCachedDirs`；`Search` 调用点改名 |
+| `server/internal/service/scanner.go` | 改：Scanner struct 加 `cacheDirs []string` + `cacheDirMap map[string]time.Time`；Scan walk goroutine 递归收集父级与祖先目录到共享 `dirMap`（mutex 保护）；Scan 合并阶段写 `cacheDirs`（排序）+ `cacheDirMap`；新增 `GetCachedDirs` + `peekCachedDirs` + `filterDirsByScope`；`InvalidateCache` 同步清理；`NewScanner` 初始化新字段；引入 `"runtime"` 与 `"sort"` 包。 |
+| `server/internal/server/handler/search.go` | 改：`searchFoldersCtx` → `searchFoldersCached`，改用 `h.scanner.GetCachedDirs`；`Search` 调用点改名；引入 `"runtime"` 包。 |
 | `server/internal/server/handler/search_test.go` | 改：现有测试若有 mock scanner WalkDir 的断言需调整；新增 cache 命中/miss + scope 过滤测试 |
 
 ### 6.4 风险与缓解
@@ -510,7 +571,7 @@ matchedFolders, err := h.searchFoldersCached(c.Request().Context(), searchPath, 
 3. **cache miss 时搜索触发 Scan**：`GetCachedDirs` cache miss 会通过 singleflight 触发 `Scan`。与现有 `GetCached` 行为一致（`Search` handler 已经调 `GetCached` 拿文件列表），无新风险。
 4. **目录 mtime 缺失**：若 `os.Stat(dir)` 失败（目录被删/权限问题），`cacheDirMap[dir] = time.Time{}`（零值），搜索结果 ModifiedTime 为空。客户端搜索结果若展示 mtime 会显示空，可接受（原 WalkDir 在目录被删时 `d.Info()` 也会失败跳过）。
 5. **fsnotify 触发重扫**：`watchEvents` 防抖后调 `InvalidateCache` + `TriggerScan`，cacheDirs 会随重扫重建。新增/删除媒体文件 → 父目录自动加入/移除 cacheDirs。
-6. **scope 二分查找正确性**：`sort.SearchStrings` 找第一个 ≥ prefix 的位置，然后线性扫描直到前缀不匹配。`cacheDirs` 已字典序排序，二分 + 线性扫描的复杂度 O(log n + k)，k 为匹配数。
+6. **scope 匹配性能与正确性**：使用 O(N) 线性过滤，并针对 Windows 进行大小写无关的前缀截取对比（`strings.EqualFold` 且无内存分配）。由于家用规模（目录数 < 10k）下线性过滤耗时仅在微秒级，性能优异，且能彻底避免因大小写不一致导致二分查找错过的风险。
 
 ---
 
@@ -604,7 +665,7 @@ matchedFolders, err := h.searchFoldersCached(c.Request().Context(), searchPath, 
 |---|---|
 | cacheDirs 为 nil（首次启动未扫完） | GetCachedDirs 触发 Scan，Scan 完成后填充 |
 | scope 不存在（不在任何 root 下） | filterDirsByScope 返回空切片，搜索返回空结果（与原 WalkDir 行为一致） |
-| scope 根被排除 | `dir == TrimSuffix(scope, Separator)` 显式跳过，与原 `path == root` 跳过一致 |
+| scope 根被排除 | 显式检查并跳过 scope 根自身（Windows 下使用 `strings.EqualFold` 对比 clean 路径，Unix 下直比），与原 `path == root` 跳过一致 |
 | 目录 mtime 为零值（os.Stat 失败） | ModifiedTime 字段为 `time.Time{}`，JSON 序列化为零值，客户端显示空（与原行为一致） |
 | fsnotify 触发重扫时搜索并发 | InvalidateCache 清空 cacheDirs，并发搜索可能拿到 nil → 触发 Scan 重建。singleflight 保证只有一个 Scan 跑 |
 | ctx 取消（客户端断开） | searchFoldersCached 循环内检查 `ctx.Err()`，提前 break 返回部分结果（与原 searchFoldersCtx 一致） |
@@ -685,7 +746,7 @@ func TestGetCachedDirs_ExcludesScopeRoot(t *testing.T)
 // 11. InvalidateCache 清空 cacheDirs
 func TestInvalidateCache_ClearsCacheDirs(t *testing.T)
 
-// 12. cacheDirs 字典序排序（二分查找前置条件）
+// 12. cacheDirs 字典序排序（确保搜索结果按字母顺序稳定返回）
 func TestScan_CacheDirsSorted(t *testing.T)
 ```
 
@@ -743,14 +804,14 @@ func TestSearchFoldersCached_ContextCancellation(t *testing.T)
 | 决策 | 选择 | 理由 |
 |---|---|---|
 | 范围 | C1 + C2 + C3 三 commit 打包 | 用户明确选 all |
-| 视频缩略图策略 | ffmpeg image2pipe + stdout pipe + imaging.Decode | 消除临时文件 IO，单次省 50-200ms |
-| 图片缩略图策略 | imaging.Fit + BiLinear（替代 Thumbnail + Box） | 300×300 场景视觉等价，速度快 3-5 倍 |
+| 视频缩略图策略 | ffmpeg image2pipe + stdout pipe + CommandContext 15s 超时限制 + stderr 收集 + imaging.Decode | 消除临时文件 IO，单次省 50-200ms；超时保障系统稳定性；捕获错误日志以利排查 |
+| 图片缩略图策略 | imaging.Fit + BiLinear（替代 Thumbnail + Box）+ os.CreateTemp 原子写入缓存 | 300×300 场景视觉等价，速度快 3-5 倍；原子 rename 避免进程中断导致生成损坏缓存 |
 | 缩放器统一 | 新增 encodeThumbnailToCache helper，视频/图片共用 | 消除重复代码，C1/C2 改动集中 |
 | 文件搜索索引 | 不索引（已基于 scanner cache） | searchFiles Round 23 已优化，无瓶颈 |
 | 文件夹搜索索引 | scanner 收集 cacheDirs，内存前缀扫 | 避免 FTS5 中文分词坑，避免内存倒排索引复杂度 |
-| 目录 mtime | 保留（os.Stat 收集） | 用户明确选保留；客户端搜索结果展示 |
-| cacheDirs 排序 | 字典序 + sort.SearchStrings 二分 | scope 前缀过滤从 O(n) → O(log n + k) |
-| scope 根排除 | 显式 `dir == TrimSuffix(scope, Sep)` 跳过 | 与原 WalkDir `path == root` 行为一致 |
+| 目录 mtime | 保留（首次加入 dirMap 时 os.Stat 收集） | 用户明确选保留；同一目录只 stat 一次，后续文件命中 dirMap 跳过，避免高频 stat |
+| cacheDirs 排序 | 字典序排序 + 线性前缀过滤（无内存分配） | 内存过滤微秒级（<10k 目录），且彻底规避 Windows 大小写不一致导致的二分失败隐患 |
+| scope 根排除 | 显式 Clean 且针对 Windows 进行大小写无关的 `strings.EqualFold` 比对跳过 | 与原 WalkDir `path == root` 行为一致，鲁棒兼容 Windows 盘符根路径与大小写变化 |
 | 空目录处理 | 不收集（scanner 只在有媒体文件时收集父目录） | 与 BrowseResult 行为一致 |
 | FFmpeg so 裁剪 | 不做（留后续轮次） | 独立议题，重编流程复杂 |
 | wrk baseline | 记录建议，非强制 | 避免拖慢交付 |
