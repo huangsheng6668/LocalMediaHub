@@ -1,18 +1,12 @@
 package com.juziss.localmediahub
 
-import android.app.PictureInPictureParams
-import android.content.IntentFilter
-import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -24,9 +18,6 @@ import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.data.isCompleted
 import com.juziss.localmediahub.data.isValidProgress
 import com.juziss.localmediahub.data.shouldFocusRestart
-import com.juziss.localmediahub.pip.PipActionReceiver
-import com.juziss.localmediahub.pip.PipController
-import com.juziss.localmediahub.pip.PipControllerStore
 import com.juziss.localmediahub.ui.component.ResumePlaybackDialog
 import com.juziss.localmediahub.ui.component.ResumePlaybackRequest
 import com.juziss.localmediahub.ui.component.VideoOpenAction
@@ -35,7 +26,6 @@ import com.juziss.localmediahub.ui.screen.ConnectionScreen
 import com.juziss.localmediahub.ui.screen.DownloadsScreen
 import com.juziss.localmediahub.ui.screen.HomeScreen
 import com.juziss.localmediahub.ui.screen.ImagePreviewScreen
-import com.juziss.localmediahub.ui.screen.VideoPlayerScreen
 import com.juziss.localmediahub.ui.theme.LocalMediaHubTheme
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import com.juziss.localmediahub.viewmodel.HomeViewModel
@@ -44,9 +34,6 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -65,19 +52,6 @@ interface AppStoresEntryPoint {
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-    private val _isInPipMode = MutableStateFlow(false)
-    /** 暴露给 Composable 读取的 PiP 状态。 */
-    val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
-
-    /**
-     * 已注册的 [PipActionReceiver] 实例，或 null 表示当前未注册。
-     *
-     * 必须保存注册时创建的同一个实例：Android 的 [android.content.Context.unregisterReceiver]
-     * 按 binder 身份（对象相等性）匹配，而不是按类匹配。如果用新构造的实例去解绑，永远抛
-     * `IllegalArgumentException: Receiver not registered`，真正注册的接收器会泄漏。
-     */
-    private var pipReceiver: PipActionReceiver? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -86,71 +60,6 @@ class MainActivity : ComponentActivity() {
                 LocalMediaHubApp()
             }
         }
-    }
-
-    /**
-     * 由 VideoPlayerScreen 的「悬浮窗」按钮调用。返回 true 表示成功进入 PiP。
-     *
-     * 在进入 PiP 前动态注册 [PipActionReceiver] (RECEIVER_NOT_EXPORTED) 以便接收
-     * RemoteAction 的 PendingIntent 派发。退出 PiP 时在
-     * [onPictureInPictureModeChanged] 中解绑。
-     */
-    @Suppress("DEPRECATION")
-    fun enterPipMode(width: Int, height: Int, isPlaying: Boolean): Boolean {
-        if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
-            return false
-        }
-        val params = PipController.buildParams(this, width, height, isPlaying)
-        return try {
-            // compileSdk 36 上单参 enterPictureInPictureMode(PictureInPictureParams) 被弃用，
-            // 替换签名要求 API 36+ 的 Executor + Consumer，超出本次范围；我们的 minSdk 26
-            // 不支持新重载，且旧的弃用调用在所有 API 26+ 设备上仍工作正常。
-            val entered = enterPictureInPictureMode(params)
-            if (entered && pipReceiver == null) {
-                val receiver = PipActionReceiver()
-                ContextCompat.registerReceiver(
-                    this,
-                    receiver,
-                    IntentFilter(PipController.ACTION_PLAY_PAUSE),
-                    ContextCompat.RECEIVER_NOT_EXPORTED,
-                )
-                pipReceiver = receiver
-            }
-            entered
-        } catch (e: IllegalStateException) {
-            // 部分 ROM 在 Activity 非 resumed 时调用 enterPictureInPictureMode 会抛。
-            false
-        }
-    }
-
-    override fun onPictureInPictureModeChanged(
-        isInPictureInPictureMode: Boolean,
-        newConfig: Configuration
-    ) {
-        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        _isInPipMode.value = isInPictureInPictureMode
-        if (!isInPictureInPictureMode) {
-            unregisterPipReceiver()
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        unregisterPipReceiver()
-        PipControllerStore.unbind()
-    }
-
-    /**
-     * 解绑已注册的 [pipReceiver]（按 binder 身份匹配）。重复调用或未注册时静默忽略。
-     */
-    private fun unregisterPipReceiver() {
-        val receiver = pipReceiver ?: return
-        try {
-            unregisterReceiver(receiver)
-        } catch (_: IllegalArgumentException) {
-            // already unregistered
-        }
-        pipReceiver = null
     }
 }
 
@@ -175,13 +84,6 @@ fun LocalMediaHubApp() {
     // Shared state for passing media data between screens
     // Keep media navigation payloads in memory only. Saving whole MediaFile objects and
     // image lists can stall the UI when opening large folders or image sets.
-    // Round 20: rememberSaveable for process-death recovery.
-    // MediaFile is @Parcelize so it serializes to SavedStateHandle automatically.
-    var currentVideoFile by rememberSaveable { mutableStateOf<MediaFile?>(null) }
-    var currentVideoUrl by rememberSaveable { mutableStateOf("") }
-    var currentVideoUsesSystemUrl by rememberSaveable { mutableStateOf(false) }
-    var currentVideoStartPositionMs by rememberSaveable { mutableLongStateOf(0L) }
-
     var currentImageFile by remember { mutableStateOf<MediaFile?>(null) }
     var imageList by remember { mutableStateOf<List<MediaFile>>(emptyList()) }
     var currentImageUsesSystemUrl by remember { mutableStateOf(false) }
@@ -195,11 +97,14 @@ fun LocalMediaHubApp() {
     val downloadedEntries by browseViewModel.downloadedFiles.collectAsState(initial = emptyList())
 
     val playVideo = { file: MediaFile, url: String, positionMs: Long, isSys: Boolean ->
-        currentVideoFile = file
-        currentVideoUrl = url
-        currentVideoStartPositionMs = positionMs
-        currentVideoUsesSystemUrl = isSys
-        navController.navigate("videoPlayer")
+        val intent = VideoPlayerIntentBuilder.build(
+            context = context,
+            file = file,
+            streamUrl = url,
+            initialPositionMs = positionMs,
+            isSystemBrowse = isSys,
+        )
+        context.startActivity(intent)
     }
 
     NavHost(navController = navController, startDestination = "connection") {
@@ -245,12 +150,8 @@ fun LocalMediaHubApp() {
                     openPlaybackProgress(
                         entry = entry,
                         homeViewModel = homeViewModel,
-                        navController = navController,
                         onVideoReady = { file, url, positionMs, isSystemBrowse ->
-                            currentVideoFile = file
-                            currentVideoUrl = url
-                            currentVideoStartPositionMs = positionMs
-                            currentVideoUsesSystemUrl = isSystemBrowse
+                            playVideo(file, url, positionMs, isSystemBrowse)
                         },
                     )
                 },
@@ -261,10 +162,7 @@ fun LocalMediaHubApp() {
                             homeViewModel = homeViewModel,
                             recentActivityStore = recentActivityStore,
                             onVideoReady = { file, url, positionMs ->
-                                currentVideoFile = file
-                                currentVideoUrl = url
-                                currentVideoStartPositionMs = positionMs
-                                currentVideoUsesSystemUrl = entry.isSystemBrowse
+                                playVideo(file, url, positionMs, entry.isSystemBrowse)
                             },
                             onShowResumeDialog = { req -> resumeRequest = req },
                             onImageReady = { file, images ->
@@ -273,7 +171,7 @@ fun LocalMediaHubApp() {
                                 currentImageUsesSystemUrl = entry.isSystemBrowse
                                 currentImageIsLocal = false
                             },
-                            navigateToVideoPlayer = { navController.navigate("videoPlayer") },
+                            navigateToVideoPlayer = { },
                             navigateToImagePreview = { navController.navigate("imagePreview") },
                         )
                     }
@@ -417,30 +315,6 @@ fun LocalMediaHubApp() {
             )
         }
 
-        composable("videoPlayer") {
-            if (currentVideoFile != null) {
-                val context = androidx.compose.ui.platform.LocalContext.current
-                VideoPlayerScreen(
-                    streamUrl = currentVideoUrl,
-                    initialPositionMs = currentVideoStartPositionMs,
-                    onProgress = { positionMs, durationMs ->
-                        val file = currentVideoFile
-                        if (file != null) {
-                            appScope.launch {
-                                recentActivityStore.savePlaybackProgress(
-                                    file = file,
-                                    isSystemBrowse = currentVideoUsesSystemUrl,
-                                    positionMs = positionMs,
-                                    durationMs = durationMs,
-                                )
-                            }
-                        }
-                    },
-                    onBack = { navController.popBackStack() },
-                )
-            }
-        }
-
         composable("imagePreview") {
             val file = currentImageFile
             if (file != null) {
@@ -560,7 +434,6 @@ private suspend fun openRecentMedia(
 private fun openPlaybackProgress(
     entry: PlaybackProgressEntry,
     homeViewModel: HomeViewModel,
-    navController: NavHostController,
     onVideoReady: (MediaFile, String, Long, Boolean) -> Unit,
 ) {
     onVideoReady(
@@ -569,7 +442,6 @@ private fun openPlaybackProgress(
         entry.positionMs,
         entry.isSystemBrowse,
     )
-    navController.navigate("videoPlayer")
 }
 
 /**
