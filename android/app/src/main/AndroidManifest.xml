@@ -22,8 +22,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
-            android:supportsPictureInPicture="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.LocalMediaHub"
             tools:targetApi="34">
             <intent-filter>
@@ -31,6 +30,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".VideoPlayerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:supportsPictureInPicture="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.juziss.localmediahub.video"
+            android:theme="@style/Theme.LocalMediaHub"
+            tools:targetApi="34" />
     </application>
 
 </manifest>
