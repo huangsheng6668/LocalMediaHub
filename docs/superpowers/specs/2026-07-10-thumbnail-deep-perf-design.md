@@ -252,13 +252,13 @@ thumb := imaging.Thumbnail(src, max, max, imaging.Box) // Box filter ≈ Lanczos
 
 ### 5.2 改造方案
 
-更新 C1 中引入的 `encodeThumbnailToCache` 辅助函数，将缩放算法从 `imaging.Thumbnail` + `Box` 替换为更高效的 `imaging.Fit` + `imaging.BiLinear`：
+更新 C1 中引入的 `encodeThumbnailToCache` 辅助函数，将缩放算法从 `imaging.Thumbnail` + `Box` 替换为更高效的 `imaging.Fit` + `imaging.Linear`（注：imaging 库的 `Linear` 即双线性/bilinear 滤镜，无独立的 `BiLinear` 常量）：
 
 ```go
 // encodeThumbnailToCache 把 src 等比缩放到 max×max 框内并写入 cachePath。
 // C2 优化：使用 BiLinear 缩放器与 Fit 模式（300×300 缩略图场景下与 Lanczos 视觉等价，速度快 3-5 倍）。
 func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
-    thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.BiLinear)
+    thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.Linear)
 
     // 为防并发写入冲突或进程崩溃导致产生损坏的缩略图文件，先写临时文件再原子 Rename
     tempFile, err := os.CreateTemp(filepath.Dir(cachePath), "thumb-tmp-*.jpg")
@@ -298,7 +298,7 @@ func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath str
 
 | 文件 | 改动类型 |
 |---|---|
-| `server/internal/service/thumbnail.go` | 改：新增 `encodeThumbnailToCache` helper（统一缩放 + 写 cache）；视频和图片分支都改用 helper；缩放器从 `imaging.Thumbnail(src, max, max, imaging.Box)` 改为 `imaging.Fit(src, max, max, imaging.BiLinear)` |
+| `server/internal/service/thumbnail.go` | 改：新增 `encodeThumbnailToCache` helper（统一缩放 + 写 cache）；视频和图片分支都改用 helper；缩放器从 `imaging.Thumbnail(src, max, max, imaging.Box)` 改为 `imaging.Fit(src, max, max, imaging.Linear)`（注：imaging 库的 `Linear` 即双线性滤镜，无 `BiLinear` 常量） |
 
 ### 5.4 风险与缓解
 

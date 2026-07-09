@@ -612,7 +612,7 @@ EOF
 ## Task 4: C2 — 图片分支改用 `encodeThumbnailToCache` + 切换 BiLinear 缩放器
 
 **Files:**
-- Modify: `server/internal/service/thumbnail.go`（`encodeThumbnailToCache` 内的 `imaging.Thumbnail` → `imaging.Fit` + `imaging.BiLinear`）+ `generateThumbnailFromFile` 图片分支
+- Modify: `server/internal/service/thumbnail.go`（`encodeThumbnailToCache` 内的 `imaging.Thumbnail` → `imaging.Fit` + `imaging.Linear`）+ `generateThumbnailFromFile` 图片分支
 - Test: `server/internal/service/thumbnail_test.go`
 
 **Interfaces:**
@@ -718,7 +718,7 @@ thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
 改为：
 
 ```go
-thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.BiLinear)
+thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.Linear)
 ```
 
 完整函数变为：
@@ -728,7 +728,7 @@ thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.BiLinear)
 // C2 优化：使用 BiLinear + Fit（300×300 缩略图场景下与 Lanczos 视觉等价，速度快 3-5 倍）。
 // 用 os.CreateTemp + os.Rename 原子写入：进程崩溃/并发写不会留下半截损坏 jpg。
 func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
-	thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.BiLinear)
+	thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.Linear)
 
 	tempFile, err := os.CreateTemp(filepath.Dir(cachePath), "thumb-tmp-*.jpg")
 	if err != nil {
