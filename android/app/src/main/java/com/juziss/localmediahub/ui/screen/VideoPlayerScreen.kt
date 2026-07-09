@@ -60,7 +60,6 @@ import com.juziss.localmediahub.pip.PipControllerStore
 import com.juziss.localmediahub.viewmodel.VideoPlayerViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 
@@ -121,8 +120,6 @@ fun VideoPlayerScreen(
     val videoPlayerViewModel: VideoPlayerViewModel = hiltViewModel()
     val pausedText = stringResource(R.string.video_paused)
     val playingText = stringResource(R.string.video_playing)
-    val coroutineScope = rememberCoroutineScope()
-
 
     // Tracks the current playback position across configuration changes (rotation)
     // so the new ExoPlayer can seek to the correct spot.
@@ -141,9 +138,9 @@ fun VideoPlayerScreen(
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 5000,   // minBufferMs — keeps ~5s buffered; prevents aggressive prefetching from saturating network on seek.
-                15000,  // maxBufferMs — prefetches up to 15s ahead (down from 50s) to save bandwidth and queue.
+                30000,  // maxBufferMs — prefetches up to 30s ahead to save bandwidth and queue.
                 250,    // bufferForPlaybackMs — start playing instantly after seek (250ms).
-                1000,   // bufferForPlaybackAfterRebufferMs — quick recovery after rebuffering (1s).
+                300,    // bufferForPlaybackAfterRebufferMs — quick recovery after rebuffering (300ms).
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
@@ -172,7 +169,7 @@ fun VideoPlayerScreen(
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSource)
             .build().apply {
-                setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
+                setSeekParameters(androidx.media3.exoplayer.SeekParameters.DEFAULT)
                 val mediaItem = MediaItem.fromUri(finalUrl)
                 setMediaItem(mediaItem)
                 // Round 20: sync seek before prepare (only for non-transcoded).
@@ -192,31 +189,8 @@ fun VideoPlayerScreen(
             }
     }
 
-    val forwardingPlayer = remember(exoPlayer) {
-        object : androidx.media3.common.ForwardingPlayer(exoPlayer) {
-            private var seekJob: kotlinx.coroutines.Job? = null
-            private var lastSeekTime = 0L
-
-            override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
-                val now = android.os.SystemClock.elapsedRealtime()
-                if (now - lastSeekTime > 500L) {
-                    seekJob?.cancel()
-                    lastSeekTime = now
-                    super.seekTo(mediaItemIndex, positionMs)
-                } else {
-                    seekJob?.cancel()
-                    seekJob = coroutineScope.launch {
-                        kotlinx.coroutines.delay(200L) // 200ms debounce during scrubbing
-                        lastSeekTime = android.os.SystemClock.elapsedRealtime()
-                        super.seekTo(mediaItemIndex, positionMs)
-                    }
-                }
-            }
-        }
-    }
-
-    val mediaSession = remember(forwardingPlayer) {
-        androidx.media3.session.MediaSession.Builder(context, forwardingPlayer).build()
+    val mediaSession = remember(exoPlayer) {
+        androidx.media3.session.MediaSession.Builder(context, exoPlayer).build()
     }
     DisposableEffect(mediaSession) {
         onDispose {
@@ -427,7 +401,7 @@ fun VideoPlayerScreen(
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
-                    player = forwardingPlayer
+                    player = exoPlayer
                     useController = !isInPipMode
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -437,8 +411,8 @@ fun VideoPlayerScreen(
                 }
             },
             update = { view ->
-                if (view.player != forwardingPlayer) {
-                    view.player = forwardingPlayer
+                if (view.player != exoPlayer) {
+                    view.player = exoPlayer
                 }
                 // Toggle controls + gesture layer when crossing the PiP boundary.
                 view.useController = !isInPipMode

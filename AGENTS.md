@@ -49,7 +49,7 @@ GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
         - `HomeScreen.kt`: 首页聚合入口、最近活动、继续播放、收藏、标签集合
         - `ConnectionScreen.kt`: 自动重连 + NSD 发现连接流
         - `BrowseScreen.kt`: 媒体浏览、筛选、滚动位置恢复
-        - `VideoPlayerScreen.kt`: Media3 ExoPlayer 全屏播放 + 手势 + 3 秒重启 chip；`ForwardingPlayer` 拦截 seek 做 500ms 冷启动 + 200ms 节流；`MediaSession` 暴露系统媒体控制；`CLOSEST_SYNC` 关键帧对齐；OkHttp cache 关闭避免 Range 请求磁盘抖动；`ON_STOP` 强制 pause 防后台音频泄漏
+        - `VideoPlayerScreen.kt`: Media3 ExoPlayer 全屏播放 + 手势 + 3 秒重启 chip；PlayerView 直连底层 `exoPlayer`（已删除 ForwardingPlayer 防抖层，手势松手后单次即时 seek）；`MediaSession` 暴露系统媒体控制；`SeekParameters.DEFAULT`（PRIOR_APPROACH_SYNC）向前对齐到最近关键帧；OkHttp cache 关闭避免 Range 请求磁盘抖动；`ON_STOP` 强制 pause 防后台音频泄漏
         - `ImagePreviewScreen.kt`: 图片全屏预览 + 双指缩放 + 同目录左右滑动；`onImageVisible` 回调记录最近活动；Coil 预加载相邻原图
         - `DownloadsScreen.kt`: 离线下载列表
     - `app/src/main/java/.../ui/component/`: Compose 可复用组件
