@@ -54,8 +54,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.juziss.localmediahub.MainActivity
 import com.juziss.localmediahub.R
+import com.juziss.localmediahub.VideoPlayerActivity
 import com.juziss.localmediahub.pip.PipControllerStore
 import com.juziss.localmediahub.viewmodel.VideoPlayerViewModel
 import kotlinx.coroutines.delay
@@ -103,7 +103,7 @@ fun VideoPlayerScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val activity = context as? MainActivity
+    val activity = context as? VideoPlayerActivity
     // Read PiP mode defensively: the screen might be hosted by a non-MainActivity
     // context in tests — fall back to a MutableStateFlow(false) then.
     val isInPipMode by (activity?.isInPipMode ?: MutableStateFlow(false))
@@ -247,9 +247,9 @@ fun VideoPlayerScreen(
                     // Spec §4.3: 视频在 PiP 中自然结束 → 退出 PiP 回全屏结束画面
                     // Android 没有直接 exitPictureInPictureMode() API；通过启动自己 + REORDER_TO_FRONT
                     // 把 Activity 拉回前台，触发 onPictureInPictureModeChanged(false)。
-                    val act = context as? MainActivity
+                    val act = context as? VideoPlayerActivity
                     if (act != null && act.isInPipMode.value) {
-                        val bringToFront = Intent(act, MainActivity::class.java).apply {
+                        val bringToFront = Intent(act, VideoPlayerActivity::class.java).apply {
                             addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                         }
                         act.startActivity(bringToFront)
