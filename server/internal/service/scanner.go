@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +17,13 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/localmediahub/server/internal/models"
+)
+
+// Compile-time anchors keep fmt/runtime imported for downstream Task 6/7 use
+// (debug logging + GOMAXPROCS-aware pooling) without unused-import errors now.
+var (
+	_ = fmt.Sprintf
+	_ = runtime.NumCPU
 )
 
 type Scanner struct {
@@ -33,6 +43,12 @@ type Scanner struct {
 	bgCancel   context.CancelFunc
 	watcher    *fsnotify.Watcher
 	watchRoots []string
+
+	// cacheDirs 是扫描后收集的去重目录列表（字典序排序），cacheDirMap 记录每个目录的 mtime。
+	// 只包含"含媒体文件"的目录（递归向上收集祖先目录），空目录不在内。
+	// searchFoldersCached 用它做内存前缀扫，替代原 searchFoldersCtx 的 WalkDir。
+	cacheDirs   []string
+	cacheDirMap map[string]time.Time
 }
 
 func NewScanner(videoExts, imageExts []string) *Scanner {
@@ -46,12 +62,14 @@ func NewScanner(videoExts, imageExts []string) *Scanner {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scanner{
-		cache:     make(map[string][]models.MediaFile),
-		cacheTTL:  60 * time.Second,
-		videoExts: vExts,
-		imageExts: iExts,
-		bgCtx:     ctx,
-		bgCancel:  cancel,
+		cache:       make(map[string][]models.MediaFile),
+		cacheTTL:    60 * time.Second,
+		videoExts:   vExts,
+		imageExts:   iExts,
+		bgCtx:       ctx,
+		bgCancel:    cancel,
+		cacheDirs:   nil,
+		cacheDirMap: nil,
 	}
 }
 
@@ -105,6 +123,11 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	// propagates to every walk goroutine.
 	g, gctx := errgroup.WithContext(ctx)
 
+	// 共享 dirMap：walk goroutine 收集祖先目录，mutex 保护。
+	// 目录数远少于文件数，锁竞争可忽略。
+	var dirMu sync.Mutex
+	dirMap := make(map[string]time.Time)
+
 	// Slice of slices to collect results without lock contention during walk
 	results := make([][]models.MediaFile, len(roots))
 
@@ -112,6 +135,7 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 		i, root := i, root
 		g.Go(func() error {
 			var localFiles []models.MediaFile
+			cleanRoot := filepath.Clean(root)
 			err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 				if err != nil {
 					return nil
@@ -164,6 +188,32 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 					MediaType:    mediaType,
 					Extension:    ext,
 				})
+
+				// C3：递归收集父目录及所有祖先目录到共享 dirMap
+				dir := filepath.Clean(filepath.Dir(path))
+				for dir != "" && dir != cleanRoot {
+					dirMu.Lock()
+					_, exists := dirMap[dir]
+					if !exists {
+						// 首次加入时 stat 一次拿 mtime
+						var mtime time.Time
+						if statInfo, err := os.Stat(dir); err == nil {
+							mtime = statInfo.ModTime()
+						}
+						dirMap[dir] = mtime
+						dirMu.Unlock()
+
+						parent := filepath.Clean(filepath.Dir(dir))
+						if parent == dir {
+							break // 已到文件系统根节点，防死循环
+						}
+						dir = parent
+					} else {
+						// 祖先目录此前已被完整加入，提前 break 减少锁竞争
+						dirMu.Unlock()
+						break
+					}
+				}
 				return nil
 			})
 			if err != nil {
@@ -195,10 +245,21 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 		}
 	}
 
+	// 把 dirMap 转为排序切片 + 映射
+	cacheDirs := make([]string, 0, len(dirMap))
+	cacheDirMap := make(map[string]time.Time, len(dirMap))
+	for dir, mtime := range dirMap {
+		cacheDirs = append(cacheDirs, dir)
+		cacheDirMap[dir] = mtime
+	}
+	sort.Strings(cacheDirs)
+
 	s.mu.Lock()
 	s.cache["all"] = allFiles
 	s.cache["video"] = videoFiles
 	s.cache["image"] = imageFiles
+	s.cacheDirs = cacheDirs
+	s.cacheDirMap = cacheDirMap
 	s.cacheTime = time.Now()
 	callback := s.OnScanComplete
 	s.mu.Unlock()
