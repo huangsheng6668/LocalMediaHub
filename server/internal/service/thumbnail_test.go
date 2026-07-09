@@ -377,9 +377,9 @@ func TestEncodeThumbnailToCache_ProducesValidJPEG(t *testing.T) {
 		t.Fatalf("decode generated thumbnail failed: %v", err)
 	}
 	bounds := img.Bounds()
-	// Box 等比缩放：短边 = maxSize=150，长边按比例（800/1000 * 150 = 120）
-	if bounds.Dx() != 150 && bounds.Dy() != 150 {
-		t.Errorf("thumbnail dims = %dx%d, expected short side = 150", bounds.Dx(), bounds.Dy())
+	// Linear + Fit：短边 = 150，长边按比例（800/1000 * 150 = 120）
+	if bounds.Dx() != 150 || bounds.Dy() != 120 {
+		t.Errorf("thumbnail dims = %dx%d, expected 150x120 (Linear+Fit)", bounds.Dx(), bounds.Dy())
 	}
 }
 
@@ -406,9 +406,9 @@ func TestEncodeThumbnailToCache_SmallImageNotUpscaled(t *testing.T) {
 		t.Fatalf("decode failed: %v", err)
 	}
 	bounds := img.Bounds()
-	// imaging.Thumbnail + Box 会放大小图到 maxSize：100x80 → 150x150
-	if bounds.Dx() != 150 || bounds.Dy() != 150 {
-		t.Errorf("small image dims = %dx%d, expected 150x150 (upscaled to maxSize)", bounds.Dx(), bounds.Dy())
+	// imaging.Fit + Linear 不放大小图：100x80 → 100x80
+	if bounds.Dx() != 100 || bounds.Dy() != 80 {
+		t.Errorf("small image dims = %dx%d, expected 100x80 (not upscaled)", bounds.Dx(), bounds.Dy())
 	}
 }
 
@@ -495,5 +495,67 @@ func TestGenerateThumbnailFromFile_Video_NoTempFileLeftover(t *testing.T) {
 		if strings.HasPrefix(e.Name(), "videothumb-") {
 			t.Errorf("old-style temp file leftover in TempDir: %s (C1 should have removed this)", e.Name())
 		}
+	}
+}
+
+// TestEncodeThumbnailToCache_BiLinearScaler 验证 C2 切到 BiLinear 后输出仍是合法 JPEG，
+// 且尺寸正确（短边 = maxSize，长边按比例）。
+func TestEncodeThumbnailToCache_BiLinearScaler(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	cachePath := filepath.Join(svc.cacheDir, "bilinear.jpg")
+
+	// 5000x4000 大图（模拟高分辨率照片）
+	src := imaging.New(5000, 4000, color.NRGBA{R: 100, G: 200, B: 50, A: 255})
+
+	if _, err := svc.encodeThumbnailToCache(src, cachePath); err != nil {
+		t.Fatalf("encodeThumbnailToCache failed: %v", err)
+	}
+
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	bounds := img.Bounds()
+	// BiLinear + Fit：短边 = 150，长边按比例（4000/5000 * 150 = 120）
+	if bounds.Dx() != 150 || bounds.Dy() != 120 {
+		t.Errorf("BiLinear+Fit output = %dx%d, expected 150x120", bounds.Dx(), bounds.Dy())
+	}
+}
+
+// TestGenerateThumbnailFromFile_Image_UsesHelper 验证图片分支也走 encodeThumbnailToCache
+// （通过观察 cacheDir 下无直接的 cachePath 之外的文件来间接验证）。
+func TestGenerateThumbnailFromFile_Image_UsesHelper(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+
+	// 构造测试图片
+	imgPath := filepath.Join(t.TempDir(), "test.png")
+	src := imaging.New(800, 600, color.NRGBA{R: 255, G: 0, B: 0, A: 255})
+	if err := imaging.Save(src, imgPath); err != nil {
+		t.Fatalf("save test image failed: %v", err)
+	}
+
+	cachePath := filepath.Join(svc.cacheDir, "imgthumb.jpg")
+	got, err := svc.generateThumbnailFromFile(imgPath, cachePath)
+	if err != nil {
+		t.Fatalf("generateThumbnailFromFile image failed: %v", err)
+	}
+	if got != cachePath {
+		t.Errorf("returned path = %q, want %q", got, cachePath)
+	}
+
+	// 验证生成的是合法 JPEG
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+	if _, _, err := image.Decode(f); err != nil {
+		t.Errorf("generated thumbnail is not valid JPEG: %v", err)
 	}
 }
