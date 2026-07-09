@@ -19,13 +19,6 @@ import (
 	"github.com/localmediahub/server/internal/models"
 )
 
-// Compile-time anchors keep fmt/runtime imported for downstream Task 6/7 use
-// (debug logging + GOMAXPROCS-aware pooling) without unused-import errors now.
-var (
-	_ = fmt.Sprintf
-	_ = runtime.NumCPU
-)
-
 type Scanner struct {
 	mu             sync.RWMutex
 	cache          map[string][]models.MediaFile
@@ -319,9 +312,91 @@ func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType
 	return s.cache[mediaType], nil
 }
 
+// GetCachedDirs 返回已知目录列表，可选按 scope 前缀过滤。
+// scope="" 返回全部；scope="D:/Media" 返回该前缀下的目录。
+// 与 GetCached 共享 TTL + singleflight（cache miss 时触发 Scan 填充 cacheDirs）。
+// 返回 (dirs, mtimes, error)：mtimes[dir] 为目录 mtime，调用方可查。
+func (s *Scanner) GetCachedDirs(ctx context.Context, roots []string, scope string) ([]string, map[string]time.Time, error) {
+	dirs, mtimes, err := s.peekCachedDirs(scope)
+	if err == nil {
+		return dirs, mtimes, nil
+	}
+
+	// cache miss → 触发 Scan（singleflight 防击穿）
+	_, err, _ = s.sf.Do("scan", func() (interface{}, error) {
+		return s.Scan(ctx, roots)
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return s.peekCachedDirs(scope)
+}
+
+// peekCachedDirs 持读锁从 cache 读取 scope 范围内的目录 + mtime。
+// cache 无效或为空时返回 error，由 caller 触发 Scan。
+func (s *Scanner) peekCachedDirs(scope string) ([]string, map[string]time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if time.Since(s.cacheTime) >= s.cacheTTL || s.cacheDirs == nil {
+		return nil, nil, fmt.Errorf("cache invalid")
+	}
+
+	dirs := s.filterDirsByScope(scope)
+	mtimes := make(map[string]time.Time, len(dirs))
+	for _, d := range dirs {
+		mtimes[d] = s.cacheDirMap[d]
+	}
+	return dirs, mtimes, nil
+}
+
+// filterDirsByScope 持读锁调用，返回 scope 前缀下的目录。
+// scope="" 返回全部。scope 不以 filepath.Separator 结尾时内部补齐。
+// 为兼容 Windows 路径大小写不敏感特性，Windows 下用 strings.EqualFold 做前缀对比。
+// 注意：dir == scope 自身（无尾部分隔符）也算命中，便于上层把 scope 当作可选根。
+func (s *Scanner) filterDirsByScope(scope string) []string {
+	if scope == "" {
+		out := make([]string, len(s.cacheDirs))
+		copy(out, s.cacheDirs)
+		return out
+	}
+	prefix := scope
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
+	}
+
+	out := make([]string, 0)
+	isWindows := runtime.GOOS == "windows"
+	for _, dir := range s.cacheDirs {
+		// 精确等于 scope 自身时直接命中（不要求尾部分隔符）
+		if isWindows {
+			if strings.EqualFold(dir, scope) {
+				out = append(out, dir)
+				continue
+			}
+			// Windows 下大小写折叠的无分配前缀匹配
+			if len(dir) >= len(prefix) && strings.EqualFold(dir[:len(prefix)], prefix) {
+				out = append(out, dir)
+			}
+		} else {
+			if dir == scope {
+				out = append(out, dir)
+				continue
+			}
+			if strings.HasPrefix(dir, prefix) {
+				out = append(out, dir)
+			}
+		}
+	}
+	return out
+}
+
 func (s *Scanner) InvalidateCache() {
 	s.mu.Lock()
 	s.cache = make(map[string][]models.MediaFile)
+	s.cacheDirs = nil
+	s.cacheDirMap = nil
 	s.cacheTime = time.Time{}
 	s.mu.Unlock()
 }

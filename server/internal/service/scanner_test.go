@@ -252,3 +252,129 @@ func TestScan_CollectsAncestorDirs(t *testing.T) {
 		t.Errorf("direct parent child dir %q not collected: %v", child, dirs)
 	}
 }
+
+// TestGetCachedDirs_ReturnsAllOnEmptyScope 验证 scope="" 返回全部目录。
+func TestGetCachedDirs_ReturnsAllOnEmptyScope(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"dir_a", "dir_b"} {
+		dir := filepath.Join(root, name)
+		os.MkdirAll(dir, 0755)
+		os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
+	}
+
+	scanner := NewScanner([]string{}, []string{".jpg"})
+	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs, _, err := scanner.GetCachedDirs(context.Background(), []string{root}, "")
+	if err != nil {
+		t.Fatalf("GetCachedDirs failed: %v", err)
+	}
+	if len(dirs) != 2 {
+		t.Errorf("scope=\"\" returned %d dirs, want 2: %v", len(dirs), dirs)
+	}
+}
+
+// TestGetCachedDirs_ScopeFilter 验证 scope 前缀过滤。
+func TestGetCachedDirs_ScopeFilter(t *testing.T) {
+	root := t.TempDir()
+	dirA := filepath.Join(root, "dir_a")
+	dirB := filepath.Join(root, "dir_b")
+	for _, dir := range []string{dirA, dirB} {
+		os.MkdirAll(dir, 0755)
+		os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
+	}
+
+	scanner := NewScanner([]string{}, []string{".jpg"})
+	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs, _, err := scanner.GetCachedDirs(context.Background(), []string{root}, dirA)
+	if err != nil {
+		t.Fatalf("GetCachedDirs failed: %v", err)
+	}
+	if len(dirs) != 1 {
+		t.Errorf("scope=%q returned %d dirs, want 1: %v", dirA, len(dirs), dirs)
+	}
+}
+
+// TestGetCachedDirs_ExcludesScopeRoot 验证 scope 根自身不在结果内。
+func TestGetCachedDirs_ExcludesScopeRoot(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	os.MkdirAll(sub, 0755)
+	os.WriteFile(filepath.Join(sub, "x.jpg"), []byte("fake"), 0644)
+
+	scanner := NewScanner([]string{}, []string{".jpg"})
+	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	// scope = root 自身（root 下有 sub，sub 下有媒体）
+	// 注意：root 自身不会被收集（边界），但 sub 应在结果内
+	dirs, _, err := scanner.GetCachedDirs(context.Background(), []string{root}, root)
+	if err != nil {
+		t.Fatalf("GetCachedDirs failed: %v", err)
+	}
+	cleanRoot := filepath.Clean(root)
+	for _, d := range dirs {
+		if d == cleanRoot {
+			t.Errorf("scope root itself should not be in result, got %q", d)
+		}
+	}
+	if len(dirs) == 0 {
+		t.Errorf("expected sub dir in result, got empty")
+	}
+}
+
+// TestGetCachedDirs_MtimesPopulated 验证返回的 mtimes map 含每个目录的 mtime。
+func TestGetCachedDirs_MtimesPopulated(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "dir_a")
+	os.MkdirAll(dir, 0755)
+	os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
+
+	scanner := NewScanner([]string{}, []string{".jpg"})
+	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs, mtimes, err := scanner.GetCachedDirs(context.Background(), []string{root}, "")
+	if err != nil {
+		t.Fatalf("GetCachedDirs failed: %v", err)
+	}
+	if len(mtimes) != len(dirs) {
+		t.Errorf("mtimes len = %d, dirs len = %d, should match", len(mtimes), len(dirs))
+	}
+	for _, d := range dirs {
+		if _, ok := mtimes[d]; !ok {
+			t.Errorf("mtimes missing entry for %q", d)
+		}
+	}
+}
+
+// TestInvalidateCache_ClearsCacheDirs 验证 InvalidateCache 清空 cacheDirs。
+func TestInvalidateCache_ClearsCacheDirs(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "dir_a")
+	os.MkdirAll(dir, 0755)
+	os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
+
+	scanner := NewScanner([]string{}, []string{".jpg"})
+	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner.InvalidateCache()
+
+	scanner.mu.RLock()
+	defer scanner.mu.RUnlock()
+	if scanner.cacheDirs != nil {
+		t.Errorf("cacheDirs should be nil after InvalidateCache, got %v", scanner.cacheDirs)
+	}
+	if scanner.cacheDirMap != nil {
+		t.Errorf("cacheDirMap should be nil after InvalidateCache, got %v", scanner.cacheDirMap)
+	}
+}
