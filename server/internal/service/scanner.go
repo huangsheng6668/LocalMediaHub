@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +36,12 @@ type Scanner struct {
 	bgCancel   context.CancelFunc
 	watcher    *fsnotify.Watcher
 	watchRoots []string
+
+	// cacheDirs 是扫描后收集的去重目录列表（字典序排序），cacheDirMap 记录每个目录的 mtime。
+	// 只包含"含媒体文件"的目录（递归向上收集祖先目录），空目录不在内。
+	// searchFoldersCached 用它做内存前缀扫，替代原 searchFoldersCtx 的 WalkDir。
+	cacheDirs   []string
+	cacheDirMap map[string]time.Time
 }
 
 func NewScanner(videoExts, imageExts []string) *Scanner {
@@ -46,12 +55,14 @@ func NewScanner(videoExts, imageExts []string) *Scanner {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scanner{
-		cache:     make(map[string][]models.MediaFile),
-		cacheTTL:  60 * time.Second,
-		videoExts: vExts,
-		imageExts: iExts,
-		bgCtx:     ctx,
-		bgCancel:  cancel,
+		cache:       make(map[string][]models.MediaFile),
+		cacheTTL:    60 * time.Second,
+		videoExts:   vExts,
+		imageExts:   iExts,
+		bgCtx:       ctx,
+		bgCancel:    cancel,
+		cacheDirs:   nil,
+		cacheDirMap: nil,
 	}
 }
 
@@ -105,6 +116,11 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	// propagates to every walk goroutine.
 	g, gctx := errgroup.WithContext(ctx)
 
+	// 共享 dirMap：walk goroutine 收集祖先目录，mutex 保护。
+	// 目录数远少于文件数，锁竞争可忽略。
+	var dirMu sync.Mutex
+	dirMap := make(map[string]time.Time)
+
 	// Slice of slices to collect results without lock contention during walk
 	results := make([][]models.MediaFile, len(roots))
 
@@ -112,6 +128,7 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 		i, root := i, root
 		g.Go(func() error {
 			var localFiles []models.MediaFile
+			cleanRoot := filepath.Clean(root)
 			err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 				if err != nil {
 					return nil
@@ -164,6 +181,32 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 					MediaType:    mediaType,
 					Extension:    ext,
 				})
+
+				// C3：递归收集父目录及所有祖先目录到共享 dirMap
+				dir := filepath.Clean(filepath.Dir(path))
+				for dir != "" && dir != cleanRoot {
+					dirMu.Lock()
+					_, exists := dirMap[dir]
+					if !exists {
+						// 首次加入时 stat 一次拿 mtime
+						var mtime time.Time
+						if statInfo, err := os.Stat(dir); err == nil {
+							mtime = statInfo.ModTime()
+						}
+						dirMap[dir] = mtime
+						dirMu.Unlock()
+
+						parent := filepath.Clean(filepath.Dir(dir))
+						if parent == dir {
+							break // 已到文件系统根节点，防死循环
+						}
+						dir = parent
+					} else {
+						// 祖先目录此前已被完整加入，提前 break 减少锁竞争
+						dirMu.Unlock()
+						break
+					}
+				}
 				return nil
 			})
 			if err != nil {
@@ -195,10 +238,21 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 		}
 	}
 
+	// 把 dirMap 转为排序切片 + 映射
+	cacheDirs := make([]string, 0, len(dirMap))
+	cacheDirMap := make(map[string]time.Time, len(dirMap))
+	for dir, mtime := range dirMap {
+		cacheDirs = append(cacheDirs, dir)
+		cacheDirMap[dir] = mtime
+	}
+	sort.Strings(cacheDirs)
+
 	s.mu.Lock()
 	s.cache["all"] = allFiles
 	s.cache["video"] = videoFiles
 	s.cache["image"] = imageFiles
+	s.cacheDirs = cacheDirs
+	s.cacheDirMap = cacheDirMap
 	s.cacheTime = time.Now()
 	callback := s.OnScanComplete
 	s.mu.Unlock()
@@ -258,9 +312,91 @@ func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType
 	return s.cache[mediaType], nil
 }
 
+// GetCachedDirs 返回已知目录列表，可选按 scope 前缀过滤。
+// scope="" 返回全部；scope="D:/Media" 返回该前缀下的目录。
+// 与 GetCached 共享 TTL + singleflight（cache miss 时触发 Scan 填充 cacheDirs）。
+// 返回 (dirs, mtimes, error)：mtimes[dir] 为目录 mtime，调用方可查。
+func (s *Scanner) GetCachedDirs(ctx context.Context, roots []string, scope string) ([]string, map[string]time.Time, error) {
+	dirs, mtimes, err := s.peekCachedDirs(scope)
+	if err == nil {
+		return dirs, mtimes, nil
+	}
+
+	// cache miss → 触发 Scan（singleflight 防击穿）
+	_, err, _ = s.sf.Do("scan", func() (interface{}, error) {
+		return s.Scan(ctx, roots)
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return s.peekCachedDirs(scope)
+}
+
+// peekCachedDirs 持读锁从 cache 读取 scope 范围内的目录 + mtime。
+// cache 无效或为空时返回 error，由 caller 触发 Scan。
+func (s *Scanner) peekCachedDirs(scope string) ([]string, map[string]time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if time.Since(s.cacheTime) >= s.cacheTTL || s.cacheDirs == nil {
+		return nil, nil, fmt.Errorf("cache invalid")
+	}
+
+	dirs := s.filterDirsByScope(scope)
+	mtimes := make(map[string]time.Time, len(dirs))
+	for _, d := range dirs {
+		mtimes[d] = s.cacheDirMap[d]
+	}
+	return dirs, mtimes, nil
+}
+
+// filterDirsByScope 持读锁调用，返回 scope 前缀下的目录。
+// scope="" 返回全部。scope 不以 filepath.Separator 结尾时内部补齐。
+// 为兼容 Windows 路径大小写不敏感特性，Windows 下用 strings.EqualFold 做前缀对比。
+// 注意：dir == scope 自身（无尾部分隔符）也算命中，便于上层把 scope 当作可选根。
+func (s *Scanner) filterDirsByScope(scope string) []string {
+	if scope == "" {
+		out := make([]string, len(s.cacheDirs))
+		copy(out, s.cacheDirs)
+		return out
+	}
+	prefix := scope
+	if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+		prefix += string(filepath.Separator)
+	}
+
+	out := make([]string, 0)
+	isWindows := runtime.GOOS == "windows"
+	for _, dir := range s.cacheDirs {
+		// 精确等于 scope 自身时直接命中（不要求尾部分隔符）
+		if isWindows {
+			if strings.EqualFold(dir, scope) {
+				out = append(out, dir)
+				continue
+			}
+			// Windows 下大小写折叠的无分配前缀匹配
+			if len(dir) >= len(prefix) && strings.EqualFold(dir[:len(prefix)], prefix) {
+				out = append(out, dir)
+			}
+		} else {
+			if dir == scope {
+				out = append(out, dir)
+				continue
+			}
+			if strings.HasPrefix(dir, prefix) {
+				out = append(out, dir)
+			}
+		}
+	}
+	return out
+}
+
 func (s *Scanner) InvalidateCache() {
 	s.mu.Lock()
 	s.cache = make(map[string][]models.MediaFile)
+	s.cacheDirs = nil
+	s.cacheDirMap = nil
 	s.cacheTime = time.Time{}
 	s.mu.Unlock()
 }

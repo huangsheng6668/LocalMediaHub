@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -59,7 +60,7 @@ func (h *Handler) Search(c echo.Context) error {
 		return respondInternalError(c, err)
 	}
 
-	matchedFolders, err := h.searchFoldersCtx(c.Request().Context(), searchPath, query, limit)
+	matchedFolders, err := h.searchFoldersCached(c.Request().Context(), searchPath, query, limit)
 	if err != nil {
 		return respondInternalError(c, err)
 	}
@@ -108,63 +109,56 @@ func (h *Handler) searchFiles(files []models.MediaFile, scopedPath, query string
 	return matchedFiles
 }
 
-// searchFoldersCtx walks the roots looking for folders whose name matches the
-// query. The ctx lets the walk abort early when the request is cancelled, so a
-// slow search doesn't keep eating IO after the client has disconnected.
-func (h *Handler) searchFoldersCtx(ctx context.Context, scopedPath, query string, limit int) ([]models.Folder, error) {
-	searchRoots := h.cfg.Scan.GetRoots()
-	if scopedPath != "" {
-		searchRoots = []string{scopedPath}
+// searchFoldersCached 从 scanner cache 中按 scope + query 过滤目录名。
+// 替代原 searchFoldersCtx 的 WalkDir，从磁盘 IO 改为内存扫。
+func (h *Handler) searchFoldersCached(ctx context.Context, scopedPath, query string, limit int) ([]models.Folder, error) {
+	roots := h.cfg.Scan.GetRoots()
+	scope := scopedPath
+	if scope != "" && !strings.HasSuffix(scope, string(filepath.Separator)) {
+		scope += string(filepath.Separator)
+	}
+
+	dirs, mtimes, err := h.scanner.GetCachedDirs(ctx, roots, scope)
+	if err != nil {
+		return nil, err
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	lowerQuery := strings.ToLower(query)
-	matchedFolders := make([]models.Folder, 0, limit)
-
-	for _, root := range searchRoots {
-		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return nil
-			}
-			// Abort the walk as soon as the request context is cancelled.
-			select {
-			case <-ctx.Done():
-				return filepath.SkipAll
-			default:
-			}
-			if len(matchedFolders) >= limit {
-				return filepath.SkipAll
-			}
-			if !d.IsDir() || path == root {
-				return nil
-			}
-			if !strings.Contains(strings.ToLower(d.Name()), lowerQuery) {
-				return nil
-			}
-
-			info, err := d.Info()
-			if err != nil {
-				return nil
-			}
-
-			matchedFolders = append(matchedFolders, models.Folder{
-				Name:         d.Name(),
-				Path:         path,
-				RelativePath: path,
-				IsRoot:       false,
-				ModifiedTime: info.ModTime(),
-			})
-			return nil
-		})
-		if err != nil && err != filepath.SkipAll {
-			return nil, err
-		}
-		if len(matchedFolders) >= limit {
-			break
-		}
+	out := make([]models.Folder, 0, limit)
+	isWindows := runtime.GOOS == "windows"
+	for _, dir := range dirs {
 		if ctx.Err() != nil {
 			break
 		}
+		// 排除 scope 根自身（与原 WalkDir 在 path == root 时跳过一致）
+		if scopedPath != "" {
+			isRootSelf := false
+			if isWindows {
+				isRootSelf = strings.EqualFold(filepath.Clean(dir), filepath.Clean(scopedPath))
+			} else {
+				isRootSelf = filepath.Clean(dir) == filepath.Clean(scopedPath)
+			}
+			if isRootSelf {
+				continue
+			}
+		}
+		name := filepath.Base(dir)
+		if !strings.Contains(strings.ToLower(name), lowerQuery) {
+			continue
+		}
+		out = append(out, models.Folder{
+			Name:         name,
+			Path:         dir,
+			RelativePath: dir,
+			IsRoot:       false,
+			ModifiedTime: mtimes[dir],
+		})
+		if len(out) >= limit {
+			break
+		}
 	}
-
-	return matchedFolders, nil
+	return out, nil
 }

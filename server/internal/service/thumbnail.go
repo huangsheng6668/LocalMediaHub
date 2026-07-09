@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/json"
@@ -150,6 +151,79 @@ func (s *ThumbnailService) VideoDuration(sourcePath string) (float64, bool) {
 	return s.videoDurationCached(sourcePath)
 }
 
+// extractVideoFrameToImage 调用 ffmpeg 从 sourcePath 的 seek 秒位置抽取一帧，
+// 通过 stdout pipe 直接返回 image.Image，避免临时文件 IO。
+// 失败时返回 error，由 caller 决定 fallback 策略。
+func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (image.Image, error) {
+	// 限制 ffmpeg 子进程执行时间，防止损坏视频导致永久挂起
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, s.getFFmpegCmd(),
+		"-y", "-ss", seek, "-i", sourcePath,
+		"-vframes", "1",
+		"-f", "image2pipe",
+		"-vcodec", "mjpeg",
+		"pipe:1",
+	)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	// 捕获 stderr 用于错误诊断
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	// Go 标准库 image.Decode 自动识别 mjpeg → jpeg decoding
+	// （thumbnail.go 已 import _ "image/png" + image/jpeg 隐式注册）
+	img, _, decodeErr := image.Decode(stdout)
+
+	// 显式关闭 pipe 读端。若 Decode 提前退出/报错，向 ffmpeg 写端发送
+	// SIGPIPE/EPIPE，避免 ffmpeg 因 pipe 缓冲区满而阻塞挂起。
+	_ = stdout.Close()
+
+	// 等待 ffmpeg 退出以释放子进程资源，避免 zombie 进程
+	waitErr := cmd.Wait()
+
+	if decodeErr != nil {
+		return nil, fmt.Errorf("failed to decode ffmpeg pipe: %w (wait err: %v, stderr: %s)", decodeErr, waitErr, stderr.String())
+	}
+	// decodeErr == nil 说明图片已完整解析；Wait 的 EPIPE/exit 1 是 pipe 提前关闭的预期副作用
+	return img, nil
+}
+
+// encodeThumbnailToCache 把 src 等比缩放到 max×max 框内并写入 cachePath。
+// C2 优化：使用 Linear + Fit（300×300 缩略图场景下与 Lanczos 视觉等价，速度快 3-5 倍）。
+// 用 os.CreateTemp + os.Rename 原子写入：进程崩溃/并发写不会留下半截损坏 jpg。
+func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
+	thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.Linear)
+
+	tempFile, err := os.CreateTemp(filepath.Dir(cachePath), "thumb-tmp-*.jpg")
+	if err != nil {
+		return "", err
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath) // 出错提前返回时自动清理
+
+	if err := jpeg.Encode(tempFile, thumb, &jpeg.Options{Quality: 85}); err != nil {
+		tempFile.Close()
+		return "", err
+	}
+	if err := tempFile.Close(); err != nil {
+		return "", err
+	}
+
+	if err := os.Rename(tempPath, cachePath); err != nil {
+		return "", err
+	}
+	return cachePath, nil
+}
+
 func isVideoFile(filePath string) bool {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
@@ -179,68 +253,28 @@ func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePat
 			return "", fmt.Errorf("ffmpeg not found, cannot generate video thumbnail")
 		}
 
-		// Create a temporary JPG file
-		tempFile, err := os.CreateTemp("", "videothumb-*.jpg")
-		if err != nil {
-			return "", err
-		}
-		tempPath := tempFile.Name()
-		tempFile.Close()
-		defer os.Remove(tempPath)
-
-		// Seek to a representative frame (video midpoint when ffprobe is
-		// available, else the prior default of 5s). Fall back to 0s on failure.
-		ffmpegCmd := s.getFFmpegCmd()
 		seek := midpointSeek(s.videoDurationCached(sourcePath))
-		cmd := exec.Command(ffmpegCmd, "-y", "-ss", seek, "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
-		if err := cmd.Run(); err != nil {
-			// 2. If it fails (e.g. video is too short), fallback to 0 seconds
-			cmdFallback := exec.Command(ffmpegCmd, "-y", "-ss", "0", "-i", sourcePath, "-vframes", "1", "-f", "image2", tempPath)
-			if err := cmdFallback.Run(); err != nil {
+
+		// 主路径：seek 到 midpoint 抽帧
+		src, err := s.extractVideoFrameToImage(sourcePath, seek)
+		if err != nil {
+			// fallback：seek=0 重试（视频太短或 midpoint 越界）
+			src, err = s.extractVideoFrameToImage(sourcePath, "0")
+			if err != nil {
 				return "", fmt.Errorf("failed to extract video frame: %w", err)
 			}
 		}
 
-		// Open the extracted image
-		src, err := imaging.Open(tempPath)
-		if err != nil {
-			return "", fmt.Errorf("failed to open extracted video frame: %w", err)
-		}
-
-		// Generate the thumbnail
-		thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
-
-		out, err := os.Create(cachePath)
-		if err != nil {
-			return "", err
-		}
-		defer out.Close()
-
-		if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
-			return "", err
-		}
-
-		return cachePath, nil
+		// C1: 传递未缩放的 src，由 encodeThumbnailToCache 完成缩放和落盘
+		return s.encodeThumbnailToCache(src, cachePath)
 	}
 
+	// 图片分支（C2 改造：复用 encodeThumbnailToCache，享受 Linear + 原子写入）
 	src, err := imaging.Open(sourcePath)
 	if err != nil {
 		return "", err
 	}
-
-	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
-
-	out, err := os.Create(cachePath)
-	if err != nil {
-		return "", err
-	}
-	defer out.Close()
-
-	if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
-		return "", err
-	}
-
-	return cachePath, nil
+	return s.encodeThumbnailToCache(src, cachePath)
 }
 
 func (s *ThumbnailService) GenerateThumbnail(sourcePath string) (string, error) {

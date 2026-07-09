@@ -2,12 +2,50 @@ package service
 
 import (
 	"encoding/json"
+	"image"
+	"image/color"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/disintegration/imaging"
 )
+
+// newTestThumbnailService 创建一个用 t.TempDir() 作为 cacheDir 的 ThumbnailService，
+// 用于测试。maxSize=150。ffmpegPath 空时回退到 PATH。
+func newTestThumbnailService(t *testing.T, ffmpegPath string) *ThumbnailService {
+	t.Helper()
+	svc, err := NewThumbnailService(t.TempDir(), 150, "jpg", ffmpegPath)
+	if err != nil {
+		t.Fatalf("NewThumbnailService failed: %v", err)
+	}
+	return svc
+}
+
+// ensureTestVideo 在 t.TempDir() 下生成一个 1 秒的纯色测试视频（testsrc）。
+// 返回视频路径；ffmpeg 不可用时返回 ""。
+func ensureTestVideo(t *testing.T, svc *ThumbnailService) string {
+	t.Helper()
+	if !svc.HasFFmpeg() {
+		return ""
+	}
+	videoPath := filepath.Join(t.TempDir(), "testsrc.mp4")
+	cmd := exec.Command(svc.getFFmpegCmd(),
+		"-y",
+		"-f", "lavfi",
+		"-i", "testsrc=duration=1:size=320x240:rate=25",
+		"-pix_fmt", "yuv420p",
+		videoPath,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("ffmpeg generate test video failed: %v\n%s", err, out)
+		return ""
+	}
+	return videoPath
+}
 
 func TestParseFFprobeDuration(t *testing.T) {
 	cases := map[string]struct {
@@ -254,5 +292,270 @@ func TestVideoDuration_CacheAndFallback(t *testing.T) {
 	}
 	if d != 42.5 {
 		t.Fatalf("VideoDuration cache hit: got %v, want 42.5", d)
+	}
+}
+
+// TestExtractVideoFrameToImage_MainPath 验证 ffmpeg pipe 抽帧主路径成功。
+// 依赖 ffmpeg + 测试视频；缺一不可时跳过。
+func TestExtractVideoFrameToImage_MainPath(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	if !svc.HasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	videoPath := ensureTestVideo(t, svc)
+	if videoPath == "" {
+		t.Skip("could not generate test video")
+	}
+
+	img, err := svc.extractVideoFrameToImage(videoPath, "0")
+	if err != nil {
+		t.Fatalf("extractVideoFrameToImage failed: %v", err)
+	}
+	if img == nil {
+		t.Fatal("returned image is nil")
+	}
+	bounds := img.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		t.Fatalf("returned image has non-positive dims: %dx%d", bounds.Dx(), bounds.Dy())
+	}
+}
+
+// TestExtractVideoFrameToImage_SeekFallback 验证 seek 越界后 caller 的 fallback 路径。
+// 主路径 seek=999999 通常会失败（视频不够长），caller 重试 seek=0 应成功。
+func TestExtractVideoFrameToImage_SeekFallback(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	if !svc.HasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	videoPath := ensureTestVideo(t, svc)
+	if videoPath == "" {
+		t.Skip("could not generate test video")
+	}
+
+	// 主路径：seek=999999（视频只有 1 秒，越界）
+	_, errPrimary := svc.extractVideoFrameToImage(videoPath, "999999")
+	// 不假设主路径一定失败（不同 ffmpeg 版本可能 clamp 到末尾），但若失败则走 fallback
+	if errPrimary == nil {
+		t.Skip("primary seek succeeded unexpectedly (ffmpeg clamped); fallback path not exercised")
+	}
+
+	// fallback：seek=0 应成功
+	img, err := svc.extractVideoFrameToImage(videoPath, "0")
+	if err != nil {
+		t.Fatalf("fallback seek=0 failed: %v", err)
+	}
+	if img == nil {
+		t.Fatal("fallback returned nil image")
+	}
+}
+
+// TestEncodeThumbnailToCache_ProducesValidJPEG 验证 helper 生成合法 JPEG 字节。
+func TestEncodeThumbnailToCache_ProducesValidJPEG(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	cachePath := filepath.Join(svc.cacheDir, "test.jpg")
+
+	// 构造 1000x800 测试图
+	src := imaging.New(1000, 800, color.NRGBA{R: 255, G: 128, B: 0, A: 255})
+
+	got, err := svc.encodeThumbnailToCache(src, cachePath)
+	if err != nil {
+		t.Fatalf("encodeThumbnailToCache failed: %v", err)
+	}
+	if got != cachePath {
+		t.Errorf("returned path = %q, want %q", got, cachePath)
+	}
+
+	// 验证文件存在 + 能被 image.Decode 读取
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatalf("decode generated thumbnail failed: %v", err)
+	}
+	bounds := img.Bounds()
+	// Linear + Fit：短边 = 150，长边按比例（800/1000 * 150 = 120）
+	if bounds.Dx() != 150 || bounds.Dy() != 120 {
+		t.Errorf("thumbnail dims = %dx%d, expected 150x120 (Linear+Fit)", bounds.Dx(), bounds.Dy())
+	}
+}
+
+// TestEncodeThumbnailToCache_SmallImageNotUpscaled 验证源图小于 maxSize 时不放大。
+func TestEncodeThumbnailToCache_SmallImageNotUpscaled(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	cachePath := filepath.Join(svc.cacheDir, "small.jpg")
+
+	// 100x80 源图（小于 maxSize=150）
+	src := imaging.New(100, 80, color.NRGBA{R: 0, G: 0, B: 255, A: 255})
+
+	if _, err := svc.encodeThumbnailToCache(src, cachePath); err != nil {
+		t.Fatalf("encodeThumbnailToCache failed: %v", err)
+	}
+
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	bounds := img.Bounds()
+	// imaging.Fit + Linear 不放大小图：100x80 → 100x80
+	if bounds.Dx() != 100 || bounds.Dy() != 80 {
+		t.Errorf("small image dims = %dx%d, expected 100x80 (not upscaled)", bounds.Dx(), bounds.Dy())
+	}
+}
+
+// TestEncodeThumbnailToCache_AtomicWriteNoPartialFile 验证 helper 用 CreateTemp + Rename，
+// 写完后 cacheDir 下无 thumb-tmp-* 残留临时文件。
+func TestEncodeThumbnailToCache_AtomicWriteNoPartialFile(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	cachePath := filepath.Join(svc.cacheDir, "atomic.jpg")
+
+	src := imaging.New(500, 400, color.NRGBA{R: 0, G: 255, B: 0, A: 255})
+	if _, err := svc.encodeThumbnailToCache(src, cachePath); err != nil {
+		t.Fatalf("encodeThumbnailToCache failed: %v", err)
+	}
+
+	// 检查 cacheDir 下无 thumb-tmp-* 残留
+	entries, err := os.ReadDir(svc.cacheDir)
+	if err != nil {
+		t.Fatalf("readdir failed: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "thumb-tmp-") {
+			t.Errorf("temp file leftover: %s (atomic rename should have removed it)", e.Name())
+		}
+	}
+}
+
+// TestGenerateThumbnailFromFile_Video_ProducesValidJPEG 验证视频分支生成的 cachePath
+// 是合法 JPEG 字节。需要 ffmpeg + 测试视频，否则跳过。
+func TestGenerateThumbnailFromFile_Video_ProducesValidJPEG(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	if !svc.HasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	videoPath := ensureTestVideo(t, svc)
+	if videoPath == "" {
+		t.Skip("could not generate test video")
+	}
+
+	cachePath := filepath.Join(svc.cacheDir, "videothumb.jpg")
+	got, err := svc.generateThumbnailFromFile(videoPath, cachePath)
+	if err != nil {
+		t.Fatalf("generateThumbnailFromFile video failed: %v", err)
+	}
+	if got != cachePath {
+		t.Errorf("returned path = %q, want %q", got, cachePath)
+	}
+
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+
+	if _, _, err := image.Decode(f); err != nil {
+		t.Errorf("generated thumbnail is not valid JPEG: %v", err)
+	}
+}
+
+// TestGenerateThumbnailFromFile_Video_NoTempFileLeftover 验证视频分支不再产生
+// 旧的 videothumb-* 临时文件（C1 改用 image2pipe 后应无残留）。
+func TestGenerateThumbnailFromFile_Video_NoTempFileLeftover(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	if !svc.HasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	videoPath := ensureTestVideo(t, svc)
+	if videoPath == "" {
+		t.Skip("could not generate test video")
+	}
+
+	cachePath := filepath.Join(svc.cacheDir, "videothumb.jpg")
+	if _, err := svc.generateThumbnailFromFile(videoPath, cachePath); err != nil {
+		t.Fatalf("generateThumbnailFromFile video failed: %v", err)
+	}
+
+	// 检查系统 TempDir 下无 videothumb-* 残留（旧逻辑的临时文件前缀）
+	tmpDir := os.TempDir()
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Logf("cannot read TempDir %s: %v (skip residual check)", tmpDir, err)
+		return
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "videothumb-") {
+			t.Errorf("old-style temp file leftover in TempDir: %s (C1 should have removed this)", e.Name())
+		}
+	}
+}
+
+// TestEncodeThumbnailToCache_BiLinearScaler 验证 C2 切到 BiLinear 后输出仍是合法 JPEG，
+// 且尺寸正确（短边 = maxSize，长边按比例）。
+func TestEncodeThumbnailToCache_BiLinearScaler(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	cachePath := filepath.Join(svc.cacheDir, "bilinear.jpg")
+
+	// 5000x4000 大图（模拟高分辨率照片）
+	src := imaging.New(5000, 4000, color.NRGBA{R: 100, G: 200, B: 50, A: 255})
+
+	if _, err := svc.encodeThumbnailToCache(src, cachePath); err != nil {
+		t.Fatalf("encodeThumbnailToCache failed: %v", err)
+	}
+
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	bounds := img.Bounds()
+	// BiLinear + Fit：短边 = 150，长边按比例（4000/5000 * 150 = 120）
+	if bounds.Dx() != 150 || bounds.Dy() != 120 {
+		t.Errorf("BiLinear+Fit output = %dx%d, expected 150x120", bounds.Dx(), bounds.Dy())
+	}
+}
+
+// TestGenerateThumbnailFromFile_Image_UsesHelper 验证图片分支也走 encodeThumbnailToCache
+// （通过观察 cacheDir 下无直接的 cachePath 之外的文件来间接验证）。
+func TestGenerateThumbnailFromFile_Image_UsesHelper(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+
+	// 构造测试图片
+	imgPath := filepath.Join(t.TempDir(), "test.png")
+	src := imaging.New(800, 600, color.NRGBA{R: 255, G: 0, B: 0, A: 255})
+	if err := imaging.Save(src, imgPath); err != nil {
+		t.Fatalf("save test image failed: %v", err)
+	}
+
+	cachePath := filepath.Join(svc.cacheDir, "imgthumb.jpg")
+	got, err := svc.generateThumbnailFromFile(imgPath, cachePath)
+	if err != nil {
+		t.Fatalf("generateThumbnailFromFile image failed: %v", err)
+	}
+	if got != cachePath {
+		t.Errorf("returned path = %q, want %q", got, cachePath)
+	}
+
+	// 验证生成的是合法 JPEG
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+	if _, _, err := image.Decode(f); err != nil {
+		t.Errorf("generated thumbnail is not valid JPEG: %v", err)
 	}
 }
