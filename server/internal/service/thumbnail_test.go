@@ -2,11 +2,16 @@ package service
 
 import (
 	"encoding/json"
+	"image"
+	"image/color"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/disintegration/imaging"
 )
 
 // newTestThumbnailService 创建一个用 t.TempDir() 作为 cacheDir 的 ThumbnailService，
@@ -341,5 +346,91 @@ func TestExtractVideoFrameToImage_SeekFallback(t *testing.T) {
 	}
 	if img == nil {
 		t.Fatal("fallback returned nil image")
+	}
+}
+
+// TestEncodeThumbnailToCache_ProducesValidJPEG 验证 helper 生成合法 JPEG 字节。
+func TestEncodeThumbnailToCache_ProducesValidJPEG(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	cachePath := filepath.Join(svc.cacheDir, "test.jpg")
+
+	// 构造 1000x800 测试图
+	src := imaging.New(1000, 800, color.NRGBA{R: 255, G: 128, B: 0, A: 255})
+
+	got, err := svc.encodeThumbnailToCache(src, cachePath)
+	if err != nil {
+		t.Fatalf("encodeThumbnailToCache failed: %v", err)
+	}
+	if got != cachePath {
+		t.Errorf("returned path = %q, want %q", got, cachePath)
+	}
+
+	// 验证文件存在 + 能被 image.Decode 读取
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatalf("decode generated thumbnail failed: %v", err)
+	}
+	bounds := img.Bounds()
+	// Box 等比缩放：短边 = maxSize=150，长边按比例（800/1000 * 150 = 120）
+	if bounds.Dx() != 150 && bounds.Dy() != 150 {
+		t.Errorf("thumbnail dims = %dx%d, expected short side = 150", bounds.Dx(), bounds.Dy())
+	}
+}
+
+// TestEncodeThumbnailToCache_SmallImageNotUpscaled 验证源图小于 maxSize 时不放大。
+func TestEncodeThumbnailToCache_SmallImageNotUpscaled(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	cachePath := filepath.Join(svc.cacheDir, "small.jpg")
+
+	// 100x80 源图（小于 maxSize=150）
+	src := imaging.New(100, 80, color.NRGBA{R: 0, G: 0, B: 255, A: 255})
+
+	if _, err := svc.encodeThumbnailToCache(src, cachePath); err != nil {
+		t.Fatalf("encodeThumbnailToCache failed: %v", err)
+	}
+
+	f, err := os.Open(cachePath)
+	if err != nil {
+		t.Fatalf("open cache file failed: %v", err)
+	}
+	defer f.Close()
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	bounds := img.Bounds()
+	// imaging.Thumbnail + Box 会放大小图到 maxSize：100x80 → 150x150
+	if bounds.Dx() != 150 || bounds.Dy() != 150 {
+		t.Errorf("small image dims = %dx%d, expected 150x150 (upscaled to maxSize)", bounds.Dx(), bounds.Dy())
+	}
+}
+
+// TestEncodeThumbnailToCache_AtomicWriteNoPartialFile 验证 helper 用 CreateTemp + Rename，
+// 写完后 cacheDir 下无 thumb-tmp-* 残留临时文件。
+func TestEncodeThumbnailToCache_AtomicWriteNoPartialFile(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	cachePath := filepath.Join(svc.cacheDir, "atomic.jpg")
+
+	src := imaging.New(500, 400, color.NRGBA{R: 0, G: 255, B: 0, A: 255})
+	if _, err := svc.encodeThumbnailToCache(src, cachePath); err != nil {
+		t.Fatalf("encodeThumbnailToCache failed: %v", err)
+	}
+
+	// 检查 cacheDir 下无 thumb-tmp-* 残留
+	entries, err := os.ReadDir(svc.cacheDir)
+	if err != nil {
+		t.Fatalf("readdir failed: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "thumb-tmp-") {
+			t.Errorf("temp file leftover: %s (atomic rename should have removed it)", e.Name())
+		}
 	}
 }

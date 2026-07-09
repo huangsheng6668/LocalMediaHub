@@ -197,6 +197,33 @@ func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (im
 	return img, nil
 }
 
+// encodeThumbnailToCache 把 src 等比缩放到 max×max 框内并写入 cachePath。
+// C1 阶段保留 imaging.Thumbnail + Box 缩放器（C2 再优化为 BiLinear）。
+// 用 os.CreateTemp + os.Rename 原子写入：进程崩溃/并发写不会留下半截损坏 jpg。
+func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
+	thumb := imaging.Thumbnail(src, s.maxSize, s.maxSize, imaging.Box)
+
+	tempFile, err := os.CreateTemp(filepath.Dir(cachePath), "thumb-tmp-*.jpg")
+	if err != nil {
+		return "", err
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath) // 出错提前返回时自动清理
+
+	if err := jpeg.Encode(tempFile, thumb, &jpeg.Options{Quality: 85}); err != nil {
+		tempFile.Close()
+		return "", err
+	}
+	if err := tempFile.Close(); err != nil {
+		return "", err
+	}
+
+	if err := os.Rename(tempPath, cachePath); err != nil {
+		return "", err
+	}
+	return cachePath, nil
+}
+
 func isVideoFile(filePath string) bool {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
