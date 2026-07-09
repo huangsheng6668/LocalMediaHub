@@ -200,6 +200,44 @@ class HomeViewModel @Inject constructor(
         }
         return true
     }
+
+    /**
+     * 获取与指定媒体文件在同一目录下的所有图片文件列表。
+     * 用于从首页（最近播放/收藏）打开图片时，支持左右滑动切换同目录下的其他图片。
+     */
+    suspend fun getSisterImages(file: MediaFile, isSystemBrowse: Boolean): List<MediaFile> {
+        val parentPath = getParentPath(if (isSystemBrowse) file.path else file.relativePath)
+        return try {
+            if (isSystemBrowse) {
+                when (val res = repository.browseSystemPath(parentPath)) {
+                    is NetworkResult.Success -> {
+                        val images = res.data.files.filter { it.mediaType == "image" }
+                        if (images.any { it.relativePath == file.relativePath }) images else listOf(file)
+                    }
+                    else -> listOf(file)
+                }
+            } else {
+                when (val res = repository.browseFolder(parentPath)) {
+                    is NetworkResult.Success -> {
+                        val images = res.data.files.filter { it.mediaType == "image" }
+                        if (images.any { it.relativePath == file.relativePath }) images else listOf(file)
+                    }
+                    else -> listOf(file)
+                }
+            }
+        } catch (e: Exception) {
+            listOf(file)
+        }
+    }
+
+    private fun getParentPath(path: String): String {
+        val lastSlash = path.lastIndexOfAny(charArrayOf('/', '\\'))
+        return if (lastSlash != -1) {
+            path.substring(0, lastSlash)
+        } else {
+            ""
+        }
+    }
 }
 
 /** 过滤掉"已看完"(进度 >= 95%)的条目,只保留还会用到的续播记录。 */

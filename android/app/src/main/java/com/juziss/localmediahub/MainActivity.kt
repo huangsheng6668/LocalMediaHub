@@ -54,6 +54,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
+
         enableEdgeToEdge()
         setContent {
             LocalMediaHubTheme {
@@ -196,16 +203,18 @@ fun LocalMediaHubApp() {
                         }
                     } else {
                         appScope.launch {
+                            val isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file)
                             recentActivityStore.addRecentMedia(
                                 file = file,
-                                isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file),
+                                isSystemBrowse = isSystemBrowse,
                             )
+                            val sisterImages = homeViewModel.getSisterImages(file, isSystemBrowse)
+                            currentImageFile = file
+                            imageList = sisterImages
+                            currentImageUsesSystemUrl = isSystemBrowse
+                            currentImageIsLocal = false
+                            navController.navigate("imagePreview")
                         }
-                        currentImageFile = file
-                        imageList = listOf(file)
-                        currentImageUsesSystemUrl = homeViewModel.isFavoriteSystemBrowse(file)
-                        currentImageIsLocal = false
-                        navController.navigate("imagePreview")
                     }
                 },
                 onDisconnect = {
@@ -336,6 +345,17 @@ fun LocalMediaHubApp() {
                             browseViewModel.getOriginalImageUrl(mediaFile)
                         }
                     },
+                    onImageVisible = { visibleFile ->
+                        currentImageFile = visibleFile
+                        if (!currentImageIsLocal) {
+                            appScope.launch {
+                                recentActivityStore.addRecentMedia(
+                                    file = visibleFile,
+                                    isSystemBrowse = currentImageUsesSystemUrl,
+                                )
+                            }
+                        }
+                    }
                 )
             }
         }
@@ -427,7 +447,8 @@ private suspend fun openRecentMedia(
         return
     }
 
-    onImageReady(entry.file, listOf(entry.file))
+    val sisterImages = homeViewModel.getSisterImages(entry.file, entry.isSystemBrowse)
+    onImageReady(entry.file, sisterImages)
     navigateToImagePreview()
 }
 

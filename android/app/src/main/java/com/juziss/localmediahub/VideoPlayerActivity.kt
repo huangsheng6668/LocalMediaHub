@@ -50,6 +50,12 @@ class VideoPlayerActivity : ComponentActivity() {
     val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
 
     /**
+     * 临时标志：onPictureInPictureModeChanged(false) 时置 true，供 [onStop] 消费。
+     * 用来区分「PiP 关闭后切到后台」(finish) 与「普通全屏切后台」(保留) 两种场景。
+     */
+    private var exitingFromPip: Boolean = false
+
+    /**
      * 已注册的 [PipActionReceiver] 实例。必须保存注册时创建的同一个实例：
      * Android 的 unregisterReceiver 按 binder 身份匹配（对象相等性），不是按类匹配。
      */
@@ -165,14 +171,56 @@ class VideoPlayerActivity : ComponentActivity() {
         newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        android.util.Log.d("PipDebug", "onPiPModeChanged: isInPip=$isInPictureInPictureMode, lifecycle=${lifecycle.currentState}")
         _isInPipMode.value = isInPictureInPictureMode
         if (!isInPictureInPictureMode) {
             unregisterPipReceiver()
+
+            // 区分「点 × 关闭浮窗」(需 finish 释放资源) 和「点主体回全屏」(保留)：
+            // - 关闭浮窗：Activity 即将进入 STOPPED/DESTROYED，lifecycle 是 CREATED 或更低
+            // - 点主体回全屏：Activity 即将进入 RESUMED，lifecycle 是 STARTED 或更高
+            // Vivo X100 / OriginOS 在某些场景下不调用 onStop，只依赖 lifecycle 判断更可靠。
+            val closing = !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+            android.util.Log.d("PipDebug", "onPiPModeChanged: closing=$closing (lifecycle=${lifecycle.currentState})")
+            exitingFromPip = true
+
+            if (closing && !isFinishing) {
+                android.util.Log.d("PipDebug", "onPiPModeChanged: closing detected, finish()")
+                exitingFromPip = false
+                finish()
+            }
+
+            // 兜底：解决 Android 12+ 关闭 PiP 时先走 onStop 后走 onPictureInPictureModeChanged 的生命周期问题。
+            if (lifecycle.currentState == androidx.lifecycle.Lifecycle.State.CREATED && !isFinishing) {
+                android.util.Log.d("PipDebug", "onPiPModeChanged: lifecycle is CREATED (post-stop), finishing activity")
+                exitingFromPip = false
+                finish()
+            }
+        }
+    }
+
+    /**
+     * 当 Activity 从 PiP 模式退出后切到完全不可见（onStop）时，finish 自己。
+     *
+     * 这捕获"用户关闭 PiP 浮窗"场景 —— 系统先调 onPictureInPictureModeChanged(false)
+     * 设置 exitingFromPip=true，随后调 onStop 时 finish，彻底销毁 Activity 并释放
+     * ExoPlayer，避免视频音频在后台 task 栈继续播放。
+     *
+     * 普通全屏切后台（未进过 PiP）→ exitingFromPip==false → 不 finish，保留 Activity。
+     * 点 PiP 浮窗主体回全屏 → 走 onResume，不经 onStop → 不 finish。
+     */
+    override fun onStop() {
+        super.onStop()
+        android.util.Log.d("PipDebug", "onStop: exitingFromPip=$exitingFromPip, isFinishing=$isFinishing")
+        if (exitingFromPip && !isFinishing) {
+            exitingFromPip = false
+            finish()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        android.util.Log.d("PipDebug", "onDestroy called")
         unregisterPipReceiver()
         PipControllerStore.unbind()
     }

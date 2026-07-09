@@ -44,6 +44,7 @@ fun ImagePreviewScreen(
     imageList: List<MediaFile>,
     onBack: () -> Unit,
     getOriginalUrl: (MediaFile) -> String,
+    onImageVisible: (MediaFile) -> Unit = {},
 ) {
     val currentIndex = imageList.indexOfFirst { it.relativePath == currentFile.relativePath }
         .coerceAtLeast(0)
@@ -52,6 +53,34 @@ fun ImagePreviewScreen(
     var visibleIndex by remember { mutableIntStateOf(currentIndex) }
     LaunchedEffect(listState.firstVisibleItemIndex) {
         visibleIndex = listState.firstVisibleItemIndex
+        if (visibleIndex in imageList.indices) {
+            onImageVisible(imageList[visibleIndex])
+        }
+    }
+
+    val context = LocalContext.current
+    LaunchedEffect(visibleIndex) {
+        if (imageList.isNotEmpty()) {
+            val loader = coil3.SingletonImageLoader.get(context)
+            // Preload next image
+            if (visibleIndex < imageList.lastIndex) {
+                val nextFile = imageList[visibleIndex + 1]
+                val nextUrl = getOriginalUrl(nextFile)
+                if (nextUrl.isNotBlank()) {
+                    val req = coil3.request.ImageRequest.Builder(context).data(nextUrl).build()
+                    loader.enqueue(req)
+                }
+            }
+            // Preload previous image
+            if (visibleIndex > 0) {
+                val prevFile = imageList[visibleIndex - 1]
+                val prevUrl = getOriginalUrl(prevFile)
+                if (prevUrl.isNotBlank()) {
+                    val req = coil3.request.ImageRequest.Builder(context).data(prevUrl).build()
+                    loader.enqueue(req)
+                }
+            }
+        }
     }
 
     var initialized by remember { mutableStateOf(false) }

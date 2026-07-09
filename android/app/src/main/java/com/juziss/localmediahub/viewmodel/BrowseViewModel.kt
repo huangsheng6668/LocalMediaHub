@@ -344,6 +344,15 @@ class BrowseViewModel @Inject constructor(
         )
     }
 
+    fun deletePaths(paths: List<String>, recursive: Boolean = true) {
+        deleteController.deletePaths(
+            paths = paths,
+            recursive = recursive,
+            onRefresh = navigator::refreshCurrentDirectory,
+            scope = viewModelScope
+        )
+    }
+
     private fun emitBrowseError(message: String) {
         sharedState.emitBrowseError(message)
     }

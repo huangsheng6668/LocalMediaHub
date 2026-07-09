@@ -265,11 +265,15 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.2.0")
     implementation("androidx.media3:media3-ui:1.2.0")
     implementation("androidx.media3:media3-datasource-okhttp:1.2.0")
+    implementation("androidx.media3:media3-session:1.2.0")
     // FFmpeg extension: media3-decoder-ffmpeg is not published to Maven.
     // libffmpeg.so is pre-built in jniLibs/arm64-v8a/ for future FFmpeg JNI bridge.
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+
+    // WorkManager
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 
     // Serialization — Gson is used directly by MediaRepository (Retrofit's
     // converter-gson was removed in Round 19 C3). Version pinned to 2.8.9

@@ -39,6 +39,7 @@ func TestGetTaggedMediaReturnsMatchingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create tags service: %v", err)
 	}
+	defer tagsService.Close()
 	tag, err := tagsService.CreateTag("Favorites", "#ff0000")
 	if err != nil {
 		t.Fatalf("failed to create tag: %v", err)

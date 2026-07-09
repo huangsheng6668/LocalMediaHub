@@ -210,6 +210,7 @@ internal fun BrowseContent(
     getScrollPosition: (path: String) -> Int,
     getThumbnailUrl: (file: MediaFile) -> String,
     modifier: Modifier = Modifier,
+    isSelected: (String) -> Boolean = { false },
 ) {
     val folderSortOrder = state.folderSort
     val fileSortOrder = state.fileSort
@@ -281,6 +282,7 @@ internal fun BrowseContent(
                 onFileLongClick = onFileLongClick,
                 modifier = Modifier.fillMaxSize(),
                 state = staggeredState,
+                isSelected = isSelected,
             )
         } else {
             LazyVerticalGrid(
@@ -309,6 +311,7 @@ internal fun BrowseContent(
                             onToggleFavorite = toggle,
                             onClick = remember(file, onVideoClick) { { onVideoClick(file) } },
                             onLongClick = longClick,
+                            isSelected = isSelected(file.relativePath),
                         )
                         "image" -> ImageCard(
                             file = file,
@@ -317,6 +320,7 @@ internal fun BrowseContent(
                             onToggleFavorite = toggle,
                             onClick = remember(file, onImageClick) { { onImageClick(file) } },
                             onLongClick = longClick,
+                            isSelected = isSelected(file.relativePath),
                         )
                     }
                 }

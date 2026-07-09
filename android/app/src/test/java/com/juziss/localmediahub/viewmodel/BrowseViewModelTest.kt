@@ -29,7 +29,7 @@ class BrowseViewModelTest {
         val httpClient = OkHttpClient()
         val serverConfig = ServerConfig(httpClient)
         val repository = MediaRepository(httpClient, serverConfig)
-        val downloadManager = DownloadManager(appContext, repository, downloadsStore)
+        val downloadManager = DownloadManager(appContext)
         val viewModel = BrowseViewModel(
             appContext = appContext,
             favoritesStore = favoritesStore,

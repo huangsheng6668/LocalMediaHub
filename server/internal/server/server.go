@@ -45,6 +45,9 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions)
+	if err := scanner.StartWatching(cfg.Scan.Roots); err != nil {
+		fmt.Printf("Warning: failed to start filesystem watcher: %v\n", err)
+	}
 	tagsService, err := service.NewTagsService(".data")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tags service: %w", err)
@@ -186,6 +189,10 @@ func (s *Server) Start() error {
 func (s *Server) Stop() error {
 	// Cancel any in-flight background scan so it doesn't keep walking the FS.
 	s.Scanner.Shutdown()
+	// Close tags database connection
+	if err := s.Tags.Close(); err != nil {
+		fmt.Printf("Warning: failed to close tags database: %v\n", err)
+	}
 	// Cancel thumbnail pre-generation (preGenCancel is nil until the first scan
 	// completes — guard against nil to avoid a panic).
 	s.preGenMu.Lock()

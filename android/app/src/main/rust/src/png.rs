@@ -5,7 +5,7 @@
 //! toolchain as the rest of the crate.
 //!
 //! All colour types are expanded to RGBA so the downstream Android Bitmap
-//! allocator can swizzle R<->B for `ARGB_8888` exactly like the JPEG/WebP
+//! allocator can copy it directly for `ARGB_8888` (RGBA_8888) exactly like the JPEG/WebP
 //! paths. Indexed (palette) PNGs are normalised to RGBA by the `png` crate
 //! itself — by the time we see `next_frame`'s output it is one of
 //! `Rgb`/`Rgba`/`Grayscale`/`GrayscaleAlpha` (8 or 16 bit). 16-bit samples

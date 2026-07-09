@@ -68,7 +68,7 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
 
     // `jpeg_decoder` emits RGB (3 bytes) or L8 (1 byte) for baseline JPEGs;
     // we normalise everything to RGBA so the bitmap allocator can blindly
-    // swizzle R<->B for Android Bitmap's ARGB_8888 layout.
+    // copy it to the Android Bitmap's ARGB_8888 (RGBA_8888) layout.
     let rgba = match info.pixel_format {
         JpegPixelFormat::RGB24 => rgb_to_rgba(&pixels),
         JpegPixelFormat::L8 => l8_to_rgba(&pixels),

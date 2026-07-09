@@ -43,6 +43,7 @@ internal fun BrowseStateContent(
     getScrollPosition: (String) -> Int,
     getThumbnailUrl: (MediaFile) -> String,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
+    isSelected: (String) -> Boolean = { false },
 ) {
     val currentPath = state.currentPath
     when (browseState) {
@@ -158,6 +159,7 @@ internal fun BrowseStateContent(
                     onConsumeRestoreScroll = onConsumeRestoreScroll,
                     getScrollPosition = getScrollPosition,
                     getThumbnailUrl = getThumbnailUrl,
+                    isSelected = isSelected,
                 )
             }
         }
@@ -211,6 +213,7 @@ internal fun BrowseStateContent(
                     onConsumeRestoreScroll = onConsumeRestoreScroll,
                     getScrollPosition = getScrollPosition,
                     getThumbnailUrl = getThumbnailUrl,
+                    isSelected = isSelected,
                 )
             }
         }

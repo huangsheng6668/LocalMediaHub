@@ -13,6 +13,7 @@ func TestTagsService(t *testing.T) {
 	svc, err := NewTagsService(tempDir)
 	assert.NoError(t, err)
 	assert.NotNil(t, svc)
+	defer svc.Close()
 	
 	// Should be empty initially
 	tags := svc.GetAllTags()
@@ -73,6 +74,7 @@ func TestTagsService(t *testing.T) {
 	// Verify persistence (reload service)
 	svcReloaded, err := NewTagsService(tempDir)
 	assert.NoError(t, err)
+	defer svcReloaded.Close()
 	assert.Len(t, svcReloaded.GetAllTags(), 1)
 	assert.Equal(t, t2.ID, svcReloaded.GetAllTags()[0].ID)
 }

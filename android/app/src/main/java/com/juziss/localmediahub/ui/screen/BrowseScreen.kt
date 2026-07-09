@@ -6,9 +6,31 @@ import com.juziss.localmediahub.ui.component.browse.QuickActionsDialog
  
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.BottomAppBar
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
 import androidx.compose.runtime.Composable
@@ -60,6 +82,15 @@ fun BrowseScreen(
  
     var isSearchMode by remember { mutableStateOf(false) }
     var showTagMenuForFile by remember { mutableStateOf<MediaFile?>(null) }
+    var selectionMode by remember { mutableStateOf(false) }
+    val selectedFiles = remember { mutableStateListOf<MediaFile>() }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(currentPath) {
+        selectionMode = false
+        selectedFiles.clear()
+        showBatchDeleteConfirm = false
+    }
  
     LaunchedEffect(Unit) {
         if (browseState is BrowseState.Idle) {
@@ -87,8 +118,12 @@ fun BrowseScreen(
  
     val isCollectionView = browseState is BrowseState.TagCollection
  
-    BackHandler(enabled = isSearchMode || showFavoritesOnly || viewModel.canGoBack() || isCollectionView) {
+    BackHandler(enabled = selectionMode || isSearchMode || showFavoritesOnly || viewModel.canGoBack() || isCollectionView) {
         when {
+            selectionMode -> {
+                selectionMode = false
+                selectedFiles.clear()
+            }
             isSearchMode -> {
                 isSearchMode = false
                 viewModel.clearSearch()
@@ -102,43 +137,141 @@ fun BrowseScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            val collectionTitle = (browseState as? BrowseState.TagCollection)?.title
-            BrowseTopBar(
-                isSearchMode = isSearchMode,
-                searchQuery = searchQuery,
-                onSearchQueryChange = viewModel::updateSearchQuery,
-                onClearSearch = {
-                    isSearchMode = false
-                    viewModel.clearSearch()
-                },
-                title = when {
-                    showFavoritesOnly -> stringResource(R.string.browse_favorites)
-                    collectionTitle != null -> collectionTitle
-                    isSystemBrowse && currentPath.isEmpty() -> stringResource(R.string.browse_drives)
-                    isSystemBrowse -> currentPath
-                    currentPath.isEmpty() -> stringResource(R.string.browse_libraries)
-                    else -> currentPath
-                },
-                onBack = when {
-                    showFavoritesOnly -> ({ viewModel.setShowFavoritesOnly(false) })
-                    isCollectionView -> onExitBrowse
-                    viewModel.canGoBack() -> ({ viewModel.navigateBack() })
-                    else -> null
-                },
-                showLibraryActions = currentPath.isEmpty() && !showFavoritesOnly && !isCollectionView,
-                isSystemBrowse = isSystemBrowse,
-                onToggleSystemMode = {
-                    if (isSystemBrowse) viewModel.loadRoots() else viewModel.loadSystemDrives()
-                },
-                onShowFavorites = { viewModel.setShowFavoritesOnly(true) },
-                showSortAndSearch = !showFavoritesOnly,
-                folderSort = folderSort,
-                fileSort = fileSort,
-                onFolderSortChange = viewModel::setFolderSortOrder,
-                onFileSortChange = viewModel::setFileSortOrder,
-                showSearch = !showFavoritesOnly && !isCollectionView,
-                onEnterSearch = { isSearchMode = true },
-            )
+            if (selectionMode) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "已选择 ${selectedFiles.size} 项",
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            selectionMode = false
+                            selectedFiles.clear()
+                        }) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = "取消选择"
+                            )
+                        }
+                    },
+                    actions = {
+                        val allFilesInFolder = when (val state = browseState) {
+                            is BrowseState.Browsed -> state.result.files
+                            is BrowseState.SystemBrowsed -> state.result.files
+                            else -> emptyList()
+                        }
+                        if (allFilesInFolder.isNotEmpty()) {
+                            val isAllSelected = selectedFiles.size == allFilesInFolder.size
+                            TextButton(onClick = {
+                                if (isAllSelected) {
+                                    selectedFiles.clear()
+                                } else {
+                                    selectedFiles.clear()
+                                    selectedFiles.addAll(allFilesInFolder)
+                                }
+                            }) {
+                                Text(
+                                    text = if (isAllSelected) "取消全选" else "全选",
+                                    color = if (isAllSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                )
+            } else {
+                val collectionTitle = (browseState as? BrowseState.TagCollection)?.title
+                BrowseTopBar(
+                    isSearchMode = isSearchMode,
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = viewModel::updateSearchQuery,
+                    onClearSearch = {
+                        isSearchMode = false
+                        viewModel.clearSearch()
+                    },
+                    title = when {
+                        showFavoritesOnly -> stringResource(R.string.browse_favorites)
+                        collectionTitle != null -> collectionTitle
+                        isSystemBrowse && currentPath.isEmpty() -> stringResource(R.string.browse_drives)
+                        isSystemBrowse -> currentPath
+                        currentPath.isEmpty() -> stringResource(R.string.browse_libraries)
+                        else -> currentPath
+                    },
+                    onBack = when {
+                        showFavoritesOnly -> ({ viewModel.setShowFavoritesOnly(false) })
+                        isCollectionView -> onExitBrowse
+                        viewModel.canGoBack() -> ({ viewModel.navigateBack() })
+                        else -> null
+                    },
+                    showLibraryActions = currentPath.isEmpty() && !showFavoritesOnly && !isCollectionView,
+                    isSystemBrowse = isSystemBrowse,
+                    onToggleSystemMode = {
+                        if (isSystemBrowse) viewModel.loadRoots() else viewModel.loadSystemDrives()
+                    },
+                    onShowFavorites = { viewModel.setShowFavoritesOnly(true) },
+                    showSortAndSearch = !showFavoritesOnly,
+                    folderSort = folderSort,
+                    fileSort = fileSort,
+                    onFolderSortChange = viewModel::setFolderSortOrder,
+                    onFileSortChange = viewModel::setFileSortOrder,
+                    showSearch = !showFavoritesOnly && !isCollectionView,
+                    onEnterSearch = { isSearchMode = true },
+                )
+            }
+        },
+        bottomBar = {
+            if (selectionMode && selectedFiles.isNotEmpty()) {
+                BottomAppBar(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    tonalElevation = 8.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "已选 ${selectedFiles.size} 个媒体",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            androidx.compose.material3.OutlinedButton(
+                                onClick = {
+                                    showBatchDeleteConfirm = true
+                                },
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ),
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Text("删除所选")
+                            }
+                            Button(
+                                onClick = {
+                                    selectedFiles.forEach { file ->
+                                        viewModel.downloadFile(file)
+                                    }
+                                    selectionMode = false
+                                    selectedFiles.clear()
+                                },
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                Text("下载所选")
+                            }
+                        }
+                    }
+                }
+            }
         }
     ) { innerPadding ->
         var itemForActions by remember { mutableStateOf<Any?>(null) }
@@ -150,8 +283,50 @@ fun BrowseScreen(
         val isFavoriteCb: (String) -> Boolean = remember(favorites) {
             { relativePath -> relativePath in favorites }
         }
-        val onFileLongClickCb: (MediaFile) -> Unit = remember {
-            { file -> itemForActions = file }
+        val onFileLongClickCb: (MediaFile) -> Unit = remember(selectionMode) {
+            { file ->
+                if (!selectionMode) {
+                    selectionMode = true
+                    selectedFiles.clear()
+                    selectedFiles.add(file)
+                }
+            }
+        }
+
+        val handleVideoClick = remember(selectionMode, onVideoClick) {
+            { file: MediaFile ->
+                if (selectionMode) {
+                    if (selectedFiles.any { it.relativePath == file.relativePath }) {
+                        selectedFiles.removeAll { it.relativePath == file.relativePath }
+                        if (selectedFiles.isEmpty()) {
+                            selectionMode = false
+                        }
+                    } else {
+                        selectedFiles.add(file)
+                    }
+                } else {
+                    onVideoClick(file)
+                }
+                Unit
+            }
+        }
+
+        val handleImageClick = remember(selectionMode, onImageClick) {
+            { file: MediaFile, list: List<MediaFile> ->
+                if (selectionMode) {
+                    if (selectedFiles.any { it.relativePath == file.relativePath }) {
+                        selectedFiles.removeAll { it.relativePath == file.relativePath }
+                        if (selectedFiles.isEmpty()) {
+                            selectionMode = false
+                        }
+                    } else {
+                        selectedFiles.add(file)
+                    }
+                } else {
+                    onImageClick(file, list)
+                }
+                Unit
+            }
         }
         var itemToDelete by remember { mutableStateOf<Any?>(null) }
         var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -218,6 +393,31 @@ fun BrowseScreen(
                 onDismiss = { showDeleteConfirm = false },
             )
         }
+
+        if (showBatchDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showBatchDeleteConfirm = false },
+                title = { Text("确认删除") },
+                text = { Text("确认要从服务器上删除这 ${selectedFiles.size} 个选中的媒体文件吗？此操作不可撤销。") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showBatchDeleteConfirm = false
+                            viewModel.deletePaths(selectedFiles.map { it.relativePath })
+                            selectionMode = false
+                            selectedFiles.clear()
+                        }
+                    ) {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBatchDeleteConfirm = false }) {
+                        Text("取消")
+                    }
+                }
+            )
+        }
  
         // Loading Overlay for Deletion
         if (deleteState is com.juziss.localmediahub.viewmodel.DeleteState.Loading) {
@@ -273,8 +473,8 @@ fun BrowseScreen(
                 isSystemBrowse = isSystemBrowse,
                 tags = tags,
                 activeTagFilter = activeTagFilter,
-                onVideoClick = onVideoClick,
-                onImageClick = onImageClick,
+                onVideoClick = handleVideoClick,
+                onImageClick = handleImageClick,
                 onToggleFavorite = onToggleFavoriteCb,
                 isFavorite = isFavoriteCb,
                 onFileLongClick = onFileLongClickCb,
@@ -289,6 +489,7 @@ fun BrowseScreen(
                 getScrollPosition = viewModel::getScrollPosition,
                 getThumbnailUrl = viewModel::getThumbnailUrl,
                 innerPadding = innerPadding,
+                isSelected = { path -> selectedFiles.any { it.relativePath == path } },
             )
         }
     }

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"os"
@@ -19,9 +18,38 @@ import (
 // video streaming. Go's http.ServeContent defaults to a 32KB io.Copy buffer,
 // which causes ExoPlayer to see data in tiny bursts → periodic stutter every
 // few seconds as each small chunk arrives and the next one is requested.
-// A 1MB buffer lets the server read a large slab from disk and push it to the
-// TCP socket in one shot, keeping the network pipe full.
-const largeStreamBuffer = 1 << 20 // 1 MiB
+// A 128KB buffer lets the server read a reasonable slab from disk and push it to the
+// TCP socket in one shot, keeping the network pipe full, while staying highly
+// responsive to client seeks and keeping transcoding startup latency low.
+const largeStreamBuffer = 128 * 1024 // 128 KiB
+
+// BufferedReadSeeker wraps an os.File and a bufio.Reader to provide
+// seekable buffered reads. This reduces Windows ReadFile system call overhead
+// during range requests by http.ServeContent.
+type BufferedReadSeeker struct {
+	file   *os.File
+	reader *bufio.Reader
+}
+
+func NewBufferedReadSeeker(f *os.File, size int) *BufferedReadSeeker {
+	return &BufferedReadSeeker{
+		file:   f,
+		reader: bufio.NewReaderSize(f, size),
+	}
+}
+
+func (b *BufferedReadSeeker) Read(p []byte) (int, error) {
+	return b.reader.Read(p)
+}
+
+func (b *BufferedReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	pos, err := b.file.Seek(offset, whence)
+	if err != nil {
+		return pos, err
+	}
+	b.reader.Reset(b.file)
+	return pos, nil
+}
 
 type StreamingService struct {
 	ffmpegPath string
@@ -68,6 +96,10 @@ func contentTypeFromExt(filePath string) string {
 // Range handler with a 1 MB buffer + explicit flushing instead of
 // http.ServeContent's 32 KB default, eliminating periodic stutter on video
 // playback.
+// ServeFile streams a file. For direct (non-transcoded) mode it uses Go's highly
+// optimized, standard library http.ServeContent which handles RFC 7233 Range requests
+// (including multi-range, conditional requests) natively, has zero heap allocations,
+// and immediately exits on client disconnections.
 func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, filePath string) error {
 	if r.URL.Query().Get("transcode") == "true" {
 		return s.serveTranscoded(w, r, filePath)
@@ -88,128 +120,12 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 	}
 
 	contentType := contentTypeFromExt(filePath)
-	size := fi.Size()
-
-	// Handle conditional requests (304).
-	w.Header().Set("Last-Modified", fi.ModTime().UTC().Format(http.TimeFormat))
-	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Content-Type", contentType)
 
-	etag := fmt.Sprintf(`"%x-%x"`, fi.ModTime().UnixNano(), size)
-	w.Header().Set("ETag", etag)
-	if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return nil
-	}
+	// Wrap in a 256 KB BufferedReadSeeker to minimize system calls on Windows
+	bufferedFile := NewBufferedReadSeeker(f, 256*1024)
 
-	// Parse Range header.
-	rangeHeader := r.Header.Get("Range")
-	var start, end int64
-	if rangeHeader != "" {
-		// Parse "bytes=START-END"
-		const prefix = "bytes="
-		if !strings.HasPrefix(rangeHeader, prefix) {
-			w.Header().Del("Accept-Ranges")
-			w.WriteHeader(http.StatusBadRequest)
-			return nil
-		}
-		spec := strings.TrimPrefix(rangeHeader, prefix)
-		parts := strings.SplitN(spec, "-", 2)
-		if len(parts) != 2 {
-			w.Header().Del("Accept-Ranges")
-			w.WriteHeader(http.StatusBadRequest)
-			return nil
-		}
-		if parts[0] == "" {
-			// Suffix range: bytes=-N means "last N bytes" per RFC 7233 §2.1.
-			// If N is missing/invalid/unparseable, treat as full file.
-			suffixLen, parseErr := strconv.ParseInt(parts[1], 10, 64)
-			if parseErr != nil || suffixLen <= 0 {
-				start = 0
-				end = size - 1
-			} else {
-				if suffixLen > size {
-					suffixLen = size
-				}
-				start = size - suffixLen
-				end = size - 1
-			}
-		} else {
-			start, err = strconv.ParseInt(parts[0], 10, 64)
-			if err != nil {
-				w.Header().Del("Accept-Ranges")
-				w.WriteHeader(http.StatusBadRequest)
-				return nil
-			}
-			if parts[1] != "" {
-				end, err = strconv.ParseInt(parts[1], 10, 64)
-				if err != nil {
-					w.Header().Del("Accept-Ranges")
-					w.WriteHeader(http.StatusBadRequest)
-					return nil
-				}
-			} else {
-				end = size - 1
-			}
-			if start < 0 || start >= size {
-				w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
-				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
-				return nil
-			}
-			if end >= size {
-				end = size - 1
-			}
-		}
-	} else {
-		start = 0
-		end = size - 1
-	}
-
-	contentLength := end - start + 1
-
-	w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
-	if rangeHeader != "" {
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
-		w.WriteHeader(http.StatusPartialContent)
-	} else {
-		w.WriteHeader(http.StatusOK)
-	}
-
-	// Seek to start offset.
-	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return err
-	}
-
-	// Stream with a 1 MB buffer + explicit flush after each buffer-full.
-	// This keeps the TCP pipe full instead of trickling 32 KB at a time.
-	buf := make([]byte, largeStreamBuffer)
-	flusher, _ := w.(http.Flusher)
-	remaining := contentLength
-
-	for remaining > 0 {
-		toRead := int64(len(buf))
-		if toRead > remaining {
-			toRead = remaining
-		}
-
-		n, readErr := io.ReadFull(f, buf[:toRead])
-		if n > 0 {
-			if _, wErr := w.Write(buf[:n]); wErr != nil {
-				return nil // client disconnected
-			}
-			if flusher != nil {
-				flusher.Flush()
-			}
-			remaining -= int64(n)
-		}
-		if readErr != nil {
-			if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
-				break
-			}
-			return readErr
-		}
-	}
-
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), bufferedFile)
 	return nil
 }
 

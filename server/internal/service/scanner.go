@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
@@ -27,8 +29,10 @@ type Scanner struct {
 	// Unlike the per-request context used by GetCached, this one is owned by the
 	// scanner so a TriggerScan keeps running after the HTTP response is sent and
 	// can be cancelled by shutting down (Stop cancels it via Shutdown).
-	bgCtx    context.Context
-	bgCancel context.CancelFunc
+	bgCtx      context.Context
+	bgCancel   context.CancelFunc
+	watcher    *fsnotify.Watcher
+	watchRoots []string
 }
 
 func NewScanner(videoExts, imageExts []string) *Scanner {
@@ -78,12 +82,15 @@ func (s *Scanner) TriggerScan(roots []string) {
 	go s.Scan(ctx, roots)
 }
 
-// Shutdown cancels any in-flight background scan. Call this on server stop so
-// triggered scans don't outlive the process.
+// Shutdown cancels any in-flight background scan and closes the file watcher.
 func (s *Scanner) Shutdown() {
 	s.mu.Lock()
 	if s.bgCancel != nil {
 		s.bgCancel()
+	}
+	if s.watcher != nil {
+		s.watcher.Close()
+		s.watcher = nil
 	}
 	s.mu.Unlock()
 }
@@ -267,4 +274,98 @@ func (s *Scanner) Search(files []models.MediaFile, query string) []models.MediaF
 		}
 	}
 	return result
+}
+
+// StartWatching initializes the fsnotify watcher, registers all roots recursively,
+// and spawns a background event-listening loop.
+func (s *Scanner) StartWatching(roots []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.watcher != nil {
+		s.watcher.Close()
+	}
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	s.watcher = watcher
+	s.watchRoots = roots
+
+	// Watch all directories recursively
+	for _, root := range roots {
+		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				_ = watcher.Add(path)
+			}
+			return nil
+		})
+	}
+
+	// Start listening to events
+	go s.watchEvents()
+
+	return nil
+}
+
+func (s *Scanner) watchEvents() {
+	var scanTimer *time.Timer
+	const debounceDuration = 2 * time.Second
+
+	for {
+		s.mu.RLock()
+		watcher := s.watcher
+		s.mu.RUnlock()
+		if watcher == nil {
+			return
+		}
+
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+
+			// Invalidate cache immediately on change events
+			if event.Op&fsnotify.Write == fsnotify.Write ||
+				event.Op&fsnotify.Create == fsnotify.Create ||
+				event.Op&fsnotify.Remove == fsnotify.Remove ||
+				event.Op&fsnotify.Rename == fsnotify.Rename {
+
+				s.InvalidateCache()
+
+				// If a new directory is created, dynamically add it to the watcher
+				if event.Op&fsnotify.Create == fsnotify.Create {
+					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+						s.mu.Lock()
+						if s.watcher != nil {
+							_ = s.watcher.Add(event.Name)
+						}
+						s.mu.Unlock()
+					}
+				}
+
+				// Debounce triggering scan to warm cache
+				s.mu.Lock()
+				if scanTimer != nil {
+					scanTimer.Stop()
+				}
+				scanTimer = time.AfterFunc(debounceDuration, func() {
+					s.mu.RLock()
+					roots := s.watchRoots
+					s.mu.RUnlock()
+					s.TriggerScan(roots)
+				})
+				s.mu.Unlock()
+			}
+		case _, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+		}
+	}
 }

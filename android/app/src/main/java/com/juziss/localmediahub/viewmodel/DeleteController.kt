@@ -62,4 +62,36 @@ internal class DeleteController(
             }
         }
     }
+
+    fun deletePaths(
+        paths: List<String>,
+        recursive: Boolean,
+        onRefresh: (suspend () -> Unit)?,
+        scope: CoroutineScope
+    ) {
+        scope.launch {
+            _deleteState.value = DeleteState.Loading
+            var anySuccess = false
+            var errorMessage: String? = null
+            for (path in paths) {
+                when (val result = deletePathSync(path, recursive)) {
+                    is NetworkResult.Success -> {
+                        anySuccess = true
+                    }
+                    is NetworkResult.Error -> {
+                        errorMessage = result.message
+                    }
+                    else -> {}
+                }
+            }
+            if (anySuccess) {
+                _deleteState.value = DeleteState.Success("成功删除了选中的文件")
+                onRefresh?.invoke()
+            } else if (errorMessage != null) {
+                _deleteState.value = DeleteState.Error(errorMessage)
+            } else {
+                _deleteState.value = DeleteState.Idle
+            }
+        }
+    }
 }

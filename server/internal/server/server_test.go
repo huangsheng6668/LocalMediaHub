@@ -158,6 +158,7 @@ func TestRegisterRoutesJsonCacheControl(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer s.Stop()
 
 	cases := []struct {
 		path      string
@@ -204,6 +205,7 @@ func TestPprofRoute_RegisteredUnderDebugPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	defer s.Stop()
 
 	routes := s.Echo.Routes()
 	found := false

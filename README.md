@@ -27,10 +27,11 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 |------|------|
 | 全盘浏览 | 自动检测 Windows 驱动器，浏览任意目录，只显示媒体文件 |
 | REST API | 29 个端点，覆盖目录浏览、媒体列表、搜索、标签、系统浏览、统一媒体访问、管理等 |
-| 视频流 | HTTP Range Requests (206 Partial Content)，64KB 分块，支持进度拖动 |
+| 视频流 | HTTP Range Requests (206 Partial Content)，基于 `http.ServeContent` + 256KB 缓冲 `BufferedReadSeeker`，原生支持多 Range / 条件请求 |
 | 缩略图 | LANCZOS 缩放，MD5 磁盘缓存，懒加载 |
-| 标签系统 | JSON 持久化，RWMutex 并发安全，CRUD + 文件关联 |
+| 标签系统 | SQLite 持久化（pure-Go `modernc.org/sqlite`，无 CGO），RWMutex 并发安全，CRUD + 文件关联；首次启动自动从 `tags.json` 迁移 |
 | 搜索 | 按文件名递归搜索，支持限定目录范围 |
+| 文件监听 | `fsnotify` 递归监听扫描根目录，变更即时失效缓存并防抖（2s）触发重扫，新目录自动加入监听 |
 | mDNS 发现 | 局域网服务注册，Android NSD 自动发现 |
 | 双模式运行 | GUI 模式（系统托盘）或 headless 模式（无窗口） |
 | 安全防护 | 路径遍历防护（ValidatePath + isWithinRoots）；系统浏览、系统媒体与统一媒体端点均强制 `system.allowed_roots` 边界（ValidateSystemMediaAccess / ValidateAccessibleMediaPath）；Android 下载解压防 Zip Slip |
@@ -47,8 +48,9 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 | 首页层 | 启动后进入首页，聚合媒体共享库、最近打开、继续播放、收藏和标签集合概览 |
 | 库入口 | 将配置的媒体根目录作为共享盘符展示，减少直接面对原始繁琐路径 |
 | 文件浏览器 | 网格/瀑布流视图，支持子目录浏览，拥有精准的滚动位置与上次浏览路径记忆 |
-| 视频播放 | Media3 (ExoPlayer) 全景架构，支持全屏切换、进度双击与音量亮度滑动控制 |
-| 图片预览 | 全屏查看，左右滑动，双指缩放与阻尼惯性缓动 |
+| 视频播放 | Media3 (ExoPlayer) 全景架构，支持全屏切换、进度双击与音量亮度滑动控制；拖动防抖（500ms 冷启动 + 200ms 节流）+ `CLOSEST_SYNC` 关键帧对齐 + `MediaSession` 媒体控制 |
+| 图片预览 | 全屏查看，左右滑动同目录图片，双指缩放与阻尼惯性缓动；自动预加载相邻原图，打开后立即滑动切换流畅 |
+| 批量选择 | 长按进入选择模式，支持全选/反选、批量删除、批量下载到本地 |
 | 搜索 | 按文件名全局或局部递归快速搜索，限定当前目录 |
 | 排序 | 独立的文件夹与文件排序（按文件名/大小/时间/数字升降序等） |
 | 收藏 | 本地 DataStore 持久化保存，支持一键只看收藏 |
@@ -56,6 +58,8 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 | 继续播放 | 精准记录视频播放时间戳，从任意入口（浏览、收藏、下载、最近打开等）打开同一视频都自动恢复进度；播放至 95% 时弹窗询问"继续 / 从头开始"，续播时右下角提供 3 秒"从头开始"快捷入口 |
 | 最近项目 | 记录最近打开的媒体与最近浏览位置，一键重回上次上下文 |
 | 自动连接 | 优先尝试上次成功连接的服务端，失败后自动回退到 NSD 局域网自发现 |
+| 后台下载 | WorkManager 前台服务执行，常驻通知栏实时显示进度（百分比/字节数），切到后台或锁屏不受影响；支持单文件与目录 ZIP 流式下载解压 |
+| 画中画 (PiP) | 视频播放支持独立 Activity 的 PiP 浮窗；点击 Home 键自动进入小窗，关闭浮窗自动 `finish()` 释放 ExoPlayer，避免后台音频泄漏 |
 | 原生解码 | Rust 编译的 JPEG/PNG/WebP 原生解码器（cargo-ndk 交叉编译到 arm64-v8a，pure-Rust crates，无 C 依赖），含 EXIF orientation 自动校正；提升大图与多图懒加载性能 |
 | FFmpeg 扩展 | 预编译 libffmpeg.so，原生支持更多罕见和超清视频格式 |
 
@@ -63,9 +67,9 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 
 ### Server (Go, 当前版本)
 
-- **语言**: Go 1.24+
+- **语言**: Go 1.25+
 - **框架**: Echo v4
-- **依赖**: getlantern/systray (系统托盘), hashicorp/mdns
+- **依赖**: getlantern/systray (系统托盘), hashicorp/mdns, fsnotify/fsnotify (文件监听), modernc.org/sqlite (pure-Go SQLite), hashicorp/golang-lru/v2
 - **配置**: YAML 文件
 - **运行**: 单文件可执行程序，双击即用
 
@@ -75,9 +79,10 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 - **UI**: Jetpack Compose
 - **架构**: MVVM (ViewModel + Repository)
 - **网络**: Retrofit + OkHttp
-- **图片**: Coil (含 NativeDecoderFactory)
-- **视频**: Media3 (ExoPlayer) + FFmpeg 扩展
-- **存储**: DataStore (偏好设置 + 收藏)
+- **图片**: Coil 3 (含 NativeDecoderFactory)
+- **视频**: Media3 (ExoPlayer + MediaSession) + FFmpeg 扩展
+- **后台任务**: WorkManager (前台服务下载，含进度通知)
+- **存储**: DataStore (偏好设置 + 收藏) + SQLite (服务端标签)
 - **原生**: Rust 2021 + cargo-ndk（交叉编译到 arm64-v8a；pure-Rust crates：jpeg-decoder / image-png / webp / kamadak-exif / fast-image-resize，输出 liblocalmedia_native.so）+ 预编译 libffmpeg.so
 - **导航**: Navigation Compose
 
@@ -94,9 +99,9 @@ localResourcesToPhone/
 │   │   │   ├── handler/          # 29 个 API handler
 │   │   │   └── middleware/       # CORS 中间件
 │   │   ├── service/              # 业务逻辑
-│   │   │   ├── scanner.go        # 文件扫描（TTL 缓存）
-│   │   │   ├── tags.go           # 标签系统（JSON 持久化）
-│   │   │   ├── streaming.go      # 视频流传输（Range）
+│   │   │   ├── scanner.go        # 文件扫描（TTL 缓存 + fsnotify 递归监听）
+│   │   │   ├── tags.go           # 标签系统（SQLite 持久化 + JSON 迁移）
+│   │   │   ├── streaming.go      # 视频流传输（http.ServeContent + 256KB 缓冲）
 │   │   │   ├── thumbnail.go      # 缩略图生成（MD5 缓存）
 │   │   │   └── path.go           # 路径校验（ValidatePath / ValidateSystemMediaAccess / ValidateAccessibleMediaPath）
 │   │   ├── mdns/                 # mDNS 服务注册
@@ -113,8 +118,9 @@ localResourcesToPhone/
 │   │   └── src/main/
 │   │       ├── java/com/juziss/localmediahub/
 │   │       │   ├── LocalMediaHubApplication.kt  # Hilt Application
-│   │       │   ├── MainActivity.kt              # 入口 + NavHost 路由 + 视频续播调度
-│   │       │   ├── data/         # Model + Repository + DataStore（收藏、最近活动、播放进度、下载、路由）
+│   │       │   ├── MainActivity.kt              # 入口 + NavHost 路由 + 视频续播调度 + POST_NOTIFICATIONS 权限请求
+│   │       │   ├── VideoPlayerActivity.kt       # 独立视频播放 Activity，承载 PiP 浮窗 + 关闭自动 finish
+│   │       │   ├── data/         # Model + Repository + DataStore（收藏、最近活动、播放进度、下载、路由）+ DownloadWorker（WorkManager 前台服务下载）
 │   │       │   ├── di/           # Hilt 模块（CoroutineScopesModule）
 │   │       │   ├── network/      # Retrofit 接口 + OkHttp
 │   │       │   ├── native/       # Kotlin JNI 入口（NativeImageDecoder / NativeExif / NaturalSorter / NativeDecoderFactory for Coil）
@@ -181,6 +187,8 @@ system:
 ```
 
 `system.allowed_roots` 只影响 `/api/v1/system/*` 这组受限系统浏览接口。
+
+> **标签存储:** 服务端使用 SQLite (`server/.data/tags.db`) 持久化标签。若首次启动检测到旧版 `tags.json`，会自动迁移并备份为 `tags.json.bak`。
 
 常规媒体扫描根目录 `scan.roots` 仍可省略，此时服务端会自动检测 Windows 驱动器。
 

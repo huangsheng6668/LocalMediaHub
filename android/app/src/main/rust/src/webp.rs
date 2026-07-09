@@ -41,8 +41,8 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
     // the Round 11 rewrite.
     decoder.read_image(&mut raw).ok()?;
 
-    // Normalise to RGBA so the bitmap allocator can blindly swizzle R<->B
-    // for Android Bitmap's ARGB_8888 layout, same as the JPEG path.
+    // Normalise to RGBA so the bitmap allocator can blindly copy it
+    // to the Android Bitmap's ARGB_8888 (RGBA_8888) layout, same as the JPEG path.
     let rgba = if has_alpha {
         raw
     } else {

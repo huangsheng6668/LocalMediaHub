@@ -117,6 +117,10 @@ fun LocalMediaHubTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = AppTypography,
-        content = content
-    )
+    ) {
+        // See NoRippleIndication.kt — overrides Material 1.3.1's legacy PlatformRipple
+        // (which only implements Indication, not IndicationNodeFactory) so that
+        // foundation 1.11.x's clickable doesn't crash on release R8 builds.
+        ProvideNoRippleIndication(content)
+    }
 }

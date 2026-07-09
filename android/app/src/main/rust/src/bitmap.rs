@@ -1,4 +1,4 @@
-//! Android Bitmap allocation + RGBA→ARGB_8888 swizzle.
+//! Android Bitmap allocation and pixel filling.
 //!
 //! Links against `libjnigraphics.so` (provided by the NDK; linked
 //! automatically when the `jnigraphics` cargo feature is set on the `jni`
@@ -7,11 +7,10 @@
 //! and the host build (`cargo test` for pure-Rust unit tests) does not
 //! touch it.
 //!
-//! Memory layout reminder: Android Bitmap `ARGB_8888` on a little-endian
-//! ARM device stores each pixel as a `u32` whose byte order in memory is
-//! `B, G, R, A`. Our decoders emit tightly-packed RGBA in byte order
-//! `R, G, B, A`, so we swizzle R<->B and pack alpha into the high byte on
-//! write.
+//! Memory layout reminder: Android Bitmap `ARGB_8888` corresponds to
+//! `ANDROID_BITMAP_FORMAT_RGBA_8888` in native code, which has a memory layout
+//! of `R, G, B, A` per pixel. Since our decoders emit tightly-packed RGBA,
+//! we can copy rows directly without any channel swizzling.
 
 #[cfg(target_os = "android")]
 use jni::objects::{JObject, JValue};
@@ -153,17 +152,9 @@ fn create_android_bitmap_inner(
                 base.add(y * stride_bytes),
                 row_bytes,
             );
-            for x in 0..(width as usize) {
-                let r = rgba[src_row_start + x * 4];
-                let g = rgba[src_row_start + x * 4 + 1];
-                let b = rgba[src_row_start + x * 4 + 2];
-                let a = rgba[src_row_start + x * 4 + 3];
-                // ARGB_8888 little-endian memory byte order is B, G, R, A.
-                dst_row[x * 4] = b;
-                dst_row[x * 4 + 1] = g;
-                dst_row[x * 4 + 2] = r;
-                dst_row[x * 4 + 3] = a;
-            }
+            // Copy row directly as Android's ARGB_8888 (RGBA_8888 in NDK)
+            // matches our decoders' RGBA layout.
+            dst_row.copy_from_slice(&rgba[src_row_start..src_row_start + row_bytes]);
         }
         AndroidBitmap_unlockPixels(raw_env, raw_bitmap);
     }

@@ -60,6 +60,7 @@ import com.juziss.localmediahub.pip.PipControllerStore
 import com.juziss.localmediahub.viewmodel.VideoPlayerViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 
@@ -118,10 +119,9 @@ fun VideoPlayerScreen(
     // ViewModel is the injection seam for the shared singleton OkHttpClient
     // (Round 17 C3 — replaces the per-screen OkHttpClient.Builder()).
     val videoPlayerViewModel: VideoPlayerViewModel = hiltViewModel()
-    // Pre-resolve these strings in the composition so they can be used inside
-    // gesture callbacks (detectTapGestures) where stringResource() is not allowed.
     val pausedText = stringResource(R.string.video_paused)
     val playingText = stringResource(R.string.video_playing)
+    val coroutineScope = rememberCoroutineScope()
 
 
     // Tracks the current playback position across configuration changes (rotation)
@@ -140,21 +140,17 @@ fun VideoPlayerScreen(
     val exoPlayer = remember(streamUrl) {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000,  // minBufferMs — ExoPlayer default; keeps ~15s buffered
-                        // so playback doesn't stutter every few seconds.
-                50000,  // maxBufferMs — aggressively prefetch up to 50s ahead.
-                1500,   // bufferForPlaybackMs — start quickly after seek.
-                3000,   // bufferForPlaybackAfterRebufferMs — conservative after
-                        // a rebuffer to avoid immediate re-stall.
+                5000,   // minBufferMs — keeps ~5s buffered; prevents aggressive prefetching from saturating network on seek.
+                15000,  // maxBufferMs — prefetches up to 15s ahead (down from 50s) to save bandwidth and queue.
+                250,    // bufferForPlaybackMs — start playing instantly after seek (250ms).
+                1000,   // bufferForPlaybackAfterRebufferMs — quick recovery after rebuffering (1s).
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // Use the shared singleton OkHttpClient from OkHttpModule (exposed via
-        // VideoPlayerViewModel). Round 17 C3 — single connection pool + 20MB
-        // cache shared with MediaRepository / ServerConfig / LAN scan.
-        // DefaultHttpDataSource can stall on some routers, so OkHttp is used.
-        val okClient = videoPlayerViewModel.provideHttpClient()
+        val okClient = videoPlayerViewModel.provideHttpClient().newBuilder()
+            .cache(null) // Disable cache to prevent locking and disk thrashing on video streaming range requests
+            .build()
         val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okClient)
             .setUserAgent("LocalMediaHub")
 
@@ -176,6 +172,7 @@ fun VideoPlayerScreen(
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSource)
             .build().apply {
+                setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
                 val mediaItem = MediaItem.fromUri(finalUrl)
                 setMediaItem(mediaItem)
                 // Round 20: sync seek before prepare (only for non-transcoded).
@@ -195,6 +192,38 @@ fun VideoPlayerScreen(
             }
     }
 
+    val forwardingPlayer = remember(exoPlayer) {
+        object : androidx.media3.common.ForwardingPlayer(exoPlayer) {
+            private var seekJob: kotlinx.coroutines.Job? = null
+            private var lastSeekTime = 0L
+
+            override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastSeekTime > 500L) {
+                    seekJob?.cancel()
+                    lastSeekTime = now
+                    super.seekTo(mediaItemIndex, positionMs)
+                } else {
+                    seekJob?.cancel()
+                    seekJob = coroutineScope.launch {
+                        kotlinx.coroutines.delay(200L) // 200ms debounce during scrubbing
+                        lastSeekTime = android.os.SystemClock.elapsedRealtime()
+                        super.seekTo(mediaItemIndex, positionMs)
+                    }
+                }
+            }
+        }
+    }
+
+    val mediaSession = remember(forwardingPlayer) {
+        androidx.media3.session.MediaSession.Builder(context, forwardingPlayer).build()
+    }
+    DisposableEffect(mediaSession) {
+        onDispose {
+            mediaSession.release()
+        }
+    }
+
     // ---- Buffering indicator state (G2) ----
     // Declared right after exoPlayer remember and before the
     // DisposableEffect(exoPlayer) that captures it. Using explicit MutableState
@@ -205,18 +234,27 @@ fun VideoPlayerScreen(
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) {
-                // Read the live PiP state at callback time rather than the
-                // compose-captured value: entering PiP delivers ON_PAUSE and the
-                // StateFlow is updated by onPictureInPictureModeChanged before
-                // the lifecycle callback fires. Falling back to false keeps the
-                // screen testable in non-MainActivity hosts.
-                val inPip = activity?.isInPipMode?.value ?: false
-                // PiP 模式下进入后台：不要暂停，让浮窗继续播放。
-                // 非 PiP 模式（普通切后台）：正常暂停。
-                if (!inPip) {
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    // Read the live PiP state at callback time rather than the
+                    // compose-captured value: entering PiP delivers ON_PAUSE and the
+                    // StateFlow is updated by onPictureInPictureModeChanged before
+                    // the lifecycle callback fires. Falling back to false keeps the
+                    // screen testable in non-MainActivity hosts.
+                    val inPip = activity?.isInPipMode?.value ?: false
+                    // PiP 模式下进入后台：不要暂停，让浮窗继续播放。
+                    // 非 PiP 模式（普通切后台）：正常暂停。
+                    if (!inPip) {
+                        exoPlayer.pause()
+                    }
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    // 无论是否在 PiP 模式，一旦 Activity 处于不可见状态 (onStop)，
+                    // 说明浮窗已被用户关闭，或者屏幕被锁屏/应用彻底切后台。
+                    // 此时必须暂停播放器，以防后台音频泄漏。
                     exoPlayer.pause()
                 }
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -389,7 +427,7 @@ fun VideoPlayerScreen(
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
-                    player = exoPlayer
+                    player = forwardingPlayer
                     useController = !isInPipMode
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -399,6 +437,9 @@ fun VideoPlayerScreen(
                 }
             },
             update = { view ->
+                if (view.player != forwardingPlayer) {
+                    view.player = forwardingPlayer
+                }
                 // Toggle controls + gesture layer when crossing the PiP boundary.
                 view.useController = !isInPipMode
                 if (isInPipMode) view.setOnTouchListener(null) else view.setOnTouchListener(gestureListener)
@@ -581,7 +622,8 @@ fun VideoPlayerScreen(
                 },
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 8.dp, end = 4.dp),
+                    .statusBarsPadding()
+                    .padding(top = 8.dp, end = 12.dp),
             ) {
                 Icon(
                     painter = painterResource(
@@ -593,18 +635,21 @@ fun VideoPlayerScreen(
             }
         }
 
-        // Back button
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 8.dp, start = 4.dp),
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.back),
-                tint = Color.White,
-            )
+        // Back button (只在非 PiP 模式下显示)
+        if (!isInPipMode) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(top = 8.dp, start = 12.dp),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.back),
+                    tint = Color.White,
+                )
+            }
         }
     }
 }
