@@ -1313,7 +1313,7 @@ func TestGetCachedDirs_ExcludesScopeRoot(t *testing.T) {
 	os.MkdirAll(sub, 0755)
 	os.WriteFile(filepath.Join(sub, "x.jpg"), []byte("fake"), 0644)
 
-	scanner := NewScanner([]string{}, []string{".jpg"])
+	scanner := NewScanner([]string{}, []string{".jpg"})
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -1342,7 +1342,7 @@ func TestGetCachedDirs_MtimesPopulated(t *testing.T) {
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
 
-	scanner := NewScanner([]string{}, []string{".jpg"])
+	scanner := NewScanner([]string{}, []string{".jpg"})
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -1368,7 +1368,7 @@ func TestInvalidateCache_ClearsCacheDirs(t *testing.T) {
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
 
-	scanner := NewScanner([]string{}, []string{".jpg")
+	scanner := NewScanner([]string{}, []string{".jpg"})
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -1482,35 +1482,17 @@ func (s *Scanner) InvalidateCache() {
 }
 ```
 
-- [ ] **Step 5: 修正测试中的语法错误（Step 1 的 `[].jpg")` 笔误）**
-
-Step 1 的测试代码里有两处 `[]string{".jpg"]` 和 `[]string{".jpg")` 笔误（方括号/圆括号混用）。运行 `go vet` 或直接 `go test` 会报语法错误。修正为：
-
-```go
-// TestGetCachedDirs_ExcludesScopeRoot 内：
-scanner := NewScanner([]string{}, []string{".jpg"])
-// 应为：
-scanner := NewScanner([]string{}, []string{".jpg"})
-
-// TestInvalidateCache_ClearsCacheDirs 内：
-scanner := NewScanner([]string{}, []string{".jpg")
-// 应为：
-scanner := NewScanner([]string{}, []string{".jpg"})
-```
-
-（实现者按修正后的代码写入测试）
-
-- [ ] **Step 6: 运行测试确认通过**
+- [ ] **Step 5: 运行测试确认通过**
 
 Run: `cd server && go test ./internal/service/ -run "TestGetCachedDirs|TestInvalidateCache" -v`
 Expected: 所有测试 PASS
 
-- [ ] **Step 7: 全套测试确认无回归**
+- [ ] **Step 6: 全套测试确认无回归**
 
 Run: `cd server && go test ./...`
 Expected: 全部 PASS
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add server/internal/service/scanner.go server/internal/service/scanner_test.go
