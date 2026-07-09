@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/json"
@@ -148,6 +149,52 @@ func (s *ThumbnailService) videoDurationCached(sourcePath string) (float64, bool
 // 并写回 cache + 标记 dirty。
 func (s *ThumbnailService) VideoDuration(sourcePath string) (float64, bool) {
 	return s.videoDurationCached(sourcePath)
+}
+
+// extractVideoFrameToImage 调用 ffmpeg 从 sourcePath 的 seek 秒位置抽取一帧，
+// 通过 stdout pipe 直接返回 image.Image，避免临时文件 IO。
+// 失败时返回 error，由 caller 决定 fallback 策略。
+func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (image.Image, error) {
+	// 限制 ffmpeg 子进程执行时间，防止损坏视频导致永久挂起
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, s.getFFmpegCmd(),
+		"-y", "-ss", seek, "-i", sourcePath,
+		"-vframes", "1",
+		"-f", "image2pipe",
+		"-vcodec", "mjpeg",
+		"pipe:1",
+	)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	// 捕获 stderr 用于错误诊断
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	// Go 标准库 image.Decode 自动识别 mjpeg → jpeg decoding
+	// （thumbnail.go 已 import _ "image/png" + image/jpeg 隐式注册）
+	img, _, decodeErr := image.Decode(stdout)
+
+	// 显式关闭 pipe 读端。若 Decode 提前退出/报错，向 ffmpeg 写端发送
+	// SIGPIPE/EPIPE，避免 ffmpeg 因 pipe 缓冲区满而阻塞挂起。
+	_ = stdout.Close()
+
+	// 等待 ffmpeg 退出以释放子进程资源，避免 zombie 进程
+	waitErr := cmd.Wait()
+
+	if decodeErr != nil {
+		return nil, fmt.Errorf("failed to decode ffmpeg pipe: %w (wait err: %v, stderr: %s)", decodeErr, waitErr, stderr.String())
+	}
+	// decodeErr == nil 说明图片已完整解析；Wait 的 EPIPE/exit 1 是 pipe 提前关闭的预期副作用
+	return img, nil
 }
 
 func isVideoFile(filePath string) bool {

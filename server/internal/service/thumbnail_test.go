@@ -9,6 +9,39 @@ import (
 	"time"
 )
 
+// newTestThumbnailService 创建一个用 t.TempDir() 作为 cacheDir 的 ThumbnailService，
+// 用于测试。maxSize=150。ffmpegPath 空时回退到 PATH。
+func newTestThumbnailService(t *testing.T, ffmpegPath string) *ThumbnailService {
+	t.Helper()
+	svc, err := NewThumbnailService(t.TempDir(), 150, "jpg", ffmpegPath)
+	if err != nil {
+		t.Fatalf("NewThumbnailService failed: %v", err)
+	}
+	return svc
+}
+
+// ensureTestVideo 在 t.TempDir() 下生成一个 1 秒的纯色测试视频（testsrc）。
+// 返回视频路径；ffmpeg 不可用时返回 ""。
+func ensureTestVideo(t *testing.T, svc *ThumbnailService) string {
+	t.Helper()
+	if !svc.HasFFmpeg() {
+		return ""
+	}
+	videoPath := filepath.Join(t.TempDir(), "testsrc.mp4")
+	cmd := exec.Command(svc.getFFmpegCmd(),
+		"-y",
+		"-f", "lavfi",
+		"-i", "testsrc=duration=1:size=320x240:rate=25",
+		"-pix_fmt", "yuv420p",
+		videoPath,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("ffmpeg generate test video failed: %v\n%s", err, out)
+		return ""
+	}
+	return videoPath
+}
+
 func TestParseFFprobeDuration(t *testing.T) {
 	cases := map[string]struct {
 		out   string
@@ -254,5 +287,59 @@ func TestVideoDuration_CacheAndFallback(t *testing.T) {
 	}
 	if d != 42.5 {
 		t.Fatalf("VideoDuration cache hit: got %v, want 42.5", d)
+	}
+}
+
+// TestExtractVideoFrameToImage_MainPath 验证 ffmpeg pipe 抽帧主路径成功。
+// 依赖 ffmpeg + 测试视频；缺一不可时跳过。
+func TestExtractVideoFrameToImage_MainPath(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	if !svc.HasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	videoPath := ensureTestVideo(t, svc)
+	if videoPath == "" {
+		t.Skip("could not generate test video")
+	}
+
+	img, err := svc.extractVideoFrameToImage(videoPath, "0")
+	if err != nil {
+		t.Fatalf("extractVideoFrameToImage failed: %v", err)
+	}
+	if img == nil {
+		t.Fatal("returned image is nil")
+	}
+	bounds := img.Bounds()
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		t.Fatalf("returned image has non-positive dims: %dx%d", bounds.Dx(), bounds.Dy())
+	}
+}
+
+// TestExtractVideoFrameToImage_SeekFallback 验证 seek 越界后 caller 的 fallback 路径。
+// 主路径 seek=999999 通常会失败（视频不够长），caller 重试 seek=0 应成功。
+func TestExtractVideoFrameToImage_SeekFallback(t *testing.T) {
+	svc := newTestThumbnailService(t, "")
+	if !svc.HasFFmpeg() {
+		t.Skip("ffmpeg not available")
+	}
+	videoPath := ensureTestVideo(t, svc)
+	if videoPath == "" {
+		t.Skip("could not generate test video")
+	}
+
+	// 主路径：seek=999999（视频只有 1 秒，越界）
+	_, errPrimary := svc.extractVideoFrameToImage(videoPath, "999999")
+	// 不假设主路径一定失败（不同 ffmpeg 版本可能 clamp 到末尾），但若失败则走 fallback
+	if errPrimary == nil {
+		t.Skip("primary seek succeeded unexpectedly (ffmpeg clamped); fallback path not exercised")
+	}
+
+	// fallback：seek=0 应成功
+	img, err := svc.extractVideoFrameToImage(videoPath, "0")
+	if err != nil {
+		t.Fatalf("fallback seek=0 failed: %v", err)
+	}
+	if img == nil {
+		t.Fatal("fallback returned nil image")
 	}
 }
