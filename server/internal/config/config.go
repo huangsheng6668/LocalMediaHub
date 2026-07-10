@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -175,6 +176,51 @@ func LoadFromBytes(data []byte) (*Config, error) {
 		cfg.Scan.Roots = append([]string(nil), cfg.System.AllowedRoots...)
 	}
 	return &cfg, nil
+}
+
+// LogSecurityWarnings prints slog.Warn banners for risky configuration.
+// Called from main.go AFTER config.Load succeeds, BEFORE server.New.
+//
+// Centralizing here (instead of inside server.New) keeps config layer
+// ownership of "what is risky" and lets main.go choose the timing
+// (e.g. before mDNS registration). server.New stays focused on wiring.
+//
+// autoFromFlag is the --auto-detect-roots flag value; it ORs with
+// cfg.Scan.AutoDetectRoots to determine the effective auto-detect state.
+// The "triggered by flag" note is only printed when flag forces on top of
+// a false config value (so users can distinguish persistent opt-in from
+// one-shot override).
+func LogSecurityWarnings(cfg *Config, autoFromFlag bool) {
+	if cfg.Server.Token == "" {
+		slog.Warn("==============================================================")
+		slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
+		slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
+		slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
+		slog.Warn("==============================================================")
+	} else {
+		slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
+	}
+
+	if cfg.System.EnableDelete {
+		slog.Warn("==============================================================")
+		slog.Warn(" REMOTE DELETE IS ENABLED (system.enable_delete: true).")
+		slog.Warn(" Any authenticated client (or any LAN host if token is empty)")
+		slog.Warn(" can delete files under system.allowed_roots.")
+		slog.Warn(" Disable 'system.enable_delete' in config.yaml unless you")
+		slog.Warn(" genuinely need this feature.")
+		slog.Warn("==============================================================")
+	}
+
+	if cfg.Scan.AutoDetectRoots || autoFromFlag {
+		slog.Warn("==============================================================")
+		slog.Warn(" AUTO-DETECT ROOTS IS ENABLED.")
+		if autoFromFlag && !cfg.Scan.AutoDetectRoots {
+			slog.Warn(" (triggered by --auto-detect-roots flag, not config.yaml)")
+		}
+		slog.Warn(" Server will serve media from ALL detected drives (A-Z).")
+		slog.Warn(" For production, configure 'scan.roots' explicitly instead.")
+		slog.Warn("==============================================================")
+	}
 }
 
 func Load(path string) (*Config, error) {

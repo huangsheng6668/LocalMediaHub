@@ -1,7 +1,9 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -275,6 +277,117 @@ func TestConfigValidate(t *testing.T) {
 			} else {
 				if err != nil {
 					t.Fatalf("expected no error, got: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestLogSecurityWarnings(t *testing.T) {
+	// captureSlogOutput swaps slog.Default() for a text handler writing to a
+	// buffer for the duration of fn, then restores. Returns captured text.
+	captureSlogOutput := func(fn func()) string {
+		var buf bytes.Buffer
+		orig := slog.Default()
+		defer slog.SetDefault(orig)
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+		fn()
+		return buf.String()
+	}
+
+	cases := []struct {
+		name           string
+		token          string
+		enableDelete   bool
+		autoDetectCfg  bool
+		autoFromFlag   bool
+		wantContains   []string // substrings that MUST appear
+		wantNotContain []string // substrings that MUST NOT appear
+	}{
+		{
+			name:         "all safe: token set, delete off, auto off",
+			token:        "secret",
+			enableDelete: false,
+			autoDetectCfg: false,
+			autoFromFlag: false,
+			wantContains: []string{"token-based authentication enabled"},
+			wantNotContain: []string{
+				"OPEN AUTH MODE",
+				"REMOTE DELETE IS ENABLED",
+				"AUTO-DETECT ROOTS IS ENABLED",
+			},
+		},
+		{
+			name:         "empty token → OPEN AUTH MODE warning",
+			token:        "",
+			enableDelete: false,
+			autoDetectCfg: false,
+			autoFromFlag: false,
+			wantContains: []string{"OPEN AUTH MODE"},
+		},
+		{
+			name:         "enable_delete=true → REMOTE DELETE warning",
+			token:        "secret",
+			enableDelete: true,
+			autoDetectCfg: false,
+			autoFromFlag: false,
+			wantContains: []string{"REMOTE DELETE IS ENABLED"},
+		},
+		{
+			name:         "auto_detect via config → AUTO-DETECT warning without flag note",
+			token:        "secret",
+			enableDelete: false,
+			autoDetectCfg: true,
+			autoFromFlag: false,
+			wantContains: []string{"AUTO-DETECT ROOTS IS ENABLED"},
+			wantNotContain: []string{"triggered by --auto-detect-roots flag"},
+		},
+		{
+			name:         "auto_detect via flag (config false) → AUTO-DETECT with flag note",
+			token:        "secret",
+			enableDelete: false,
+			autoDetectCfg: false,
+			autoFromFlag: true,
+			wantContains: []string{
+				"AUTO-DETECT ROOTS IS ENABLED",
+				"triggered by --auto-detect-roots flag",
+			},
+		},
+		{
+			name:         "all risky at once → three warnings",
+			token:        "",
+			enableDelete: true,
+			autoDetectCfg: true,
+			autoFromFlag: true,
+			wantContains: []string{
+				"OPEN AUTH MODE",
+				"REMOTE DELETE IS ENABLED",
+				"AUTO-DETECT ROOTS IS ENABLED",
+				// When both cfg and flag are true, the flag note is NOT printed
+				// (only printed when flag forces on top of cfg=false).
+			},
+			wantNotContain: []string{"triggered by --auto-detect-roots flag"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				Server: ServerConfig{Token: tc.token},
+				System: SystemConfig{EnableDelete: tc.enableDelete},
+				Scan:   ScanConfig{AutoDetectRoots: tc.autoDetectCfg},
+			}
+			output := captureSlogOutput(func() {
+				LogSecurityWarnings(cfg, tc.autoFromFlag)
+			})
+			for _, want := range tc.wantContains {
+				if !strings.Contains(output, want) {
+					t.Errorf("output missing %q\nfull output:\n%s", want, output)
+				}
+			}
+			for _, notWant := range tc.wantNotContain {
+				if strings.Contains(output, notWant) {
+					t.Errorf("output unexpectedly contains %q\nfull output:\n%s", notWant, output)
 				}
 			}
 		})
