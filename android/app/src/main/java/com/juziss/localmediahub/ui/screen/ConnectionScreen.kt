@@ -60,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.juziss.localmediahub.viewmodel.ConnectionState
@@ -79,6 +80,7 @@ fun ConnectionScreen(
 ) {
     var ip by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("8000") }
+    var tokenInput by remember { mutableStateOf("") }
     var autoConnectAttempted by rememberSaveable { mutableStateOf(false) }
     var showServerSelection by remember { mutableStateOf(false) }
  
@@ -164,10 +166,15 @@ fun ConnectionScreen(
             ManualConnectionCard(
                 ip = ip,
                 port = port,
+                tokenInput = tokenInput,
                 connectionState = connectionState,
                 onIpChange = { ip = it },
                 onPortChange = { port = it },
-                onConnect = { viewModel.testConnection(ip, port) },
+                onTokenChange = { tokenInput = it },
+                onConnect = {
+                    viewModel.saveToken(tokenInput)
+                    viewModel.testConnection(ip, port)
+                },
             )
  
             when (connectionState) {
@@ -596,9 +603,11 @@ private fun DiscoveryCard(
 private fun ManualConnectionCard(
     ip: String,
     port: String,
+    tokenInput: String,
     connectionState: ConnectionState,
     onIpChange: (String) -> Unit,
     onPortChange: (String) -> Unit,
+    onTokenChange: (String) -> Unit,
     onConnect: () -> Unit,
 ) {
     ElevatedCard(
@@ -658,6 +667,17 @@ private fun ManualConnectionCard(
                 supportingText = {
                     Text(stringResource(R.string.conn_port_hint))
                 },
+                shape = RoundedCornerShape(10.dp)
+            )
+            OutlinedTextField(
+                value = tokenInput,
+                onValueChange = onTokenChange,
+                label = { Text(stringResource(R.string.auth_token_label)) },
+                placeholder = { Text(stringResource(R.string.auth_token_placeholder)) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp)
             )
             Button(

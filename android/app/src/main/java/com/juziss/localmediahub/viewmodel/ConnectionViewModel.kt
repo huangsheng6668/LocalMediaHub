@@ -139,6 +139,13 @@ class ConnectionViewModel @Inject constructor(
         }
     }
 
+    fun saveToken(token: String) {
+        viewModelScope.launch {
+            serverConfigStore.saveAuthToken(token.trim())
+            serverConfig.setToken(token.trim())
+        }
+    }
+
     fun tryAutoConnect() {
         if (_connectionState.value is ConnectionState.Testing || _connectionState.value is ConnectionState.Connected) {
             return

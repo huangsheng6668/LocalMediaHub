@@ -112,6 +112,9 @@
     <string name="conn_port_hint">若未修改服务端配置文件，请保持默认的 8000 端口。</string>
     <string name="conn_connecting">正在连接...</string>
     <string name="conn_connect_btn">手动连接服务器</string>
+    <string name="auth_token_label">访问令牌（可选）</string>
+    <string name="auth_token_placeholder">服务端开启了鉴权时填写</string>
+    <string name="auth_token_save">保存令牌</string>
 
     <!-- ── Browse screen ───────────────────────────────────── -->
     <string name="browse_search_hint">搜索媒体文件...</string>
