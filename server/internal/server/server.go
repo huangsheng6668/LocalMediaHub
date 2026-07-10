@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -81,6 +82,20 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService)
+
+	// Security startup notice: warn loudly when running in open auth mode so
+	// operators don't accidentally expose admin/system/media endpoints without
+	// a token. When a token is configured, log a quiet info line instead.
+	if cfg.Server.Token == "" {
+		slog.Warn("==============================================================")
+		slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
+		slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
+		slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
+		slog.Warn("==============================================================")
+	} else {
+		slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
+	}
+
 	s.registerRoutes(h)
 
 	s.httpServer = &http.Server{
@@ -149,14 +164,18 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	api.GET("/tags/:tag_id/media", h.GetTaggedMedia)
 	api.GET("/tags/file-tags", h.GetFileTags)
 
+	// Auth middleware: gates sensitive endpoints on the configured token.
+	// Empty token = open mode (passthrough), logged at startup.
+	authMw := middleware.BearerToken(s.Config.Server.Token)
+
 	// Admin
-	admin := api.Group("/admin")
+	admin := api.Group("/admin", authMw)
 	admin.GET("/config", h.GetConfig)
 	admin.PUT("/config", h.UpdateConfig)
 	admin.POST("/scan/trigger", h.TriggerScan)
 
 	// System
-	sys := api.Group("/system")
+	sys := api.Group("/system", authMw)
 	sys.GET("/drives", h.GetDrives)
 	sys.GET("/browse", h.SystemBrowse)
 	sys.GET("/thumbnail", h.SystemThumbnail)
@@ -165,7 +184,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	sys.POST("/delete", h.DeletePath)
 
 	// Unified absolute-path media access
-	media := api.Group("/media")
+	media := api.Group("/media", authMw)
 	media.GET("/thumbnail", h.MediaThumbnail)
 	media.GET("/original", h.MediaOriginal)
 	media.GET("/stream", h.MediaStream)
