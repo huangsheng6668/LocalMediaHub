@@ -287,6 +287,26 @@
         </div>
     </div>
 
+    <!-- Token Input Modal for Auth -->
+    <div id="auth-modal" class="modal hidden" role="dialog" aria-labelledby="auth-modal-title" aria-modal="true">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <h2 id="auth-modal-title">需要访问令牌</h2>
+            <p>此服务器要求 Bearer Token 鉴权。请输入令牌后继续。</p>
+            <input
+                id="auth-token-input"
+                type="password"
+                placeholder="粘贴令牌"
+                autocomplete="off"
+                class="modal-input"
+            />
+            <div class="modal-actions">
+                <button id="auth-cancel-btn" type="button">取消</button>
+                <button id="auth-save-btn" type="button" class="primary">保存</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification System -->
     <div class="toast-container" id="toast-container"></div>
 

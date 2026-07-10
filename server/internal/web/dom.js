@@ -83,5 +83,11 @@ export const elements = {
     modalFileTags: document.getElementById('modal-file-tags'),
     tagModalFilePath: document.getElementById('tag-modal-file-path'),
     tagSelectorCheckboxes: document.getElementById('tag-selector-checkboxes'),
-    btnCloseFileTagsModal: document.getElementById('btn-close-file-tags-modal')
+    btnCloseFileTagsModal: document.getElementById('btn-close-file-tags-modal'),
+
+    // Auth modal (Round 28 Task 12)
+    authModal: document.getElementById('auth-modal'),
+    authTokenInput: document.getElementById('auth-token-input'),
+    authSaveBtn: document.getElementById('auth-save-btn'),
+    authCancelBtn: document.getElementById('auth-cancel-btn')
 };

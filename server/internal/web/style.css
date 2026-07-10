@@ -1447,6 +1447,89 @@ body {
     }
 }
 
+/* ─── Round 28 Task 12: Auth Token Modal ─── */
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-card, #11111a);
+    padding: 24px;
+    border-radius: var(--border-radius-lg);
+    min-width: 320px;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-premium);
+    z-index: 101;
+}
+
+.modal-input {
+    width: 100%;
+    padding: 8px;
+    margin: 12px 0;
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    outline: none;
+    transition: var(--transition-quick);
+}
+
+.modal-input:focus {
+    border-color: var(--primary-light);
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.modal-actions button {
+    padding: 8px 16px;
+    border-radius: var(--border-radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-quick);
+    font-family: var(--font-sans);
+    border: none;
+}
+
+.modal-actions button.primary {
+    background: var(--primary-gradient);
+    color: var(--text-white);
+}
+
+.modal-actions button.primary:hover {
+    box-shadow: 0 0 16px rgba(124, 58, 237, 0.4);
+    opacity: 0.95;
+}
+
+.modal-actions button:not(.primary) {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+}
+
+.modal-actions button:not(.primary):hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
 /* ─── Round 16 C3: Full-screen modal on phone ─── */
 
 @media (max-width: 767px) {
