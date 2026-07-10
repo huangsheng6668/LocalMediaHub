@@ -139,3 +139,34 @@ func TestSaveIsAtomicAndReadable(t *testing.T) {
 		t.Errorf("expected port 8000, got %d", loaded.Server.Port)
 	}
 }
+
+func TestServerConfigTokenRoundTrip(t *testing.T) {
+	yamlIn := []byte(`
+server:
+  host: "0.0.0.0"
+  port: 8000
+  token: "my-secret-token"
+`)
+	cfg, err := LoadFromBytes(yamlIn)
+	if err != nil {
+		t.Fatalf("LoadFromBytes failed: %v", err)
+	}
+	if cfg.Server.Token != "my-secret-token" {
+		t.Errorf("Token = %q, want %q", cfg.Server.Token, "my-secret-token")
+	}
+}
+
+func TestServerConfigTokenDefaultsEmpty(t *testing.T) {
+	yamlIn := []byte(`
+server:
+  host: "0.0.0.0"
+  port: 8000
+`)
+	cfg, err := LoadFromBytes(yamlIn)
+	if err != nil {
+		t.Fatalf("LoadFromBytes failed: %v", err)
+	}
+	if cfg.Server.Token != "" {
+		t.Errorf("Token = %q, want empty default", cfg.Server.Token)
+	}
+}

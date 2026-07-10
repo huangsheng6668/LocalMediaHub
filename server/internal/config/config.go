@@ -16,8 +16,9 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host" json:"host"`
-	Port int    `yaml:"port" json:"port"`
+	Host  string `yaml:"host" json:"host"`
+	Port  int    `yaml:"port" json:"port"`
+	Token string `yaml:"token,omitempty" json:"token,omitempty"`
 }
 
 type ScanConfig struct {
@@ -119,11 +120,9 @@ func (c *Config) GetSystemAllowedRoots() []string {
 	return []string{}
 }
 
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
+// LoadFromBytes parses config from a YAML byte slice. Used by tests to avoid
+// disk I/O; production code uses Load(path).
+func LoadFromBytes(data []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
@@ -132,6 +131,14 @@ func Load(path string) (*Config, error) {
 		cfg.Scan.Roots = append([]string(nil), cfg.System.AllowedRoots...)
 	}
 	return &cfg, nil
+}
+
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return LoadFromBytes(data)
 }
 
 // Save writes the config atomically: marshal → temp file in the same dir → fsync
