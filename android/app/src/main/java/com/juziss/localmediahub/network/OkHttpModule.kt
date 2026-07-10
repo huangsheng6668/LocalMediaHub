@@ -10,11 +10,34 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.Cache
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
+
+/**
+ * OkHttp Interceptor that injects `Authorization: Bearer <token>` header
+ * when the tokenProvider returns a non-empty value. Empty token = no header
+ * (open mode, matches server-side passthrough).
+ *
+ * The tokenProvider is a lambda returning String so the interceptor always
+ * reads the latest value (tokens can change at runtime via Settings).
+ */
+class AuthInterceptor(private val tokenProvider: () -> String) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): okhttp3.Response {
+        val token = tokenProvider()
+        val request = if (token.isEmpty()) {
+            chain.request()
+        } else {
+            chain.request().newBuilder()
+                .addHeader("Authorization", "Bearer $token")
+                .build()
+        }
+        return chain.proceed(request)
+    }
+}
 
 /**
  * Hilt module providing a singleton [OkHttpClient] + [Cache] shared across
