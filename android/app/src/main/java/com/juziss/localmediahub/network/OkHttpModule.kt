@@ -37,6 +37,13 @@ class AuthInterceptor(private val tokenProvider: () -> String) : Interceptor {
         }
         return chain.proceed(request)
     }
+
+    /**
+     * Test-only accessor for the current token value. Lets unit tests verify
+     * the interceptor was wired with the right tokenProvider without making
+     * a network call.
+     */
+    fun tokenForTest(): String = tokenProvider()
 }
 
 /**
@@ -47,6 +54,15 @@ class AuthInterceptor(private val tokenProvider: () -> String) : Interceptor {
  * lives under `cacheDir/okhttp/` (sibling to Coil's `cacheDir/coil/`) and is
  * capped at 20MB. TTL is controlled by server-side `Cache-Control` headers
  * added in Round 17 C1.
+ *
+ * Round 29 (Phase 1 Bearer Token auth) wires [AuthInterceptor] into the
+ * shared client. The interceptor reads the current token from
+ * [ServerConfig.getTokenSnapshot] on every request. Because ServerConfig
+ * previously depended on OkHttpClient in its constructor, injecting
+ * ServerConfig directly here would form a Hilt cycle
+ * (provideOkHttpClient -> ServerConfig -> OkHttpClient). We break the cycle
+ * with `javax.inject.Provider<ServerConfig>` (JSR-330 lazy lookup) and
+ * removed `httpClient` from ServerConfig's constructor.
  *
  * Call sites needing custom timeouts (e.g. ConnectionViewModel LAN scan
  * with 250ms connect timeout) use `client.newBuilder()` to derive a child
@@ -75,7 +91,15 @@ object OkHttpModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(cache: Cache): OkHttpClient {
+    fun provideOkHttpClient(
+        cache: Cache,
+        // javax.inject.Provider (JSR-330) gives lazy lookup and breaks the
+        // Hilt cycle that would otherwise form (provideOkHttpClient ->
+        // ServerConfig -> OkHttpClient). The lambda captures the provider,
+        // not an instance, so the interceptor reads the latest token on
+        // each request.
+        serverConfigProvider: javax.inject.Provider<ServerConfig>,
+    ): OkHttpClient {
         // Round 24: 解除 OkHttp 默认 maxRequestsPerHost=5 的隐藏瓶颈。
         // 40 与 ConnectionPool 容量对齐；C3 场景 2-3 台 × 12-15 并发 ≈ 30-45，
         // 40 给余量。
@@ -94,6 +118,9 @@ object OkHttpModule {
             // Round 24: 扩到 40 与 dispatcher 对齐；keepAlive 5min → 3min
             // （缩略图访问是密集短脉冲，长时间闲置占着服务端 FD 意义不大）。
             .connectionPool(ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES))
+            // Round 29: bearer token injection. AuthInterceptor reads the
+            // latest token via the lazy provider on every request.
+            .addInterceptor(AuthInterceptor { serverConfigProvider.get().getTokenSnapshot() })
 
         // Verbose HTTP logging only in debug; release builds skip the
         // interceptor to save memory and avoid leaking paths in logcat.
