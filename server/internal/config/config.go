@@ -80,11 +80,26 @@ type SystemConfig struct {
 // is kept (already exposed by GET /system/drives and shown in the Web settings UI).
 // ScanConfig is projected onto ScanConfigPublic so the internal auto-detected-drive
 // cache (sync.Once) is neither copied nor leaked.
+//
+// Round 29 fix: Server is projected onto ServerConfigPublic which omits the
+// bearer Token. Previously ConfigPublic embedded ServerConfig directly, which
+// leaked the token in GET /api/v1/admin/config responses — defeating the auth
+// layer. See TestPublicRedactsServerToken.
 type ConfigPublic struct {
-	Server    ServerConfig        `json:"server"`
-	Scan      ScanConfigPublic    `json:"scan"`
-	Thumbnail ThumbnailConfig     `json:"thumbnail"`
-	System    SystemConfigPublic  `json:"system"`
+	Server    ServerConfigPublic   `json:"server"`
+	Scan      ScanConfigPublic     `json:"scan"`
+	Thumbnail ThumbnailConfig      `json:"thumbnail"`
+	System    SystemConfigPublic   `json:"system"`
+}
+
+// ServerConfigPublic mirrors only the user-facing fields of ServerConfig. The
+// bearer Token is intentionally omitted — it must NEVER be exposed to clients
+// via any admin/config endpoint, otherwise the entire auth layer is bypassable
+// by anyone who can read the config response.
+type ServerConfigPublic struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	// Token intentionally omitted — never expose to clients.
 }
 
 // ScanConfigPublic mirrors only the user-facing fields of ScanConfig. The internal
@@ -104,7 +119,7 @@ type SystemConfigPublic struct {
 // Public returns a copy of the config with sensitive operational fields removed.
 func (c *Config) Public() ConfigPublic {
 	return ConfigPublic{
-		Server:    c.Server,
+		Server:    ServerConfigPublic{Host: c.Server.Host, Port: c.Server.Port},
 		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions},
 		Thumbnail: c.Thumbnail,
 		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots, EnableDelete: c.System.EnableDelete},
