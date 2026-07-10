@@ -4,9 +4,9 @@
 
 **Goal:** Force explicit `scan.roots` configuration (or explicit opt-in to auto-detect), add startup security warning banners for risky config (`enable_delete`, auto-detect, empty token), tighten `config.yaml` file permissions to 0600, and centralize all startup security warnings in one `config.LogSecurityWarnings` helper.
 
-**Architecture:** Server-side only. `config.go` gains `AutoDetectRoots` field + `Load` validation (reject empty roots without opt-in) + new `LogSecurityWarnings(cfg, autoFlag)` function. `main.go` adds `--auto-detect-roots` flag, calls `LogSecurityWarnings` after `Load`, and `os.Chmod("config.yaml", 0600)`. `server.go` removes the Phase 1 token warning block (migrated to `LogSecurityWarnings`). `config.example.yaml` documents the new field with safety comments.
+**Architecture:** Server-side only. `config.go` gains `AutoDetectRoots` field in `ScanConfig` and `ScanConfigPublic` + `Validate(autoFromFlag bool) error` method + new `LogSecurityWarnings(cfg, autoFlag)` function. `main.go` adds `--auto-detect-roots` flag, calls `Validate` and `LogSecurityWarnings` after `Load`, and `os.Chmod("config.yaml", 0600)`. `server.go` removes the Phase 1 token warning block (migrated to `LogSecurityWarnings`). `admin.go` validates config before save. `config.example.yaml` documents the new field with safety comments. `settings.js` adds style alert for `enableDelete`.
 
-**Tech Stack:** Go 1.25+ / Echo v4 / `log/slog` / `flag` / `gopkg.in/yaml.v3`
+**Tech Stack:** Go 1.25+ / Echo v4 / `log/slog` / `flag` / `gopkg.in/yaml.v3` / Vanilla JS
 
 **Source spec:** `docs/superpowers/specs/2026-07-10-security-phase3-config-defaults-design.md`
 
@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- **`scan.roots` empty + `system.allowed_roots` empty + `scan.auto_detect_roots: false` → `config.Load` MUST return error.** No silent fallback to auto-detect. (Spec section 5.1.2)
+- **`scan.roots` empty + `system.allowed_roots` empty + `scan.auto_detect_roots: false` + `autoFromFlag: false` → `config.Validate` MUST return error.** No silent fallback to auto-detect. (Spec section 5.1.2)
 - **Existing fallback `Roots = AllowedRoots` (when `Roots` empty + `AllowedRoots` non-empty) MUST be preserved.** Only the "both empty" case is new. (Spec section 5.1.2 note)
 - **`--auto-detect-roots` flag is "force on"**: `effective_auto = cfg.Scan.AutoDetectRoots || flag_value`. Flag cannot force OFF. (Spec section 3.1)
 - **Phase 1 token warning MUST be migrated from `server.New()` to `config.LogSecurityWarnings`** — behavior must stay equivalent (same text, same timing relative to server start). (Spec section 5.3)
@@ -28,100 +28,95 @@
 
 | File | Type | Responsibility |
 |---|---|---|
-| `server/internal/config/config.go` | Modify | Add `AutoDetectRoots` field + `Load` validation + `LogSecurityWarnings` function |
-| `server/internal/config/config_test.go` | Modify | Add `TestLoadRejectsEmptyRoots` + `TestLogSecurityWarnings` |
-| `server/cmd/server/main.go` | Modify | Add `--auto-detect-roots` flag + call `LogSecurityWarnings` + `os.Chmod` |
+| `server/internal/config/config.go` | Modify | Add `AutoDetectRoots` field + `Validate` method + `LogSecurityWarnings` function + update public config types |
+| `server/internal/config/config_test.go` | Modify | Add `TestConfigValidate` + `TestLogSecurityWarnings` |
+| `server/cmd/server/main.go` | Modify | Add `--auto-detect-roots` flag + call `Validate` + call `LogSecurityWarnings` + `os.Chmod` |
 | `server/internal/server/server.go` | Modify | DELETE Phase 1 token warning block (migrated) |
+| `server/internal/server/handler/admin.go` | Modify | Call `Validate(false)` before saving new roots |
 | `server/config.example.yaml` | Modify | Document `auto_detect_roots: false` + strengthen `enable_delete` warning |
+| `server/internal/web/settings.js` | Modify | Highlight `enableDelete` in red bold when enabled |
 
 ---
 
-## Task 1: Add `AutoDetectRoots` field + `Load` validation (TDD)
+## Task 1: Add `AutoDetectRoots` field + `Validate` method (TDD)
 
 **Files:**
 - Modify: `server/internal/config/config.go`
 - Test: `server/internal/config/config_test.go`
 
 **Interfaces:**
-- Consumes: existing `LoadFromBytes` (Phase 1 Task 2 output).
-- Produces: `ScanConfig.AutoDetectRoots bool` field + `Load` rejects empty-roots-no-opt-in configs.
+- Consumes: existing config structure.
+- Produces: `ScanConfig.AutoDetectRoots bool` field + `ScanConfigPublic.AutoDetectRoots bool` field + `Validate(autoFromFlag bool) error` method.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `server/internal/config/config_test.go`:
 
 ```go
-func TestLoadRejectsEmptyRoots(t *testing.T) {
+func TestConfigValidate(t *testing.T) {
 	cases := []struct {
-		name           string
-		yaml           string
-		wantLoadErr    bool
-		wantErrorMatch string // substring to match in error message, when wantLoadErr
+		name         string
+		roots        []string
+		allowedRoots []string
+		autoDetect   bool
+		autoFromFlag bool
+		wantErr      bool
 	}{
 		{
-			name: "empty roots + empty allowed_roots + auto=false → reject",
-			yaml: `
-server:
-  host: "0.0.0.0"
-  port: 8000
-scan:
-  video_extensions: [".mp4"]
-  image_extensions: [".jpg"]
-`,
-			wantLoadErr:    true,
-			wantErrorMatch: "refusing to start",
+			name:         "empty roots + empty allowed_roots + auto=false + flag=false → reject",
+			roots:        nil,
+			allowedRoots: nil,
+			autoDetect:   false,
+			autoFromFlag: false,
+			wantErr:      true,
 		},
 		{
-			name: "empty roots + empty allowed_roots + auto=true → accept",
-			yaml: `
-server:
-  host: "0.0.0.0"
-  port: 8000
-scan:
-  video_extensions: [".mp4"]
-  image_extensions: [".jpg"]
-  auto_detect_roots: true
-`,
-			wantLoadErr: false,
+			name:         "empty roots + empty allowed_roots + auto=false + flag=true → accept",
+			roots:        nil,
+			allowedRoots: nil,
+			autoDetect:   false,
+			autoFromFlag: true,
+			wantErr:      false,
 		},
 		{
-			name: "explicit roots → accept regardless of auto flag",
-			yaml: `
-server:
-  host: "0.0.0.0"
-  port: 8000
-scan:
-  roots: ["D:/Media"]
-  video_extensions: [".mp4"]
-  image_extensions: [".jpg"]
-`,
-			wantLoadErr: false,
+			name:         "empty roots + empty allowed_roots + auto=true + flag=false → accept",
+			roots:        nil,
+			allowedRoots: nil,
+			autoDetect:   true,
+			autoFromFlag: false,
+			wantErr:      false,
 		},
 		{
-			name: "empty roots + non-empty allowed_roots → accept (existing fallback preserved)",
-			yaml: `
-server:
-  host: "0.0.0.0"
-  port: 8000
-scan:
-  video_extensions: [".mp4"]
-  image_extensions: [".jpg"]
-system:
-  allowed_roots: ["E:/Photos"]
-`,
-			wantLoadErr: false,
+			name:         "explicit roots → accept",
+			roots:        []string{"D:/Media"},
+			allowedRoots: nil,
+			autoDetect:   false,
+			autoFromFlag: false,
+			wantErr:      false,
+		},
+		{
+			name:         "empty roots + allowed_roots → accept (fallback)",
+			roots:        nil,
+			allowedRoots: []string{"E:/Photos"},
+			autoDetect:   false,
+			autoFromFlag: false,
+			wantErr:      false,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := LoadFromBytes([]byte(tc.yaml))
-			if tc.wantLoadErr {
+			cfg := &Config{
+				Scan:   ScanConfig{Roots: tc.roots, AutoDetectRoots: tc.autoDetect},
+				System: SystemConfig{AllowedRoots: tc.allowedRoots},
+			}
+			err := cfg.Validate(tc.autoFromFlag)
+			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("expected error, got nil; cfg=%+v", cfg)
+					t.Fatal("expected error, got nil")
 				}
-				if tc.wantErrorMatch != "" && !strings.Contains(err.Error(), tc.wantErrorMatch) {
-					t.Errorf("error = %q, want substring %q", err.Error(), tc.wantErrorMatch)
+				if !strings.Contains(err.Error(), "refusing to start") {
+					t.Errorf("expected error to contain 'refusing to start', got: %v", err)
 				}
 			} else {
 				if err != nil {
@@ -137,8 +132,8 @@ Add `"strings"` import to `config_test.go` if not present.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd server && go test ./internal/config/ -run TestLoadRejectsEmptyRoots -v`
-Expected: FAIL — first subcase accepts (no validation yet), wants error.
+Run: `cd server && go test ./internal/config/ -run TestConfigValidate -v`
+Expected: FAIL — `cfg.Validate` undefined.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -156,46 +151,75 @@ type ScanConfig struct {
 }
 ```
 
-In `LoadFromBytes`, after the existing `if len(cfg.Scan.Roots) == 0 && len(cfg.System.AllowedRoots) > 0 { ... }` block (and before `return &cfg, nil`), add:
+And in `ScanConfigPublic`:
 
 ```go
-// Phase 3 safety: refuse to start when no roots are configured and auto-detect
-// is not explicitly opted in. Forces operators to declare their attack surface.
-// The existing fallback above (Roots = AllowedRoots) handles the case where
-// only allowed_roots is set, so this check only fires when BOTH are empty.
-if len(cfg.Scan.Roots) == 0 && len(cfg.System.AllowedRoots) == 0 && !cfg.Scan.AutoDetectRoots {
-	return nil, fmt.Errorf(
-		"refusing to start: no scan.roots or system.allowed_roots configured and " +
-			"scan.auto_detect_roots is false.\n" +
-			"To serve media, either:\n" +
-			"  1. List explicit roots under 'scan.roots' in config.yaml, or\n" +
-			"  2. Configure 'system.allowed_roots' (also serves as scan roots fallback), or\n" +
-			"  3. Set 'scan.auto_detect_roots: true' in config.yaml (serves ALL drives — " +
-			"review your threat model first), or\n" +
-			"  4. Run with --auto-detect-roots flag (one-shot override)")
+type ScanConfigPublic struct {
+	Roots           []string `json:"roots,omitempty"`
+	VideoExtensions []string `json:"video_extensions"`
+	ImageExtensions []string `json:"image_extensions"`
+	AutoDetectRoots bool     `json:"auto_detect_roots,omitempty"`
 }
 ```
 
-Confirm `"fmt"` is already imported (it is — `NormalizePath` uses it).
+And map it in `Public()`:
 
+```go
+// Public returns a copy of the config with sensitive operational fields removed.
+func (c *Config) Public() ConfigPublic {
+	return ConfigPublic{
+		Server:    ServerConfigPublic{Host: c.Server.Host, Port: c.Server.Port},
+		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions, AutoDetectRoots: c.Scan.AutoDetectRoots},
+		Thumbnail: c.Thumbnail,
+		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots, EnableDelete: c.System.EnableDelete},
+	}
+}
+```
+
+And define the `Validate` method in `config.go`:
+
+```go
+// Validate checks if the configuration is safe and sufficient to start.
+// Refuses to start when no roots are configured and auto-detect is not
+// explicitly opted in (either via config or via command-line override flag).
+//
+// Note: LoadFromBytes already copies AllowedRoots → Roots when Roots is
+// empty and AllowedRoots is non-empty. So after a normal Load, if
+// AllowedRoots was set, Roots will be non-empty and this check passes.
+// The len(c.Scan.Roots)==0 condition therefore implicitly covers the
+// "both empty" case. We still check AllowedRoots explicitly for
+// callers who construct Config directly (tests, admin API Validate
+// before Save).
+func (c *Config) Validate(autoFromFlag bool) error {
+	if len(c.Scan.Roots) == 0 && len(c.System.AllowedRoots) == 0 && !c.Scan.AutoDetectRoots && !autoFromFlag {
+		return fmt.Errorf(
+			"refusing to start: no scan.roots or system.allowed_roots configured and " +
+				"scan.auto_detect_roots is false.\n" +
+				"To serve media, either:\n" +
+				"  1. List explicit roots under 'scan.roots' in config.yaml, or\n" +
+				"  2. Configure 'system.allowed_roots' (also serves as scan roots fallback), or\n" +
+				"  3. Set 'scan.auto_detect_roots: true' in config.yaml (serves ALL drives — " +
+				"review your threat model first), or\n" +
+				"  4. Run with --auto-detect-roots flag (one-shot override)")
+	}
+	return nil
+}
+```
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd server && go test ./internal/config/ -run TestLoadRejectsEmptyRoots -v`
-Expected: PASS — all 4 subcases green.
+Run: `cd server && go test ./internal/config/ -run TestConfigValidate -v`
+Expected: PASS — all 5 subcases green.
 
 - [ ] **Step 5: Run full config test suite + server suite**
 
 Run: `cd server && go test ./internal/config/ ./internal/server/ -v`
-Expected: All existing tests pass (Phase 1 `TestServerConfigTokenRoundTrip`, `TestServerRejectsAdminWithoutToken`, etc. green — they construct configs with roots or use real `config.yaml`).
-
-**Note**: If any Phase 1 test constructs a `config.Config{}` literal WITHOUT roots and expects it to load, that test will now fail. If so, that test needs to add roots OR `AutoDetectRoots: true` to its fixture. Check `server_auth_test.go` — the `newAuthTestConfig` helper (from Phase 1 Task 3) sets `Thumbnail.CacheDir` via `t.TempDir()` but may not set roots. **Read it first** and add roots if missing.
+Expected: All existing tests pass (including `TestSaveIsAtomicAndReadable` and others, without modification, because `Load`/`LoadFromBytes` do not reject empty configs by default anymore).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add server/internal/config/config.go server/internal/config/config_test.go
-# Add server_auth_test.go to the commit IF its fixture needed roots added
-git commit -m "feat(config): require explicit scan.roots or auto-detect opt-in (Phase 3)"
+git commit -m "feat(config): add AutoDetectRoots field and Validate method (Phase 3)"
 ```
 
 ---
@@ -392,7 +416,7 @@ Expected: PASS — all 6 subcases green.
 - [ ] **Step 5: Run full config suite**
 
 Run: `cd server && go test ./internal/config/ -v`
-Expected: All tests pass (including Task 1's `TestLoadRejectsEmptyRoots`).
+Expected: All tests pass (including Task 1's `TestConfigValidate`).
 
 - [ ] **Step 6: Commit**
 
@@ -403,15 +427,16 @@ git commit -m "feat(config): add LogSecurityWarnings helper for startup banners 
 
 ---
 
-## Task 3: Wire flag + chmod + migrate Phase 1 token warning
+## Task 3: Wire flag + chmod + migrate Phase 1 token warning + admin.go validation
 
 **Files:**
 - Modify: `server/cmd/server/main.go`
 - Modify: `server/internal/server/server.go`
+- Modify: `server/internal/server/handler/admin.go`
 
 **Interfaces:**
-- Consumes: Task 1 `Load` validation + Task 2 `LogSecurityWarnings`.
-- Produces: `--auto-detect-roots` CLI flag, config.yaml `0600` chmod, Phase 1 token warning removed from server.New.
+- Consumes: Task 1 `Validate` + Task 2 `LogSecurityWarnings`.
+- Produces: `--auto-detect-roots` CLI flag, config.yaml `0600` chmod, Phase 1 token warning removed from server.New, config validation in UpdateConfig.
 
 - [ ] **Step 1: Modify `main.go`**
 
@@ -436,6 +461,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Phase 3: validate config after Load, incorporating CLI override flags.
+	if err := cfg.Validate(autoDetectRoots); err != nil {
+		slog.Error("Invalid config", "error", err)
+		os.Exit(1)
+	}
+
 	// Phase 3: log security warnings BEFORE any side effects (mDNS, server).
 	// Centralized in config.LogSecurityWarnings so the config layer owns
 	// "what is risky"; main.go owns the timing.
@@ -455,24 +486,42 @@ The rest of `main()` (mDNS start + headless/gui branch) stays unchanged.
 
 - [ ] **Step 2: Modify `server.go` — remove Phase 1 token warning**
 
-In `server/internal/server/server.go` `New()` function, **DELETE** the token warning block (added in Phase 1 commit `2083e47`, around lines 85-97). The block looks like:
+In `server/internal/server/server.go` `New()` function, **DELETE** the token warning block (added in Phase 1 commit `2083e47`, lines 86-97 including the comment). The block looks like:
 
 ```go
-// DELETE THIS ENTIRE BLOCK:
-if cfg.Server.Token == "" {
-    slog.Warn("==============================================================")
-    slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
-    slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
-    slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
-    slog.Warn("==============================================================")
-} else {
-    slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
-}
+// DELETE THIS ENTIRE BLOCK (lines 86-97):
+	// Security startup notice: warn loudly when running in open auth mode so
+	// operators don't accidentally expose admin/system/media endpoints without
+	// a token. When a token is configured, log a quiet info line instead.
+	if cfg.Server.Token == "" {
+		slog.Warn("==============================================================")
+		slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
+		slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
+		slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
+		slog.Warn("==============================================================")
+	} else {
+		slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
+	}
 ```
 
-After deletion, the `New()` function should flow directly from `s := &Server{...}` to `scanner.OnScanComplete = ...` (or wherever the warning was inserted).
+After deletion, the `New()` function should flow directly from `h := handler.New(...)` (line 84) to `s.registerRoutes(h)` (previously line 99).
 
-**Verify `slog` import**: After removing the warning block, check if `slog` is still used elsewhere in `server.go`. If not, remove the `"log/slog"` import to avoid "unused import" compile error. (Likely still used elsewhere — check before removing.)
+**Verify `slog` import**: After removing the warning block, `slog` is still used elsewhere in `server.go` (e.g., `slog.Info` in `Start()`/`Stop()`) — do NOT remove the import.
+
+- [ ] **Step 2a: Modify `admin.go` — validate new roots**
+
+In `server/internal/server/handler/admin.go` in `UpdateConfig`, call `Validate(false)` before saving to prevent persisting invalid configurations.
+
+```go
+	oldRoots := h.cfg.Scan.Roots
+	h.cfg.Scan.Roots = req.Roots
+	if err := h.cfg.Validate(false); err != nil {
+		h.cfg.Scan.Roots = oldRoots
+		return respondError(c, http.StatusBadRequest, "invalid configuration: scan roots cannot be empty unless auto-detect is enabled or allowed_roots is set", err)
+	}
+	h.cfg.Scan.InvalidateRootsCache()
+	if err := h.cfg.Save("config.yaml"); err != nil {
+```
 
 - [ ] **Step 3: Run full server test suite to verify migration didn't break anything**
 
@@ -480,7 +529,7 @@ Run: `cd server && go test ./...`
 Expected: All tests pass. Specifically:
 - `TestServerRejectsAdminWithoutToken`, `TestServerAcceptsAdminWithCorrectToken`, `TestServerOpenModeWhenTokenEmpty` (Phase 1) — these test **route behavior**, not warning text, so they should still pass.
 - `TestLogSecurityWarnings` (Task 2) — covers the migrated warning.
-- `TestLoadRejectsEmptyRoots` (Task 1) — unaffected.
+- `TestConfigValidate` (Task 1) — unaffected.
 
 If any Phase 1 `server_auth_test.go` test fails because it asserted the warning was printed during `server.New()`, that assertion moves to `TestLogSecurityWarnings`. Update the test accordingly.
 
@@ -530,34 +579,26 @@ mv config.yaml.bak config.yaml
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/cmd/server/main.go server/internal/server/server.go
-git commit -m "feat(server): wire --auto-detect-roots flag, chmod 0600, migrate token warning (Phase 3)"
+git add server/cmd/server/main.go server/internal/server/server.go server/internal/server/handler/admin.go
+git commit -m "feat(server): wire --auto-detect-roots flag, chmod 0600, migrate token warning, validate config in UpdateConfig (Phase 3)"
 ```
 
 ---
 
-## Task 4: Update `config.example.yaml` + verify
+## Task 4: Update `config.example.yaml` + Web UI settings.js + verify
 
 **Files:**
 - Modify: `server/config.example.yaml`
-- Verify only: no code changes
+- Modify: `server/internal/web/settings.js`
+- Verify: manual validation
 
 **Interfaces:**
 - Consumes: Tasks 1-3.
-- Produces: Documented new field + strengthened warnings for users copying the example.
+- Produces: Documented new field + styled Web UI alert for enable_delete.
 
 - [ ] **Step 1: Modify `config.example.yaml`**
 
-Read current `server/config.example.yaml`. The current `scan:` block should look roughly like:
-
-```yaml
-scan:
-  video_extensions:
-    - ".mp4"
-    ...
-```
-
-Replace/augment to:
+Read current `server/config.example.yaml`. Replace/augment `scan` and `system` blocks to:
 
 ```yaml
 scan:
@@ -588,7 +629,7 @@ scan:
   auto_detect_roots: false
 ```
 
-And in the existing `system:` block, ensure `enable_delete` has the warning comment (it may already have one — strengthen if needed):
+And in the existing `system:` block, ensure `enable_delete` has the warning comment:
 
 ```yaml
 system:
@@ -600,7 +641,23 @@ system:
     # - "D:/Media"
 ```
 
-- [ ] **Step 2: Verify YAML parses + server still loads**
+- [ ] **Step 2: Modify `settings.js`**
+
+In `server/internal/web/settings.js`, update `renderSettings()` to display `enableDelete` with red bold style if it's enabled:
+
+```javascript
+    if (state.enableDelete) {
+        elements.settingsEnableDelete.textContent = '⚠️ 已开启 (允许从客户端删除电脑媒体文件)';
+        elements.settingsEnableDelete.style.color = 'var(--error)';
+        elements.settingsEnableDelete.style.fontWeight = 'bold';
+    } else {
+        elements.settingsEnableDelete.textContent = '已禁用 (安全只读)';
+        elements.settingsEnableDelete.style.color = '';
+        elements.settingsEnableDelete.style.fontWeight = '';
+    }
+```
+
+- [ ] **Step 3: Verify YAML parses + server still loads**
 
 ```bash
 cd server
@@ -621,16 +678,16 @@ go build -o LocalMediaHub.exe ./cmd/server
 # Ctrl+C to stop
 ```
 
-- [ ] **Step 3: Full regression — Go test suite**
+- [ ] **Step 4: Full regression — Go test suite**
 
 Run: `cd server && go test ./...`
 Expected: All packages green. No regressions from Tasks 1-3.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add server/config.example.yaml
-git commit -m "docs(config): document auto_detect_roots + strengthen enable_delete warning (Phase 3)"
+git add server/config.example.yaml server/internal/web/settings.js
+git commit -m "docs(config): document auto_detect_roots, add Web UI styling for delete (Phase 3)"
 ```
 
 ---
@@ -638,26 +695,27 @@ git commit -m "docs(config): document auto_detect_roots + strengthen enable_dele
 ## Self-Review
 
 **Spec coverage** (against spec section 5):
-- ✅ `AutoDetectRoots` field + `Load` validation (Task 1, spec 5.1.2)
+- ✅ `AutoDetectRoots` field + `Validate` validation method (Task 1, spec 5.1.2)
 - ✅ `LogSecurityWarnings` helper (Task 2, spec 5.1.3)
 - ✅ `--auto-detect-roots` flag (Task 3, spec 5.2)
 - ✅ `os.Chmod 0600` (Task 3, spec 5.2)
+- ✅ Admin config API UpdateConfig validation (Task 3, spec 5.2a)
 - ✅ Phase 1 token warning migration (Task 3, spec 5.3)
 - ✅ `config.example.yaml` documentation (Task 4, spec 5.4)
-- ✅ Existing `Roots = AllowedRoots` fallback preserved (Task 1 test case 4)
+- ✅ Web UI `enable_delete` red bold styling (Task 4, spec 4.3)
+- ✅ Existing `Roots = AllowedRoots` fallback preserved (Task 1 test case 5)
 
 **Type consistency**:
 - `LogSecurityWarnings(cfg *Config, autoFromFlag bool)` — consistent across Tasks 2, 3
-- `ScanConfig.AutoDetectRoots bool` with `yaml:"auto_detect_roots,omitempty"` — consistent across Tasks 1, 4
+- `ScanConfig.AutoDetectRoots bool` and `ScanConfigPublic.AutoDetectRoots bool` — consistent across Tasks 1, 4
 - `--auto-detect-roots` flag name — consistent across Tasks 3, 4
 
 **Placeholder scan**: No TBD/TODO/"add error handling"/"similar to Task N" patterns. Every step contains complete code.
 
 **Known implementation risks** (flagged for executor awareness):
-1. **Task 1 Step 5 regression risk**: Phase 1 `server_auth_test.go` `newAuthTestConfig` helper may construct configs without roots — if so, it will fail the new `Load` validation. The task brief tells the executor to read `server_auth_test.go` and add roots OR `AutoDetectRoots: true` to the fixture if needed. **Note**: `server_auth_test.go` constructs `*config.Config` literals directly (bypassing `Load`), so the new validation in `LoadFromBytes` does NOT fire on those literals — they should be unaffected. But verify during execution.
-2. **Task 3 Step 2 unused import**: Removing the token warning from `server.go` may leave `slog` unused. Check before removing the import.
-3. **Task 3 Step 4-5 Windows bash**: Background process + sleep + curl + kill may need adjustment on Windows. The implementer should use `Start-Process` (PowerShell) or run in `--headless` with `&` + `kill %1` carefully.
-4. **Task 4 Step 2 heredoc**: YAML heredocs with array syntax may need careful escaping. The implementer can use `printf` or write the file via `cat <<'EOF'` to avoid variable expansion.
+1. **Task 3 Step 2 unused import**: Removing the token warning from `server.go` may leave `slog` unused. Check before removing the import.
+2. **Task 3 Step 4-5 Windows bash**: Background process + sleep + curl + kill may need adjustment on Windows. The implementer should use `Start-Process` (PowerShell) or run in `--headless` with `&` + `kill %1` carefully.
+3. **Task 4 Step 3 heredoc**: YAML heredocs with array syntax may need careful escaping. The implementer can use `printf` or write the file via `cat <<'EOF'` to avoid variable expansion.
 
 ---
 
@@ -665,10 +723,10 @@ git commit -m "docs(config): document auto_detect_roots + strengthen enable_dele
 
 Plan saved to `docs/superpowers/plans/2026-07-10-security-phase3-config-defaults.md`.
 
-Four tasks, all server-side Go. Estimated total effort: small (each task is 15-40 lines of code + tests).
+Four tasks, Go and JS files. Estimated total effort: small.
 
 Execution model recommendation:
-- Task 1: standard model (touches existing `Load` logic + potential regression in `server_auth_test.go`)
-- Task 2: cheapest model (new function + table-driven tests, complete code in brief)
+- Task 1: standard model (touches existing `Load` structures, introduces `Validate`)
+- Task 2: cheapest model (new function + table-driven tests)
 - Task 3: standard model (multi-file, migration, manual integration tests)
-- Task 4: cheapest model (config.yaml edits + verification)
+- Task 4: cheapest model (config.yaml/JS edits + verification)

@@ -19,11 +19,12 @@ Phase 3 落实 spec 第 5.3 节的"配置默认安全"修复，针对 Phase 1 �
 - **T8-12（CVSS Low）**：`config.yaml` 默认 0644 文件权限，多用户系统下可被其他本地用户读取。
 
 **核心改动**：
-1. **强制显式 roots**：`scan.roots` 空 + `scan.auto_detect_roots: false` + 无 `system.allowed_roots` → 拒绝启动。
+1. **强制显式 roots**：`scan.roots` 空 + `scan.auto_detect_roots: false` + 无 `system.allowed_roots` → 拒绝启动（引入 `cfg.Validate(autoFromFlag)` 方法在启动时校验，防止 Load 抛错导致 CLI flag 逃生口失效）。
 2. **`--auto-detect-roots` 逃生口**：config.yaml 字段（持久 opt-in）+ 命令行 flag（force on，临时 override）。
 3. **`enable_delete` 启动告警**：检测到 `true` 时打印显眼 slog.Warn 横幅。
 4. **Phase 1 token 告警迁移**：统一到新的 `LogSecurityWarnings(cfg, autoFlag)` helper。
 5. **`config.yaml` 权限收紧**：启动时 `os.Chmod("config.yaml", 0600)`，失败仅告警。
+6. **配置修改安全校验**：在 `UpdateConfig` API 写入新 roots 后调用 `Validate(false)` 保护持久化配置不被误改为无效状态，并在 Web UI 开启 `enable_delete` 时增加红色警示。
 
 **Why now**：Phase 1 的鉴权层在用户开启 token 时已堵住大部分 LAN 攻击；但个人项目的现实是"用户图省事不开 token"。Phase 3 把"未开 token 时的最坏情况"也限制住——至少强制用户显式声明攻击面。
 
@@ -94,10 +95,11 @@ Phase 3 落实 spec 第 5.3 节的"配置默认安全"修复，针对 Phase 1 �
 
 | 文件 | 改动 | Task |
 |---|---|---|
-| `server/internal/config/config.go` | 加 `ScanConfig.AutoDetectRoots bool`；`Load` 末尾加强制 roots 校验；新增 `LogSecurityWarnings(*Config, bool)` 函数 | 1, 2 |
-| `server/internal/config/config_test.go` | 加 `TestLoadRejectsEmptyRoots`；加 `TestLogSecurityWarnings` 三场景 | 1, 2 |
-| `server/cmd/server/main.go` | 加 `--auto-detect-roots` flag；调 `config.LogSecurityWarnings(cfg, autoFlag)`；`os.Chmod("config.yaml", 0600)` | 3 |
+| `server/internal/config/config.go` | 加 `ScanConfig.AutoDetectRoots bool` 到配置及 `ScanConfigPublic` 结构；新增 `Validate(bool) error` 校验方法；新增 `LogSecurityWarnings(*Config, bool)` 函数 | 1, 2 |
+| `server/internal/config/config_test.go` | 加 `TestConfigValidate` 校验函数测试；加 `TestLogSecurityWarnings` 场景覆盖测试 | 1, 2 |
+| `server/cmd/server/main.go` | 加 `--auto-detect-roots` flag；在加载 config 后调用 `cfg.Validate(autoFlag)`；调 `config.LogSecurityWarnings(cfg, autoFlag)`；`os.Chmod("config.yaml", 0600)` | 3 |
 | `server/internal/server/server.go` | **删除** Phase 1 写在 `New()` 里的 token 告警（迁移到 `LogSecurityWarnings`） | 3 |
+| `server/internal/server/handler/admin.go` | 在 `UpdateConfig` 修改 roots 并保存前，调用 `cfg.Validate(false)` 进行配置合法性校验 | 3 |
 
 ### 4.2 配置与文档
 
@@ -110,9 +112,7 @@ Phase 3 落实 spec 第 5.3 节的"配置默认安全"修复，针对 Phase 1 �
 
 | 文件 | 改动 | Task |
 |---|---|---|
-| `server/internal/web/settings.js`（或对应渲染 `enable_delete` 的文件） | `enable_delete` toggle 旁加红色警告文案（仅当开启时显示） | 4 |
-
-**注**：Task 4 涉及 Web UI 文件——若现有 settings.js 未渲染 `enable_delete`（只在 config.yaml 配置），则跳过 Web UI 改动，仅在 config.example.yaml 加警告。
+| `server/internal/web/settings.js` | 渲染逻辑中，若 `enableDelete` 为 true，对 `elements.settingsEnableDelete` 应用红色加粗样式警示 | 4 |
 
 ---
 
@@ -135,27 +135,51 @@ type ScanConfig struct {
 }
 ```
 
-#### 5.1.2 `Load` 校验
+#### 5.1.2 `Validate` 校验方法
 
-在现有 `Load` 末尾、`return &cfg, nil` 之前插入：
+在 `server/internal/config/config.go` 中新增 `Validate` 方法：
 
 ```go
-// Phase 3 安全默认：若既未配 roots 也未配 allowed_roots，且未显式 opt-in
-// auto-detect，则拒绝启动。强制用户声明攻击面。
-if len(cfg.Scan.Roots) == 0 && len(cfg.System.AllowedRoots) == 0 && !cfg.Scan.AutoDetectRoots {
-    return nil, fmt.Errorf(
-        "refusing to start: no scan.roots or system.allowed_roots configured and " +
-            "scan.auto_detect_roots is false.\n" +
-            "To serve media, either:\n" +
-            "  1. List explicit roots under 'scan.roots' in config.yaml, or\n" +
-            "  2. Configure 'system.allowed_roots' (also serves as scan roots fallback), or\n" +
-            "  3. Set 'scan.auto_detect_roots: true' in config.yaml (serves ALL drives — " +
-            "review your threat model first), or\n" +
-            "  4. Run with --auto-detect-roots flag (one-shot override)")
+// Validate checks if the configuration is safe and sufficient to start.
+// Refuses to start when no roots are configured and auto-detect is not
+// explicitly opted in (either via config or via command-line override flag).
+//
+// Note: LoadFromBytes already copies AllowedRoots → Roots when Roots is
+// empty and AllowedRoots is non-empty. So after a normal Load, if
+// AllowedRoots was set, Roots will be non-empty and this check passes.
+// The len(c.Scan.Roots)==0 condition therefore implicitly covers the
+// "both empty" case. We still check AllowedRoots explicitly for
+// callers who construct Config directly (tests, admin API Validate
+// before Save).
+func (c *Config) Validate(autoFromFlag bool) error {
+	if len(c.Scan.Roots) == 0 && len(c.System.AllowedRoots) == 0 && !c.Scan.AutoDetectRoots && !autoFromFlag {
+		return fmt.Errorf(
+			"refusing to start: no scan.roots or system.allowed_roots configured and " +
+				"scan.auto_detect_roots is false.\n" +
+				"To serve media, either:\n" +
+				"  1. List explicit roots under 'scan.roots' in config.yaml, or\n" +
+				"  2. Configure 'system.allowed_roots' (also serves as scan roots fallback), or\n" +
+				"  3. Set 'scan.auto_detect_roots: true' in config.yaml (serves ALL drives — " +
+				"review your threat model first), or\n" +
+				"  4. Run with --auto-detect-roots flag (one-shot override)")
+	}
+	return nil
 }
 ```
 
-**注**：现有 fallback（`Roots = AllowedRoots`，当 `Roots` 空 + `AllowedRoots` 非空时）保留不变。新校验只在**两者都空**时触发。
+并在 `ScanConfigPublic` 中暴露 `AutoDetectRoots` 字段以便前端识别当前是否为全盘自动检测：
+
+```go
+type ScanConfigPublic struct {
+	Roots           []string `json:"roots,omitempty"`
+	VideoExtensions []string `json:"video_extensions"`
+	ImageExtensions []string `json:"image_extensions"`
+	AutoDetectRoots bool     `json:"auto_detect_roots,omitempty"`
+}
+```
+
+在 `Public()` 转换时赋值：
+`Scan: ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions, AutoDetectRoots: c.Scan.AutoDetectRoots}`
 
 #### 5.1.3 `LogSecurityWarnings` 新函数
 
@@ -170,36 +194,36 @@ if len(cfg.Scan.Roots) == 0 && len(cfg.System.AllowedRoots) == 0 && !cfg.Scan.Au
 // autoFromFlag is the --auto-detect-roots flag value; it ORs with
 // cfg.Scan.AutoDetectRoots to determine the effective auto-detect state.
 func LogSecurityWarnings(cfg *Config, autoFromFlag bool) {
-    if cfg.Server.Token == "" {
-        slog.Warn("==============================================================")
-        slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
-        slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
-        slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
-        slog.Warn("==============================================================")
-    } else {
-        slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
-    }
+	if cfg.Server.Token == "" {
+		slog.Warn("==============================================================")
+		slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
+		slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
+		slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
+		slog.Warn("==============================================================")
+	} else {
+		slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
+	}
 
-    if cfg.System.EnableDelete {
-        slog.Warn("==============================================================")
-        slog.Warn(" REMOTE DELETE IS ENABLED (system.enable_delete: true).")
-        slog.Warn(" Any authenticated client (or any LAN host if token is empty)")
-        slog.Warn(" can delete files under system.allowed_roots.")
-        slog.Warn(" Disable 'system.enable_delete' in config.yaml unless you")
-        slog.Warn(" genuinely need this feature.")
-        slog.Warn("==============================================================")
-    }
+	if cfg.System.EnableDelete {
+		slog.Warn("==============================================================")
+		slog.Warn(" REMOTE DELETE IS ENABLED (system.enable_delete: true).")
+		slog.Warn(" Any authenticated client (or any LAN host if token is empty)")
+		slog.Warn(" can delete files under system.allowed_roots.")
+		slog.Warn(" Disable 'system.enable_delete' in config.yaml unless you")
+		slog.Warn(" genuinely need this feature.")
+		slog.Warn("==============================================================")
+	}
 
-    if cfg.Scan.AutoDetectRoots || autoFromFlag {
-        slog.Warn("==============================================================")
-        slog.Warn(" AUTO-DETECT ROOTS IS ENABLED.")
-        if autoFromFlag && !cfg.Scan.AutoDetectRoots {
-            slog.Warn(" (triggered by --auto-detect-roots flag, not config.yaml)")
-        }
-        slog.Warn(" Server will serve media from ALL detected drives (A-Z).")
-        slog.Warn(" For production, configure 'scan.roots' explicitly instead.")
-        slog.Warn("==============================================================")
-    }
+	if cfg.Scan.AutoDetectRoots || autoFromFlag {
+		slog.Warn("==============================================================")
+		slog.Warn(" AUTO-DETECT ROOTS IS ENABLED.")
+		if autoFromFlag && !cfg.Scan.AutoDetectRoots {
+			slog.Warn(" (triggered by --auto-detect-roots flag, not config.yaml)")
+		}
+		slog.Warn(" Server will serve media from ALL detected drives (A-Z).")
+		slog.Warn(" For production, configure 'scan.roots' explicitly instead.")
+		slog.Warn("==============================================================")
+	}
 }
 ```
 
@@ -207,54 +231,80 @@ func LogSecurityWarnings(cfg *Config, autoFromFlag bool) {
 
 ```go
 var (
-    headless        bool
-    autoDetectRoots bool
+	headless        bool
+	autoDetectRoots bool
 )
 
 func main() {
-    flag.BoolVar(&headless, "headless", false, "Run without GUI (system tray)")
-    flag.BoolVar(&autoDetectRoots, "auto-detect-roots", false,
-        "Force-enable auto-detection of all drives as scan roots (one-shot override; "+
-            "also achievable via scan.auto_detect_roots in config.yaml)")
-    flag.Parse()
+	flag.BoolVar(&headless, "headless", false, "Run without GUI (system tray)")
+	flag.BoolVar(&autoDetectRoots, "auto-detect-roots", false,
+		"Force-enable auto-detection of all drives as scan roots (one-shot override; "+
+			"also achievable via scan.auto_detect_roots in config.yaml)")
+	flag.Parse()
 
-    cfg, err := config.Load("config.yaml")
-    if err != nil {
-        slog.Error("Failed to load config", "error", err)
-        os.Exit(1)
-    }
+	cfg, err := config.Load("config.yaml")
+	if err != nil {
+		slog.Error("Failed to load config", "error", err)
+		os.Exit(1)
+	}
 
-    // Phase 3: log security warnings BEFORE any side effects (mDNS, server).
-    config.LogSecurityWarnings(cfg, autoDetectRoots)
+	// Phase 3: Validate config after Load, incorporating CLI override flags.
+	if err := cfg.Validate(autoDetectRoots); err != nil {
+		slog.Error("Invalid config", "error", err)
+		os.Exit(1)
+	}
 
-    // Phase 3: tighten config.yaml file permissions to owner-only.
-    // Failure is non-fatal (read-only fs, Windows ACL quirks) — warn and continue.
-    if err := os.Chmod("config.yaml", 0600); err != nil {
-        slog.Warn("Failed to tighten config.yaml permissions to 0600", "error", err)
-    }
+	// Phase 3: log security warnings BEFORE any side effects (mDNS, server).
+	config.LogSecurityWarnings(cfg, autoDetectRoots)
 
-    // ... rest of main (mDNS, headless/gui) unchanged ...
+	// Phase 3: tighten config.yaml file permissions to owner-only.
+	// Failure is non-fatal (read-only fs, Windows ACL quirks) — warn and continue.
+	if err := os.Chmod("config.yaml", 0600); err != nil {
+		slog.Warn("Failed to tighten config.yaml permissions to 0600", "error", err)
+	}
+
+	// ... rest of main (mDNS, headless/gui) unchanged ...
 }
+```
+
+### 5.2a `admin.go` 改动 (UpdateConfig 校验)
+
+在 `server/internal/server/handler/admin.go` 内部，保存 roots 修改前调用 `Validate` 进行逻辑保护，防止保存无效配置：
+
+```go
+	oldRoots := h.cfg.Scan.Roots
+	h.cfg.Scan.Roots = req.Roots
+	if err := h.cfg.Validate(false); err != nil {
+		h.cfg.Scan.Roots = oldRoots
+		return respondError(c, http.StatusBadRequest, "invalid configuration: scan roots cannot be empty unless auto-detect is enabled or allowed_roots is set", err)
+	}
+	h.cfg.Scan.InvalidateRootsCache()
+	if err := h.cfg.Save("config.yaml"); err != nil {
 ```
 
 ### 5.3 `server.go` 改动（Phase 1 告警迁移）
 
-**删除** `server.New()` 中的 token 告警块（commit `2083e47` 加的，约第 89-97 行）：
+**删除** `server.New()` 中的 token 告警块（commit `2083e47` 加的，第 86-97 行，含注释）：
 
 ```go
-// DELETE THIS BLOCK from server.New():
+// DELETE THIS BLOCK (lines 86-97) from server.New():
+// Security startup notice: warn loudly when running in open auth mode so
+// operators don't accidentally expose admin/system/media endpoints without
+// a token. When a token is configured, log a quiet info line instead.
 if cfg.Server.Token == "" {
     slog.Warn("==============================================================")
     slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
-    // ...
+    slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
+    slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
+    slog.Warn("==============================================================")
 } else {
     slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
 }
 ```
 
-**理由**：迁移到 `config.LogSecurityWarnings`（main.go 调用）。行为等价——`server.New` 仍在 main.go 之后调用，告警在 server.New 之前打印，用户看到的输出顺序不变。
+**理由**：迁移到 `config.LogSecurityWarnings`（main.go 调用）。行为等价——`Validate` 和 `LogSecurityWarnings` 在 `main()` 中 `config.Load` 之后、headless/gui 分支之前调用，因此 headless 和 GUI 两条启动路径都会在 `server.New` 之前完成告警输出。
 
-**回归风险**：`server_auth_test.go` 中的 `TestServerRejectsAdminWithoutToken` 等测试不依赖告警文本，只依赖路由行为。但若有测试断言告警输出，需迁移到 `TestLogSecurityWarnings`。
+**回归风险**：`server_auth_test.go` 中的 `TestServerRejectsAdminWithoutToken` 等测试不依赖告警文本，只依赖路由行为（已验证代码：三个测试均只断言 HTTP status code）。但若有测试断言告警输出，需迁移到 `TestLogSecurityWarnings`。
 
 ### 5.4 `config.example.yaml` 改动
 
@@ -294,7 +344,7 @@ system:
 
 | 测试 | 覆盖 | 文件 |
 |---|---|---|
-| `TestLoadRejectsEmptyRoots` | 空 roots + 空 allowed_roots + auto=false → error；空 roots + 空 allowed_roots + auto=true → OK；有 roots → OK；空 roots + 有 allowed_roots → OK（fallback） | `config_test.go` |
+| `TestConfigValidate` | 空 roots + 空 allowed_roots + auto=false + flag=false → error；空 roots + 空 allowed_roots + auto=false + flag=true → OK；有 roots → OK；空 roots + 有 allowed_roots → OK（fallback） | `config_test.go` |
 | `TestLogSecurityWarnings` | capture slog 输出，断言：(a) 空 token → 含"OPEN AUTH MODE"；(b) enable_delete=true → 含"REMOTE DELETE IS ENABLED"；(c) auto_detect=true → 含"AUTO-DETECT ROOTS IS ENABLED"；(d) 全部安全 → 无 Warn 仅 Info | `config_test.go` |
 
 #### 6.1.1 slog 输出捕获模式
@@ -346,8 +396,8 @@ func captureSlogOutput(fn func()) string {
 
 ## 8. 验证完成标准
 
-- ✅ `TestLoadRejectsEmptyRoots` 通过（4 子用例）
-- ✅ `TestLogSecurityWarnings` 通过（4 子用例）
+- ✅ `TestConfigValidate` 通过（5 子用例）
+- ✅ `TestLogSecurityWarnings` 通过（6 子用例）
 - ✅ 现有 `config_test.go` + `server_auth_test.go` 全部 green（回归）
 - ✅ `cd server && go test ./...` 全 green
 - ✅ 手动：空 config + 无 flag → 拒绝启动（exit 1）
