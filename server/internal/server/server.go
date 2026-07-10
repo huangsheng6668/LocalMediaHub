@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -82,19 +81,6 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService)
-
-	// Security startup notice: warn loudly when running in open auth mode so
-	// operators don't accidentally expose admin/system/media endpoints without
-	// a token. When a token is configured, log a quiet info line instead.
-	if cfg.Server.Token == "" {
-		slog.Warn("==============================================================")
-		slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
-		slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
-		slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
-		slog.Warn("==============================================================")
-	} else {
-		slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
-	}
 
 	s.registerRoutes(h)
 

@@ -29,7 +29,12 @@ func (h *Handler) UpdateConfig(c echo.Context) error {
 		}
 	}
 
+	oldRoots := h.cfg.Scan.Roots
 	h.cfg.Scan.Roots = req.Roots
+	if err := h.cfg.Validate(false); err != nil {
+		h.cfg.Scan.Roots = oldRoots
+		return respondError(c, http.StatusBadRequest, "invalid configuration: scan roots cannot be empty unless auto-detect is enabled or allowed_roots is set", err)
+	}
 	// Roots changed: drop any cached auto-detected drive list so subsequent
 	// GetRoots calls reflect the new configuration immediately.
 	h.cfg.Scan.InvalidateRootsCache()
