@@ -1,6 +1,11 @@
 server:
   host: "0.0.0.0"
   port: 8000
+  # Auth token for admin/system/media API endpoints.
+  # Empty (default) = open mode (any LAN host can access — for trusted home networks only).
+  # Set to a long random string to require `Authorization: Bearer <token>` on protected routes.
+  # Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+  token: ""
 
 scan:
   video_extensions:
