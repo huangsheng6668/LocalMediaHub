@@ -46,7 +46,8 @@ class HomeViewModelTest {
             ?: RuntimeEnvironment.getApplication()
         deleteDatastoreFiles()
         serverConfigStore = ServerConfigStore(context)
-        serverConfig = ServerConfig(OkHttpClient())
+        // Round 29: ServerConfig no longer takes httpClient (Hilt cycle break).
+        serverConfig = ServerConfig()
     }
 
     @After

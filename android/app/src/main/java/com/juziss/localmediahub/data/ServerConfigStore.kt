@@ -30,6 +30,7 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
         private val KEY_SERVER_IP = stringPreferencesKey("server_ip")
         private val KEY_SERVER_PORT = stringPreferencesKey("server_port")
         private val KEY_KNOWN_SERVERS = stringPreferencesKey("known_servers")
+        private val KEY_AUTH_TOKEN = stringPreferencesKey("auth_token")
     }
 
     private val gson = Gson()
@@ -44,6 +45,10 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
 
     val serverPort: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_SERVER_PORT] ?: "8000"
+    }
+
+    val authToken: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_AUTH_TOKEN] ?: ""
     }
 
     val knownServers: Flow<List<KnownServer>> = context.dataStore.data.map { prefs ->
@@ -63,6 +68,12 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
                 it.ip == server.ip && it.port == server.port
             }).take(10)
             prefs[KEY_KNOWN_SERVERS] = gson.toJson(updated)
+        }
+    }
+
+    suspend fun saveAuthToken(token: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_AUTH_TOKEN] = token
         }
     }
 

@@ -1447,6 +1447,98 @@ body {
     }
 }
 
+/* ─── Round 28 Task 12: Auth Token Modal ───
+   Round 29 fix (final review Finding 3): every selector here is scoped under
+   #auth-modal. The earlier unscoped rules (.modal-backdrop, .modal-actions,
+   .modal-input, .modal-content, .modal.hidden) collided with the EXISTING
+   global modal styles at lines ~792/.modal-backdrop and ~831/.modal-actions
+   used by the file-tags modal, video player modal, etc. The unscoped
+   .modal-backdrop in particular reset background/blurs on those modals and
+   the unscoped .modal-actions clobbered their flex layout. The auth modal's
+   root element carries id="auth-modal" (see index.html), so all rules below
+   are namespaced to it. */
+
+#auth-modal.hidden {
+    display: none;
+}
+
+#auth-modal .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+#auth-modal .modal-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-card, #11111a);
+    padding: 24px;
+    border-radius: var(--border-radius-lg);
+    min-width: 320px;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-premium);
+    z-index: 101;
+}
+
+#auth-modal .modal-input {
+    width: 100%;
+    padding: 8px;
+    margin: 12px 0;
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-md);
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    outline: none;
+    transition: var(--transition-quick);
+}
+
+#auth-modal .modal-input:focus {
+    border-color: var(--primary-light);
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+}
+
+#auth-modal .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+#auth-modal .modal-actions button {
+    padding: 8px 16px;
+    border-radius: var(--border-radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-quick);
+    font-family: var(--font-sans);
+    border: none;
+}
+
+#auth-modal .modal-actions button.primary {
+    background: var(--primary-gradient);
+    color: var(--text-white);
+}
+
+#auth-modal .modal-actions button.primary:hover {
+    box-shadow: 0 0 16px rgba(124, 58, 237, 0.4);
+    opacity: 0.95;
+}
+
+#auth-modal .modal-actions button:not(.primary) {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+}
+
+#auth-modal .modal-actions button:not(.primary):hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
 /* ─── Round 16 C3: Full-screen modal on phone ─── */
 
 @media (max-width: 767px) {

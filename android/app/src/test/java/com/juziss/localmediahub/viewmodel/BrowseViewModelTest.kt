@@ -27,7 +27,8 @@ class BrowseViewModelTest {
         val recentActivityStore = RecentActivityStore(appContext)
         val downloadsStore = DownloadsStore(appContext)
         val httpClient = OkHttpClient()
-        val serverConfig = ServerConfig(httpClient)
+        // Round 29: ServerConfig no longer takes httpClient (Hilt cycle break).
+        val serverConfig = ServerConfig()
         val repository = MediaRepository(httpClient, serverConfig)
         val downloadManager = DownloadManager(appContext)
         val viewModel = BrowseViewModel(

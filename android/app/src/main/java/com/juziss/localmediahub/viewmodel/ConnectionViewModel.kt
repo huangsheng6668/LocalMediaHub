@@ -82,6 +82,23 @@ class ConnectionViewModel @Inject constructor(
     private var resolveQueue: Channel<NsdServiceInfo>? = null
     private var resolveWorkerJob: Job? = null
 
+    // Round 29 fix (final review Finding 2): On app restart ServerConfig._token
+    // starts empty even though DataStore has the persisted token, so the
+    // AuthInterceptor would send no Authorization header and every protected
+    // call would 401 until the user re-entered the token. We `collect` (not
+    // `first`) the authToken flow so ServerConfig also stays in sync if the
+    // token changes via another code path (e.g. re-entered from
+    // ConnectionScreen). ConnectionViewModel is constructed early at app
+    // startup (it is observed by the launch screen), so this seeds the token
+    // before the first protected API call.
+    init {
+        viewModelScope.launch {
+            serverConfigStore.authToken.collect { token ->
+                serverConfig.setToken(token)
+            }
+        }
+    }
+
     private fun acquireMulticastLock() {
         try {
             if (multicastLock == null) {
@@ -136,6 +153,13 @@ class ConnectionViewModel @Inject constructor(
                     e.message ?: "Unknown error"
                 )
             }
+        }
+    }
+
+    fun saveToken(token: String) {
+        viewModelScope.launch {
+            serverConfigStore.saveAuthToken(token.trim())
+            serverConfig.setToken(token.trim())
         }
     }
 

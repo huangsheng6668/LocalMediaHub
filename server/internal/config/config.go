@@ -16,8 +16,9 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host" json:"host"`
-	Port int    `yaml:"port" json:"port"`
+	Host  string `yaml:"host" json:"host"`
+	Port  int    `yaml:"port" json:"port"`
+	Token string `yaml:"token,omitempty" json:"token,omitempty"`
 }
 
 type ScanConfig struct {
@@ -79,11 +80,26 @@ type SystemConfig struct {
 // is kept (already exposed by GET /system/drives and shown in the Web settings UI).
 // ScanConfig is projected onto ScanConfigPublic so the internal auto-detected-drive
 // cache (sync.Once) is neither copied nor leaked.
+//
+// Round 29 fix: Server is projected onto ServerConfigPublic which omits the
+// bearer Token. Previously ConfigPublic embedded ServerConfig directly, which
+// leaked the token in GET /api/v1/admin/config responses — defeating the auth
+// layer. See TestPublicRedactsServerToken.
 type ConfigPublic struct {
-	Server    ServerConfig        `json:"server"`
-	Scan      ScanConfigPublic    `json:"scan"`
-	Thumbnail ThumbnailConfig     `json:"thumbnail"`
-	System    SystemConfigPublic  `json:"system"`
+	Server    ServerConfigPublic   `json:"server"`
+	Scan      ScanConfigPublic     `json:"scan"`
+	Thumbnail ThumbnailConfig      `json:"thumbnail"`
+	System    SystemConfigPublic   `json:"system"`
+}
+
+// ServerConfigPublic mirrors only the user-facing fields of ServerConfig. The
+// bearer Token is intentionally omitted — it must NEVER be exposed to clients
+// via any admin/config endpoint, otherwise the entire auth layer is bypassable
+// by anyone who can read the config response.
+type ServerConfigPublic struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	// Token intentionally omitted — never expose to clients.
 }
 
 // ScanConfigPublic mirrors only the user-facing fields of ScanConfig. The internal
@@ -103,7 +119,7 @@ type SystemConfigPublic struct {
 // Public returns a copy of the config with sensitive operational fields removed.
 func (c *Config) Public() ConfigPublic {
 	return ConfigPublic{
-		Server:    c.Server,
+		Server:    ServerConfigPublic{Host: c.Server.Host, Port: c.Server.Port},
 		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions},
 		Thumbnail: c.Thumbnail,
 		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots, EnableDelete: c.System.EnableDelete},
@@ -119,11 +135,9 @@ func (c *Config) GetSystemAllowedRoots() []string {
 	return []string{}
 }
 
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
+// LoadFromBytes parses config from a YAML byte slice. Used by tests to avoid
+// disk I/O; production code uses Load(path).
+func LoadFromBytes(data []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
@@ -132,6 +146,14 @@ func Load(path string) (*Config, error) {
 		cfg.Scan.Roots = append([]string(nil), cfg.System.AllowedRoots...)
 	}
 	return &cfg, nil
+}
+
+func Load(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return LoadFromBytes(data)
 }
 
 // Save writes the config atomically: marshal → temp file in the same dir → fsync

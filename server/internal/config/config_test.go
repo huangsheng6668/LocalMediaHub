@@ -104,6 +104,42 @@ func TestPublicRedactsOnlyFFmpegPath(t *testing.T) {
 	}
 }
 
+// TestPublicRedactsServerToken is a regression test for the Round 29 security
+// fix. ConfigPublic previously embedded ServerConfig directly, so its Token
+// field (added in Task 2) was serialized into the GET /api/v1/admin/config
+// response — letting any caller read the configured bearer token and bypass
+// the entire auth layer. The test uses a non-empty, distinctive token so the
+// regression would be caught regardless of which field name or value shape
+// the leak takes.
+func TestPublicRedactsServerToken(t *testing.T) {
+	const secret = "lmh-pr-29-leak-canary-token-DO-NOT-EXPOSE"
+	cfg := &Config{
+		Server: ServerConfig{Host: "0.0.0.0", Port: 8000, Token: secret},
+		System: SystemConfig{
+			AllowedRoots: []string{"D:/Media"},
+			EnableDelete: true,
+		},
+	}
+
+	data, err := json.Marshal(cfg.Public())
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(data)
+
+	if strings.Contains(s, secret) {
+		t.Fatalf("Public() leaked server token into config response: %s", s)
+	}
+	if strings.Contains(strings.ToLower(s), `"token"`) {
+		t.Fatalf("Public() serialized a token field — server token must be omitted entirely: %s", s)
+	}
+	// Sanity: host/port should still be present so the test is meaningful
+	// (i.e. we didn't just produce an empty object).
+	if !strings.Contains(s, "0.0.0.0") || !strings.Contains(s, "8000") {
+		t.Fatalf("Public() lost expected server fields: %s", s)
+	}
+}
+
 func TestSaveIsAtomicAndReadable(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -137,5 +173,36 @@ func TestSaveIsAtomicAndReadable(t *testing.T) {
 	}
 	if loaded.Server.Port != 8000 {
 		t.Errorf("expected port 8000, got %d", loaded.Server.Port)
+	}
+}
+
+func TestServerConfigTokenRoundTrip(t *testing.T) {
+	yamlIn := []byte(`
+server:
+  host: "0.0.0.0"
+  port: 8000
+  token: "my-secret-token"
+`)
+	cfg, err := LoadFromBytes(yamlIn)
+	if err != nil {
+		t.Fatalf("LoadFromBytes failed: %v", err)
+	}
+	if cfg.Server.Token != "my-secret-token" {
+		t.Errorf("Token = %q, want %q", cfg.Server.Token, "my-secret-token")
+	}
+}
+
+func TestServerConfigTokenDefaultsEmpty(t *testing.T) {
+	yamlIn := []byte(`
+server:
+  host: "0.0.0.0"
+  port: 8000
+`)
+	cfg, err := LoadFromBytes(yamlIn)
+	if err != nil {
+		t.Fatalf("LoadFromBytes failed: %v", err)
+	}
+	if cfg.Server.Token != "" {
+		t.Errorf("Token = %q, want empty default", cfg.Server.Token)
 	}
 }
