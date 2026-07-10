@@ -35,6 +35,19 @@ export const state = {
     videoDuration: 0,
     transcodeStartOffset: 0,
     isDraggingProgress: false,
-    
-    apiBase: ''
+
+    apiBase: '',
+
+    // Auth token for API authentication
+    authToken: sessionStorage.getItem('lmh_auth_token') || ''
 };
+
+// Auth token setter with sessionStorage sync
+export function setAuthToken(token) {
+    state.authToken = token;
+    if (token) {
+        sessionStorage.setItem('lmh_auth_token', token);
+    } else {
+        sessionStorage.removeItem('lmh_auth_token');
+    }
+}
