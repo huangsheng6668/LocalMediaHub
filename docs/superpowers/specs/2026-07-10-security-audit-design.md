@@ -23,8 +23,8 @@
 | 等级 | 数量 | 占比 |
 |---|---|---|
 | P0（High，CVSS ≥ 7.0） | 11 | 19% |
-| P1（Medium，4.0–6.9） | 38 | 65% |
-| P2（Low，< 4.0） | 9 | 16% |
+| P1（Medium，4.0–6.9） | 24 | 41% |
+| P2（Low，< 4.0） | 23 | 40% |
 | Informational | 4 | —— |
 
 **关键结论**：
@@ -167,86 +167,86 @@
 
 | ID | STRIDE | 威胁 | 代码证据 | 当前缓解 | CVSS 向量 | Base | 严重度 |
 |---|---|---|---|---|---|---|---|
-| **T1-01a** | EoP | 无鉴权 PUT `/admin/config` 篡改 `scan.roots` 为 `C:\Users` | `admin.go:18` | 仅 CORS IP 白名单 | `AV:A/PR:N/UI:N/S:U/C:H/I:H/A:H` | 8.0 | **High** |
-| **T1-01b** | Tampering | `UpdateConfig` 持久化写入 `config.yaml` | `admin.go:36` `cfg.Save("config.yaml")` | 仅 `filepath.IsAbs` 校验 | `AV:A/PR:N/UI:N/S:U/C:N/I:H/A:L` | 6.1 | Medium |
-| **T1-01c** | Info Disclosure | PUT 响应回 `allowed_roots` 完整路径布局 | `admin.go:42` 返回 `cfg.Public()` | 无 | `AV:A/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
-| **T1-02a** | Tampering | 无鉴权 POST `/system/delete` 删除 `allowed_roots` 内任意单文件 | `system.go:228` `os.Remove` | `enable_delete` 开关 + `ValidateDeletion` | `AV:A/PR:N/UI:N/S:U/C:N/I:H/A:L` | 6.1 | Medium |
-| **T1-02b** | Tampering | 同上 `recursive:true` 删整目录树 | `system.go:224` `os.RemoveAll` | 同上 | `AV:A/PR:N/UI:N/S:U/C:N/I:H/A:H` | 7.6 | **High** |
-| **T1-02c** | Repudiation | 删除操作无审计日志 | `system.go:192` 无 slog | 无 | `AV:A/PR:N/UI:N/S:U/C:N/I:L/A:N` | 3.1 | Low |
-| **T1-03a** | Spoofing | mDNS 伪造：恶意主机注册同名 `_localmediahub._tcp`，Android NSD 优先连到攻击者 | `mdns.go:31` 无认证 TXT | 无 | `AV:A/PR:N/UI:R/S:C/C:H/I:H/A:L` | 7.6 | **High** |
-| **T1-03b** | Spoofing | Android 自动重连"上次成功 server"，被伪 server 接管后持久 | `ConnectionScreen.kt`（README 描述了"优先尝试上次成功连接"） | 用户手动重置才能恢复 | `AV:A/PR:N/UI:R/S:C/C:H/I:H/A:L` | 7.6 | **High** |
-| **T1-03c** | Spoofing | TXT 记录 `path=/` 无版本协商 | `mdns.go:38` | 无 | `AV:A/PR:N/UI:R/S:U/C:L/I:L/A:N` | 4.0 | Medium |
-| **T1-04a** | Info Disclosure | HTTP 明文 JSON（文件路径/收藏/标签） | `server.go:86` 无 TLS | 无 | `AV:A/PR:N/UI:N/S:U/C:H/I:N/A:N` | 6.1 | Medium |
-| **T1-04b** | Info Disclosure | HTTP 明文媒体流（私人内容） | `streaming.go` 无 TLS | 无 | `AV:A/PR:N/UI:N/S:U/C:H/I:N/A:N` | 6.1 | Medium |
-| **T1-04c** | Info Disclosure | HTTP 明文 Authorization（未来 token） | `cors.go:22` | n/a | `AV:A/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
-| **T1-05** | Tampering | 转码流 MITM：注入恶意 mp4 触发 ExoPlayer/FFmpeg 解码漏洞 | `streaming.go:133` | 无 | `AV:A/PR:N/UI:R/S:C/C:L/I:H/A:L` | 6.3 | Medium |
-| **T1-06** | DoS | 单 IP 无限并发连接 | `server.go` 无 rate limit | 仅 per-connection 超时 | `AV:A/PR:N/UI:N/S:U/C:N/I:N/A:L` | 3.7 | Low |
-| **T1-07** | Info Disclosure | GET `/admin/config` 公开 `allowed_roots` 全部路径 | `config.go:104` + `admin.go:14` | CORS 白名单 | `AV:A/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
+| **T1-01a** | EoP | 无鉴权 PUT `/admin/config` 篡改 `scan.roots` 为 `C:\Users` | `admin.go:18` | 仅 CORS IP 白名单 | `AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H` | 8.0 | **High** |
+| **T1-01b** | Tampering | `UpdateConfig` 持久化写入 `config.yaml` | `admin.go:36` `cfg.Save("config.yaml")` | 仅 `filepath.IsAbs` 校验 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:L` | 6.1 | Medium |
+| **T1-01c** | Info Disclosure | PUT 响应回 `allowed_roots` 完整路径布局 | `admin.go:42` 返回 `cfg.Public()` | 无 | `AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
+| **T1-02a** | Tampering | 无鉴权 POST `/system/delete` 删除 `allowed_roots` 内任意单文件 | `system.go:228` `os.Remove` | `enable_delete` 开关 + `ValidateDeletion` | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:L` | 6.1 | Medium |
+| **T1-02b** | Tampering | 同上 `recursive:true` 删整目录树 | `system.go:224` `os.RemoveAll` | 同上 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H` | 7.6 | **High** |
+| **T1-02c** | Repudiation | 删除操作无审计日志 | `system.go:192` 无 slog | 无 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N` | 3.1 | Low |
+| **T1-03a** | Spoofing | mDNS 伪造：恶意主机注册同名 `_localmediahub._tcp`，Android NSD 优先连到攻击者 | `mdns.go:31` 无认证 TXT | 无 | `AV:A/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:L` | 7.6 | **High** |
+| **T1-03b** | Spoofing | Android 自动重连"上次成功 server"，被伪 server 接管后持久 | `ConnectionScreen.kt`（README 描述了"优先尝试上次成功连接"） | 用户手动重置才能恢复 | `AV:A/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:L` | 7.6 | **High** |
+| **T1-03c** | Spoofing | TXT 记录 `path=/` 无版本协商 | `mdns.go:38` | 无 | `AV:A/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N` | 4.0 | Medium |
+| **T1-04a** | Info Disclosure | HTTP 明文 JSON（文件路径/收藏/标签） | `server.go:86` 无 TLS | 无 | `AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N` | 6.1 | Medium |
+| **T1-04b** | Info Disclosure | HTTP 明文媒体流（私人内容） | `streaming.go` 无 TLS | 无 | `AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N` | 6.1 | Medium |
+| **T1-04c** | Info Disclosure | HTTP 明文 Authorization（未来 token） | `cors.go:22` | n/a | `AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
+| **T1-05** | Tampering | 转码流 MITM：注入恶意 mp4 触发 ExoPlayer/FFmpeg 解码漏洞 | `streaming.go:133` | 无 | `AV:A/AC:L/PR:N/UI:R/S:C/C:L/I:H/A:L` | 6.3 | Medium |
+| **T1-06** | DoS | 单 IP 无限并发连接 | `server.go` 无 rate limit | 仅 per-connection 超时 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L` | 3.7 | Low |
+| **T1-07** | Info Disclosure | GET `/admin/config` 公开 `allowed_roots` 全部路径 | `config.go:104` + `admin.go:14` | CORS 白名单 | `AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
 
 ### 3.2 T2 边界（Android JVM ↔ Native）— 7 项
 
 | ID | STRIDE | 威胁 | 代码证据 | 当前缓解 | CVSS 向量 | Base | 严重度 |
 |---|---|---|---|---|---|---|---|
-| **T2-01** | Info Disclosure | `png.rs:58` `set_len` 依赖 png 0.17 契约；crate 违约 → 未初始化内存读 | `png.rs:58` | SAFETY 注释完善 + 单测 | `AV:N/PR:N/UI:R/S:U/C:L/I:N/A:L` | 3.7 | Low |
-| **T2-02** | Info | `from_raw_parts` 已 clamp 到 capacity | `decoders.rs:178` | clamp 逻辑 + 单测 | n/a | 0.0 | Info |
-| **T2-03a** | Tampering | `libffmpeg.so` 无来源/SHA256/版本 → 无法审计 CVE | `jniLibs/arm64-v8a/libffmpeg.so` | 无 | `AV:N/PR:N/UI:R/S:C/C:H/I:H/A:H` | 8.6 | **High** |
-| **T2-03b** | Tampering | FFmpeg 历史多个 HEVC/MP4 RCE CVE；毒视频可 RCE Android | 同上 | 无 | `AV:N/PR:N/UI:R/S:C/C:H/I:H/A:H` | 8.6 | **High** |
-| **T2-04** | DoS | Rust panic 已被 `catch_unwind` 捕获 → 降级 | `decoders.rs:105,149` | catch_unwind + AssertUnwindSafe | `AV:N/PR:N/UI:R/S:U/C:N/I:N/A:L` | 3.1 | Low |
+| **T2-01** | Info Disclosure | `png.rs:58` `set_len` 依赖 png 0.17 契约；crate 违约 → 未初始化内存读 | `png.rs:58` | SAFETY 注释完善 + 单测 | `AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:L` | 3.7 | Low |
+| **T2-02** | Info | `from_raw_parts` 已 clamp 到 capacity | `decoders.rs:179` | clamp 逻辑 + 单测 | n/a | 0.0 | Info |
+| **T2-03a** | Tampering | `libffmpeg.so` 无来源/SHA256/版本 → 无法审计 CVE | `jniLibs/arm64-v8a/libffmpeg.so` | 无 | `AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:H/A:H` | 8.6 | **High** |
+| **T2-03b** | Tampering | FFmpeg 历史多个 HEVC/MP4 RCE CVE；毒视频可 RCE Android | 同上 | 无 | `AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:H/A:H` | 8.6 | **High** |
+| **T2-04** | DoS | Rust panic 已被 `catch_unwind` 捕获 → 降级 | `decoders.rs:105,149` | catch_unwind + AssertUnwindSafe | `AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:N/A:L` | 3.1 | Low |
 | **T2-05** | Info | `bitmap.rs:139-158` stride 用 NDK 返回值，`rgba.len() < expected` 守卫已加 | `bitmap.rs:139-160` | 完整 + catch_unwind | n/a | 0.0 | Info |
-| **T2-06** | Tampering | HEIC 解码 fallback 到 Android `AImageDecoder`，漏洞面转移给系统 | `heif.rs:27` | 平台级 | `AV:N/PR:N/UI:R/S:C/C:H/I:H/A:H` | 8.6 | **High** |
+| **T2-06** | Tampering | HEIC 解码：Rust 端 `heif.rs:27` 返回 `None` → Kotlin 侧 `NativeImageDecoder.kt` 回退到 `BitmapFactory`（平台 AImageDecoder），漏洞面转移给系统 | `heif.rs:27` + `NativeImageDecoder.kt:113-122` | 平台级 | `AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:H/A:H` | 8.6 | **High** |
 
 ### 3.3 T3 边界（Server ↔ 文件系统）— 8 项
 
 | ID | STRIDE | 威胁 | 代码证据 | 当前缓解 | CVSS 向量 | Base | 严重度 |
 |---|---|---|---|---|---|---|---|
-| **T3-01a** | Info Disclosure | `scan.roots` 未配置时自动探测 `A-Z` 全盘 | `config.go:42` | blockedSegments | `AV:A/PR:N/UI:N/S:U/C:H/I:N/A:N` | 6.1 | Medium |
-| **T3-01b** | Info Disclosure | blockedSegments 未含 `users`（注释说刻意） | `path.go:22` | 设计取舍 | `AV:A/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
-| **T3-01c** | Info Disclosure | `ProgramData`/`inetpub` 等敏感目录未列入 blockedSegments | `path.go:22` | 部分缓解 | `AV:A/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
-| **T3-02** | Tampering | `enable_delete:true` + 自动盘符 → 删任意盘任意媒体 | `system.go:193` + `config.go:42` | 仅 `enable_delete` 开关 | `AV:A/PR:N/UI:N/S:U/C:N/I:H/A:H` | 7.6 | **High** |
-| **T3-03a** | Tampering | 转码 `-i filePath`，路径校验绕过可让 ffmpeg 解释为协议（`concat:`/`sub:`） | `streaming.go:161` | 路径校验 + ffmpeg 默认禁协议 | `AV:A/PR:L/UI:N/S:U/C:L/I:L/A:L` | 4.6 | Medium |
-| **T3-03b** | Info Disclosure | ffprobe 同上 | `streaming.go:255` | 同上 | `AV:A/PR:L/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
-| **T3-04a** | DoS | 缩略图 fork ffmpeg 无全局 rate limit | `thumbnail.go:73` | sem 部分缓解 | `AV:A/PR:N/UI:N/S:U/C:N/I:N/A:L` | 3.7 | Low |
-| **T3-04b** | DoS | 任意客户端触发 `/admin/scan/trigger` 全盘扫描 | `admin.go:45` 无 rate limit | 无 | `AV:A/PR:N/UI:N/S:U/C:N/I:N/A:L` | 3.7 | Low |
+| **T3-01a** | Info Disclosure | `scan.roots` 未配置时自动探测 `A-Z` 全盘 | `config.go:42` | blockedSegments | `AV:A/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N` | 6.1 | Medium |
+| **T3-01b** | Info Disclosure | blockedSegments 未含 `users`（注释说刻意） | `path.go:22` | 设计取舍 | `AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
+| **T3-01c** | Info Disclosure | `ProgramData`/`inetpub` 等敏感目录未列入 blockedSegments | `path.go:22` | 部分缓解 | `AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
+| **T3-02** | Tampering | `enable_delete:true` + 自动盘符 → 删任意盘任意媒体 | `system.go:193` + `config.go:42` | 仅 `enable_delete` 开关 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H` | 7.6 | **High** |
+| **T3-03a** | Tampering | 转码 `-i filePath`，路径校验绕过可让 ffmpeg 解释为协议（`concat:`/`sub:`） | `streaming.go:161` | 路径校验 + ffmpeg 默认禁协议 | `AV:A/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L` | 4.6 | Medium |
+| **T3-03b** | Info Disclosure | ffprobe 同上 | `streaming.go:254` | 同上 | `AV:A/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
+| **T3-04a** | DoS | 缩略图 fork ffmpeg 无全局 rate limit | `thumbnail.go:73` | sem 部分缓解 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L` | 3.7 | Low |
+| **T3-04b** | DoS | 任意客户端触发 `/admin/scan/trigger` 全盘扫描 | `admin.go:45` 无 rate limit | 无 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L` | 3.7 | Low |
 
 ### 3.4 T4 边界（浏览器 ↔ Web UI）— 8 项
 
 | ID | STRIDE | 威胁 | 代码证据 | 当前缓解 | CVSS 向量 | Base | 严重度 |
 |---|---|---|---|---|---|---|---|
-| **T4-01a** | XSS | `dashboard.js:55` 拼 `file.name` 到 innerHTML | `dashboard.js:55` | 待覆盖率验证 | `AV:A/PR:N/UI:R/S:C/C:L/I:L/A:N` | 5.4 | Medium |
-| **T4-01b** | XSS | `browserView.js` 28+ 处拼路径/文件名 | `browserView.js` | 待验证 | 同上 | 5.4 | Medium |
-| **T4-01c** | XSS | `tagsView.js` 拼 tag 名 | `tagsView.js:36,86,121` | 待验证 | 同上 | 5.4 | Medium |
-| **T4-01d** | XSS | `lightbox.js:56` HTML 模板插入路径 | `lightbox.js:56` | 待验证 | 同上 | 5.4 | Medium |
-| **T4-01e** | XSS | `safeBtoa` fallback `replace(/[^a-zA-Z0-9]/g,'_')` DOM clobbering | `utils.js:23` | 部分 | `AV:A/PR:N/UI:R/S:U/C:L/I:L/A:N` | 4.3 | Medium |
-| **T4-02** | CSRF | `/admin/config` PUT 走 JSON body 触发预检（部分缓解） | `cors.go` | 预检 + Origin 白名单 | `AV:A/PR:N/UI:R/S:U/C:N/I:L/A:L` | 4.3 | Medium |
-| **T4-03** | Clickjacking | 缺 `X-Frame-Options`/`frame-ancestors` CSP | `server.go` 无安全头 | 无 | `AV:A/PR:N/UI:R/S:U/C:L/I:L/A:N` | 4.3 | Medium |
-| **T4-04** | Info Disclosure | 缺 `nosniff` / CSP / Referrer-Policy | 同上 | 无 | `AV:A/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.1 | Low |
+| **T4-01a** | XSS | `dashboard.js:55` innerHTML 赋值含动态字段（`file.name` 已走 `escapeHtml`，`file.size` 经 `formatSize`）；风险在于未来新增字段可能遗漏 escape | `dashboard.js:55-62` | `escapeHtml` 已覆盖当前字段 | `AV:A/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N` | 5.4 | Medium |
+| **T4-01b** | XSS | `browserView.js` 12 处 innerHTML（动态路径/文件名/drive 均已走 `escapeHtml`）；风险同 T4-01a：新增字段漏洞窗口 | `browserView.js` | `escapeHtml` 已覆盖当前字段 | 同上 | 5.4 | Medium |
+| **T4-01c** | XSS | `tagsView.js` 4 处 innerHTML（tag 名/颜色已走 `escapeHtml`） | `tagsView.js:36,86,121` | `escapeHtml` 已覆盖当前字段 | 同上 | 5.4 | Medium |
+| **T4-01d** | XSS | `lightbox.js:56` HTML 模板插入路径（已走 `escapeHtml`） | `lightbox.js:56` | `escapeHtml` 已覆盖当前字段 | 同上 | 5.4 | Medium |
+| **T4-01e** | XSS | `safeBtoa` fallback `replace(/[^a-zA-Z0-9]/g,'_')` DOM clobbering | `utils.js:19-23` | 部分 | `AV:A/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N` | 4.3 | Medium |
+| **T4-02** | CSRF | `/admin/config` PUT 走 JSON body 触发预检（部分缓解） | `cors.go` | 预检 + Origin 白名单 | `AV:A/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:L` | 4.3 | Medium |
+| **T4-03** | Clickjacking | 缺 `X-Frame-Options`/`frame-ancestors` CSP | `server.go` 无安全头 | 无 | `AV:A/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N` | 4.3 | Medium |
+| **T4-04** | Info Disclosure | 缺 `nosniff` / CSP / Referrer-Policy | 同上 | 无 | `AV:A/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.1 | Low |
 
 ### 3.5 T5 边界（Server ↔ OS 命令行）— 3 项
 
 | ID | STRIDE | 威胁 | 代码证据 | 当前缓解 | CVSS 向量 | Base | 严重度 |
 |---|---|---|---|---|---|---|---|
-| **T5-01a** | EoP | `System.FFmpegPath` 从 config 读，理论可指向任意 exe | `streaming.go:135` + `config.go:74` | 仅路径校验（注：当前 PUT 不暴露此字段） | `AV:A/PR:N/UI:N/S:C/C:H/I:H/A:H` | 8.0 | **High** |
-| **T5-01b** | EoP | ffmpeg `-i filePath` 协议前缀注入 | `streaming.go:161` | 路径校验 | `AV:A/PR:L/UI:N/S:U/C:H/I:N/A:N` | 5.6 | Medium |
-| **T5-02** | DoS | `serveTranscoded` 无 timeout（仅 `extractVideoFrameToImage` 有 15s） | `streaming.go:177` | 部分 | `AV:A/PR:N/UI:N/S:U/C:N/I:N/A:L` | 3.7 | Low |
+| **T5-01a** | EoP | `System.FFmpegPath` 从 config 读，理论可指向任意 exe | `streaming.go:134` + `config.go:73` | 仅路径校验（注：当前 PUT 不暴露此字段） | `AV:A/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H` | 8.0 | **High** |
+| **T5-01b** | EoP | ffmpeg `-i filePath` 协议前缀注入 | `streaming.go:161` | 路径校验 | `AV:A/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N` | 5.6 | Medium |
+| **T5-02** | DoS | `serveTranscoded` 无 timeout（仅 `extractVideoFrameToImage` 有 15s） | `streaming.go:177` | 部分 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L` | 3.7 | Low |
 
 ### 3.6 T6 边界（供应链）— 5 项
 
 | ID | STRIDE | 威胁 | 代码证据 | 当前缓解 | CVSS 向量 | Base | 严重度 |
 |---|---|---|---|---|---|---|---|
-| **T6-01** | Tampering | Go modules 无 strict mode | `server/go.mod` | 标准 go.sum | `AV:A/PR:L/UI:N/S:U/C:L/I:L/A:L` | 4.6 | Medium |
-| **T6-02** | Tampering | Cargo.lock 已入库但无 audit 自动化 | `rust/Cargo.lock` | 部分 | `AV:A/PR:L/UI:N/S:U/C:L/I:L/A:L` | 4.6 | Medium |
+| **T6-01** | Tampering | Go modules 无 strict mode | `server/go.mod` | 标准 go.sum | `AV:A/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L` | 4.6 | Medium |
+| **T6-02** | Tampering | Cargo.lock 已入库但无 audit 自动化 | `rust/Cargo.lock` | 部分 | `AV:A/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L` | 4.6 | Medium |
 | **T6-03** | Tampering | Gradle 未启用 dependency locking | `android/app/build.gradle.kts` | 无 | 同上 | 4.6 | Medium |
-| **T6-04** | Tampering | `libffmpeg.so` 预编译来源未记录 | 项目文档 | 无 | `AV:A/PR:L/UI:N/S:C/C:H/I:H/A:H` | 8.0 | **High** |
-| **T6-05** | Info Disclosure | Android `allowBackup="true"` + ServerConfigStore 可被 `adb backup` 提取 | `AndroidManifest.xml:15` | 无 | `AV:P/PR:N/UI:N/S:U/C:L/I:N/A:N` | 2.5 | Low |
+| **T6-04** | Tampering | `libffmpeg.so` 预编译来源未记录 | 项目文档 | 无 | `AV:A/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H` | 8.0 | **High** |
+| **T6-05** | Info Disclosure | Android `allowBackup="true"` + ServerConfigStore 可被 `adb backup` 提取 | `AndroidManifest.xml:15` | 无 | `AV:P/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N` | 2.5 | Low |
 
 ### 3.7 T7 边界（构建/配置）— 4 项
 
 | ID | STRIDE | 威胁 | 代码证据 | 当前缓解 | CVSS 向量 | Base | 严重度 |
 |---|---|---|---|---|---|---|---|
-| **T7-01** | Spoofing | release 签名 fallback debug.keystore | `build.gradle.kts:57-60` | 仅警告日志 | `AV:N/PR:N/UI:R/S:C/C:L/I:H/A:N` | 6.1 | Medium |
-| **T7-02** | Tampering | 依赖偏旧含 CVE（okhttp 4.12.0 / gson 2.8.9 / media3 1.2.0） | `build.gradle.kts:251,282,265` | 无 | `AV:A/PR:L/UI:N/S:U/C:L/I:L/A:L` | 4.6 | Medium |
-| **T7-03** | Info Disclosure | `cleartextTrafficPermitted="true"` 全局 | `network_security_config.xml:3` | 设计取舍 | `AV:A/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
-| **T7-04** | Tampering | `config.yaml` 默认 `enable_delete:true` | `config.yaml:34` | 用户决定 | `AV:A/PR:N/UI:N/S:U/C:N/I:H/A:H` | 7.6 | **High** |
+| **T7-01** | Spoofing | release 签名 fallback debug.keystore | `build.gradle.kts:57-60` | 仅警告日志 | `AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:H/A:N` | 6.1 | Medium |
+| **T7-02** | Tampering | 依赖偏旧含 CVE（okhttp 4.12.0 / gson 2.8.9 / media3 1.2.0） | `build.gradle.kts:251,282,265` | 无 | `AV:A/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L` | 4.6 | Medium |
+| **T7-03** | Info Disclosure | `cleartextTrafficPermitted="true"` 全局 | `network_security_config.xml:3` | 设计取舍 | `AV:A/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N` | 3.7 | Low |
+| **T7-04** | Tampering | `config.yaml` 默认 `enable_delete:true` | `config.yaml:34` | 用户决定 | `AV:A/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:H` | 7.6 | **High** |
 
 ### 3.8 T8 补盲（checklist）— 12 项
 
@@ -256,7 +256,7 @@
 | **T8-02** | OWASP API5 | admin 路由无独立中间件 | Low |
 | **T8-03** | OWASP API9 | 三套媒体端点策略重复 | Low |
 | **T8-04** | MASVS 4.6 | 无 TLS 证书锁定（未来加 TLS 时） | Info |
-| **T8-05** | XSS Cheat Sheet | 28 处 innerHTML 的 escapeHtml 覆盖率未审计 | Medium |
+| **T8-05** | XSS Cheat Sheet | 27 处 innerHTML 的 escapeHtml 覆盖率已审计（当前所有动态字段均已覆盖，残余风险为未来新增字段） | Medium |
 | **T8-06** | CJ Cheat Sheet | 未启用 Trusted Types（条件性） | Info |
 | **T8-07** | RustSec | 无 `cargo audit` 自动化 | Low |
 | **T8-08** | SLSA SC-1 | Gradle 无 dependency locking | Low |
@@ -320,8 +320,18 @@
 
 **修复策略**：
 
-1. 在 `server/internal/server/middleware/` 新增 `auth.go`，实现 Bearer Token 中间件：
+1. 在 `server/internal/server/middleware/` 新增 `auth.go`，实现 Bearer Token 中间件。为防止局域网内未授权访问泄露媒体目录和内容，并且为了满足 Android/Web UI 统一的 JSON 错误响应格式，必须返回 `{"error": "Unauthorized"}` 的规范格式。**关键**：token 比较必须使用 `crypto/subtle.ConstantTimeCompare`，防止定时攻击逐字节猜解 token（即使在 LAN 场景下，攻击者可发送大量请求统计响应时间差异）：
    ```go
+   package middleware
+
+   import (
+       "crypto/subtle"
+       "net/http"
+       "strings"
+
+       "github.com/labstack/echo/v4"
+   )
+
    func BearerToken(token string) echo.MiddlewareFunc {
        return func(next echo.HandlerFunc) echo.HandlerFunc {
            return func(c echo.Context) error {
@@ -329,18 +339,21 @@
                    return next(c) // 兼容未配置场景
                }
                auth := c.Request().Header.Get(echo.HeaderAuthorization)
-               if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != token {
-                   return echo.ErrUnauthorized
+               provided := strings.TrimPrefix(auth, "Bearer ")
+               if !strings.HasPrefix(auth, "Bearer ") ||
+                   subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+                   return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
                }
                return next(c)
            }
        }
    }
    ```
-2. 在 `config.yaml` 增加 `auth.token` 字段（默认空 = 兼容旧行为，日志告警）。
-3. 在 `server.go:registerRoutes` 中给 `admin`/`system`/`media` 三个路由组加 `BearerToken` 中间件。
-4. Android 端 `ServerConfigStore` 增加 `token` 字段，OkHttp 拦截器自动注入 `Authorization`。
-5. Web UI 启动时弹窗要求 token，存 `sessionStorage`，`apiRequest` 自动注入。
+2. 在 `config.yaml` 的 `server` 块下增加 `token` 字段（默认空 = 兼容旧行为，若开启则进行校验，关闭时日志打印安全警告）。
+3. 在 `server/internal/config/config.go` 的 `ServerConfig` 结构体中添加对应的 `Token` 字段。
+4. 在 `server.go:registerRoutes` 中，建议除健康检查 `/health` 之外的所有敏感业务 API 路由（包括 `folders`/`videos`/`images`/`search`/`tags`/`admin`/`system`/`media` 组）统一挂载 `BearerToken` 中间件。如果只想防范越权/删改行为，至少应为 `admin`/`system`/`media` 组强制启用该中间件。
+5. Android 端 `ServerConfigStore` 增加 `token` 字段，OkHttp 拦截器自动在 `Authorization` 请求头中注入 `Bearer <token>`。
+6. Web UI 启动时检测到 API 返回 401，弹窗要求用户输入 token，并存入 `sessionStorage`，后续 `apiRequest` 自动注入该请求头。
 
 **验证方法**：
 
@@ -366,7 +379,7 @@
 1. **追溯来源**：查 `libffmpeg.so` 是从哪个 NDK / 哪个 FFmpeg 版本编译的；若无记录，重新用 documented 流程构建（`ffmpeg-6.1.1` 源码在 `build/ffmpeg-src/` 已存在，可编译）。
 2. **生成 SBOM**：用 `syft` 或 `cargo-about` 生成 `.so` 的 SBOM，登记到 `docs/sbom/libffmpeg.md`。
 3. **SHA256 校验**：在 `build.gradle.kts` 加 task，构建时校验 `jniLibs/arm64-v8a/libffmpeg.so` 的 SHA256 与 `docs/sbom/libffmpeg.sha256` 一致。
-4. **启用 ffmpeg 协议白名单**：重新编译时禁用 `concat`/`sub`/`data` 等危险协议（`--disable-protocols --enable-protocol=file`）。
+4. **启用 ffmpeg 协议白名单**：重新编译时禁用 `concat`/`sub`/`data` 等危险协议。**注意：** 必须同时包含 `file` 和 `pipe` 协议，因为流式转码时需要写入 `pipe:1` 输出流（配置为 `--disable-protocols --enable-protocol=file,pipe`）。
 
 **验证方法**：
 1. SBOM 文档存在且版本号明确
@@ -419,6 +432,9 @@
                h.Set("X-Frame-Options", "DENY")
                h.Set("X-Content-Type-Options", "nosniff")
                h.Set("Referrer-Policy", "no-referrer")
+               // NOTE: 'unsafe-inline' for style-src is a pragmatic concession for
+               // existing inline styles in the Web UI. Should be removed after
+               // migrating all inline styles to external CSS (tracked as follow-up).
                h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'")
                return next(c)
            }
@@ -444,7 +460,7 @@
 
 **修复策略**：
 
-1. **覆盖率审计**：逐一检查 28 处 innerHTML 拼接点（dashboard.js / browserView.js / tagsView.js / lightbox.js），所有用户可控字段（`file.name` / `file.path` / `tag.name`）必须走 `escapeHtml`。
+1. **覆盖率审计**：逐一检查所有 27 处 innerHTML 赋值点（browserView.js 12 处 / dashboard.js 4 处 / tagsView.js 4 处 / lightbox.js 5 处 / 未来新增模块），确认所有用户可控字段（`file.name` / `file.path` / `tag.name` / `tag.color`）已走 `escapeHtml`。**经本次审计验证，当前所有动态字段均已覆盖 `escapeHtml`**，残余风险为未来新增字段遗漏 escape。
 2. **最小整改**：补全遗漏的 escapeHtml 调用。
 3. **彻底整改**（推荐）：将 innerHTML 拼接改为 `textContent` + `createElement` 模式（DOM API）。
 4. **CSP 启用**：在阶段 4 CSP 基础上禁用 `unsafe-inline`。
@@ -455,7 +471,7 @@
 3. DOMPurify 或 Trusted Types 强制 → 所有 innerHTML 经检查
 
 **潜在副作用**：
-- 彻底整改工作量大（28 处） → 推荐分两步：先补漏洞，再迁移
+- 彻底整改工作量大（27 处 innerHTML） → 推荐分两步：先确保所有动态字段走 `escapeHtml`（经审计已达成），再迁移到 DOM API
 
 ### 5.6 阶段 6：供应链扫描与依赖升级
 
@@ -656,7 +672,6 @@ jobs:
 | Chain-B | 7.6 | High | 跨界 | 无鉴权 + enable_delete → 删任意 | 1+3 |
 | Chain-H | 7.1 | High | 跨界 | 持久 APT | 1+4 |
 | T1-05 | 6.3 | Medium | T1 | 转码流 MITM | 4 |
-| T2-05（降级） | 0.0 | Info | T2 | bitmap.rs stride（已守卫） | —— |
 | T4-01a-d | 5.4 | Medium | T4 | XSS innerHTML | 5 |
 | Chain-E/F/K/L | 5.4-5.9 | Medium | 跨界 | 客户端 DoS / 条件性 XSS | 5/2 |
 | T5-01b | 5.6 | Medium | T5 | ffmpeg 协议注入 | 8 |
@@ -691,10 +706,11 @@ jobs:
 | T7-03 | 3.7 | Low | T7 | cleartextTrafficPermitted | —— |
 | T8-02/03/07/08/10/11/12 | Low | T8 | 杂项 | 8 |
 | T1-02c | 3.1 | Low | T1 | 删除无审计日志 | 8 |
+| T6-05 | 2.5 | Low | T6 | allowBackup=true | 7 |
 | T2-02 | 0.0 | Info | T2 | from_raw_parts（已 clamp） | —— |
+| T2-05 | 0.0 | Info | T2 | bitmap.rs stride（已守卫） | —— |
 | T8-04 | Info | T8 | 无证书锁定（未来） | —— |
 | T8-06 | Info | T8 | 未启用 Trusted Types | —— |
-| T6-05 | 2.5 | Low | T6 | allowBackup=true | 7 |
 
 ---
 
