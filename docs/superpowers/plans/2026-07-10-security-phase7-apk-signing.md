@@ -101,12 +101,12 @@ Expected: No script evaluation errors. If `GradleException` is unresolved, add t
 - [ ] **Step 4: Verify fail-fast behavior (no keystore, no flag)**
 
 First ensure no `keystore.properties` exists (it's gitignored, so likely absent):
-```bash
-ls android/keystore.properties 2>&1 || echo "absent (expected)"
+```powershell
+if (Test-Path android/keystore.properties) { Write-Host "present (rename to test)" } else { Write-Host "absent (expected)" }
 ```
 
-Run: `cd android && ./gradlew assembleRelease 2>&1 | tail -20`
-Expected: BUILD FAILED, output contains `Release build requires a valid keystore.properties` + the 3 remediation lines.
+Run: `cd android && ./gradlew assembleRelease 2>&1 | Select-Object -Last 20`
+Expected: BUILD FAILED, output contains `Release build requires a valid keystore.properties` + 2 remediation options (configure keystore / use flag) + security warning.
 
 - [ ] **Step 5: Verify opt-in behavior (no keystore + flag)**
 
@@ -164,20 +164,16 @@ Expected: BUILD SUCCESSFUL. Invalid manifest attribute would fail the build.
 - [ ] **Step 3: Verify allowBackup=false in built APK**
 
 Run:
-```bash
+```powershell
 cd android
-# Use aapt to dump the merged manifest's allowBackup value:
-"$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/aapt" dump xmltree app/build/intermediates/packaged_manifests/debug/processDebugManifestForPackage/AndroidManifest.xml 2>&1 | grep -i allowBackup
+# Grep the merged manifest for allowBackup:
+Select-String -Path "app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml" -Pattern "allowBackup"
 ```
 
-Alternative if `aapt` path is hard to find: use `aapt2`:
-```bash
-cd android && ./gradlew :app:processDebugManifest --info 2>&1 | grep -i allowBackup | head -3
-```
-
-Or simpler — grep the merged manifest directly:
-```bash
-grep -i "allowBackup" android/app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml
+Alternative — use `aapt2 dump xmltree`:
+```powershell
+cd android
+& "$env:ANDROID_HOME\build-tools\$(Get-ChildItem $env:ANDROID_HOME\build-tools | Select-Object -Last 1)\aapt2.exe" dump xmltree --file AndroidManifest.xml app/build/outputs/apk/debug/app-debug.apk | Select-String -Pattern "allowBackup"
 ```
 
 Expected: `android:allowBackup="false"`.

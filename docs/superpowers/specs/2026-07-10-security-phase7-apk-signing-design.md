@@ -67,7 +67,7 @@ Phase 7 落实主 spec 第 5.7 节的"APK 签名加固"修复，针对两条攻�
 | 签名强制触发条件 | **命令行 flag `-PallowDebugSigning=true`** | 默认安全（fail）；本地调试显式 opt-in；未来加 CI 不传 flag 即 fail |
 | `allowBackup` 处理 | **只关 `allowBackup="false"`** | 一行改动覆盖所有 API level；`dataExtractionRules` 在 `allowBackup=false` 时冗余 |
 | flag 命名 | **`allowDebugSigning`** | 语义清晰，与 `allowBackup` 命名风格一致 |
-| 错误消息含 keytool 命令 | **是** | 降低新开发者上手成本 |
+| 错误消息引导至 `keystore.properties.example` | **是** | 降低新开发者上手成本（`keytool` 命令已在 example 文件中提供） |
 | README 签名指引位置 | **"### 3. 编译 Android 客户端"之后** | 上下文连贯 |
 
 ### 3.2 兼容性矩阵
@@ -110,7 +110,7 @@ Phase 7 落实主 spec 第 5.7 节的"APK 签名加固"修复，针对两条攻�
 2. 若 `keyAlias != null && storeFile.exists()` → 用 release key（不变）。
 3. 否则：
    - 读 `project.findProperty("allowDebugSigning")`。
-   - 若非 `"true"` → `throw GradleException(...)`，消息列出 3 种解决方式。
+   - 若非 `"true"` → `throw GradleException(...)`，消息列出 2 种解决方式 + 安全警告。
    - 若 `"true"` → 保留现有 debug.keystore fallback + warn 横幅。
 
 ```kotlin
@@ -218,7 +218,6 @@ Release 构建默认要求有效的 `keystore.properties`，未配置时会**构
 ```
 
 ⚠️ **切勿公开分发 debug 签名的 APK**——任何人都能用相同 debug key 重签名发布"官方" APK（Chain-I 供应链攻击）。
-```
 
 ---
 
@@ -232,7 +231,7 @@ Gradle 签名逻辑难以单元测试（涉及 `Project.findProperty` + `GradleE
 |---|---|---|
 | 无 keystore + 默认 → 构建失败 | `cd android && ./gradlew assembleRelease`（确保无 `keystore.properties`） | BUILD FAILED，错误消息含"Release build requires a valid keystore.properties" |
 | 无 keystore + `-PallowDebugSigning=true` → 构建成功 | `./gradlew assembleRelease -PallowDebugSigning=true` | BUILD SUCCESSFUL + warn 横幅 |
-| `allowBackup=false` 生效 | `aapt dump badging app/build/outputs/apk/release/app-release.apk \| grep -i backup` | 输出含 `application-label` 且 `allowBackup=false`（或 `aapt dump xmltree` 查 manifest） |
+| `allowBackup=false` 生效 | `aapt2 dump xmltree --file AndroidManifest.xml app/build/outputs/apk/debug/app-debug.apk \| grep -i allowBackup` 或 `grep allowBackup` merged manifest | 输出含 `allowBackup=false` |
 
 ### 6.2 手动验证
 
@@ -262,10 +261,10 @@ Gradle 签名逻辑难以单元测试（涉及 `Project.findProperty` + `GradleE
 
 ## 8. 验证完成标准
 
-- ✅ 无 `keystore.properties` + `./gradlew assembleRelease` → BUILD FAILED + 错误消息含 3 种解决方式
+- ✅ 无 `keystore.properties` + `./gradlew assembleRelease` → BUILD FAILED + 错误消息含 2 种解决方式（配 keystore / 加 flag）+ 安全警告
 - ✅ 无 `keystore.properties` + `./gradlew assembleRelease -PallowDebugSigning=true` → BUILD SUCCESSFUL + warn 横幅
 - ✅ 有 `keystore.properties` → BUILD SUCCESSFUL（用 release key，不论 flag）
-- ✅ `aapt dump badging` 确认 `allowBackup=false`
+- ✅ `aapt2 dump xmltree` 或 merged manifest grep 确认 `allowBackup=false`
 - ✅ `cd android && ./gradlew testDebugUnitTest assembleDebug` 全 green（debug 不受影响）
 - ✅ Phase 1 Android 测试无回归
 
