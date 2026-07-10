@@ -209,6 +209,19 @@ APK 输出位置：`android/app/build/outputs/apk/`
   *注：Android 端需要 `CHANGE_WIFI_MULTICAST_STATE` 权限以确保发现成功。*
 - **手动**: 在 App 中输入 PC 的局域网 IP（如 `192.168.1.100:8000`）
 
+## 升级迁移 (Phase 3 安全加固)
+
+Round 29 Phase 3 引入配置默认安全：服务端启动时若 `scan.roots` 和 `system.allowed_roots` 均为空且 `scan.auto_detect_roots: false`，将**拒绝启动**。
+
+**如果你升级后遇到 `refusing to start` 错误**，选择以下任一方式：
+
+1. 在 `config.yaml` 的 `scan.roots` 下显式列出媒体目录（推荐，最安全）
+2. 配置 `system.allowed_roots`（同时作为 scan roots 的 fallback）
+3. 在 `config.yaml` 设置 `scan.auto_detect_roots: true`（全盘扫描，需评估风险）
+4. 启动时加 `--auto-detect-roots` 命令行 flag（一次性 override）
+
+详见 `server/config.example.yaml` 的注释。
+
 ## API 端点一览
 
 ### 目录浏览
