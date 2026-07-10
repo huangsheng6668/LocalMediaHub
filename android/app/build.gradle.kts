@@ -270,7 +270,7 @@ dependencies {
     // libffmpeg.so is pre-built in jniLibs/arm64-v8a/ for future FFmpeg JNI bridge.
 
     // DataStore
-    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.9.0")
