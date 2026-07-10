@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
 
@@ -29,7 +30,12 @@ func (h *Handler) UpdateConfig(c echo.Context) error {
 		}
 	}
 
+	oldRoots := h.cfg.Scan.Roots
 	h.cfg.Scan.Roots = req.Roots
+	if err := h.cfg.Validate(false); err != nil {
+		h.cfg.Scan.Roots = oldRoots
+		return respondError(c, http.StatusBadRequest, fmt.Sprintf("invalid configuration: %v", err))
+	}
 	// Roots changed: drop any cached auto-detected drive list so subsequent
 	// GetRoots calls reflect the new configuration immediately.
 	h.cfg.Scan.InvalidateRootsCache()

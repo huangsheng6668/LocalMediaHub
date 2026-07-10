@@ -12,15 +12,37 @@ import (
 	"github.com/localmediahub/server/internal/server"
 )
 
-var headless bool
+var (
+	headless        bool
+	autoDetectRoots bool
+)
 
 func main() {
 	flag.BoolVar(&headless, "headless", false, "Run without GUI (system tray)")
+	flag.BoolVar(&autoDetectRoots, "auto-detect-roots", false,
+		"Force-enable auto-detection of all drives as scan roots (one-shot override; "+
+			"also achievable via scan.auto_detect_roots in config.yaml)")
 	flag.Parse()
 
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
 		slog.Error("Failed to load config", "error", err); os.Exit(1)
+	}
+
+	// Phase 3: validate config after Load, incorporating CLI override flags.
+	if err := cfg.Validate(autoDetectRoots); err != nil {
+		slog.Error("Invalid config", "error", err); os.Exit(1)
+	}
+
+	// Phase 3: log security warnings BEFORE any side effects (mDNS, server).
+	// Centralized in config.LogSecurityWarnings so the config layer owns
+	// "what is risky"; main.go owns the timing.
+	config.LogSecurityWarnings(cfg, autoDetectRoots)
+
+	// Phase 3: tighten config.yaml permissions to owner-only.
+	// Non-fatal on failure (read-only fs, Windows ACL quirks) — warn and continue.
+	if err := os.Chmod("config.yaml", 0600); err != nil {
+		slog.Warn("Failed to tighten config.yaml permissions to 0600", "error", err)
 	}
 
 	// Start mDNS

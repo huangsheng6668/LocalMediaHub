@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -25,6 +27,7 @@ type ScanConfig struct {
 	Roots           []string `yaml:"roots,omitempty" json:"roots,omitempty"`
 	VideoExtensions []string `yaml:"video_extensions" json:"video_extensions"`
 	ImageExtensions []string `yaml:"image_extensions" json:"image_extensions"`
+	AutoDetectRoots bool     `yaml:"auto_detect_roots,omitempty" json:"auto_detect_roots,omitempty"`
 
 	// Cached result of auto-detected drives (only used when Roots is empty).
 	// Detecting drives probes A-Z: with os.Stat on every call, which is called
@@ -109,6 +112,7 @@ type ScanConfigPublic struct {
 	Roots           []string `json:"roots,omitempty"`
 	VideoExtensions []string `json:"video_extensions"`
 	ImageExtensions []string `json:"image_extensions"`
+	AutoDetectRoots bool     `json:"auto_detect_roots,omitempty"`
 }
 
 type SystemConfigPublic struct {
@@ -120,10 +124,36 @@ type SystemConfigPublic struct {
 func (c *Config) Public() ConfigPublic {
 	return ConfigPublic{
 		Server:    ServerConfigPublic{Host: c.Server.Host, Port: c.Server.Port},
-		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions},
+		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions, AutoDetectRoots: c.Scan.AutoDetectRoots},
 		Thumbnail: c.Thumbnail,
 		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots, EnableDelete: c.System.EnableDelete},
 	}
+}
+
+// Validate checks if the configuration is safe and sufficient to start.
+// Refuses to start when no roots are configured and auto-detect is not
+// explicitly opted in (either via config or via command-line override flag).
+//
+// Note: LoadFromBytes already copies AllowedRoots → Roots when Roots is
+// empty and AllowedRoots is non-empty. So after a normal Load, if
+// AllowedRoots was set, Roots will be non-empty and this check passes.
+// The len(c.Scan.Roots)==0 condition therefore implicitly covers the
+// "both empty" case. We still check AllowedRoots explicitly for
+// callers who construct Config directly (tests, admin API Validate
+// before Save).
+func (c *Config) Validate(autoFromFlag bool) error {
+	if len(c.Scan.Roots) == 0 && len(c.System.AllowedRoots) == 0 && !c.Scan.AutoDetectRoots && !autoFromFlag {
+		return fmt.Errorf(
+			"refusing to start: no scan.roots or system.allowed_roots configured and " +
+				"scan.auto_detect_roots is false.\n" +
+				"To serve media, either:\n" +
+				"  1. List explicit roots under 'scan.roots' in config.yaml, or\n" +
+				"  2. Configure 'system.allowed_roots' (also serves as scan roots fallback), or\n" +
+				"  3. Set 'scan.auto_detect_roots: true' in config.yaml (serves ALL drives — " +
+				"review your threat model first), or\n" +
+				"  4. Run with --auto-detect-roots flag (one-shot override)")
+	}
+	return nil
 }
 
 // GetSystemAllowedRoots returns configured system browse roots.
@@ -146,6 +176,51 @@ func LoadFromBytes(data []byte) (*Config, error) {
 		cfg.Scan.Roots = append([]string(nil), cfg.System.AllowedRoots...)
 	}
 	return &cfg, nil
+}
+
+// LogSecurityWarnings prints slog.Warn banners for risky configuration.
+// Called from main.go AFTER config.Load succeeds, BEFORE server.New.
+//
+// Centralizing here (instead of inside server.New) keeps config layer
+// ownership of "what is risky" and lets main.go choose the timing
+// (e.g. before mDNS registration). server.New stays focused on wiring.
+//
+// autoFromFlag is the --auto-detect-roots flag value; it ORs with
+// cfg.Scan.AutoDetectRoots to determine the effective auto-detect state.
+// The "triggered by flag" note is only printed when flag forces on top of
+// a false config value (so users can distinguish persistent opt-in from
+// one-shot override).
+func LogSecurityWarnings(cfg *Config, autoFromFlag bool) {
+	if cfg.Server.Token == "" {
+		slog.Warn("==============================================================")
+		slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
+		slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
+		slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
+		slog.Warn("==============================================================")
+	} else {
+		slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
+	}
+
+	if cfg.System.EnableDelete {
+		slog.Warn("==============================================================")
+		slog.Warn(" REMOTE DELETE IS ENABLED (system.enable_delete: true).")
+		slog.Warn(" Any authenticated client (or any LAN host if token is empty)")
+		slog.Warn(" can delete files under system.allowed_roots.")
+		slog.Warn(" Disable 'system.enable_delete' in config.yaml unless you")
+		slog.Warn(" genuinely need this feature.")
+		slog.Warn("==============================================================")
+	}
+
+	if cfg.Scan.AutoDetectRoots || autoFromFlag {
+		slog.Warn("==============================================================")
+		slog.Warn(" AUTO-DETECT ROOTS IS ENABLED.")
+		if autoFromFlag && !cfg.Scan.AutoDetectRoots {
+			slog.Warn(" (triggered by --auto-detect-roots flag, not config.yaml)")
+		}
+		slog.Warn(" Server will serve media from ALL detected drives (A-Z).")
+		slog.Warn(" For production, configure 'scan.roots' explicitly instead.")
+		slog.Warn("==============================================================")
+	}
 }
 
 func Load(path string) (*Config, error) {
