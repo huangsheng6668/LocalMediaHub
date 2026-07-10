@@ -28,7 +28,15 @@ export function renderSettings() {
     elements.settingsVideoExts.textContent = state.videoExts.join(', ') || '未配置';
     elements.settingsImageExts.textContent = state.imageExts.join(', ') || '未配置';
     elements.settingsAllowedRoots.textContent = state.allowedRoots.join(', ') || '未限制/不可浏览系统';
-    elements.settingsEnableDelete.textContent = state.enableDelete ? '已开启 (运行在客户端删除 PC 文件)' : '已禁用 (安全只读)';
+    if (state.enableDelete) {
+        elements.settingsEnableDelete.textContent = '⚠️ 已开启 (允许从客户端删除电脑媒体文件)';
+        elements.settingsEnableDelete.style.color = 'var(--error)';
+        elements.settingsEnableDelete.style.fontWeight = 'bold';
+    } else {
+        elements.settingsEnableDelete.textContent = '已禁用 (安全只读)';
+        elements.settingsEnableDelete.style.color = '';
+        elements.settingsEnableDelete.style.fontWeight = '';
+    }
     elements.settingsThumbMax.textContent = `${state.thumbMax} px`;
 }
 

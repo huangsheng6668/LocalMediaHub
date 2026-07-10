@@ -8,6 +8,12 @@ server:
   token: ""
 
 scan:
+  # Media roots. If empty AND system.allowed_roots is empty AND auto_detect_roots
+  # is false, the server REFUSES TO START (Phase 3 safety default).
+  # Explicit roots are strongly recommended for production.
+  roots: []
+    # - "D:/Movies"
+    # - "E:/Photos"
   video_extensions:
     - ".mp4"
     - ".mkv"
@@ -23,6 +29,10 @@ scan:
     - ".gif"
     - ".bmp"
     - ".webp"
+  # OPT-IN auto-detection: when true, server scans all detected drives (A-Z).
+  # Convenience feature with elevated risk — any LAN host (or any authenticated
+  # client) can browse media on ALL drives. Default false.
+  auto_detect_roots: false
 
 thumbnail:
   cache_dir: ".cache/thumbnails"
@@ -32,5 +42,9 @@ thumbnail:
 # System browse: restrict which directories are visible to the Android client.
 # If omitted or empty, /api/v1/system/* browsing is disabled.
 system:
-  allowed_roots:
-    - "/usr/media/path"
+  # CAUTION: when true, authenticated clients can delete files under allowed_roots
+  # via POST /api/v1/system/delete. The server prints a warning at startup when
+  # this is enabled. Default false.
+  enable_delete: false
+  allowed_roots: []
+    # - "D:/Media"
