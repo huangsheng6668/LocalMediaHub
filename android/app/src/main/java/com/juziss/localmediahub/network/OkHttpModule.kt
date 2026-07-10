@@ -1,6 +1,7 @@
 package com.juziss.localmediahub.network
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
 import com.juziss.localmediahub.BuildConfig
 import dagger.Module
 import dagger.Provides
@@ -43,6 +44,7 @@ class AuthInterceptor(private val tokenProvider: () -> String) : Interceptor {
      * the interceptor was wired with the right tokenProvider without making
      * a network call.
      */
+    @VisibleForTesting(otherwise = VisibleForTesting.NONE)
     fun tokenForTest(): String = tokenProvider()
 }
 
