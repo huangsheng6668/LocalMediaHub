@@ -1,4 +1,4 @@
-import { state } from './state.js';
+import { state, setAuthToken } from './state.js';
 import { handleRoute } from './router.js';
 import { loadConfig, renderSettings, setupSettingsListeners } from './settings.js';
 import {
@@ -11,6 +11,32 @@ import { setupVideoPlayerListeners } from './videoPlayer.js';
 import { setupLightboxListeners } from './lightbox.js';
 import { renderDashboard, setupDashboardListeners } from './dashboard.js';
 import { loadRoots, browsePath, setupBrowserListeners } from './browserView.js';
+import { AUTH_REQUIRED_EVENT } from './api.js';
+
+// Auth modal — module-scoped so it persists across show/hide.
+let lastFailedUrl = null;
+
+function showAuthModal(url) {
+    lastFailedUrl = url;
+    elements.authModal.classList.remove('hidden');
+    elements.authTokenInput.focus();
+}
+
+function hideAuthModal() {
+    elements.authModal.classList.add('hidden');
+    elements.authTokenInput.value = '';
+}
+
+function saveAuthAndRetry() {
+    const token = elements.authTokenInput.value.trim();
+    if (!token) return;
+    setAuthToken(token);
+    hideAuthModal();
+    // Reload to re-trigger the original request with the new token.
+    if (lastFailedUrl) {
+        window.location.reload();
+    }
+}
 
 // Initial Setup
 document.addEventListener('DOMContentLoaded', () => {
@@ -88,6 +114,23 @@ function setupEventListeners() {
             elements.sidebar.classList.remove('open');
             elements.hamburgerBtn?.setAttribute('aria-expanded', 'false');
             elements.sidebarBackdrop.hidden = true;
+        });
+    }
+
+    // Auth modal — show on AUTH_REQUIRED_EVENT (401), save-and-retry or cancel.
+    window.addEventListener(AUTH_REQUIRED_EVENT, (e) => {
+        showAuthModal(e.detail?.url);
+    });
+    if (elements.authSaveBtn) {
+        elements.authSaveBtn.addEventListener('click', saveAuthAndRetry);
+    }
+    if (elements.authCancelBtn) {
+        elements.authCancelBtn.addEventListener('click', hideAuthModal);
+    }
+    if (elements.authTokenInput) {
+        elements.authTokenInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') saveAuthAndRetry();
+            if (e.key === 'Escape') hideAuthModal();
         });
     }
 }
