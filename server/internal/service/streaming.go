@@ -174,7 +174,22 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 		"pipe:1",
 	)
 
-	cmd := exec.Command(ffmpegCmd, args...)
+	// Phase 8 T5-02: bind ffmpeg lifetime to the client's request context.
+	// When the client disconnects (or the server shuts down), r.Context()
+	// is cancelled, which kills ffmpeg — preventing orphaned processes
+	// that would keep transcode CPU/disk long after the client is gone.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, ffmpegCmd, args...)
+	// Windows ffmpeg subprocess may not respond to CTRL_BREAK_EVENT that
+	// Go's default CommandContext sends. Force kill on context cancellation.
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return cmd.Process.Kill()
+		}
+		return os.ErrProcessDone
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -184,13 +199,10 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
-
 	// killOnce guarantees cmd.Process.Kill() is called at most once and only
-	// when cmd.Process is non-nil, eliminating the prior nil-deref panic and
-	// the double-kill risk between the ctx-cancel goroutine and the write-fail
-	// branch in the main loop below.
+	// when cmd.Process is non-nil, eliminating the double-kill risk between
+	// cmd.Cancel (fired by CommandContext) and the write-fail branch in the
+	// main loop below.
 	var killOnce sync.Once
 	killCmd := func() {
 		killOnce.Do(func() {
@@ -199,11 +211,6 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 			}
 		})
 	}
-
-	go func() {
-		<-ctx.Done()
-		killCmd()
-	}()
 
 	// Use a large buffer + explicit flush for transcoded streams too.
 	bufReader := bufio.NewReaderSize(stdout, largeStreamBuffer)
