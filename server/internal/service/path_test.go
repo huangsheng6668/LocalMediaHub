@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -254,4 +255,77 @@ func TestValidateDeletionAllowsChildFile(t *testing.T) {
 	if resolved != child {
 		t.Errorf("expected resolved %q, got %q", child, resolved)
 	}
+}
+
+func TestIsBlockedRoot(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		// Blocked — segment matches
+		{"windows root", `C:\Windows`, true},
+		{"windows nested", `C:\Foo\Windows\bar`, true},
+		{"system32", `C:\Windows\System32\foo`, true},
+		{"program files with parens", `C:\Program Files (x86)\App`, true},
+		{"recycle bin", `D:\$Recycle.Bin\x`, true},
+		{"system volume information", `C:\System Volume Information`, true},
+		// Not blocked — segment is a substring but not whole segment
+		{"windows-screenshots (substring)", `D:\Media\windows-screenshots`, false},
+		{"myprogram files (substring)", `E:\Foo\myprogram files`, false},
+		// Not blocked — clean media paths
+		{"user media", `E:\Photos\vacation`, false},
+		{"idm downloads", `H:\IDM_Download\Video`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsBlockedRoot(tc.path)
+			if got != tc.want {
+				t.Errorf("IsBlockedRoot(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateMediaFilePathErrorClassification(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Not exist — must NOT leak the path
+	t.Run("not exist", func(t *testing.T) {
+		missingPath := filepath.Join(tmp, "nonexistent-file.mp4")
+		err := validateMediaFilePath(missingPath, []string{".mp4"})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if err.Error() != "file not found" {
+			t.Errorf("error = %q, want %q (must not contain path)", err.Error(), "file not found")
+		}
+		if strings.Contains(err.Error(), missingPath) {
+			t.Errorf("error leaks path: %q", err.Error())
+		}
+	})
+
+	// Accessible file with allowed extension — no error
+	t.Run("accessible allowed ext", func(t *testing.T) {
+		p := filepath.Join(tmp, "video.mp4")
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		err := validateMediaFilePath(p, []string{".mp4"})
+		if err != nil {
+			t.Errorf("expected no error, got: %v", err)
+		}
+	})
+
+	// Accessible file with wrong extension — "file type not allowed"
+	t.Run("wrong ext", func(t *testing.T) {
+		p := filepath.Join(tmp, "data.txt")
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		err := validateMediaFilePath(p, []string{".mp4"})
+		if err == nil || err.Error() != "access denied: file type not allowed" {
+			t.Errorf("error = %v, want %q", err, "access denied: file type not allowed")
+		}
+	})
 }
