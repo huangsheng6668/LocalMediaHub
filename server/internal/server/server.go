@@ -162,7 +162,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	admin := api.Group("/admin", authMw)
 	admin.GET("/config", h.GetConfig)
 	admin.PUT("/config", h.UpdateConfig)
-	admin.POST("/scan/trigger", h.TriggerScan)
+	admin.POST("/scan/trigger", h.TriggerScan, middleware.RateLimit(2, 30*time.Second))
 
 	// System
 	sys := api.Group("/system", authMw)
@@ -171,7 +171,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	sys.GET("/thumbnail", h.SystemThumbnail)
 	sys.GET("/original", h.SystemOriginal)
 	sys.GET("/stream", h.SystemStream)
-	sys.POST("/delete", h.DeletePath)
+	sys.POST("/delete", h.DeletePath, middleware.RateLimit(5, time.Minute))
 
 	// Unified absolute-path media access
 	media := api.Group("/media", authMw)
