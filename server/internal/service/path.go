@@ -38,7 +38,12 @@ var blockedSegments = []string{
 // Semantics: case-insensitive, whole-segment match — same as the internal
 // containsBlockedSegment() used by browse/media/delete paths.
 func IsBlockedRoot(absPath string) bool {
-	for _, seg := range strings.Split(strings.ToLower(absPath), string(filepath.Separator)) {
+	// Normalize forward slashes to the OS separator so blocked-segment matching
+	// works regardless of the path separator the caller used. Without this,
+	// "C:/Windows/System32" would be split as a single segment and bypass the
+	// blocklist on Windows (T8-01 hardening).
+	normalized := strings.ReplaceAll(absPath, "/", string(filepath.Separator))
+	for _, seg := range strings.Split(strings.ToLower(normalized), string(filepath.Separator)) {
 		for _, blocked := range blockedSegments {
 			if seg == blocked {
 				return true

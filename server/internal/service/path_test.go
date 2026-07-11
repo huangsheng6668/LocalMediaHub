@@ -276,6 +276,10 @@ func TestIsBlockedRoot(t *testing.T) {
 		// Not blocked — clean media paths
 		{"user media", `E:\Photos\vacation`, false},
 		{"idm downloads", `H:\IDM_Download\Video`, false},
+		// Forward-slash bypass attempts (T8-01) — must still be blocked on Windows
+		{"windows root with forward slashes (T8-01 bypass attempt)", `C:/Windows`, true},
+		{"windows nested with forward slashes", `C:/Foo/Windows/bar`, true},
+		{"program files with forward slashes", `C:/Program Files/App`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
