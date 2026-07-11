@@ -61,6 +61,8 @@ android/release-keystore.jks
 # Server runtime data
 server/.data/
 server/config.yaml
+# Test side-effect: handler UpdateConfig test writes config.yaml to its CWD
+server/internal/server/handler/config.yaml
 server/=*
 
 # OS
