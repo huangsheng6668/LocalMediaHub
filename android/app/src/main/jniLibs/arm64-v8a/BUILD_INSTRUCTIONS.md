@@ -89,3 +89,8 @@ libraries from:
 
 Ensure the build includes the decoders and demuxers listed above and is
 configured with `--enable-jni` and `--enable-mediacodec`.
+
+## SBOM 与完整性校验
+
+本库的 SBOM（版本、SHA256、CVE 审计）见 `docs/sbom/libffmpeg.md`。
+构建时由 `build.gradle.kts:verifyLibffmpegSha256` 自动校验 SHA256。
