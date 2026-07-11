@@ -1,6 +1,7 @@
 import java.util.Properties
 import java.io.FileInputStream
 import java.io.File as JFile
+import java.security.MessageDigest
 import org.gradle.api.GradleException
 
 plugins {
@@ -238,6 +239,63 @@ val buildRustNative = tasks.register<Exec>("buildRustNative") {
 }
 
 tasks.named("preBuild") { dependsOn(buildRustNative) }
+
+// ----------------------------------------------------------------------------
+// Phase 2: Verify libffmpeg.so integrity against docs/sbom/libffmpeg.sha256.
+// Runs at preBuild phase; fails the build if the .so was replaced without
+// updating the SBOM. To update: rebuild .so per BUILD_INSTRUCTIONS.md,
+// recompute sha256, update docs/sbom/libffmpeg.sha256 + docs/sbom/libffmpeg.md.
+// ----------------------------------------------------------------------------
+tasks.register("verifyLibffmpegSha256") {
+    group = "verification"
+    description = "Verify libffmpeg.so SHA256 matches docs/sbom/libffmpeg.sha256"
+
+    val soFile = file("${projectDir}/src/main/jniLibs/arm64-v8a/libffmpeg.so")
+    val hashFile = JFile(rootProject.projectDir.parentFile, "docs/sbom/libffmpeg.sha256")
+
+    // Skip if .so absent (e.g. building without ffmpeg support — hardware decode only).
+    if (!soFile.exists()) {
+        logger.lifecycle("verifyLibffmpegSha256: libffmpeg.so absent, skipping")
+        return@register
+    }
+
+    doLast {
+        val actualHash = sha256(soFile)
+        val expectedLine = hashFile.readText().trim().lines().firstOrNull()
+            ?: throw GradleException("docs/sbom/libffmpeg.sha256 is empty")
+        val expectedHash = expectedLine.split(Regex("\\s+"))[0]
+
+        if (!actualHash.equals(expectedHash, ignoreCase = true)) {
+            throw GradleException(
+                "libffmpeg.so SHA256 mismatch!\n" +
+                "  actual:   $actualHash\n" +
+                "  expected: $expectedHash\n" +
+                "If you intentionally rebuilt libffmpeg.so, update docs/sbom/libffmpeg.sha256 " +
+                "and docs/sbom/libffmpeg.md per BUILD_INSTRUCTIONS.md."
+            )
+        }
+        logger.lifecycle("verifyLibffmpegSha256: OK ($actualHash)")
+    }
+}
+
+// Helper: compute SHA256 of a file using java.security.MessageDigest.
+fun sha256(file: java.io.File): String {
+    val md = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buf = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(buf)
+            if (n <= 0) break
+            md.update(buf, 0, n)
+        }
+    }
+    return md.digest().joinToString("") { b -> "%02x".format(b) }
+}
+
+// Hook into preBuild so the check runs before every Android build.
+project.tasks.named("preBuild").configure {
+    dependsOn("verifyLibffmpegSha256")
+}
 
 dependencies {
 
