@@ -19,7 +19,7 @@
     --text-muted: #9ca3af;
     --text-white: #ffffff;
     
-    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-quick: all 0.15s ease;
     
@@ -981,7 +981,7 @@ body {
 }
 
 .video-time-display {
-    font-family: 'Inter', monospace, sans-serif;
+    font-family: system-ui, -apple-system, monospace, sans-serif;
     font-size: 13px;
     color: var(--text-muted);
 }

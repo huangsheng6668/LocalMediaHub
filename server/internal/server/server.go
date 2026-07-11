@@ -102,6 +102,10 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// to a 500 instead of crashing the whole process.
 	s.Echo.Use(echoMw.Recover())
 	s.Echo.Use(echoMw.Logger())
+	// Phase 4: security headers must run BEFORE CORS so OPTIONS preflight
+	// responses also carry X-Frame-Options / X-Content-Type-Options /
+	// Referrer-Policy / Content-Security-Policy. See middleware.SecurityHeaders.
+	s.Echo.Use(middleware.SecurityHeaders())
 	// CORS is restricted to this host's LAN IPs + localhost so only devices on
 	// the local network can drive the embedded Web UI (and its destructive
 	// endpoints). See allowedCORSOrigins for details.
