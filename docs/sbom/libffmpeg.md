@@ -39,7 +39,7 @@
 
 ### 审计结果
 
-去重后共审阅 **31** 个独立 CVE（同一 CVE 可能出现在多个版本的修复列表中，已按 CVE-ID 去重）。
+去重后共审阅 **46** 个独立 CVE（同一 CVE 可能出现在多个版本的修复列表中，已按 CVE-ID 去重）。
 
 | CVE | 严重度 | 影响组件 | 项目是否受影响 | 原因 |
 |---|---|---|---|---|
@@ -92,7 +92,7 @@
 
 ### 审计摘要
 
-- **审阅 CVE 总数**：31 个去重后的独立 CVE（自 FFmpeg 6.1.1 之后修复）
+- **审阅 CVE 总数**：46 个去重后的独立 CVE（自 FFmpeg 6.1.1 之后修复）
 - **确认受影响（yes）**：3 个
   - CVE-2024-36618（AVI demuxer 整数溢出 → DoS，Medium 6.2）
   - CVE-2025-22920（MOV demuxer NULL deref → DoS，Medium 4.3）
@@ -101,7 +101,7 @@
   - CVE-2023-49502（libavutil samplefmt 音频函数，项目仅视频解码）
   - CVE-2023-6605（libavutil hwcontext，项目 mediacodec 不经过 FFmpeg hwcontext）
   - CVE-2025-10256（libavutil mem.c 内存泄漏，低危）
-- **不受影响（no）**：22 个（组件未启用 / 网络已禁用 / 工具未构建 / 平台不匹配）
+- **不受影响（no）**：37 个（组件未启用 / 网络已禁用 / 工具未构建 / 平台不匹配）
 - **无法判断（unknown）**：3 个（NVD Reserved，无技术详情）
 
 ### 风险评估
