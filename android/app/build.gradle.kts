@@ -49,6 +49,8 @@ android {
                 // for every Gradle invocation (including assembleDebug, testDebugUnitTest,
                 // help, etc.). To avoid breaking non-release builds, we only fail-fast
                 // when a release-related task is actually on the command line.
+                // NOTE: this guard only fires for CLI-driven builds; Android Studio
+                // GUI builds may not populate taskNames the same way.
                 val taskNames = gradle.startParameter.taskNames
                 val isReleaseBuild = taskNames.any { task ->
                     task.lowercase().contains("release")
