@@ -222,6 +222,26 @@ Round 29 Phase 3 引入配置默认安全：服务端启动时若 `scan.roots` �
 
 详见 `server/config.example.yaml` 的注释。
 
+### 安全响应头
+
+服务端对所有响应（含静态资源 + API + OPTIONS 预检）附加以下安全头：
+
+| 头 | 值 | 缓解 |
+|---|---|---|
+| `X-Frame-Options` | `DENY` | Clickjacking（禁止任何站点 iframe 嵌入本服务） |
+| `X-Content-Type-Options` | `nosniff` | MIME 嗅探攻击 |
+| `Referrer-Policy` | `no-referrer` | 外链泄漏本服务 URL |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; media-src 'self'; connect-src 'self'` | XSS 数据 exfiltration（纵深防御） |
+
+**CSP 说明**：
+- `script-src 'self'`：JavaScript 全部同源（已外部化，不允许 inline script）。
+- `style-src 'self' 'unsafe-inline'`：当前 Web UI 仍有 inline `style="..."` 属性，暂留 `'unsafe-inline'`。**待未来 Phase 5 Web UI XSS 整改完成后移除**。
+- 不含 `data:` URI 例外（探索阶段确认 Web UI 无使用）。
+
+**未加的头**：
+- `Strict-Transport-Security`（HSTS）：仅 HTTPS 下有效，TLS 留作未来。
+- `Permissions-Policy`：项目不使用相机/麦克风/地理位置等敏感 API。
+
 ## API 端点一览
 
 ### 目录浏览
