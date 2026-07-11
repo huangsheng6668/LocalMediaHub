@@ -261,6 +261,15 @@ tasks.register("verifyLibffmpegSha256") {
 
     doLast {
         val actualHash = sha256(soFile)
+
+        if (!hashFile.exists()) {
+            throw GradleException(
+                "docs/sbom/libffmpeg.sha256 not found at ${hashFile.absolutePath}.\n" +
+                "This file is required for libffmpeg.so integrity verification.\n" +
+                "If deleted accidentally, restore from git: git checkout docs/sbom/libffmpeg.sha256"
+            )
+        }
+
         val expectedLine = hashFile.readText().trim().lines().firstOrNull()
             ?: throw GradleException("docs/sbom/libffmpeg.sha256 is empty")
         val expectedHash = expectedLine.split(Regex("\\s+"))[0]
