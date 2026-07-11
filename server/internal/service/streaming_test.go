@@ -1,12 +1,16 @@
 package service
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestServeFile_DirectStreamingHeaders(t *testing.T) {
@@ -128,4 +132,68 @@ func TestServeFile_DirectStreamingHeaders(t *testing.T) {
 			t.Errorf("expected Content-Range 'bytes */36', got %q", res.Header.Get("Content-Range"))
 		}
 	})
+}
+
+// TestServeTranscodedClientDisconnect verifies that when a client disconnects
+// mid-transcode, ffmpeg is killed and serveTranscoded returns promptly
+// (within 5s). This prevents orphaned ffmpeg processes from consuming CPU
+// and disk after the client is gone.
+//
+// Phase 8 T5-02: The fix uses exec.CommandContext bound to the request
+// context so that context cancellation force-kills the ffmpeg subprocess.
+func TestServeTranscodedClientDisconnect(t *testing.T) {
+	// Skip if ffmpeg not in PATH — CI environments without ffmpeg can't test this.
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not in PATH, skipping client-disconnect test")
+	}
+
+	// Create a long-running fake "video" file — ffmpeg will read from it
+	// for the duration of the test.
+	tmp := t.TempDir()
+	srcPath := filepath.Join(tmp, "input.mp4")
+	// A small but real MP4 — use ffmpeg to generate a 60-second test video.
+	genCmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i",
+		"testsrc=duration=60:size=320x240:rate=1", "-c:v", "libx264",
+		"-preset", "ultrafast", srcPath)
+	if out, err := genCmd.CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg cannot generate test video: %v\n%s", err, out)
+	}
+
+	// Set up streaming service with default ffmpeg path
+	svc := NewStreamingService("")
+
+	// Create a request that will be cancelled mid-stream.
+	// ServeFile delegates to serveTranscoded when ?transcode=true.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/stream?transcode=true&path="+url.QueryEscape(srcPath), nil)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	// Run ServeFile (→ serveTranscoded) in a goroutine; cancel ctx after 500ms
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.ServeFile(rec, req, srcPath)
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	cancel()
+
+	// Wait for handler to finish (should return shortly after ctx cancel)
+	select {
+	case err := <-done:
+		// Error is OK — context cancellation may surface as read/write error.
+		_ = err
+	case <-time.After(5 * time.Second):
+		t.Fatal("serveTranscoded did not return within 5s of client disconnect")
+	}
+
+	// Give ffmpeg a moment to die after context cancel
+	time.Sleep(500 * time.Millisecond)
+
+	// The 5s timeout above IS the assertion: if serveTranscoded returned
+	// within 5s of cancel(), the cmd must have been killed (otherwise
+	// the io.Copy/read loop would block indefinitely on ffmpeg's stdout).
 }

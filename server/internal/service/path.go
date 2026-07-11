@@ -31,6 +31,28 @@ var blockedSegments = []string{
 	"boot",
 }
 
+// IsBlockedRoot reports whether any segment of absPath matches the blocked list.
+// Exported so handler/admin.go can validate user-supplied scan roots (T8-01)
+// without letting C:\Windows / D:\Program Files etc. become roots.
+//
+// Semantics: case-insensitive, whole-segment match — same as the internal
+// containsBlockedSegment() used by browse/media/delete paths.
+func IsBlockedRoot(absPath string) bool {
+	// Normalize forward slashes to the OS separator so blocked-segment matching
+	// works regardless of the path separator the caller used. Without this,
+	// "C:/Windows/System32" would be split as a single segment and bypass the
+	// blocklist on Windows (T8-01 hardening).
+	normalized := strings.ReplaceAll(absPath, "/", string(filepath.Separator))
+	for _, seg := range strings.Split(strings.ToLower(normalized), string(filepath.Separator)) {
+		for _, blocked := range blockedSegments {
+			if seg == blocked {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // NormalizePath converts route/query path input into a cleaned absolute local path.
 func NormalizePath(pathStr string) (string, error) {
 	if strings.TrimSpace(pathStr) == "" {
@@ -156,14 +178,11 @@ func ValidateAccessibleMediaPath(pathStr string, scanRoots []string, systemAllow
 }
 
 // containsBlockedSegment reports whether any segment of absPath (split on the OS
-// separator, lower-cased) equals one of the blocked segments.
+// separator, lower-cased) equals one of the blocked segments. Delegates to the
+// exported IsBlockedRoot so the blocklist logic lives in exactly one place.
 func containsBlockedSegment(absPath string) error {
-	for _, seg := range strings.Split(strings.ToLower(absPath), string(filepath.Separator)) {
-		for _, blocked := range blockedSegments {
-			if seg == blocked {
-				return fmt.Errorf("access denied: restricted directory")
-			}
-		}
+	if IsBlockedRoot(absPath) {
+		return fmt.Errorf("access denied: restricted directory")
 	}
 	return nil
 }
@@ -171,7 +190,16 @@ func containsBlockedSegment(absPath string) error {
 func validateMediaFilePath(absPath string, allowedExtensions []string) error {
 	info, err := os.Stat(absPath)
 	if err != nil {
-		return fmt.Errorf("path not accessible: %w", err)
+		// Phase 8 T8-11: classify error without leaking the path. The previous
+		// "path not accessible: %w" format wrapped the OS error and surfaced
+		// the absolute path to the API client.
+		if os.IsNotExist(err) {
+			return fmt.Errorf("file not found")
+		}
+		if os.IsPermission(err) {
+			return fmt.Errorf("permission denied")
+		}
+		return fmt.Errorf("path not accessible")
 	}
 	if info.IsDir() {
 		return fmt.Errorf("access denied: not a file")

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/labstack/echo/v4"
+
+	"github.com/localmediahub/server/internal/service"
 )
 
 type ConfigUpdateRequest struct {
@@ -27,6 +29,13 @@ func (h *Handler) UpdateConfig(c echo.Context) error {
 	for _, r := range req.Roots {
 		if !filepath.IsAbs(r) {
 			return respondError(c, http.StatusBadRequest, "scan roots must be absolute paths")
+		}
+		// Phase 8 T8-01: reject sensitive system directories as roots so an
+		// operator (or attacker with the admin token) cannot turn C:\Windows
+		// / D:\$Recycle.Bin etc. into a browseable media library.
+		if service.IsBlockedRoot(r) {
+			return respondError(c, http.StatusBadRequest,
+				fmt.Sprintf("scan root %q matches a restricted system directory", r))
 		}
 	}
 
