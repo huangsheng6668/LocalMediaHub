@@ -1,6 +1,7 @@
 import java.util.Properties
 import java.io.FileInputStream
 import java.io.File as JFile
+import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -39,21 +40,39 @@ android {
                 storeFile = storeFileVal
                 storePassword = storePasswordVal
             } else {
-                // WARNING: no keystore.properties found at the project root, so
-                // the release build falls back to the debug signing key. This is
-                // fine for local testing but MUST NOT be used for Play Store / public
-                // distribution — a debug-signed APK can be resigned by anyone.
-                // To sign properly, create android/keystore.properties with:
-                //   storeFile=<path-to-release.keystore>
-                //   storePassword=***
-                //   keyAlias=***
-                //   keyPassword=***
-                val logger = org.gradle.api.logging.Logging.getLogger("LocalMediaHubSigning")
-                logger.warn("==============================================================")
-                logger.warn(" RELEASE BUILD IS USING THE DEBUG SIGNING KEY.")
-                logger.warn(" No android/keystore.properties with a valid storeFile was found.")
-                logger.warn(" Do NOT distribute this APK publicly.")
-                logger.warn("==============================================================")
+                // Phase 7: default fail-fast. Debug signing fallback is opt-in via
+                // -PallowDebugSigning=true to prevent accidental release distribution
+                // with the debug key (Chain-I: debug-signed APK can be resigned by
+                // anyone, enabling supply-chain attacks).
+                //
+                // The signingConfigs block is evaluated eagerly at configuration time
+                // for every Gradle invocation (including assembleDebug, testDebugUnitTest,
+                // help, etc.). To avoid breaking non-release builds, we only fail-fast
+                // when a release-related task is actually on the command line.
+                // NOTE: this guard only fires for CLI-driven builds; Android Studio
+                // GUI builds may not populate taskNames the same way.
+                val taskNames = gradle.startParameter.taskNames
+                val isReleaseBuild = taskNames.any { task ->
+                    task.lowercase().contains("release")
+                }
+                if (isReleaseBuild) {
+                    val allowDebugSigning = (project.findProperty("allowDebugSigning") as String?) == "true"
+                    if (!allowDebugSigning) {
+                        throw GradleException(
+                            "Release build requires a valid keystore.properties at the project root.\n" +
+                            "To create one, copy keystore.properties.example to keystore.properties and fill in your release signing details.\n" +
+                            "For LOCAL TESTING ONLY, run: ./gradlew assembleRelease -PallowDebugSigning=true\n" +
+                            "Do NOT distribute a debug-signed APK publicly — it can be resigned by anyone."
+                        )
+                    }
+                    val logger = org.gradle.api.logging.Logging.getLogger("LocalMediaHubSigning")
+                    logger.warn("==============================================================")
+                    logger.warn(" RELEASE BUILD IS USING THE DEBUG SIGNING KEY (explicitly opted in).")
+                    logger.warn(" Do NOT distribute this APK publicly.")
+                    logger.warn("==============================================================")
+                }
+                // Always provide the debug fallback values so the signing config is
+                // fully populated; the fail-fast above prevents accidental release use.
                 keyAlias = "androiddebugkey"
                 keyPassword = "android"
                 storePassword = "android"

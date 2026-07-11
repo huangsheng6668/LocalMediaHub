@@ -203,6 +203,37 @@ cd android
 
 APK 输出位置：`android/app/build/outputs/apk/`
 
+### 3.1 Release 签名（发布前必读）
+
+Release 构建默认要求有效的 `keystore.properties`，未配置时会**构建失败**（防止误用 debug 签名发布 APK，避免供应链攻击）。
+
+**首次配置**：
+
+1. 生成 keystore（一次性）：
+   ```bash
+   keytool -genkeypair -v -keystore localmediahub.keystore -alias localmediahub \
+     -keyalg RSA -keysize 2048 -validity 10000
+   ```
+
+2. 复制示例配置并填入你的签名信息：
+   ```bash
+   cp android/keystore.properties.example android/keystore.properties
+   # 编辑 android/keystore.properties，填入 storeFile/storePassword/keyAlias/keyPassword
+   ```
+
+3. 正常构建：
+   ```bash
+   cd android && ./gradlew assembleRelease
+   ```
+
+**仅本地调试**（不配 keystore，用 debug key）：
+
+```bash
+./gradlew assembleRelease -PallowDebugSigning=true
+```
+
+⚠️ **切勿公开分发 debug 签名的 APK**——任何人都能用相同 debug key 重签名发布"官方" APK（Chain-I 供应链攻击）。
+
 ### 4. 连接
 
 - **自动**: App 会优先尝试上次成功连接的 Server；如果不可用，再通过 NSD 自动发现局域网内的 Server（需同一 WiFi）。
