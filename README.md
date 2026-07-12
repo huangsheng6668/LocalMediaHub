@@ -273,39 +273,6 @@ Round 29 Phase 3 引入配置默认安全：服务端启动时若 `scan.roots` �
 - `Strict-Transport-Security`（HSTS）：仅 HTTPS 下有效，TLS 留作未来。
 - `Permissions-Policy`：项目不使用相机/麦克风/地理位置等敏感 API。
 
-### CI（持续集成）
-
-GitHub Actions workflow `.github/workflows/security.yml` 在每次 push master / PR master 时自动运行：
-
-| Job | 工具 | 覆盖 |
-|---|---|---|
-| `go-vuln` | `govulncheck` | Go 已知漏洞（`server/`） |
-| `cargo-audit` | `cargo audit` | Rust 已知漏洞（`android/app/src/main/rust/`） |
-| `xsscheck` | `tools/xsscheck` | Web UI XSS 静态分析（`server/internal/web/`） |
-| `go-test` | `go test` | 服务端单元测试 |
-| `gradle-test` | `./gradlew testDebugUnitTest assembleDebug` | Android 单元测试 + 构建（含 `verifyLibffmpegSha256` SHA256 校验） |
-
-任一 job 失败 → workflow 失败 → PR 阻止 merge。
-
-**本地复现**：
-
-```bash
-# Go 漏洞
-cd server && govulncheck ./...
-
-# Rust 漏洞
-cd android/app/src/main/rust && cargo audit
-
-# XSS lint
-cd tools/xsscheck && go test ./... && go run .
-
-# 服务端测试
-cd server && go test ./...
-
-# Android 测试 + 构建
-cd android && ./gradlew testDebugUnitTest assembleDebug
-```
-
 **依赖锁定**：Android 使用 Gradle dependency locking（`LockMode.STRICT`）。`android/app/gradle.lockfile` 入库，传递性依赖不可被悄悄替换。升级依赖时：
 
 ```bash
