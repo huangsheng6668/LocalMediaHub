@@ -253,13 +253,13 @@ tasks.register("verifyLibffmpegSha256") {
     val soFile = file("${projectDir}/src/main/jniLibs/arm64-v8a/libffmpeg.so")
     val hashFile = JFile(rootProject.projectDir.parentFile, "docs/sbom/libffmpeg.sha256")
 
-    // Skip if .so absent (e.g. building without ffmpeg support — hardware decode only).
-    if (!soFile.exists()) {
-        logger.lifecycle("verifyLibffmpegSha256: libffmpeg.so absent, skipping")
-        return@register
-    }
-
     doLast {
+        // Skip if .so absent (e.g. building without ffmpeg support — hardware decode only).
+        if (!soFile.exists()) {
+            logger.lifecycle("verifyLibffmpegSha256: libffmpeg.so absent, skipping")
+            return@doLast
+        }
+
         val actualHash = sha256(soFile)
 
         if (!hashFile.exists()) {
@@ -272,7 +272,21 @@ tasks.register("verifyLibffmpegSha256") {
 
         val expectedLine = hashFile.readText().trim().lines().firstOrNull()
             ?: throw GradleException("docs/sbom/libffmpeg.sha256 is empty")
-        val expectedHash = expectedLine.split(Regex("\\s+"))[0]
+        val parts = expectedLine.split(Regex("\\s+"), limit = 2)
+        val expectedHash = parts[0]
+        val expectedPath = if (parts.size > 1) parts[1].trim() else ""
+
+        // Phase 2 backlog: validate path field matches expected .so location.
+        // Prevents silent drift if someone changes the .sha256 file path.
+        val expectedSoPath = "android/app/src/main/jniLibs/arm64-v8a/libffmpeg.so"
+        if (expectedPath.isNotEmpty() && expectedPath != expectedSoPath) {
+            throw GradleException(
+                "docs/sbom/libffmpeg.sha256 path field mismatch!\n" +
+                "  expected: $expectedSoPath\n" +
+                "  actual:   $expectedPath\n" +
+                "Update docs/sbom/libffmpeg.sha256 to match the actual .so location."
+            )
+        }
 
         if (!actualHash.equals(expectedHash, ignoreCase = true)) {
             throw GradleException(
