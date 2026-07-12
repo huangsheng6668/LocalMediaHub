@@ -320,6 +320,20 @@ project.tasks.named("preBuild").configure {
     dependsOn("verifyLibffmpegSha256")
 }
 
+// Phase 6: strict dependency locking. Prevents transitive deps from being
+// silently replaced (supply-chain attack). Lock file is committed at
+// android/app/gradle.lockfile. To update deps: run
+//   ./gradlew dependencies --write-locks
+// then commit the lockfile change.
+dependencyLocking {
+    lockMode = LockMode.STRICT
+    lockFile = file("$projectDir/gradle.lockfile")
+}
+
+configurations.all {
+    resolutionStrategy.activateDependencyLocking()
+}
+
 dependencies {
 
     implementation("androidx.core:core-ktx:1.12.0")
