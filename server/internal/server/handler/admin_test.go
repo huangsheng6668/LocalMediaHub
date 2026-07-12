@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -19,6 +20,16 @@ import (
 // Validate even runs (Phase 8 T8-01). The four cases mirror the blockedSegments
 // list entries that an operator is most likely to misconfigure.
 func TestUpdateConfigRejectsBlockedRoot(t *testing.T) {
+	// blockedSegments in service/path.go is Windows-focused (windows,
+	// system32, $recycle.bin, program files, ...). On Linux none of these
+	// segments match anything, so the rejection path can't be exercised.
+	// Additionally the cases below use drive-letter paths that
+	// filepath.IsAbs rejects on Linux, short-circuiting before IsBlockedRoot
+	// runs. Run this case on Windows only.
+	if runtime.GOOS != "windows" {
+		t.Skip("TestUpdateConfigRejectsBlockedRoot uses Windows-specific paths; " +
+			"blockedSegments list is Windows-focused. Run on Windows.")
+	}
 	cases := []string{
 		`C:\Windows`,
 		`C:\Program Files`,
