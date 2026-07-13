@@ -7,7 +7,7 @@ import { formatSize } from './utils.js';
 import { openVideoPlayer } from './videoPlayer.js';
 
 // Delegated click dispatcher for dashboard recent items
-export function onDashboardRecentClick(e) {
+function onDashboardRecentClick(e) {
     const actionEl = e.target.closest('[data-action]');
     if (!actionEl) return;
     if (actionEl.dataset.action === 'open-video') {

@@ -54,7 +54,7 @@ export function openTaggingDialog(file) {
 }
 
 // Toggle association between a file and a tag
-export async function toggleFileTagAssociation(checkbox, tagId, filePath) {
+async function toggleFileTagAssociation(checkbox, tagId, filePath) {
     const isAssociate = checkbox.checked;
     const url = `${state.apiBase}/api/v1/tags/${tagId}/files/${encodeRoutePath(filePath)}`;
 
@@ -95,7 +95,7 @@ export async function toggleFileTagAssociation(checkbox, tagId, filePath) {
 }
 
 // Delegated click dispatcher for the tags manager list
-export function onTagsManagerListClick(e) {
+function onTagsManagerListClick(e) {
     const actionEl = e.target.closest('[data-action]');
     if (!actionEl) return;
     if (actionEl.dataset.action === 'delete-tag') {
@@ -104,7 +104,7 @@ export function onTagsManagerListClick(e) {
 }
 
 // Delegated change dispatcher for the file-tag selector dialog
-export function onTagSelectorChange(e) {
+function onTagSelectorChange(e) {
     const checkbox = e.target;
     if (checkbox.matches('input[type="checkbox"][data-tag-id]') && state.taggingFile) {
         toggleFileTagAssociation(checkbox, checkbox.dataset.tagId || '', state.taggingFile.path);
@@ -133,7 +133,7 @@ export function renderTagsManager() {
 }
 
 // Delete tag definition
-export async function deleteTag(tagId, name) {
+async function deleteTag(tagId, name) {
     if (!confirm(`确定要彻底删除标签 [${name}] 吗？\n所有关联文件的分类记录也会一并清除。`)) return;
 
     try {

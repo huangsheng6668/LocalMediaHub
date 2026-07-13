@@ -30,7 +30,7 @@ function openImageLightbox(file) {
 }
 
 // Show image in lightbox
-export function renderLightboxImage() {
+function renderLightboxImage() {
     if (state.lightboxIndex < 0 || state.lightboxIndex >= state.lightboxFiles.length) return;
 
     if (state.lightboxStitchMode) {
@@ -91,7 +91,7 @@ export function renderLightboxImage() {
 }
 
 // Navigate lightbox
-export function navigateLightbox(dir) {
+function navigateLightbox(dir) {
     if (state.lightboxFiles.length <= 1) return;
     state.lightboxIndex += dir;
 
