@@ -221,7 +221,6 @@ dependencies = [
  "jni",
  "jpeg-decoder",
  "kamadak-exif",
- "log",
  "png",
 ]
 

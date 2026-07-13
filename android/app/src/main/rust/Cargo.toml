@@ -11,7 +11,6 @@ edition = "2021"
 # `cargo build` proves the toolchain end-to-end without dragging in C
 # libraries that need their own build-script validation.
 jni = "0.21"
-log = "0.4"
 # Task 2: EXIF parsing. `kamadak-exif` is published as crate name
 # `kamadak-exif`, library name `exif` (`use exif::...`). Pure Rust parser,
 # no native deps, so it cross-compiles cleanly to aarch64-linux-android.
