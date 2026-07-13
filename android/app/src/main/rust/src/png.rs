@@ -15,13 +15,6 @@
 
 use png::{ColorType, Decoder};
 
-/// Decode a PNG byte buffer to RGBA pixels with no resizing. Returns
-/// `(rgba_bytes, width, height)` or `None` on any decode error / unsupported
-/// colour type.
-pub fn decode(data: &[u8]) -> Option<(Vec<u8>, i32, i32)> {
-    decode_scaled(data, 0, 0)
-}
-
 /// Decode a PNG to RGBA pixels, optionally downscaling to fit `(tw, th)`
 /// while preserving aspect ratio. Returns `(rgba_bytes, width, height)`.
 ///
@@ -110,25 +103,6 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn decode_invalid_data() {
-        assert!(decode(b"not png").is_none());
-        assert!(decode(&[]).is_none());
-    }
-
-    #[test]
-    fn decode_real_png_rgb() {
-        let data = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/testdata/sample.png"
-        ))
-        .expect("testdata/sample.png missing");
-        let (rgba, w, h) = decode(&data).expect("decode should succeed");
-        assert_eq!(w, 1456);
-        assert_eq!(h, 2054);
-        assert_eq!(rgba.len(), (w as usize) * (h as usize) * 4);
-    }
 
     #[test]
     fn decode_scaled_real_png_downscaled() {

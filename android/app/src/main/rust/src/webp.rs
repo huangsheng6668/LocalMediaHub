@@ -7,15 +7,6 @@
 
 use std::io::Cursor;
 
-/// Return `(width, height)` of a WebP byte buffer without a full decode.
-/// `image_webp::WebPDecoder::dimensions` parses the RIFF/VP8X chunk headers
-/// and is cheap.
-pub fn dimensions(data: &[u8]) -> Option<(i32, i32)> {
-    let decoder = image_webp::WebPDecoder::new(Cursor::new(data)).ok()?;
-    let (w, h) = decoder.dimensions();
-    Some((w as i32, h as i32))
-}
-
 /// Decode a WebP to RGBA pixels, optionally downscaling to fit `(tw, th)`
 /// while preserving aspect ratio. Returns `(rgba_bytes, width, height)`.
 pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32)> {
@@ -65,24 +56,6 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dimensions_invalid_data() {
-        assert!(dimensions(b"not webp").is_none());
-        assert!(dimensions(&[]).is_none());
-    }
-
-    #[test]
-    fn dimensions_real_webp() {
-        let data = std::fs::read(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/testdata/sample.webp"
-        ))
-        .expect("testdata/sample.webp missing");
-        let (w, h) = dimensions(&data).expect("dimensions should parse");
-        assert_eq!(w, 1456);
-        assert_eq!(h, 2054);
-    }
 
     #[test]
     fn decode_scaled_real_webp_full() {
