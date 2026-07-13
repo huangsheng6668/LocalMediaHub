@@ -46,19 +46,6 @@ data class BrowseResult(
 )
 
 /**
- * Matches server/models.py PaginatedMediaFiles
- */
-data class PaginatedMediaFiles(
-    val items: List<MediaFile>,
-    val total: Int,
-    val page: Int,
-    @SerializedName("page_size")
-    val pageSize: Int,
-    @SerializedName("has_more")
-    val hasMore: Boolean,
-)
-
-/**
  * Matches server/models.py SearchResult
  */
 data class SearchResult(

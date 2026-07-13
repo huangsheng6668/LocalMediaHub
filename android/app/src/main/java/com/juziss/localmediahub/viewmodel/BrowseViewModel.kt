@@ -211,10 +211,6 @@ class BrowseViewModel @Inject constructor(
         favoritesController.setShowFavoritesOnly(show)
     }
 
-    fun filterFilesByFavorites(files: List<MediaFile>): List<MediaFile> {
-        return favoritesController.filterFilesByFavorites(files)
-    }
-
     fun isFavoriteSystemBrowse(file: MediaFile): Boolean {
         return favoritesController.isFavoriteSystemBrowse(file)
     }
@@ -281,14 +277,6 @@ class BrowseViewModel @Inject constructor(
         tagController.untagFile(tagId, filePath, viewModelScope)
     }
 
-    fun loadFileTagsForFile(filePath: String) {
-        tagController.loadFileTagsForFile(filePath, viewModelScope)
-    }
-
-    fun loadAllFileTags() {
-        tagController.loadAllFileTags(viewModelScope)
-    }
-
     fun getTagsForFile(filePath: String): List<Tag> {
         return tagController.getTagsForFile(filePath)
     }
@@ -299,10 +287,6 @@ class BrowseViewModel @Inject constructor(
 
     fun openCollection(tag: Tag) {
         tagController.openCollection(tag, viewModelScope)
-    }
-
-    fun currentCollectionTag(): Tag? {
-        return tagController.currentCollectionTag()
     }
 
     fun filterFilesByTag(files: List<MediaFile>): List<MediaFile> {
@@ -331,10 +315,6 @@ class BrowseViewModel @Inject constructor(
         deleteController.clearDeleteState()
     }
 
-    suspend fun deletePathSync(path: String, recursive: Boolean): NetworkResult<String> {
-        return deleteController.deletePathSync(path, recursive)
-    }
-
     fun deletePath(path: String, recursive: Boolean) {
         deleteController.deletePath(
             path = path,
@@ -351,10 +331,6 @@ class BrowseViewModel @Inject constructor(
             onRefresh = navigator::refreshCurrentDirectory,
             scope = viewModelScope
         )
-    }
-
-    private fun emitBrowseError(message: String) {
-        sharedState.emitBrowseError(message)
     }
 }
 

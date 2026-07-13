@@ -153,16 +153,6 @@ class MediaRepository @Inject constructor(
     suspend fun downloadFileStream(url: String): NetworkResult<ResponseBody> =
         httpStream(url)
 
-    // ── Videos / Images ───────────────────────────────────────
-
-    suspend fun getVideos(page: Int = 1, pageSize: Int = 50): NetworkResult<PaginatedMediaFiles> =
-        httpGet("$baseUrl/api/v1/videos?page=$page&page_size=$pageSize",
-            object : TypeToken<PaginatedMediaFiles>() {}.type)
-
-    suspend fun getImages(page: Int = 1, pageSize: Int = 50): NetworkResult<PaginatedMediaFiles> =
-        httpGet("$baseUrl/api/v1/images?page=$page&page_size=$pageSize",
-            object : TypeToken<PaginatedMediaFiles>() {}.type)
-
     // ── Search ────────────────────────────────────────────────
 
     suspend fun search(query: String, currentPath: String = ""): NetworkResult<SearchResult> {
@@ -223,9 +213,6 @@ class MediaRepository @Inject constructor(
                 } else result as NetworkResult<Map<String, String>>
             }
 
-    suspend fun getTaggedFiles(tagId: String): NetworkResult<List<String>> =
-        httpGet("$baseUrl/api/v1/tags/$tagId/files", object : TypeToken<List<String>>() {}.type)
-
     suspend fun getTaggedMedia(tagId: String): NetworkResult<List<MediaFile>> =
         httpGet("$baseUrl/api/v1/tags/$tagId/media", object : TypeToken<List<MediaFile>>() {}.type)
 
@@ -253,15 +240,6 @@ class MediaRepository @Inject constructor(
     //  URL builders (unchanged — used by Coil / ExoPlayer, not Retrofit)
     // ════════════════════════════════════════════════════════════════════════
 
-    fun getVideoStreamUrl(relativePath: String): String =
-        "$baseUrl/api/v1/videos/${normalizeRoutePath(relativePath)}/stream"
-
-    fun getThumbnailUrl(relativePath: String): String =
-        "$baseUrl/api/v1/images/${normalizeRoutePath(relativePath)}/thumbnail"
-
-    fun getOriginalImageUrl(relativePath: String): String =
-        "$baseUrl/api/v1/images/${normalizeRoutePath(relativePath)}/original"
-
     fun getMediaStreamUrl(absolutePath: String): String =
         "$baseUrl/api/v1/media/stream?path=${URLEncoder.encode(absolutePath, "UTF-8")}"
 
@@ -270,15 +248,6 @@ class MediaRepository @Inject constructor(
 
     fun getMediaOriginalImageUrl(absolutePath: String): String =
         "$baseUrl/api/v1/media/original?path=${URLEncoder.encode(absolutePath, "UTF-8")}"
-
-    fun getSystemVideoStreamUrl(absolutePath: String): String =
-        "$baseUrl/api/v1/system/stream?path=${URLEncoder.encode(absolutePath, "UTF-8")}"
-
-    fun getSystemThumbnailUrl(absolutePath: String): String =
-        "$baseUrl/api/v1/system/thumbnail?path=${URLEncoder.encode(absolutePath, "UTF-8")}"
-
-    fun getSystemOriginalImageUrl(absolutePath: String): String =
-        "$baseUrl/api/v1/system/original?path=${URLEncoder.encode(absolutePath, "UTF-8")}"
 
     // ════════════════════════════════════════════════════════════════════════
     //  Helpers
