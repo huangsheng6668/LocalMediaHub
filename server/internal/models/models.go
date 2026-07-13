@@ -55,10 +55,3 @@ type FileAssociation struct {
 	FilePath string `json:"file_path"`
 	TagID    string `json:"tag_id"`
 }
-
-type ServerStatus struct {
-	Running bool   `json:"running"`
-	Host    string `json:"host"`
-	Port    int    `json:"port"`
-	IP      string `json:"ip"`
-}

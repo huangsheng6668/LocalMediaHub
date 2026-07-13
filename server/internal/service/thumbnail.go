@@ -457,21 +457,6 @@ func (s *ThumbnailService) GenerateSystemThumbnailBytes(sourcePath string) ([]by
 	return s.generateBytesVia(sourcePath, s.GenerateSystemThumbnail)
 }
 
-// DecodeImage decodes an image file and returns the Go image object.
-func DecodeImage(path string) (image.Image, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	img, _, err := image.Decode(f)
-	if err != nil {
-		return nil, err
-	}
-	return img, nil
-}
-
 // ffprobeSibling derives the ffprobe path from an ffmpeg path: same directory
 // and extension with the basename ffmpeg -> ffprobe. If the basename does not
 // contain "ffmpeg", it returns the bare "ffprobe" (relying on PATH lookup).

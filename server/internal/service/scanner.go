@@ -401,17 +401,6 @@ func (s *Scanner) InvalidateCache() {
 	s.mu.Unlock()
 }
 
-func (s *Scanner) Search(files []models.MediaFile, query string) []models.MediaFile {
-	result := make([]models.MediaFile, 0)
-	q := strings.ToLower(query)
-	for _, f := range files {
-		if strings.Contains(strings.ToLower(f.Name), q) {
-			result = append(result, f)
-		}
-	}
-	return result
-}
-
 // StartWatching initializes the fsnotify watcher, registers all roots recursively,
 // and spawns a background event-listening loop.
 func (s *Scanner) StartWatching(roots []string) error {
