@@ -25,6 +25,17 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// thumbBufPool 复用 jpeg.Encode 的输出 buffer，减少 GC 压力。
+// 预分配 64KB（300×300 Q85 JPEG 典型输出 ~30KB，留余量）。
+// 注：jpeg.Encode 内部分配无法通过 pool 控制，pool 只覆盖输出 buffer。
+// B2 整体 alloc 预计下降 30-50%（非 70x）。
+var thumbBufPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 0, 64*1024)
+		return &b
+	},
+}
+
 type ThumbnailService struct {
 	cacheDir   string
 	maxSize    int
@@ -211,23 +222,50 @@ func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (im
 // encodeThumbnailToCache 把 src 等比缩放到 max×max 框内并写入 cachePath。
 // C2 优化：使用 Linear + Fit（300×300 缩略图场景下与 Lanczos 视觉等价，速度快 3-5 倍）。
 // 用 os.CreateTemp + os.Rename 原子写入：进程崩溃/并发写不会留下半截损坏 jpg。
+//
+// B2 改造：用 sync.Pool 复用 jpeg.Encode 输出 buffer。
+//
+// Tradeoff（实事求是）：原实现直接 jpeg.Encode(tempFile, ...) 流式写磁盘，
+// 峰值内存仅 jpeg 内部 buffer。B2 改为先编码到内存 pool buffer 再写磁盘，
+// 峰值内存增加约 30-50KB/并发，但减少了 bytes.Buffer 底层 []byte 的重复分配。
+// 整体 alloc 预计下降 30-50%（非 70x）。
 func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
 	thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.Linear)
 
+	bufPtr := thumbBufPool.Get().(*[]byte)
+	buf := bytes.NewBuffer(*bufPtr)
+	buf.Reset()
+
+	if err := jpeg.Encode(buf, thumb, &jpeg.Options{Quality: 85}); err != nil {
+		*bufPtr = buf.Bytes()
+		thumbBufPool.Put(bufPtr)
+		return "", err
+	}
+
+	// 原子写入磁盘
 	tempFile, err := os.CreateTemp(filepath.Dir(cachePath), "thumb-tmp-*.jpg")
 	if err != nil {
+		*bufPtr = buf.Bytes()
+		thumbBufPool.Put(bufPtr)
 		return "", err
 	}
 	tempPath := tempFile.Name()
 	defer os.Remove(tempPath) // 出错提前返回时自动清理
 
-	if err := jpeg.Encode(tempFile, thumb, &jpeg.Options{Quality: 85}); err != nil {
+	if _, err := tempFile.Write(buf.Bytes()); err != nil {
 		tempFile.Close()
+		*bufPtr = buf.Bytes()
+		thumbBufPool.Put(bufPtr)
 		return "", err
 	}
 	if err := tempFile.Close(); err != nil {
+		*bufPtr = buf.Bytes()
+		thumbBufPool.Put(bufPtr)
 		return "", err
 	}
+
+	*bufPtr = buf.Bytes()
+	thumbBufPool.Put(bufPtr)
 
 	if err := os.Rename(tempPath, cachePath); err != nil {
 		return "", err

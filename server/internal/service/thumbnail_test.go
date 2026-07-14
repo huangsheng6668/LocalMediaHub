@@ -947,3 +947,34 @@ func BenchmarkPreGenerateThumbnails_EnqueueStage(b *testing.B) {
 		svc.PreGenerateThumbnails(files, ctx, hotPaths)
 	}
 }
+
+// BenchmarkEncodeThumbnailToCache 度量 encodeThumbnailToCache 热路径的内存分配。
+// B2 前后对比基线：用 5000x4000 大图（典型高分辨率照片）作为输入，
+// 每次迭代用不同 cachePath 避免命中已存在文件。
+// 报告 ns/op + B/op + allocs/op，B2 改造后 B/op 预期下降 30-50%
+// （jpeg.Encode 内部分配无法 pool 控制，只覆盖输出 buffer）。
+func BenchmarkEncodeThumbnailToCache(b *testing.B) {
+	tempDir := b.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// 构造 5000x4000 测试图（典型大图）
+	src := imaging.New(5000, 4000, color.NRGBA{R: 255, G: 0, B: 0, A: 255})
+
+	cachePath := filepath.Join(tempDir, "bench.jpg")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		// 每次用不同 cachePath 避免命中已存在文件
+		cp := fmt.Sprintf("%s_%d.jpg", cachePath, i)
+		if _, err := svc.encodeThumbnailToCache(src, cp); err != nil {
+			b.Fatal(err)
+		}
+		// 清理
+		_ = os.Remove(cp)
+	}
+}
