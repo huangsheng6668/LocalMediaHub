@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,4 +78,56 @@ func TestTagsService(t *testing.T) {
 	defer svcReloaded.Close()
 	assert.Len(t, svcReloaded.GetAllTags(), 1)
 	assert.Equal(t, t2.ID, svcReloaded.GetAllTags()[0].ID)
+}
+
+func TestTagsService_PragmasApplied(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewTagsService(tempDir)
+	assert.NoError(t, err)
+	defer svc.Close()
+
+	// journal_mode 应为 WAL
+	var mode string
+	err = svc.db.QueryRow("PRAGMA journal_mode").Scan(&mode)
+	assert.NoError(t, err)
+	assert.Equal(t, "wal", strings.ToLower(mode))
+
+	// synchronous 应为 NORMAL (1)
+	var sync int
+	err = svc.db.QueryRow("PRAGMA synchronous").Scan(&sync)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, sync)
+
+	// foreign_keys 应为 ON (1)
+	var fk int
+	err = svc.db.QueryRow("PRAGMA foreign_keys").Scan(&fk)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, fk)
+}
+
+func TestTagsService_IndexesCreated(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewTagsService(tempDir)
+	assert.NoError(t, err)
+	defer svc.Close()
+
+	// 查 sqlite_master 确认 3 个索引存在
+	expectedIndexes := []string{
+		"idx_associations_tag_id",
+		"idx_associations_file_path",
+		"idx_tags_name_lower",
+	}
+	rows, err := svc.db.Query("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")
+	assert.NoError(t, err)
+	defer rows.Close()
+
+	got := make(map[string]bool)
+	for rows.Next() {
+		var name string
+		assert.NoError(t, rows.Scan(&name))
+		got[name] = true
+	}
+	for _, idx := range expectedIndexes {
+		assert.True(t, got[idx], "missing index: %s", idx)
+	}
 }

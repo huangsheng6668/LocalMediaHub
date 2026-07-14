@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -45,6 +46,23 @@ func NewTagsService(dataDir string) (*TagsService, error) {
 	// Optimize SQLite performance and connection behavior
 	db.SetMaxOpenConns(1)
 
+	// A1.1: PRAGMA 优化（WAL + NORMAL + mmap + cache + foreign_keys）。
+	// 单个 PRAGMA 失败仅 log.Warn 不阻断启动，用默认配置降级运行。
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA mmap_size=268435456",   // 256MB
+		"PRAGMA temp_store=MEMORY",
+		"PRAGMA cache_size=-65536",     // 64MB page cache (KB 单位，负数表示 KB)
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			slog.Warn("tags sqlite pragma failed", "pragma", p, "error", err)
+		}
+	}
+
 	// Create tables
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS tags (
@@ -62,6 +80,21 @@ func NewTagsService(dataDir string) (*TagsService, error) {
 	if err != nil {
 		db.Close()
 		return nil, err
+	}
+
+	// A1.2: 索引（CREATE INDEX IF NOT EXISTS 幂等，老库升级安全）。
+	// idx_tags_name_lower 是函数索引（modernc.org/sqlite 3.x 支持），CreateTag 的
+	// WHERE LOWER(name) = LOWER(?) 命中此索引。
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_associations_tag_id ON associations(tag_id)",
+		"CREATE INDEX IF NOT EXISTS idx_associations_file_path ON associations(file_path)",
+		"CREATE INDEX IF NOT EXISTS idx_tags_name_lower ON tags(LOWER(name))",
+	}
+	for _, idx := range indexes {
+		if _, err := db.Exec(idx); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to create index: %w", err)
+		}
 	}
 
 	s := &TagsService{db: db}
