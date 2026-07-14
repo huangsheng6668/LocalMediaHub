@@ -1,9 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +15,17 @@ import (
 	"time"
 
 	"github.com/disintegration/imaging"
+	"github.com/stretchr/testify/assert"
 )
+
+// validJPEGBytes 是一个用 stdlib image/jpeg 编码的 10x10 RGBA 测试 JPEG。
+// 仅在测试启动时编码一次，供需要合法 JPEG 字节的测试复用。
+var validJPEGBytes = func() []byte {
+	var buf bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	_ = jpeg.Encode(&buf, img, nil)
+	return buf.Bytes()
+}()
 
 // newTestThumbnailService 创建一个用 t.TempDir() 作为 cacheDir 的 ThumbnailService，
 // 用于测试。maxSize=150。ffmpegPath 空时回退到 PATH。
@@ -557,5 +570,77 @@ func TestGenerateThumbnailFromFile_Image_UsesHelper(t *testing.T) {
 	defer f.Close()
 	if _, _, err := image.Decode(f); err != nil {
 		t.Errorf("generated thumbnail is not valid JPEG: %v", err)
+	}
+}
+
+// TestHotTracker_RecordsInteractionRequests 验证：通过 GenerateThumbnailBytes
+// （内部走 generateBytesVia，即交互请求路径）请求一次后，hotTracker 包含该 path。
+// PreGenerateThumbnails 调 GenerateThumbnail（不经 generateBytesVia），不会被记录。
+func TestHotTracker_RecordsInteractionRequests(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// 准备一张测试图片
+	imgPath := filepath.Join(tempDir, "test.jpg")
+	if err := os.WriteFile(imgPath, validJPEGBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 调用 GenerateThumbnailBytes（内部走 generateBytesVia）
+	_, _ = svc.GenerateThumbnailBytes(imgPath)
+
+	// hotTracker 应包含该 path
+	keys := svc.HotTracker().Keys()
+	assert.Contains(t, keys, imgPath)
+}
+
+// TestHotTracker_LRU200Max 验证：hotTracker 容量为 200，超过时淘汰最老的。
+func TestHotTracker_LRU200Max(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// 手动 add 200 个 path
+	for i := 0; i < 200; i++ {
+		svc.HotTracker().Add(fmt.Sprintf("path_%d.jpg", i), struct{}{})
+	}
+
+	// LRU 容量 200，应保留最后 200 个
+	assert.Equal(t, 200, svc.HotTracker().Len())
+
+	// 加第 201 个，最老的（path_0.jpg）应被淘汰
+	svc.HotTracker().Add("path_200.jpg", struct{}{})
+	assert.Equal(t, 200, svc.HotTracker().Len())
+	keys := svc.HotTracker().Keys()
+	assert.NotContains(t, keys, "path_0.jpg")
+	assert.Contains(t, keys, "path_200.jpg")
+}
+
+// BenchmarkHotTracker_Add 度量 hotTracker.Add 热路径操作开销。
+// 这是 PreGenerateThumbnails 排序前 read-only 遍历 Keys 时反向上游的写入路径。
+func BenchmarkHotTracker_Add(b *testing.B) {
+	tempDir := b.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	paths := make([]string, 1000)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("dir/file_%04d.mp4", i)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		svc.HotTracker().Add(paths[i%len(paths)], struct{}{})
 	}
 }

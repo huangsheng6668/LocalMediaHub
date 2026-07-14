@@ -47,6 +47,13 @@ type ThumbnailService struct {
 	// 文件被替换后会自然产生新 key，不会把新旧版本串到一起。
 	sf singleflight.Group
 
+	// hotTracker 跟踪最近 200 个被请求的 path（LRU）。
+	// PreGenerateThumbnails 用它作为热点优先级来源。
+	// 放在 generateBytesVia（仅交互请求路径）而非 GenerateThumbnail 中是有意设计：
+	// PreGenerateThumbnails 调 GenerateThumbnail 不经过 generateBytesVia，
+	// 因此 hotTracker 只追踪真实用户交互请求。
+	hotTracker *lru.Cache[string, struct{}]
+
 	// durations.json 持久化缓存：避免视频缩略图 miss 时每次都 fork ffprobe。
 	// 也通过 VideoDuration 导出方法共享给 /api/v1/media/duration handler。
 	durMu           sync.RWMutex
@@ -64,6 +71,9 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 	// golang-lru/v2 returns no error when size > 0; the explicit discard is
 	// documented. 200 entries ≈ 20 MB heap at ~100 KB per thumbnail.
 	memCache, _ := lru.NewWithEvict[string, []byte](200, nil)
+	// hotTracker 容量与 memCache 对齐：200 个最近交互请求的 path。
+	// golang-lru/v2 在 size>0 时不返回 error，显式丢弃是文档化的。
+	hotTracker, _ := lru.New[string, struct{}](200)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &ThumbnailService{
@@ -73,6 +83,7 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 		sem:        make(chan struct{}, runtime.NumCPU()),
 		ffmpegPath: ffmpegPath,
 		memCache:   memCache,
+		hotTracker: hotTracker,
 		durCache:   make(map[string]durationEntry),
 		ctx:        ctx,
 		durCancel:  cancel,
@@ -413,6 +424,11 @@ func (s *ThumbnailService) generateBytesVia(
 	sourcePath string,
 	genFunc func(string) (string, error),
 ) ([]byte, error) {
+	// B1.1: 记录交互请求 path 到 hotTracker，供 PreGenerateThumbnails 排序用。
+	// 仅 generateBytesVia 调用此处 → PreGen 走 GenerateThumbnail 不经过这里，
+	// 因此 pre-generation 不会污染 hot set。
+	s.hotTracker.Add(sourcePath, struct{}{})
+
 	fi, err := os.Stat(sourcePath)
 	if err != nil {
 		return nil, err
@@ -586,4 +602,11 @@ func (s *ThumbnailService) persistDurationCache() {
 func (s *ThumbnailService) Shutdown() {
 	s.durCancel()
 	s.persistDurationCache()
+}
+
+// HotTracker 导出 hotTracker 给 server.go::OnScanComplete 读取热点 key 列表，
+// 供 PreGenerateThumbnails（B1.2）按热度排序后台预生成任务。
+// 只读访问（Keys/Len/Contains）；不导出字段本身，避免外部包误操作 LRU 内部状态。
+func (s *ThumbnailService) HotTracker() *lru.Cache[string, struct{}] {
+	return s.hotTracker
 }
