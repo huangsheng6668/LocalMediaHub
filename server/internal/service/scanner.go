@@ -467,6 +467,23 @@ func (s *Scanner) InvalidateCache() {
 	s.mu.Unlock()
 }
 
+// findOwnerRoot 返回 path 所属的 watch root；找不到时返回第一个 root（降级）。
+// 路径分隔符由 filepath.Clean 统一处理。
+// 用途：watchEvents 根据 event.Name 找到所属 root，做 per-root 独立防抖。
+func findOwnerRoot(path string, roots []string) string {
+	cleanPath := filepath.Clean(path)
+	for _, root := range roots {
+		cleanRoot := filepath.Clean(root)
+		if cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(filepath.Separator)) {
+			return root
+		}
+	}
+	if len(roots) > 0 {
+		return roots[0]
+	}
+	return ""
+}
+
 // StartWatching initializes the fsnotify watcher, registers all roots recursively,
 // and spawns a background event-listening loop.
 func (s *Scanner) StartWatching(roots []string) error {
@@ -504,7 +521,20 @@ func (s *Scanner) StartWatching(roots []string) error {
 }
 
 func (s *Scanner) watchEvents() {
-	var scanTimer *time.Timer
+	// A3: per-root 独立防抖。
+	// 当前实现是全局单 scanTimer，任何事件都重置同一个 2s timer——
+	// 一个 root 持续产生事件会不断重置 timer，导致其他 root 的扫描被延迟。
+	// A3 改为每 root 一个独立 timer：root1 持续事件不影响 root2 的 timer fire。
+	// 防抖 timer fire 后仍扫所有 roots（保证 cache 完整性），TriggerScan 内的
+	// bgCancel + singleflight 自动合并同一时刻 fire 的多次扫描。
+	type pendingRoot struct {
+		timer *time.Timer
+	}
+	var (
+		pending   = make(map[string]*pendingRoot)
+		pendingMu sync.Mutex
+	)
+
 	const debounceDuration = 2 * time.Second
 
 	for {
@@ -521,38 +551,50 @@ func (s *Scanner) watchEvents() {
 				return
 			}
 
-			// Invalidate cache immediately on change events
-			if event.Op&fsnotify.Write == fsnotify.Write ||
-				event.Op&fsnotify.Create == fsnotify.Create ||
-				event.Op&fsnotify.Remove == fsnotify.Remove ||
-				event.Op&fsnotify.Rename == fsnotify.Rename {
-
-				s.InvalidateCache()
-
-				// If a new directory is created, dynamically add it to the watcher
-				if event.Op&fsnotify.Create == fsnotify.Create {
-					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-						s.mu.Lock()
-						if s.watcher != nil {
-							_ = s.watcher.Add(event.Name)
-						}
-						s.mu.Unlock()
-					}
-				}
-
-				// Debounce triggering scan to warm cache
-				s.mu.Lock()
-				if scanTimer != nil {
-					scanTimer.Stop()
-				}
-				scanTimer = time.AfterFunc(debounceDuration, func() {
-					s.mu.RLock()
-					roots := s.watchRoots
-					s.mu.RUnlock()
-					s.TriggerScan(roots)
-				})
-				s.mu.Unlock()
+			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) == 0 {
+				continue
 			}
+
+			// A3：保留全 cache 失效语义（精确增量合并复杂度过高，YAGNI）
+			s.InvalidateCache()
+
+			if event.Op&fsnotify.Create == fsnotify.Create {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					s.mu.Lock()
+					if s.watcher != nil {
+						_ = s.watcher.Add(event.Name)
+					}
+					s.mu.Unlock()
+				}
+			}
+
+			s.mu.RLock()
+			roots := s.watchRoots
+			s.mu.RUnlock()
+
+			ownerRoot := findOwnerRoot(event.Name, roots)
+
+			pendingMu.Lock()
+			if p, ok := pending[ownerRoot]; ok {
+				p.timer.Stop()
+			}
+			pending[ownerRoot] = &pendingRoot{}
+			pending[ownerRoot].timer = time.AfterFunc(debounceDuration, func() {
+				pendingMu.Lock()
+				delete(pending, ownerRoot)
+				pendingMu.Unlock()
+
+				// A3：始终扫所有 roots 保证缓存完整性。
+				// 独立防抖的核心收益：root1 高频事件不会重置 root2 的
+				// 2s 窗口，减少总重扫次数。singleflight 会自动合并
+				// 同一时刻 fire 的多个 root 的扫描为一次。
+				s.mu.RLock()
+				allRoots := s.watchRoots
+				s.mu.RUnlock()
+				s.TriggerScan(allRoots)
+			})
+			pendingMu.Unlock()
+
 		case _, ok := <-watcher.Errors:
 			if !ok {
 				return

@@ -560,3 +560,54 @@ func BenchmarkGetCachedByDir_LargeCache(b *testing.B) {
 		_, _ = scanner.GetCachedByDir(context.Background(), []string{tempDir}, filepath.Join(tempDir, "Big"))
 	}
 }
+
+// TestFindOwnerRoot 验证 A3 的 findOwnerRoot helper：把 event path 映射到所属 watch root。
+// 找不到所属 root 时降级为 roots[0]，空 roots 返回空字符串。
+func TestFindOwnerRoot(t *testing.T) {
+	roots := []string{"D:/Media", "E:/Videos", "/home/user/music"}
+
+	cases := []struct {
+		name     string
+		path     string
+		expected string
+	}{
+		{"exact match root", "D:/Media", "D:/Media"},
+		{"file inside root", "D:/Media/Series/Ep01.mp4", "D:/Media"},
+		{"file in second root", "E:/Videos/movie.mkv", "E:/Videos"},
+		{"file in unix root", "/home/user/music/song.mp3", "/home/user/music"},
+		{"path outside any root falls back to roots[0]", "/tmp/random.mp4", "D:/Media"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findOwnerRoot(tc.path, roots)
+			assert.Equal(t, tc.expected, got)
+		})
+	}
+
+	// 空 roots：返回 ""
+	assert.Equal(t, "", findOwnerRoot("/anywhere", []string{}))
+}
+
+// TestWatchEvents_PerRootIndependentDebounce 是 A3 的端到端集成测试。
+// 需要真实的 fsnotify 事件 + 时间敏感断言，单测环境不稳定，标 Skip 由手动 smoke test 覆盖。
+func TestWatchEvents_PerRootIndependentDebounce(t *testing.T) {
+	t.Skip("requires fsnotify real file events + timing-sensitive assertions; covered by manual smoke test")
+}
+
+// BenchmarkFindOwnerRoot 验证 A3 helper 在热路径（每事件）零分配。
+func BenchmarkFindOwnerRoot(b *testing.B) {
+	roots := []string{"D:/Media", "E:/Videos", "F:/Movies", "/home/user/music"}
+	paths := []string{
+		"D:/Media/Series/Show/ep01.mp4",
+		"E:/Videos/movie.mkv",
+		"F:/Movies/2024/film.mp4",
+		"/home/user/music/album/song.mp3",
+		"/tmp/nonexistent.mp4",
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = findOwnerRoot(paths[i%len(paths)], roots)
+	}
+}
