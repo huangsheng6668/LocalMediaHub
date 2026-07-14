@@ -28,7 +28,7 @@ import (
 // thumbBufPool 复用 jpeg.Encode 的输出 buffer，减少 GC 压力。
 // 预分配 64KB（300×300 Q85 JPEG 典型输出 ~30KB，留余量）。
 // 注：jpeg.Encode 内部分配无法通过 pool 控制，pool 只覆盖输出 buffer。
-// B2 整体 alloc 预计下降 30-50%（非 70x）。
+// 实测 B/op 下降 ~0%（jpeg.Encode 内部分配占主导，pool 收益不可见）。
 var thumbBufPool = sync.Pool{
 	New: func() interface{} {
 		b := make([]byte, 0, 64*1024)
@@ -228,7 +228,7 @@ func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (im
 // Tradeoff（实事求是）：原实现直接 jpeg.Encode(tempFile, ...) 流式写磁盘，
 // 峰值内存仅 jpeg 内部 buffer。B2 改为先编码到内存 pool buffer 再写磁盘，
 // 峰值内存增加约 30-50KB/并发，但减少了 bytes.Buffer 底层 []byte 的重复分配。
-// 整体 alloc 预计下降 30-50%（非 70x）。
+// 实测 B/op 下降 ~0%（详见 BenchmarkEncodeThumbnailToCache + commit 8606fe2 message）。
 func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
 	thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.Linear)
 
