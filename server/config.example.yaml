@@ -44,7 +44,7 @@ thumbnail:
 system:
   # CAUTION: when true, authenticated clients can delete files under allowed_roots
   # via POST /api/v1/system/delete. The server prints a warning at startup when
-  # this is enabled. Default false.
-  enable_delete: false
+  # this is enabled. Default true.
+  enable_delete: true
   allowed_roots: []
     # - "D:/Media"

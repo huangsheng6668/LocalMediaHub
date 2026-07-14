@@ -168,7 +168,11 @@ func (c *Config) GetSystemAllowedRoots() []string {
 // LoadFromBytes parses config from a YAML byte slice. Used by tests to avoid
 // disk I/O; production code uses Load(path).
 func LoadFromBytes(data []byte) (*Config, error) {
-	var cfg Config
+	cfg := Config{
+		System: SystemConfig{
+			EnableDelete: true,
+		},
+	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
