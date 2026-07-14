@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -304,29 +305,51 @@ func (s *TagsService) GetTagsForFiles(filePaths []string) map[string][]models.Fi
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make(map[string][]models.FileTag)
+	result := make(map[string][]models.FileTag, len(filePaths))
 	for _, fp := range filePaths {
 		result[fp] = []models.FileTag{}
 	}
-
-	rows, err := s.db.Query(`
-		SELECT a.file_path, t.id, t.name, t.color 
-		FROM associations a 
-		JOIN tags t ON a.tag_id = t.id
-	`)
-	if err != nil {
+	if len(filePaths) == 0 {
 		return result
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var filePath string
-		var t models.FileTag
-		if err := rows.Scan(&filePath, &t.ID, &t.Name, &t.Color); err == nil {
-			if _, exists := result[filePath]; exists {
-				result[filePath] = append(result[filePath], t)
+	// A1.2: 批查（每批 500 个 placeholder）。
+	// modernc.org/sqlite 默认 SQLITE_MAX_VARIABLE_NUMBER=32766，500 远低于上限。
+	const batchSize = 500
+	for start := 0; start < len(filePaths); start += batchSize {
+		end := start + batchSize
+		if end > len(filePaths) {
+			end = len(filePaths)
+		}
+		batch := filePaths[start:end]
+
+		placeholders := strings.Repeat("?,", len(batch)-1) + "?"
+		args := make([]interface{}, len(batch))
+		for i, fp := range batch {
+			args[i] = fp
+		}
+
+		query := fmt.Sprintf(`
+			SELECT a.file_path, t.id, t.name, t.color
+			FROM associations a
+			JOIN tags t ON a.tag_id = t.id
+			WHERE a.file_path IN (%s)
+		`, placeholders)
+
+		rows, err := s.db.Query(query, args...)
+		if err != nil {
+			return result
+		}
+		for rows.Next() {
+			var filePath string
+			var t models.FileTag
+			if err := rows.Scan(&filePath, &t.ID, &t.Name, &t.Color); err == nil {
+				if _, exists := result[filePath]; exists {
+					result[filePath] = append(result[filePath], t)
+				}
 			}
 		}
+		rows.Close()
 	}
 	return result
 }
