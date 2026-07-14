@@ -1,9 +1,13 @@
 package service
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +16,19 @@ import (
 	"time"
 
 	"github.com/disintegration/imaging"
+	"github.com/localmediahub/server/internal/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// validJPEGBytes 是一个用 stdlib image/jpeg 编码的 10x10 RGBA 测试 JPEG。
+// 仅在测试启动时编码一次，供需要合法 JPEG 字节的测试复用。
+var validJPEGBytes = func() []byte {
+	var buf bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	_ = jpeg.Encode(&buf, img, nil)
+	return buf.Bytes()
+}()
 
 // newTestThumbnailService 创建一个用 t.TempDir() 作为 cacheDir 的 ThumbnailService，
 // 用于测试。maxSize=150。ffmpegPath 空时回退到 PATH。
@@ -557,5 +573,408 @@ func TestGenerateThumbnailFromFile_Image_UsesHelper(t *testing.T) {
 	defer f.Close()
 	if _, _, err := image.Decode(f); err != nil {
 		t.Errorf("generated thumbnail is not valid JPEG: %v", err)
+	}
+}
+
+// TestHotTracker_RecordsInteractionRequests 验证：通过 GenerateThumbnailBytes
+// （内部走 generateBytesVia，即交互请求路径）请求一次后，hotTracker 包含该 path。
+// PreGenerateThumbnails 调 GenerateThumbnail（不经 generateBytesVia），不会被记录。
+func TestHotTracker_RecordsInteractionRequests(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// 准备一张测试图片
+	imgPath := filepath.Join(tempDir, "test.jpg")
+	if err := os.WriteFile(imgPath, validJPEGBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 调用 GenerateThumbnailBytes（内部走 generateBytesVia）
+	_, _ = svc.GenerateThumbnailBytes(imgPath)
+
+	// hotTracker 应包含该 path
+	keys := svc.HotTracker().Keys()
+	assert.Contains(t, keys, imgPath)
+}
+
+// TestHotTracker_LRU200Max 验证：hotTracker 容量为 200，超过时淘汰最老的。
+func TestHotTracker_LRU200Max(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// 手动 add 200 个 path
+	for i := 0; i < 200; i++ {
+		svc.HotTracker().Add(fmt.Sprintf("path_%d.jpg", i), struct{}{})
+	}
+
+	// LRU 容量 200，应保留最后 200 个
+	assert.Equal(t, 200, svc.HotTracker().Len())
+
+	// 加第 201 个，最老的（path_0.jpg）应被淘汰
+	svc.HotTracker().Add("path_200.jpg", struct{}{})
+	assert.Equal(t, 200, svc.HotTracker().Len())
+	keys := svc.HotTracker().Keys()
+	assert.NotContains(t, keys, "path_0.jpg")
+	assert.Contains(t, keys, "path_200.jpg")
+}
+
+// BenchmarkHotTracker_Add 度量 hotTracker.Add 热路径操作开销。
+// 这是 PreGenerateThumbnails 排序前 read-only 遍历 Keys 时反向上游的写入路径。
+func BenchmarkHotTracker_Add(b *testing.B) {
+	tempDir := b.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	paths := make([]string, 1000)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("dir/file_%04d.mp4", i)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		svc.HotTracker().Add(paths[i%len(paths)], struct{}{})
+	}
+}
+
+// --- B1.2: PreGenerateThumbnails hotPaths + skip-cached + worker backoff ---
+
+// makeJPEGAt writes a real JPEG file (reusing the package-level validJPEGBytes
+// fixture) at path. Used by the B1.2 PreGen tests so all source files are
+// decodable by imaging.Open.
+func makeJPEGAt(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, validJPEGBytes, 0644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// TestPreGenerateThumbnails_HotPathFirst 验证：当 hotPaths 标记某个文件为热点时，
+// 该文件的缩略图会在冷文件之前被生成。
+//
+// 测试策略（Option B，真实 JPEG fixtures + 并发观测）：
+//   - 1 个 hot 文件 + 200 个 cold 文件
+//   - 利用 B1.2 的 100ms 退让（每 5 文件/worker）：200 cold / numWorkers(≤ NumCPU/4)
+//     即使 4 workers，每个处理 ~50 cold = 10 次 yield × 100ms = 1000ms，远超观测窗口
+//   - 在独立 goroutine 启动 PreGen，主 goroutine sleep 200ms 后检查磁盘状态
+//   - 断言：hot 缩略图存在（channel 头部，worker 必先取到），且至少一个 cold 未生成
+//
+// 这个测试利用 B1.2 的退让行为制造可观测的时间窗口，证明 hot-first 排序。
+func TestPreGenerateThumbnails_HotPathFirst(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// 1 hot + 200 cold。200 个 cold 在 B1.2 的退让下需要 > 1s 才能处理完，
+	// 给主 goroutine 充足的 200ms 观测窗口。
+	const numCold = 200
+	hotPath := filepath.Join(tempDir, "hot.jpg")
+	makeJPEGAt(t, hotPath)
+
+	files := []models.MediaFile{
+		{Name: "hot.jpg", Path: hotPath, MediaType: "image"},
+	}
+	for i := 0; i < numCold; i++ {
+		coldPath := filepath.Join(tempDir, fmt.Sprintf("cold_%03d.jpg", i))
+		makeJPEGAt(t, coldPath)
+		files = append(files, models.MediaFile{
+			Name:      fmt.Sprintf("cold_%03d.jpg", i),
+			Path:      coldPath,
+			MediaType: "image",
+		})
+	}
+
+	hotPaths := map[string]struct{}{hotPath: {}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 在 goroutine 中启动 PreGen（会阻塞直到完成或取消）
+	preGenDone := make(chan struct{})
+	go func() {
+		svc.PreGenerateThumbnails(files, ctx, hotPaths)
+		close(preGenDone)
+	}()
+
+	// 等待 200ms：hot 在 channel 头部，worker 几乎瞬间处理完（< 1ms）。
+	// 而 200 个 cold 受 B1.2 退让限制，200ms 内绝对处理不完。
+	time.Sleep(200 * time.Millisecond)
+
+	// hot 缩略图必须存在 —— 它在 channel 头部，worker 一定先拿到它。
+	hotFi, err := os.Stat(hotPath)
+	require.NoError(t, err, "hot source must still exist")
+	hotCache := svc.GetThumbnailPath(hotPath, hotFi.ModTime())
+	_, err = os.Stat(hotCache)
+	assert.NoError(t, err, "hot thumbnail must be generated within 200ms (it's first in queue)")
+
+	// 取消以释放 goroutine
+	cancel()
+	<-preGenDone
+
+	// 至少一个 cold 缩略图不存在 —— 证明 200ms 不够处理完所有 cold（退让生效）。
+	// 这间接验证了排序的"意义"：如果没有 hot-first，hot 会被淹没在 cold 中。
+	coldGenerated := 0
+	for i := 0; i < numCold; i++ {
+		coldPath := filepath.Join(tempDir, fmt.Sprintf("cold_%03d.jpg", i))
+		fi, err := os.Stat(coldPath)
+		if err != nil {
+			continue
+		}
+		cachePath := svc.GetThumbnailPath(coldPath, fi.ModTime())
+		if _, err := os.Stat(cachePath); err == nil {
+			coldGenerated++
+		}
+	}
+	assert.Less(t, coldGenerated, numCold,
+		"at least one cold thumbnail should NOT be generated within 200ms (B1.2 yield throttles cold processing)")
+}
+
+// TestPreGenerateThumbnails_SkipsCached 验证：已缓存的文件在入队阶段被跳过，
+// GenerateThumbnail 不会被重复调用（通过比较磁盘缓存 mtime 不变来验证）。
+//
+// 测试策略（Option B）：
+//  1. 先直接调 GenerateThumbnail 让缓存文件存在
+//  2. 记录缓存文件的 mtime
+//  3. 调 PreGenerateThumbnails（该文件在 hotPaths 中也无妨，缓存命中会跳过）
+//  4. 断言 mtime 未变化（缓存未被重写）
+func TestPreGenerateThumbnails_SkipsCached(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	srcPath := filepath.Join(tempDir, "cached.jpg")
+	makeJPEGAt(t, srcPath)
+
+	// 步骤 1：先让缩略图缓存存在
+	_, err = svc.GenerateThumbnail(srcPath)
+	require.NoError(t, err)
+
+	// 步骤 2：记录缓存 mtime
+	srcFi, err := os.Stat(srcPath)
+	require.NoError(t, err)
+	cachePath := svc.GetThumbnailPath(srcPath, srcFi.ModTime())
+	cacheFiBefore, err := os.Stat(cachePath)
+	require.NoError(t, err, "cache file must exist after GenerateThumbnail")
+	mtimeBefore := cacheFiBefore.ModTime()
+
+	// 步骤 3：调 PreGen。文件在 hotPaths 中也应被跳过（缓存命中）。
+	files := []models.MediaFile{
+		{Name: "cached.jpg", Path: srcPath, MediaType: "image"},
+	}
+	hotPaths := map[string]struct{}{srcPath: {}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	svc.PreGenerateThumbnails(files, ctx, hotPaths)
+
+	// 步骤 4：缓存 mtime 不应变（证明未被重写）
+	cacheFiAfter, err := os.Stat(cachePath)
+	require.NoError(t, err)
+	assert.Equal(t, mtimeBefore, cacheFiAfter.ModTime(),
+		"cached thumbnail should not be rewritten by PreGen")
+}
+
+// TestPreGenerateThumbnails_NilHotPaths 验证：hotPaths 为 nil map 时不会 panic，
+// 所有文件都被当作 cold 处理（功能正确性 regression guard）。
+func TestPreGenerateThumbnails_NilHotPaths(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	srcPath := filepath.Join(tempDir, "regular.jpg")
+	makeJPEGAt(t, srcPath)
+
+	files := []models.MediaFile{
+		{Name: "regular.jpg", Path: srcPath, MediaType: "image"},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// 不应 panic
+	assert.NotPanics(t, func() {
+		svc.PreGenerateThumbnails(files, ctx, nil)
+	})
+
+	// 缩略图应被生成
+	srcFi, err := os.Stat(srcPath)
+	require.NoError(t, err)
+	cachePath := svc.GetThumbnailPath(srcPath, srcFi.ModTime())
+	_, err = os.Stat(cachePath)
+	assert.NoError(t, err, "thumbnail should be generated with nil hotPaths")
+}
+
+// TestPreGenerateThumbnails_SkipsUnknownMediaType 验证：非 image/video 的
+// MediaType 在入队阶段被过滤掉，不会被处理。
+func TestPreGenerateThumbnails_SkipsUnknownMediaType(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// "document" 类型不应被处理
+	srcPath := filepath.Join(tempDir, "doc.txt")
+	makeJPEGAt(t, srcPath) // 实际是 JPEG 字节，但 MediaType 不对
+
+	files := []models.MediaFile{
+		{Name: "doc.txt", Path: srcPath, MediaType: "document"},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	svc.PreGenerateThumbnails(files, ctx, nil)
+
+	// 不应生成缩略图（MediaType 被过滤）
+	srcFi, err := os.Stat(srcPath)
+	require.NoError(t, err)
+	cachePath := svc.GetThumbnailPath(srcPath, srcFi.ModTime())
+	_, err = os.Stat(cachePath)
+	assert.True(t, os.IsNotExist(err),
+		"thumbnail should NOT be generated for unknown MediaType")
+}
+
+// TestPreGenerateThumbnails_RespectsContextCancellation 验证：context 取消后
+// worker 不继续处理新任务（但已派发的当前任务可能完成）。
+func TestPreGenerateThumbnails_RespectsContextCancellation(t *testing.T) {
+	tempDir := t.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// 生成足够多的文件，使取消时仍有未处理的任务
+	const numFiles = 50
+	files := make([]models.MediaFile, numFiles)
+	for i := 0; i < numFiles; i++ {
+		p := filepath.Join(tempDir, fmt.Sprintf("f_%02d.jpg", i))
+		makeJPEGAt(t, p)
+		files[i] = models.MediaFile{
+			Name:      fmt.Sprintf("f_%02d.jpg", i),
+			Path:      p,
+			MediaType: "image",
+		}
+	}
+
+	// 立即取消的 context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 先取消
+
+	start := time.Now()
+	svc.PreGenerateThumbnails(files, ctx, nil)
+	elapsed := time.Since(start)
+
+	// 应该很快返回（不处理所有 50 个文件）。
+	// 注意：worker 可能在 ctx.Done select 中立即退出，但已排队的 head 任务
+	// 可能仍被处理 1-2 个。这里只断言总耗时远小于处理全部 50 个文件的时间。
+	assert.Less(t, elapsed, 5*time.Second,
+		"PreGen with cancelled ctx should return quickly, got %v", elapsed)
+
+	// 至少有一些文件没被处理（50 个全处理需要 > 5s，cancel 后 < 5s 必然有剩余）
+	generated := 0
+	for i := 0; i < numFiles; i++ {
+		p := filepath.Join(tempDir, fmt.Sprintf("f_%02d.jpg", i))
+		fi, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		cachePath := svc.GetThumbnailPath(p, fi.ModTime())
+		if _, err := os.Stat(cachePath); err == nil {
+			generated++
+		}
+	}
+	assert.Less(t, generated, numFiles,
+		"cancelled context should prevent all files from being processed")
+}
+
+// BenchmarkPreGenerateThumbnails_EnqueueStage 度量入队阶段的过滤 + 排序开销。
+// 4.3-B 合规：这是 PreGen 端到端中唯一有意义且可隔离的微基准。
+// 用合成的 files 切片（无真实磁盘 IO），立即取消 context 使 worker 退出。
+// os.Stat 对 fake path 失败 → 所有文件被跳过，仅测量入队 + 过滤成本。
+func BenchmarkPreGenerateThumbnails_EnqueueStage(b *testing.B) {
+	files := make([]models.MediaFile, 1000)
+	for i := range files {
+		files[i] = models.MediaFile{
+			Name:      fmt.Sprintf("file_%04d.jpg", i),
+			Path:      fmt.Sprintf("/fake/dir/file_%04d.jpg", i),
+			MediaType: "image",
+		}
+	}
+	hotPaths := map[string]struct{}{
+		"/fake/dir/file_0005.jpg": {},
+		"/fake/dir/file_0010.jpg": {},
+		"/fake/dir/file_0050.jpg": {},
+	}
+
+	tempDir := b.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 立即取消，worker 几乎不做实际生成工作
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		svc.PreGenerateThumbnails(files, ctx, hotPaths)
+	}
+}
+
+// BenchmarkEncodeThumbnailToCache 度量 encodeThumbnailToCache 热路径的内存分配。
+// B2 前后对比基线：用 5000x4000 大图（典型高分辨率照片）作为输入，
+// 每次迭代用不同 cachePath 避免命中已存在文件。
+// 报告 ns/op + B/op + allocs/op，B2 改造后 B/op 预期下降 30-50%
+// （jpeg.Encode 内部分配无法 pool 控制，只覆盖输出 buffer）。
+func BenchmarkEncodeThumbnailToCache(b *testing.B) {
+	tempDir := b.TempDir()
+	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer svc.Shutdown()
+
+	// 构造 5000x4000 测试图（典型大图）
+	src := imaging.New(5000, 4000, color.NRGBA{R: 255, G: 0, B: 0, A: 255})
+
+	cachePath := filepath.Join(tempDir, "bench.jpg")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		// 每次用不同 cachePath 避免命中已存在文件
+		cp := fmt.Sprintf("%s_%d.jpg", cachePath, i)
+		if _, err := svc.encodeThumbnailToCache(src, cp); err != nil {
+			b.Fatal(err)
+		}
+		// 清理
+		_ = os.Remove(cp)
 	}
 }

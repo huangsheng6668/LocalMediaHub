@@ -77,7 +77,14 @@ func New(cfg *config.Config) (*Server, error) {
 		ctx, s.preGenCancel = context.WithCancel(context.Background())
 		s.preGenMu.Unlock()
 
-		s.Thumbnail.PreGenerateThumbnails(files, ctx)
+		// B1.2: 收集 hot paths 作为预热优先级来源。
+		// HotTracker().Keys() 内部加锁（golang-lru/v2 自带 sync），无需外部锁。
+		hotPaths := make(map[string]struct{})
+		for _, key := range s.Thumbnail.HotTracker().Keys() {
+			hotPaths[key] = struct{}{}
+		}
+
+		s.Thumbnail.PreGenerateThumbnails(files, ctx, hotPaths)
 	}
 
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService)
@@ -102,6 +109,29 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// to a 500 instead of crashing the whole process.
 	s.Echo.Use(echoMw.Recover())
 	s.Echo.Use(echoMw.Logger())
+	// B3: gzip JSON responses to reduce LAN transfer time (a 500-item folder
+	// listing is ~500KB raw → ~80KB compressed, a ~6x wire reduction).
+	// Skip binary endpoints (video/image/zip are already compressed, so gzip
+	// would waste CPU for ~0 ratio gain and double-buffer large streams).
+	//
+	// CRITICAL: the Skipper MUST use c.Request().URL.Path (actual request path),
+	// NOT c.Path() (route template). Route templates like "/api/v1/videos/*"
+	// do NOT contain "/stream", so c.Path() would fail to skip transcoded
+	// streams and double-gzip video bytes. URL.Path is the concrete path the
+	// client requested (e.g. "/api/v1/videos/foo/stream") and matches correctly.
+	s.Echo.Use(echoMw.GzipWithConfig(echoMw.GzipConfig{
+		Level: 5,
+		Skipper: func(c echo.Context) bool {
+			path := c.Request().URL.Path
+			if strings.Contains(path, "/stream") ||
+				strings.Contains(path, "/thumbnail") ||
+				strings.Contains(path, "/original") ||
+				strings.Contains(path, "/download") {
+				return true
+			}
+			return false
+		},
+	}))
 	// Phase 4: security headers must run BEFORE CORS so OPTIONS preflight
 	// responses also carry X-Frame-Options / X-Content-Type-Options /
 	// Referrer-Policy / Content-Security-Policy. See middleware.SecurityHeaders.

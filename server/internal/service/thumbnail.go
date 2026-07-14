@@ -25,6 +25,17 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// thumbBufPool 复用 jpeg.Encode 的输出 buffer，减少 GC 压力。
+// 预分配 64KB（300×300 Q85 JPEG 典型输出 ~30KB，留余量）。
+// 注：jpeg.Encode 内部分配无法通过 pool 控制，pool 只覆盖输出 buffer。
+// 实测 B/op 下降 ~0%（jpeg.Encode 内部分配占主导，pool 收益不可见）。
+var thumbBufPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 0, 64*1024)
+		return &b
+	},
+}
+
 type ThumbnailService struct {
 	cacheDir   string
 	maxSize    int
@@ -47,6 +58,13 @@ type ThumbnailService struct {
 	// 文件被替换后会自然产生新 key，不会把新旧版本串到一起。
 	sf singleflight.Group
 
+	// hotTracker 跟踪最近 200 个被请求的 path（LRU）。
+	// PreGenerateThumbnails 用它作为热点优先级来源。
+	// 放在 generateBytesVia（仅交互请求路径）而非 GenerateThumbnail 中是有意设计：
+	// PreGenerateThumbnails 调 GenerateThumbnail 不经过 generateBytesVia，
+	// 因此 hotTracker 只追踪真实用户交互请求。
+	hotTracker *lru.Cache[string, struct{}]
+
 	// durations.json 持久化缓存：避免视频缩略图 miss 时每次都 fork ffprobe。
 	// 也通过 VideoDuration 导出方法共享给 /api/v1/media/duration handler。
 	durMu           sync.RWMutex
@@ -64,6 +82,9 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 	// golang-lru/v2 returns no error when size > 0; the explicit discard is
 	// documented. 200 entries ≈ 20 MB heap at ~100 KB per thumbnail.
 	memCache, _ := lru.NewWithEvict[string, []byte](200, nil)
+	// hotTracker 容量与 memCache 对齐：200 个最近交互请求的 path。
+	// golang-lru/v2 在 size>0 时不返回 error，显式丢弃是文档化的。
+	hotTracker, _ := lru.New[string, struct{}](200)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &ThumbnailService{
@@ -73,6 +94,7 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 		sem:        make(chan struct{}, runtime.NumCPU()),
 		ffmpegPath: ffmpegPath,
 		memCache:   memCache,
+		hotTracker: hotTracker,
 		durCache:   make(map[string]durationEntry),
 		ctx:        ctx,
 		durCancel:  cancel,
@@ -200,23 +222,50 @@ func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (im
 // encodeThumbnailToCache 把 src 等比缩放到 max×max 框内并写入 cachePath。
 // C2 优化：使用 Linear + Fit（300×300 缩略图场景下与 Lanczos 视觉等价，速度快 3-5 倍）。
 // 用 os.CreateTemp + os.Rename 原子写入：进程崩溃/并发写不会留下半截损坏 jpg。
+//
+// B2 改造：用 sync.Pool 复用 jpeg.Encode 输出 buffer。
+//
+// Tradeoff（实事求是）：原实现直接 jpeg.Encode(tempFile, ...) 流式写磁盘，
+// 峰值内存仅 jpeg 内部 buffer。B2 改为先编码到内存 pool buffer 再写磁盘，
+// 峰值内存增加约 30-50KB/并发，但减少了 bytes.Buffer 底层 []byte 的重复分配。
+// 实测 B/op 下降 ~0%（详见 BenchmarkEncodeThumbnailToCache + commit 8606fe2 message）。
 func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath string) (string, error) {
 	thumb := imaging.Fit(src, s.maxSize, s.maxSize, imaging.Linear)
 
+	bufPtr := thumbBufPool.Get().(*[]byte)
+	buf := bytes.NewBuffer(*bufPtr)
+	buf.Reset()
+
+	if err := jpeg.Encode(buf, thumb, &jpeg.Options{Quality: 85}); err != nil {
+		*bufPtr = buf.Bytes()
+		thumbBufPool.Put(bufPtr)
+		return "", err
+	}
+
+	// 原子写入磁盘
 	tempFile, err := os.CreateTemp(filepath.Dir(cachePath), "thumb-tmp-*.jpg")
 	if err != nil {
+		*bufPtr = buf.Bytes()
+		thumbBufPool.Put(bufPtr)
 		return "", err
 	}
 	tempPath := tempFile.Name()
 	defer os.Remove(tempPath) // 出错提前返回时自动清理
 
-	if err := jpeg.Encode(tempFile, thumb, &jpeg.Options{Quality: 85}); err != nil {
+	if _, err := tempFile.Write(buf.Bytes()); err != nil {
 		tempFile.Close()
+		*bufPtr = buf.Bytes()
+		thumbBufPool.Put(bufPtr)
 		return "", err
 	}
 	if err := tempFile.Close(); err != nil {
+		*bufPtr = buf.Bytes()
+		thumbBufPool.Put(bufPtr)
 		return "", err
 	}
+
+	*bufPtr = buf.Bytes()
+	thumbBufPool.Put(bufPtr)
 
 	if err := os.Rename(tempPath, cachePath); err != nil {
 		return "", err
@@ -333,25 +382,62 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 	return s.generateThumbnailFromFile(sourcePath, cachePath)
 }
 
-func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx context.Context) {
+// PreGenerateThumbnails 后台预热缩略图。
+// hotPaths 是用户最近可能访问的文件路径集合（来自 HotTracker().Keys()），
+// 会被排在队列前面优先处理。nil 等价于空 map（全部当作 cold）。
+// 已缓存的文件（disk cache 命中）会在入队阶段被跳过。
+//
+// B1.2 相比原实现的改动：
+//  1. 加 hotPaths 参数：hot 优先 cold 排序
+//  2. 跳过已缓存从 worker 内部前移到入队阶段（减少 goroutine 调度 + 缩小 jobs channel buffer）
+//  3. numWorkers 从 NumCPU/2 降到 NumCPU/4，保留 CPU 给交互请求
+//  4. 每 5 个文件退让 100ms，让出 sem 给交互请求
+func (s *ThumbnailService) PreGenerateThumbnails(
+	files []models.MediaFile,
+	ctx context.Context,
+	hotPaths map[string]struct{},
+) {
 	hasFFmpeg := s.HasFFmpeg()
-	var queue []models.MediaFile
+
+	// 入队阶段：过滤 MediaType + 跳过已缓存 + 拆分 hot/cold 两个队列
+	var hotQueue, coldQueue []models.MediaFile
 	for _, f := range files {
 		switch f.MediaType {
 		case "image":
-			queue = append(queue, f)
+			// ok
 		case "video":
-			if hasFFmpeg {
-				queue = append(queue, f)
+			if !hasFFmpeg {
+				continue
 			}
+		default:
+			continue
+		}
+
+		// 跳过已缓存（从 worker 内部前移到入队阶段，减少 goroutine churn）
+		fi, err := os.Stat(f.Path)
+		if err != nil {
+			continue
+		}
+		cachePath := s.GetThumbnailPath(f.Path, fi.ModTime())
+		if _, err := os.Stat(cachePath); err == nil {
+			continue
+		}
+
+		if _, isHot := hotPaths[f.Path]; isHot {
+			hotQueue = append(hotQueue, f)
+		} else {
+			coldQueue = append(coldQueue, f)
 		}
 	}
 
+	// hot 优先 cold 拼接成最终处理队列
+	queue := append(hotQueue, coldQueue...)
 	if len(queue) == 0 {
 		return
 	}
 
-	numWorkers := runtime.NumCPU() / 2
+	// B1.2: 从 NumCPU/2 降到 NumCPU/4，保留 CPU 给交互请求
+	numWorkers := runtime.NumCPU() / 4
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
@@ -367,6 +453,7 @@ func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx c
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			var count int
 			for {
 				select {
 				case <-ctx.Done():
@@ -375,21 +462,15 @@ func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx c
 					if !ok {
 						return
 					}
-					// Quick check cache
-					fi, err := os.Stat(img.Path)
-					if err != nil {
-						continue
-					}
-					cachePath := s.GetThumbnailPath(img.Path, fi.ModTime())
-					if _, err := os.Stat(cachePath); err == nil {
-						continue
-					}
 
-					// Let's also check context before taking the semaphore
-					select {
-					case <-ctx.Done():
-						return
-					default:
+					// B1.2: 每 5 个文件退让 100ms，让出 sem 给交互请求
+					count++
+					if count%5 == 0 {
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(100 * time.Millisecond):
+						}
 					}
 
 					_, _ = s.GenerateThumbnail(img.Path)
@@ -413,6 +494,11 @@ func (s *ThumbnailService) generateBytesVia(
 	sourcePath string,
 	genFunc func(string) (string, error),
 ) ([]byte, error) {
+	// B1.1: 记录交互请求 path 到 hotTracker，供 PreGenerateThumbnails 排序用。
+	// 仅 generateBytesVia 调用此处 → PreGen 走 GenerateThumbnail 不经过这里，
+	// 因此 pre-generation 不会污染 hot set。
+	s.hotTracker.Add(sourcePath, struct{}{})
+
 	fi, err := os.Stat(sourcePath)
 	if err != nil {
 		return nil, err
@@ -586,4 +672,11 @@ func (s *ThumbnailService) persistDurationCache() {
 func (s *ThumbnailService) Shutdown() {
 	s.durCancel()
 	s.persistDurationCache()
+}
+
+// HotTracker 导出 hotTracker 给 server.go::OnScanComplete 读取热点 key 列表，
+// 供 PreGenerateThumbnails（B1.2）按热度排序后台预生成任务。
+// 只读访问（Keys/Len/Contains）；不导出字段本身，避免外部包误操作 LRU 内部状态。
+func (s *ThumbnailService) HotTracker() *lru.Cache[string, struct{}] {
+	return s.hotTracker
 }

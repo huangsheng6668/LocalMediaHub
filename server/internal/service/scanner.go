@@ -42,6 +42,12 @@ type Scanner struct {
 	// searchFoldersCached 用它做内存前缀扫，替代原 searchFoldersCtx 的 WalkDir。
 	cacheDirs   []string
 	cacheDirMap map[string]time.Time
+
+	// cacheByDir 把扫描结果按"直接父目录"分组。
+	// BrowseFolder /files 分支用 path 直接查这个 map，
+	// 替代遍历 cache["all"] + IsPathWithinRoots 全量过滤。
+	// key = filepath.Clean(dir)；value = 该目录直接子文件（不含子目录的文件）
+	cacheByDir map[string][]models.MediaFile
 }
 
 func NewScanner(videoExts, imageExts []string) *Scanner {
@@ -247,12 +253,23 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	}
 	sort.Strings(cacheDirs)
 
+	// A2.1: 按"直接父目录"分组构建 cacheByDir。
+	// 同一次 results 遍历，零额外 IO。
+	byDir := make(map[string][]models.MediaFile)
+	for _, subList := range results {
+		for _, f := range subList {
+			dir := filepath.Clean(filepath.Dir(f.Path))
+			byDir[dir] = append(byDir[dir], f)
+		}
+	}
+
 	s.mu.Lock()
 	s.cache["all"] = allFiles
 	s.cache["video"] = videoFiles
 	s.cache["image"] = imageFiles
 	s.cacheDirs = cacheDirs
 	s.cacheDirMap = cacheDirMap
+	s.cacheByDir = byDir
 	s.cacheTime = time.Now()
 	callback := s.OnScanComplete
 	s.mu.Unlock()
@@ -310,6 +327,54 @@ func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.cache[mediaType], nil
+}
+
+// GetCachedByDir 返回指定目录直接子文件列表（不含子目录的文件）。
+// cache miss 时触发 Scan（与 GetCached 共享 singleflight）。
+// 区分"cache miss"和"目录为空"：返回 (emptySlice, nil) 表示目录无文件。
+// 用途：BrowseFolder /files 分支替代全量 cache + IsPathWithinRoots 过滤。
+// 50k 文件规模下，从 ~5ms 遍历 → ~1μs map lookup。
+//
+// 返回切片按 MediaFile.Name 字典序排序，给 BrowseScreen 提供稳定的字母顺序视图。
+// 排序在拷贝上完成，避免修改 cacheByDir 内部状态与并发读竞争。
+func (s *Scanner) GetCachedByDir(ctx context.Context, roots []string, dir string) ([]models.MediaFile, error) {
+	cleanDir := filepath.Clean(dir)
+	s.mu.RLock()
+	cachedValid := time.Since(s.cacheTime) < s.cacheTTL
+	if cachedValid {
+		if files, ok := s.cacheByDir[cleanDir]; ok {
+			out := make([]models.MediaFile, len(files))
+			copy(out, files)
+			s.mu.RUnlock()
+			sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+			return out, nil
+		}
+		// cache 有效但目录不在 map 中 → 目录确实无媒体文件，返回空切片（不是 nil）
+		if s.cacheByDir != nil {
+			s.mu.RUnlock()
+			return []models.MediaFile{}, nil
+		}
+	}
+	s.mu.RUnlock()
+
+	// cache miss → 触发 Scan（singleflight 防击穿）
+	_, err, _ := s.sf.Do("scan", func() (interface{}, error) {
+		return s.Scan(ctx, roots)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Scan 刚填充了 cacheByDir；读回目标目录
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if files, ok := s.cacheByDir[cleanDir]; ok {
+		out := make([]models.MediaFile, len(files))
+		copy(out, files)
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		return out, nil
+	}
+	return []models.MediaFile{}, nil
 }
 
 // GetCachedDirs 返回已知目录列表，可选按 scope 前缀过滤。
@@ -397,8 +462,26 @@ func (s *Scanner) InvalidateCache() {
 	s.cache = make(map[string][]models.MediaFile)
 	s.cacheDirs = nil
 	s.cacheDirMap = nil
+	s.cacheByDir = nil
 	s.cacheTime = time.Time{}
 	s.mu.Unlock()
+}
+
+// findOwnerRoot 返回 path 所属的 watch root；找不到时返回第一个 root（降级）。
+// 路径分隔符由 filepath.Clean 统一处理。
+// 用途：watchEvents 根据 event.Name 找到所属 root，做 per-root 独立防抖。
+func findOwnerRoot(path string, roots []string) string {
+	cleanPath := filepath.Clean(path)
+	for _, root := range roots {
+		cleanRoot := filepath.Clean(root)
+		if cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(filepath.Separator)) {
+			return root
+		}
+	}
+	if len(roots) > 0 {
+		return roots[0]
+	}
+	return ""
 }
 
 // StartWatching initializes the fsnotify watcher, registers all roots recursively,
@@ -438,7 +521,20 @@ func (s *Scanner) StartWatching(roots []string) error {
 }
 
 func (s *Scanner) watchEvents() {
-	var scanTimer *time.Timer
+	// A3: per-root 独立防抖。
+	// 当前实现是全局单 scanTimer，任何事件都重置同一个 2s timer——
+	// 一个 root 持续产生事件会不断重置 timer，导致其他 root 的扫描被延迟。
+	// A3 改为每 root 一个独立 timer：root1 持续事件不影响 root2 的 timer fire。
+	// 防抖 timer fire 后仍扫所有 roots（保证 cache 完整性），TriggerScan 内的
+	// bgCancel + singleflight 自动合并同一时刻 fire 的多次扫描。
+	type pendingRoot struct {
+		timer *time.Timer
+	}
+	var (
+		pending   = make(map[string]*pendingRoot)
+		pendingMu sync.Mutex
+	)
+
 	const debounceDuration = 2 * time.Second
 
 	for {
@@ -455,38 +551,50 @@ func (s *Scanner) watchEvents() {
 				return
 			}
 
-			// Invalidate cache immediately on change events
-			if event.Op&fsnotify.Write == fsnotify.Write ||
-				event.Op&fsnotify.Create == fsnotify.Create ||
-				event.Op&fsnotify.Remove == fsnotify.Remove ||
-				event.Op&fsnotify.Rename == fsnotify.Rename {
-
-				s.InvalidateCache()
-
-				// If a new directory is created, dynamically add it to the watcher
-				if event.Op&fsnotify.Create == fsnotify.Create {
-					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-						s.mu.Lock()
-						if s.watcher != nil {
-							_ = s.watcher.Add(event.Name)
-						}
-						s.mu.Unlock()
-					}
-				}
-
-				// Debounce triggering scan to warm cache
-				s.mu.Lock()
-				if scanTimer != nil {
-					scanTimer.Stop()
-				}
-				scanTimer = time.AfterFunc(debounceDuration, func() {
-					s.mu.RLock()
-					roots := s.watchRoots
-					s.mu.RUnlock()
-					s.TriggerScan(roots)
-				})
-				s.mu.Unlock()
+			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Remove|fsnotify.Rename) == 0 {
+				continue
 			}
+
+			// A3：保留全 cache 失效语义（精确增量合并复杂度过高，YAGNI）
+			s.InvalidateCache()
+
+			if event.Op&fsnotify.Create == fsnotify.Create {
+				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+					s.mu.Lock()
+					if s.watcher != nil {
+						_ = s.watcher.Add(event.Name)
+					}
+					s.mu.Unlock()
+				}
+			}
+
+			s.mu.RLock()
+			roots := s.watchRoots
+			s.mu.RUnlock()
+
+			ownerRoot := findOwnerRoot(event.Name, roots)
+
+			pendingMu.Lock()
+			if p, ok := pending[ownerRoot]; ok {
+				p.timer.Stop()
+			}
+			pending[ownerRoot] = &pendingRoot{}
+			pending[ownerRoot].timer = time.AfterFunc(debounceDuration, func() {
+				pendingMu.Lock()
+				delete(pending, ownerRoot)
+				pendingMu.Unlock()
+
+				// A3：始终扫所有 roots 保证缓存完整性。
+				// 独立防抖的核心收益：root1 高频事件不会重置 root2 的
+				// 2s 窗口，减少总重扫次数。singleflight 会自动合并
+				// 同一时刻 fire 的多个 root 的扫描为一次。
+				s.mu.RLock()
+				allRoots := s.watchRoots
+				s.mu.RUnlock()
+				s.TriggerScan(allRoots)
+			})
+			pendingMu.Unlock()
+
 		case _, ok := <-watcher.Errors:
 			if !ok {
 				return

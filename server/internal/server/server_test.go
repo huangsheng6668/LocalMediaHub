@@ -1,10 +1,13 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +18,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	echoMw "github.com/labstack/echo/v4/middleware"
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/server/handler"
 	"github.com/localmediahub/server/internal/service"
@@ -217,5 +221,273 @@ func TestPprofRoute_RegisteredUnderDebugPrefix(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no /debug/pprof route registered")
+	}
+}
+
+// setupGzipTestEcho builds a minimal Echo engine with the same gzip middleware
+// configuration used by registerRoutes (B3). It exists so the gzip behavior
+// tests can exercise the middleware in isolation (unit-level Skipper semantics)
+// without booting the full Server (which requires filesystem watchers, tags DB,
+// etc.). The end-to-end check that registerRoutes actually mounts this config
+// lives in TestGzipMountedOnRealServer below.
+func setupGzipTestEcho() *echo.Echo {
+	e := echo.New()
+	e.HideBanner = true
+	e.Use(echoMw.GzipWithConfig(echoMw.GzipConfig{
+		Level: 5,
+		Skipper: func(c echo.Context) bool {
+			// B3 critical correctness: use c.Request().URL.Path (actual request
+			// path), NOT c.Path() (route template). Route templates like
+			// "/api/v1/videos/*" do not contain "/stream" and would fail to
+			// skip transcoded streams.
+			path := c.Request().URL.Path
+			if strings.Contains(path, "/stream") ||
+				strings.Contains(path, "/thumbnail") ||
+				strings.Contains(path, "/original") ||
+				strings.Contains(path, "/download") {
+				return true
+			}
+			return false
+		},
+	}))
+	return e
+}
+
+// newGzipTestServer boots a real Server via New(cfg) — exercising the
+// production registerRoutes path — and returns it along with a cleanup that
+// stops the server. Additional test-only routes can be registered on s.Echo
+// after this returns, and they will still pass through the production
+// middleware chain mounted by registerRoutes.
+func newGzipTestServer(t *testing.T) *Server {
+	t.Helper()
+	cfg := &config.Config{
+		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0},
+		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: filepath.Join(t.TempDir(), "thumb"), MaxSize: 64, Format: "jpeg",
+		},
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Stop(); err != nil {
+			t.Logf("Stop: %v", err)
+		}
+	})
+	return s
+}
+
+// TestGzipMountedOnRealServer is the end-to-end check that registerRoutes
+// actually mounts the gzip middleware on the production router. It boots a real
+// Server via New(), registers a test route that returns ~5KB JSON, and asserts
+// the response is gzip-compressed when the client opts in. This test is the
+// RED/GREEN gate for Step 4 of the B3 brief (fails before middleware is added
+// to registerRoutes, passes after).
+func TestGzipMountedOnRealServer(t *testing.T) {
+	s := newGzipTestServer(t)
+
+	s.Echo.GET("/api/v1/__test_gzip_probe", func(c echo.Context) error {
+		large := make([]string, 500) // ~5KB JSON
+		for i := range large {
+			large[i] = strings.Repeat("x", 10)
+		}
+		return c.JSON(http.StatusOK, large)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/__test_gzip_probe", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (body=%q)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("expected Content-Encoding=gzip on production router, got %q (gzip middleware not mounted by registerRoutes?)", got)
+	}
+}
+
+// TestGzipMiddleware_CompressesJSON verifies that JSON responses are
+// gzip-compressed when the client opts in via Accept-Encoding: gzip, AND that
+// the compressed body decompresses back to the original JSON. This is the
+// "happy path" for B3.
+func TestGzipMiddleware_CompressesJSON(t *testing.T) {
+	e := setupGzipTestEcho()
+
+	e.GET("/api/v1/test/big-json", func(c echo.Context) error {
+		large := make([]string, 500) // ~5KB JSON
+		for i := range large {
+			large[i] = strings.Repeat("x", 10)
+		}
+		return c.JSON(http.StatusOK, large)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/test/big-json", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (body=%q)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("expected Content-Encoding=gzip, got %q", got)
+	}
+	if got := rec.Header().Get("Vary"); got != "Accept-Encoding" {
+		t.Fatalf("expected Vary=Accept-Encoding, got %q", got)
+	}
+
+	// Body MUST be valid gzip that decompresses to the original JSON array.
+	zr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	defer zr.Close()
+	decompressed, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("io.ReadAll(gzip): %v", err)
+	}
+	if !bytes.HasPrefix(bytes.TrimSpace(decompressed), []byte("[")) {
+		t.Fatalf("decompressed body is not a JSON array, got prefix %q", string(decompressed[:min(20, len(decompressed))]))
+	}
+	// Sanity: each of the 500 entries should appear in the decompressed output.
+	if got, want := bytes.Count(decompressed, []byte(strings.Repeat("x", 10))), 500; got != want {
+		t.Fatalf("expected %d repeated entries after decompression, got %d", want, got)
+	}
+}
+
+// TestGzipMiddleware_SkipsStreamEndpoints verifies the Skipper excludes binary
+// endpoints. The path used here mirrors real wildcard routes: although the
+// actual Echo route template would be "/api/v1/videos/*", the request path is
+// "/api/v1/videos/foo/stream" which must match the Skipper via URL.Path.
+func TestGzipMiddleware_SkipsStreamEndpoints(t *testing.T) {
+	e := setupGzipTestEcho()
+
+	e.GET("/api/v1/videos/*", func(c echo.Context) error {
+		c.Response().Header().Set("Content-Type", "video/mp4")
+		_, err := c.Response().Write(make([]byte, 10000))
+		return err
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/videos/foo/stream", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("expected NO Content-Encoding for /stream endpoint, got %q", got)
+	}
+	// Body must NOT be gzip-encoded — it should be the raw 10000 zero bytes.
+	if rec.Body.Len() != 10000 {
+		t.Fatalf("expected raw 10000-byte body (uncompressed), got %d bytes", rec.Body.Len())
+	}
+}
+
+// TestGzipMiddleware_SkipsThumbnailAndOriginalAndDownload verifies the other
+// three Skipper keywords — /thumbnail, /original, /download — also bypass
+// compression. These cover the media-asset endpoints that serve pre-compressed
+// binary payloads (JPEG/PNG/MP4) where gzip would waste CPU for ~0 ratio gain.
+func TestGzipMiddleware_SkipsThumbnailAndOriginalAndDownload(t *testing.T) {
+	cases := []string{
+		"/api/v1/media/thumbnail",
+		"/api/v1/media/original",
+		"/api/v1/admin/download",
+	}
+	for _, path := range cases {
+		t.Run(path, func(t *testing.T) {
+			e := setupGzipTestEcho()
+			e.GET(path, func(c echo.Context) error {
+				c.Response().Header().Set("Content-Type", "application/octet-stream")
+				_, err := c.Response().Write(make([]byte, 2048))
+				return err
+			})
+
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d", rec.Code)
+			}
+			if got := rec.Header().Get("Content-Encoding"); got != "" {
+				t.Fatalf("expected NO Content-Encoding for %s, got %q", path, got)
+			}
+			if rec.Body.Len() != 2048 {
+				t.Fatalf("expected raw 2048-byte body (uncompressed) for %s, got %d bytes", path, rec.Body.Len())
+			}
+		})
+	}
+}
+
+// TestGzipMiddleware_NoAcceptEncodingNoCompression verifies the middleware is
+// a no-op when the client does NOT send Accept-Encoding: gzip. This is the
+// behavior that keeps existing tests (which never set Accept-Encoding) valid.
+func TestGzipMiddleware_NoAcceptEncodingNoCompression(t *testing.T) {
+	e := setupGzipTestEcho()
+
+	e.GET("/api/v1/test/plain", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"hello": "world"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/test/plain", nil)
+	// Intentionally do NOT set Accept-Encoding.
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("expected NO Content-Encoding when client did not opt in, got %q", got)
+	}
+	// Body must be the raw JSON.
+	want := `{"hello":"world"}`
+	if got := strings.TrimSpace(rec.Body.String()); got != want {
+		t.Fatalf("expected raw JSON %q, got %q", want, got)
+	}
+}
+
+// BenchmarkGzipMiddleware_JSON measures the per-request overhead of the gzip
+// middleware on a typical JSON response (~50KB). This is the 4.3-B baseline
+// benchmark for B3.
+func BenchmarkGzipMiddleware_JSON(b *testing.B) {
+	e := echo.New()
+	e.HideBanner = true
+	e.Use(echoMw.GzipWithConfig(echoMw.GzipConfig{
+		Level: 5,
+		Skipper: func(c echo.Context) bool {
+			path := c.Request().URL.Path
+			return strings.Contains(path, "/stream") ||
+				strings.Contains(path, "/thumbnail") ||
+				strings.Contains(path, "/original") ||
+				strings.Contains(path, "/download")
+		},
+	}))
+	// 5000 strings * ~10 bytes each = ~50KB JSON.
+	e.GET("/bench", func(c echo.Context) error {
+		items := make([]string, 5000)
+		for i := range items {
+			items[i] = strings.Repeat("x", 10)
+		}
+		return c.JSON(http.StatusOK, items)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/bench", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			b.Fatalf("status = %d, want 200", rec.Code)
+		}
 	}
 }
