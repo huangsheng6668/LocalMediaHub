@@ -11,6 +11,7 @@ import (
 
 	"github.com/localmediahub/server/internal/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestScanner(t *testing.T) {
@@ -454,5 +455,108 @@ func BenchmarkScan_WithCacheByDir(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_, _ = scanner.Scan(context.Background(), []string{tempDir})
+	}
+}
+
+// TestGetCachedByDir verifies the O(1) dir-keyed cache lookup that backs
+// BrowseFolder /files (A2.2). Direct children of the queried dir are returned;
+// files in nested subdirectories are excluded. Empty directories return a
+// non-nil empty slice to distinguish "dir exists, no files" from cache miss.
+func TestGetCachedByDir(t *testing.T) {
+	tempDir := t.TempDir()
+
+	assert.NoError(t, os.MkdirAll(filepath.Join(tempDir, "HasFiles"), 0755))
+	assert.NoError(t, os.MkdirAll(filepath.Join(tempDir, "Empty"), 0755))
+	assert.NoError(t, os.MkdirAll(filepath.Join(tempDir, "HasFiles", "sub"), 0755))
+
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "HasFiles", "v.mp4"), []byte("x"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "HasFiles", "sub", "v2.mp4"), []byte("x"), 0644))
+
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	_, err := scanner.Scan(context.Background(), []string{tempDir})
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+
+	// 命中：HasFiles 目录有 1 个直接子文件（v.mp4）；sub/v2.mp4 不应出现
+	files, err := scanner.GetCachedByDir(ctx, []string{tempDir}, filepath.Join(tempDir, "HasFiles"))
+	assert.NoError(t, err)
+	assert.Len(t, files, 1)
+	assert.Equal(t, "v.mp4", files[0].Name)
+
+	// 空目录（无直接子文件）：返回 (emptySlice, nil) 而非 (nil, nil)
+	files, err = scanner.GetCachedByDir(ctx, []string{tempDir}, filepath.Join(tempDir, "Empty"))
+	assert.NoError(t, err)
+	assert.Len(t, files, 0)
+	// 关键：返回 emptySlice 而非 nil，区分"目录为空"与"cache miss"
+	assert.NotNil(t, files)
+}
+
+// TestGetCachedByDir_CacheMissTriggersScan verifies that calling GetCachedByDir
+// before any Scan triggers a Scan via singleflight (same contract as GetCached).
+func TestGetCachedByDir_CacheMissTriggersScan(t *testing.T) {
+	tempDir := t.TempDir()
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "v.mp4"), []byte("x"), 0644))
+
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	// 注意：未调 Scan，cacheByDir 为 nil
+
+	ctx := context.Background()
+	files, err := scanner.GetCachedByDir(ctx, []string{tempDir}, tempDir)
+	assert.NoError(t, err) // 内部触发 Scan
+	assert.Len(t, files, 1)
+	assert.Equal(t, "v.mp4", files[0].Name)
+}
+
+// TestGetCachedByDir_SortedByName verifies the controller-mandated contract
+// that GetCachedByDir returns files sorted alphabetically by Name, so
+// BrowseScreen sees a stable deterministic order regardless of walk order.
+func TestGetCachedByDir_SortedByName(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create files in non-alphabetical walk-determined order; cacheByDir
+	// stores them in walk order. GetCachedByDir must sort before returning.
+	for _, name := range []string{"zeta.mp4", "alpha.mp4", "mid.mp4"} {
+		assert.NoError(t, os.WriteFile(filepath.Join(tempDir, name), []byte("x"), 0644))
+	}
+
+	scanner := NewScanner([]string{".mp4"}, nil)
+	_, err := scanner.Scan(context.Background(), []string{tempDir})
+	assert.NoError(t, err)
+
+	files, err := scanner.GetCachedByDir(context.Background(), []string{tempDir}, tempDir)
+	assert.NoError(t, err)
+	assert.Len(t, files, 3)
+	assert.Equal(t, "alpha.mp4", files[0].Name)
+	assert.Equal(t, "mid.mp4", files[1].Name)
+	assert.Equal(t, "zeta.mp4", files[2].Name)
+}
+
+// BenchmarkGetCachedByDir_LargeCache measures the steady-state cost of a
+// cached dir lookup on a 50k-file scale (represented here by 500 files in
+// one directory). This is the baseline for A2.2's perf claim; the previous
+// implementation (full-cache IsPathWithinRoots filter) is not benchmarked
+// here because the code path is removed by this change.
+func BenchmarkGetCachedByDir_LargeCache(b *testing.B) {
+	tempDir := b.TempDir()
+
+	// 构造 1 个目录 500 文件 + 1000 个空目录（模拟 50k 文件规模）
+	require.NoError(b, os.MkdirAll(filepath.Join(tempDir, "Big"), 0755))
+	for i := 0; i < 500; i++ {
+		assert.NoError(b, os.WriteFile(
+			filepath.Join(tempDir, "Big", fmt.Sprintf("f%04d.mp4", i)),
+			[]byte("x"), 0644))
+	}
+
+	scanner := NewScanner([]string{".mp4"}, nil)
+	_, err := scanner.Scan(context.Background(), []string{tempDir})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = scanner.GetCachedByDir(context.Background(), []string{tempDir}, filepath.Join(tempDir, "Big"))
 	}
 }

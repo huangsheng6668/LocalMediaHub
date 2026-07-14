@@ -329,6 +329,54 @@ func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType
 	return s.cache[mediaType], nil
 }
 
+// GetCachedByDir 返回指定目录直接子文件列表（不含子目录的文件）。
+// cache miss 时触发 Scan（与 GetCached 共享 singleflight）。
+// 区分"cache miss"和"目录为空"：返回 (emptySlice, nil) 表示目录无文件。
+// 用途：BrowseFolder /files 分支替代全量 cache + IsPathWithinRoots 过滤。
+// 50k 文件规模下，从 ~5ms 遍历 → ~1μs map lookup。
+//
+// 返回切片按 MediaFile.Name 字典序排序，给 BrowseScreen 提供稳定的字母顺序视图。
+// 排序在拷贝上完成，避免修改 cacheByDir 内部状态与并发读竞争。
+func (s *Scanner) GetCachedByDir(ctx context.Context, roots []string, dir string) ([]models.MediaFile, error) {
+	cleanDir := filepath.Clean(dir)
+	s.mu.RLock()
+	cachedValid := time.Since(s.cacheTime) < s.cacheTTL
+	if cachedValid {
+		if files, ok := s.cacheByDir[cleanDir]; ok {
+			out := make([]models.MediaFile, len(files))
+			copy(out, files)
+			s.mu.RUnlock()
+			sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+			return out, nil
+		}
+		// cache 有效但目录不在 map 中 → 目录确实无媒体文件，返回空切片（不是 nil）
+		if s.cacheByDir != nil {
+			s.mu.RUnlock()
+			return []models.MediaFile{}, nil
+		}
+	}
+	s.mu.RUnlock()
+
+	// cache miss → 触发 Scan（singleflight 防击穿）
+	_, err, _ := s.sf.Do("scan", func() (interface{}, error) {
+		return s.Scan(ctx, roots)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Scan 刚填充了 cacheByDir；读回目标目录
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if files, ok := s.cacheByDir[cleanDir]; ok {
+		out := make([]models.MediaFile, len(files))
+		copy(out, files)
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		return out, nil
+	}
+	return []models.MediaFile{}, nil
+}
+
 // GetCachedDirs 返回已知目录列表，可选按 scope 前缀过滤。
 // scope="" 返回全部；scope="D:/Media" 返回该前缀下的目录。
 // 与 GetCached 共享 TTL + singleflight（cache miss 时触发 Scan 填充 cacheDirs）。

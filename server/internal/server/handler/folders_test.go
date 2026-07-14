@@ -13,6 +13,7 @@ import (
 	"net/url"
 
 	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/require"
 
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/models"
@@ -223,7 +224,18 @@ func TestBrowseFolderRouteDecodesEncodedUnicodePath(t *testing.T) {
 	}
 }
 
-func TestBrowseFolderRecursiveFiles(t *testing.T) {
+// TestBrowseFolder_Files_OnlyDirectChildren replaces the former
+// TestBrowseFolderRecursiveFiles. Under A2.2, the /files branch uses
+// GetCachedByDir which returns only the direct child media files of the
+// queried dir; files in nested subdirectories are NOT included.
+//
+// Layout under root:
+//
+//	cats/cat1.mp4      <- direct child of cats  (included)
+//	cats/subcats/cat2.jpg  <- nested grandchild   (excluded)
+//
+// Before A2.2 the endpoint returned 2 files (recursive); now it returns 1.
+func TestBrowseFolder_Files_OnlyDirectChildren(t *testing.T) {
 	root := t.TempDir()
 	childDir := filepath.Join(root, "cats")
 	if err := os.MkdirAll(childDir, 0o755); err != nil {
@@ -275,7 +287,57 @@ func TestBrowseFolderRecursiveFiles(t *testing.T) {
 		t.Fatalf("failed to decode files list: %v", err)
 	}
 
-	if len(files) != 2 {
-		t.Fatalf("expected 2 recursive files under 'cats', got %d", len(files))
+	if len(files) != 1 {
+		names := make([]string, 0, len(files))
+		for _, f := range files {
+			names = append(names, f.Name)
+		}
+		t.Fatalf("expected 1 direct-child file under 'cats' (A2.2 contract), got %d: %v", len(files), names)
 	}
+	if files[0].Name != "cat1.mp4" {
+		t.Fatalf("expected only cat1.mp4, got %q", files[0].Name)
+	}
+}
+
+// TestBrowseFolder_Files_SortedByName verifies the A2.2 contract that
+// /files returns direct children sorted alphabetically by Name, giving
+// BrowseScreen a stable view regardless of filesystem walk order.
+func TestBrowseFolder_Files_SortedByName(t *testing.T) {
+	tempDir := t.TempDir()
+	root := filepath.Join(tempDir, "Root")
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sub"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "zeta.mp4"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "alpha.mp4"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "mid.mp4"), []byte("x"), 0o644))
+	// Nested child must NOT appear in the response.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "sub", "nested.mp4"), []byte("x"), 0o644))
+
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{root},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+	}
+
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions), nil, nil, nil)
+	e := echo.New()
+	e.GET("/api/v1/folders/*", h.BrowseFolder)
+
+	_, err := h.scanner.Scan(context.Background(), cfg.Scan.GetRoots())
+	require.NoError(t, err)
+
+	encodedPath := strings.ReplaceAll(url.PathEscape(filepath.ToSlash(root)), "%2F", "/")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders/"+encodedPath+"/files", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var files []models.MediaFile
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &files))
+	require.Len(t, files, 3)
+	require.Equal(t, "alpha.mp4", files[0].Name)
+	require.Equal(t, "mid.mp4", files[1].Name)
+	require.Equal(t, "zeta.mp4", files[2].Name)
 }

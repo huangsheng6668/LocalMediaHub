@@ -72,17 +72,18 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 			return respondError(c, http.StatusForbidden, "path outside roots")
 		}
 
-		files, err := h.scanner.GetCached(c.Request().Context(), h.cfg.Scan.GetRoots())
+		// A2.2: 从 scanner cacheByDir 直接查目标目录的直接子文件。
+		// 替代原 GetCached + 全量遍历 + IsPathWithinRoots 过滤（50k 文件 ~5ms）。
+		// 行为变化：原实现返回递归子目录文件，新实现只返回直接子文件
+		// （客户端 BrowseScreen 进入目录后期望只看当前目录的文件）。
+		// GetCachedByDir 内部对结果按 Name 字典序排序，给前端稳定视图。
+		matchedFiles, err := h.scanner.GetCachedByDir(
+			c.Request().Context(),
+			h.cfg.Scan.GetRoots(),
+			pathStr,
+		)
 		if err != nil {
 			return respondInternalError(c, err)
-		}
-
-		matchedFiles := make([]models.MediaFile, 0)
-		for _, file := range files {
-			ok, err := service.IsPathWithinRoots(file.Path, []string{pathStr})
-			if err == nil && ok {
-				matchedFiles = append(matchedFiles, file)
-			}
 		}
 
 		setJsonCacheBrief(c)
