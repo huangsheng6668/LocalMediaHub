@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -376,5 +377,82 @@ func TestInvalidateCache_ClearsCacheDirs(t *testing.T) {
 	}
 	if scanner.cacheDirMap != nil {
 		t.Errorf("cacheDirMap should be nil after InvalidateCache, got %v", scanner.cacheDirMap)
+	}
+}
+
+func TestScan_PopulatesCacheByDir(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Dirs
+	assert.NoError(t, os.MkdirAll(filepath.Join(tempDir, "A"), 0755))
+	assert.NoError(t, os.MkdirAll(filepath.Join(tempDir, "A", "sub"), 0755))
+	assert.NoError(t, os.MkdirAll(filepath.Join(tempDir, "B"), 0755))
+
+	// Files
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "A", "v1.mp4"), []byte("x"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "A", "i1.jpg"), []byte("x"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "A", "sub", "v2.mp4"), []byte("x"), 0644))
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "B", "v3.mp4"), []byte("x"), 0644))
+
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	_, err := scanner.Scan(context.Background(), []string{tempDir})
+	assert.NoError(t, err)
+
+	// cacheByDir 应被填充：直接父目录为 key
+	dirA := filepath.Join(tempDir, "A")
+	dirAsub := filepath.Join(tempDir, "A", "sub")
+	dirB := filepath.Join(tempDir, "B")
+
+	files, ok := scanner.cacheByDir[dirA]
+	assert.True(t, ok, "dirA should be in cacheByDir")
+	assert.Len(t, files, 2) // v1.mp4 + i1.jpg
+
+	files, ok = scanner.cacheByDir[dirAsub]
+	assert.True(t, ok, "dirAsub should be in cacheByDir")
+	assert.Len(t, files, 1) // v2.mp4
+
+	files, ok = scanner.cacheByDir[dirB]
+	assert.True(t, ok, "dirB should be in cacheByDir")
+	assert.Len(t, files, 1) // v3.mp4
+}
+
+func TestInvalidateCache_ClearsCacheByDir(t *testing.T) {
+	tempDir := t.TempDir()
+	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "v.mp4"), []byte("x"), 0644))
+
+	scanner := NewScanner([]string{".mp4"}, nil)
+	_, err := scanner.Scan(context.Background(), []string{tempDir})
+	assert.NoError(t, err)
+
+	// Populated by Scan.
+	scanner.mu.RLock()
+	populated := scanner.cacheByDir != nil
+	scanner.mu.RUnlock()
+	assert.True(t, populated, "cacheByDir should be populated after Scan")
+
+	scanner.InvalidateCache()
+
+	scanner.mu.RLock()
+	defer scanner.mu.RUnlock()
+	if scanner.cacheByDir != nil {
+		t.Errorf("cacheByDir should be nil after InvalidateCache, got %v", scanner.cacheByDir)
+	}
+}
+
+func BenchmarkScan_WithCacheByDir(b *testing.B) {
+	tempDir := b.TempDir()
+	// Create 500 files in 1 dir (representative scaled-down fixture)
+	for i := 0; i < 500; i++ {
+		p := filepath.Join(tempDir, fmt.Sprintf("f%04d.mp4", i))
+		if err := os.WriteFile(p, []byte("x"), 0644); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	scanner := NewScanner([]string{".mp4"}, nil)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _ = scanner.Scan(context.Background(), []string{tempDir})
 	}
 }

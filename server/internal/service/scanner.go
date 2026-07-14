@@ -42,6 +42,12 @@ type Scanner struct {
 	// searchFoldersCached 用它做内存前缀扫，替代原 searchFoldersCtx 的 WalkDir。
 	cacheDirs   []string
 	cacheDirMap map[string]time.Time
+
+	// cacheByDir 把扫描结果按"直接父目录"分组。
+	// BrowseFolder /files 分支用 path 直接查这个 map，
+	// 替代遍历 cache["all"] + IsPathWithinRoots 全量过滤。
+	// key = filepath.Clean(dir)；value = 该目录直接子文件（不含子目录的文件）
+	cacheByDir map[string][]models.MediaFile
 }
 
 func NewScanner(videoExts, imageExts []string) *Scanner {
@@ -247,12 +253,23 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	}
 	sort.Strings(cacheDirs)
 
+	// A2.1: 按"直接父目录"分组构建 cacheByDir。
+	// 同一次 results 遍历，零额外 IO。
+	byDir := make(map[string][]models.MediaFile)
+	for _, subList := range results {
+		for _, f := range subList {
+			dir := filepath.Clean(filepath.Dir(f.Path))
+			byDir[dir] = append(byDir[dir], f)
+		}
+	}
+
 	s.mu.Lock()
 	s.cache["all"] = allFiles
 	s.cache["video"] = videoFiles
 	s.cache["image"] = imageFiles
 	s.cacheDirs = cacheDirs
 	s.cacheDirMap = cacheDirMap
+	s.cacheByDir = byDir
 	s.cacheTime = time.Now()
 	callback := s.OnScanComplete
 	s.mu.Unlock()
@@ -397,6 +414,7 @@ func (s *Scanner) InvalidateCache() {
 	s.cache = make(map[string][]models.MediaFile)
 	s.cacheDirs = nil
 	s.cacheDirMap = nil
+	s.cacheByDir = nil
 	s.cacheTime = time.Time{}
 	s.mu.Unlock()
 }
