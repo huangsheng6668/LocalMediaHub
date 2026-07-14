@@ -344,25 +344,62 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 	return s.generateThumbnailFromFile(sourcePath, cachePath)
 }
 
-func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx context.Context) {
+// PreGenerateThumbnails 后台预热缩略图。
+// hotPaths 是用户最近可能访问的文件路径集合（来自 HotTracker().Keys()），
+// 会被排在队列前面优先处理。nil 等价于空 map（全部当作 cold）。
+// 已缓存的文件（disk cache 命中）会在入队阶段被跳过。
+//
+// B1.2 相比原实现的改动：
+//  1. 加 hotPaths 参数：hot 优先 cold 排序
+//  2. 跳过已缓存从 worker 内部前移到入队阶段（减少 goroutine 调度 + 缩小 jobs channel buffer）
+//  3. numWorkers 从 NumCPU/2 降到 NumCPU/4，保留 CPU 给交互请求
+//  4. 每 5 个文件退让 100ms，让出 sem 给交互请求
+func (s *ThumbnailService) PreGenerateThumbnails(
+	files []models.MediaFile,
+	ctx context.Context,
+	hotPaths map[string]struct{},
+) {
 	hasFFmpeg := s.HasFFmpeg()
-	var queue []models.MediaFile
+
+	// 入队阶段：过滤 MediaType + 跳过已缓存 + 拆分 hot/cold 两个队列
+	var hotQueue, coldQueue []models.MediaFile
 	for _, f := range files {
 		switch f.MediaType {
 		case "image":
-			queue = append(queue, f)
+			// ok
 		case "video":
-			if hasFFmpeg {
-				queue = append(queue, f)
+			if !hasFFmpeg {
+				continue
 			}
+		default:
+			continue
+		}
+
+		// 跳过已缓存（从 worker 内部前移到入队阶段，减少 goroutine churn）
+		fi, err := os.Stat(f.Path)
+		if err != nil {
+			continue
+		}
+		cachePath := s.GetThumbnailPath(f.Path, fi.ModTime())
+		if _, err := os.Stat(cachePath); err == nil {
+			continue
+		}
+
+		if _, isHot := hotPaths[f.Path]; isHot {
+			hotQueue = append(hotQueue, f)
+		} else {
+			coldQueue = append(coldQueue, f)
 		}
 	}
 
+	// hot 优先 cold 拼接成最终处理队列
+	queue := append(hotQueue, coldQueue...)
 	if len(queue) == 0 {
 		return
 	}
 
-	numWorkers := runtime.NumCPU() / 2
+	// B1.2: 从 NumCPU/2 降到 NumCPU/4，保留 CPU 给交互请求
+	numWorkers := runtime.NumCPU() / 4
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
@@ -378,6 +415,7 @@ func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx c
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			var count int
 			for {
 				select {
 				case <-ctx.Done():
@@ -386,21 +424,15 @@ func (s *ThumbnailService) PreGenerateThumbnails(files []models.MediaFile, ctx c
 					if !ok {
 						return
 					}
-					// Quick check cache
-					fi, err := os.Stat(img.Path)
-					if err != nil {
-						continue
-					}
-					cachePath := s.GetThumbnailPath(img.Path, fi.ModTime())
-					if _, err := os.Stat(cachePath); err == nil {
-						continue
-					}
 
-					// Let's also check context before taking the semaphore
-					select {
-					case <-ctx.Done():
-						return
-					default:
+					// B1.2: 每 5 个文件退让 100ms，让出 sem 给交互请求
+					count++
+					if count%5 == 0 {
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(100 * time.Millisecond):
+						}
 					}
 
 					_, _ = s.GenerateThumbnail(img.Path)

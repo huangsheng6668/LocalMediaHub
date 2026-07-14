@@ -77,7 +77,14 @@ func New(cfg *config.Config) (*Server, error) {
 		ctx, s.preGenCancel = context.WithCancel(context.Background())
 		s.preGenMu.Unlock()
 
-		s.Thumbnail.PreGenerateThumbnails(files, ctx)
+		// B1.2: 收集 hot paths 作为预热优先级来源。
+		// HotTracker().Keys() 内部加锁（golang-lru/v2 自带 sync），无需外部锁。
+		hotPaths := make(map[string]struct{})
+		for _, key := range s.Thumbnail.HotTracker().Keys() {
+			hotPaths[key] = struct{}{}
+		}
+
+		s.Thumbnail.PreGenerateThumbnails(files, ctx, hotPaths)
 	}
 
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService)
