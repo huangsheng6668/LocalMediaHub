@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -129,5 +130,32 @@ func TestTagsService_IndexesCreated(t *testing.T) {
 	}
 	for _, idx := range expectedIndexes {
 		assert.True(t, got[idx], "missing index: %s", idx)
+	}
+}
+
+func BenchmarkTagsService_GetFilesForTag(b *testing.B) {
+	tempDir := b.TempDir()
+	svc, err := NewTagsService(tempDir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer svc.Close()
+
+	// 1 tag with 5000 associations to verify idx_associations_tag_id benefit
+	tag, err := svc.CreateTag("Bench", "#FF0000")
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < 5000; i++ {
+		_, err := svc.AssociateFile(tag.ID, fmt.Sprintf("dir/file_%05d.mp4", i))
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = svc.GetFilesForTag(tag.ID)
 	}
 }

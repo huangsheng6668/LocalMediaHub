@@ -93,7 +93,7 @@ func NewTagsService(dataDir string) (*TagsService, error) {
 	for _, idx := range indexes {
 		if _, err := db.Exec(idx); err != nil {
 			db.Close()
-			return nil, fmt.Errorf("failed to create index: %w", err)
+			return nil, fmt.Errorf("failed to create index %q: %w", idx, err)
 		}
 	}
 
