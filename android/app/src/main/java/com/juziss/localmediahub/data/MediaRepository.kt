@@ -255,6 +255,20 @@ class MediaRepository @Inject constructor(
             }
     }
 
+    // ── Books (text-reader) ───────────────────────────────────
+
+    suspend fun getBookInfo(path: String): NetworkResult<Book> =
+        httpGet(
+            "$baseUrl/api/v1/books/info?path=${URLEncoder.encode(path, "UTF-8")}",
+            Book::class.java,
+        )
+
+    suspend fun getBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> =
+        httpGet(
+            "$baseUrl/api/v1/books/chapter?path=${URLEncoder.encode(path, "UTF-8")}&index=$index",
+            BookChapterContent::class.java,
+        )
+
     // ════════════════════════════════════════════════════════════════════════
     //  URL builders (unchanged — used by Coil / ExoPlayer, not Retrofit)
     // ════════════════════════════════════════════════════════════════════════

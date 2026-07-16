@@ -81,3 +81,37 @@ data class SystemBrowseResult(
     val folders: List<Folder>,
     val files: List<MediaFile>,
 )
+
+/**
+ * Matches server/service/bookparser.Chapter — one entry in a Book's table of contents.
+ */
+@Parcelize
+data class BookChapter(
+    val index: Int,
+    val title: String,
+    @SerializedName("char_start") val charStart: Int = 0,
+    @SerializedName("char_end") val charEnd: Int = 0,
+    @SerializedName("manifest_id") val manifestId: String? = null,
+) : Parcelable
+
+/**
+ * Matches server/service/bookparser.Book — parsed metadata for a text/epub file.
+ */
+@Parcelize
+data class Book(
+    val path: String,
+    val format: String,
+    val title: String,
+    val charset: String? = null,
+    val chapters: List<BookChapter>,
+    @SerializedName("mod_time") val modTime: String,
+) : Parcelable
+
+/**
+ * Matches server/server/handler.chapterResponse — single-chapter text payload.
+ * Property names already match JSON tags, so no @SerializedName needed.
+ */
+data class BookChapterContent(
+    val title: String,
+    val content: String,
+)
