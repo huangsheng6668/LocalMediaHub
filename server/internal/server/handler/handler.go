@@ -12,21 +12,32 @@ import (
 )
 
 // Handler holds references to all services needed by API handlers.
+//
+// books is added in Task 3 (text-reader) so handler.New can carry the
+// BookService dependency. Task 3 only adds the slot; Task 7 constructs the
+// actual BookService and Task 8 wires it into the /api/v1/books/* endpoints.
+// Until then no code path dereferences h.books, keeping the build green even
+// though every current caller passes nil.
 type Handler struct {
 	cfg       *config.Config
 	scanner   *service.Scanner
 	tags      *service.TagsService
 	streaming *service.StreamingService
 	thumbnail *service.ThumbnailService
+	books     *service.BookService
 }
 
 // New creates a Handler with all required service dependencies.
+//
+// The books parameter is the 6th and last argument; production wiring lands in
+// Task 8. Until then all callers (production server.go + every test) pass nil.
 func New(
 	cfg *config.Config,
 	scanner *service.Scanner,
 	tags *service.TagsService,
 	streaming *service.StreamingService,
 	thumbnail *service.ThumbnailService,
+	books *service.BookService,
 ) *Handler {
 	return &Handler{
 		cfg:       cfg,
@@ -34,10 +45,16 @@ func New(
 		tags:      tags,
 		streaming: streaming,
 		thumbnail: thumbnail,
+		books:     books,
 	}
 }
 
-// isMediaExt checks if a file extension is a configured video or image format.
+// isMediaExt checks if a file extension is a configured video, image, or text
+// format. Text extensions were added in Task 3 (text-reader) so that browse,
+// search, and download code paths treat .txt / .epub / .mobi / .azw3 files as
+// media even though they have no thumbnail or streaming representation.
+// Comparison is case-insensitive via strings.EqualFold, matching the existing
+// video/image behavior.
 func (h *Handler) isMediaExt(ext string) bool {
 	for _, e := range h.cfg.Scan.VideoExtensions {
 		if strings.EqualFold(ext, e) {
@@ -49,14 +66,22 @@ func (h *Handler) isMediaExt(ext string) bool {
 			return true
 		}
 	}
+	for _, e := range h.cfg.Scan.TextExtensions {
+		if strings.EqualFold(ext, e) {
+			return true
+		}
+	}
 	return false
 }
 
-// mediaExtensions returns all allowed media extensions (video + image).
+// mediaExtensions returns all allowed media extensions
+// (video + image + text). Text extensions were added in Task 3 so that folder
+// listing and zip-download code paths pick up text files alongside video/image.
 func (h *Handler) mediaExtensions() []string {
-	exts := make([]string, 0, len(h.cfg.Scan.VideoExtensions)+len(h.cfg.Scan.ImageExtensions))
+	exts := make([]string, 0, len(h.cfg.Scan.VideoExtensions)+len(h.cfg.Scan.ImageExtensions)+len(h.cfg.Scan.TextExtensions))
 	exts = append(exts, h.cfg.Scan.VideoExtensions...)
 	exts = append(exts, h.cfg.Scan.ImageExtensions...)
+	exts = append(exts, h.cfg.Scan.TextExtensions...)
 	return exts
 }
 

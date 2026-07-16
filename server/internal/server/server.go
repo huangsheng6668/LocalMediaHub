@@ -87,7 +87,8 @@ func New(cfg *config.Config) (*Server, error) {
 		s.Thumbnail.PreGenerateThumbnails(files, ctx, hotPaths)
 	}
 
-	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService)
+	// books: nil for now — Task 8 wires the real BookService here.
+	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, nil)
 
 	s.registerRoutes(h)
 

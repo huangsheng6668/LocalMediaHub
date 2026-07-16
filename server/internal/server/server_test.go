@@ -70,6 +70,7 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 		nil,
 		service.NewStreamingService(""),
 		thumbnailService,
+		nil,
 	)
 	s.registerRoutes(h)
 

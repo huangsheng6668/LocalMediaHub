@@ -58,7 +58,7 @@ func TestSearchScopesResultsToRequestedPathAndReturnsFolders(t *testing.T) {
 		t.Fatalf("failed to seed scanner cache: %v", err)
 	}
 
-	h := New(cfg, scanner, nil, nil, nil)
+	h := New(cfg, scanner, nil, nil, nil, nil)
 	e := echo.New()
 	req := httptest.NewRequest(
 		http.MethodGet,
@@ -107,7 +107,7 @@ func newTestHandlerWithScanner(t *testing.T, root string, videoExts, imageExts [
 		},
 	}
 	scanner := service.NewScanner(videoExts, imageExts, nil)
-	h := New(cfg, scanner, nil, nil, nil)
+	h := New(cfg, scanner, nil, nil, nil, nil)
 	return h, scanner
 }
 
