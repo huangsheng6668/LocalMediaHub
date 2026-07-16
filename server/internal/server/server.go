@@ -57,6 +57,7 @@ func New(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create thumbnail service: %w", err)
 	}
+	bookService := service.NewBookService()
 
 	s := &Server{
 		Echo:      e,
@@ -87,8 +88,8 @@ func New(cfg *config.Config) (*Server, error) {
 		s.Thumbnail.PreGenerateThumbnails(files, ctx, hotPaths)
 	}
 
-	// books: nil for now — Task 8 wires the real BookService here.
-	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, nil)
+	// books: BookService wired in Task 8 — drives /api/v1/books/info|chapter.
+	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, bookService)
 
 	s.registerRoutes(h)
 
@@ -210,6 +211,13 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	media.GET("/original", h.MediaOriginal)
 	media.GET("/stream", h.MediaStream)
 	media.GET("/duration", h.MediaDuration)
+
+	// Books (text-reader, Task 8): metadata + per-chapter text content for
+	// .txt / .epub files. Auth-gated because chapter content can be large and
+	// these endpoints perform disk I/O on each chapter fetch.
+	books := api.Group("/books", authMw)
+	books.GET("/info", h.GetBookInfo)
+	books.GET("/chapter", h.GetBookChapter)
 
 	// Admin page
 }

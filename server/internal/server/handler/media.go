@@ -39,7 +39,13 @@ func (h *Handler) MediaOriginal(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.ImageExtensions)
+	// Text extensions added in Task 8 so /api/v1/media/original can serve raw
+	// .txt / .epub bytes for client-side download (the /api/v1/books chapter
+	// endpoint is for rendering, this one is for "save as" / share flows).
+	allowedExts := make([]string, 0, len(h.cfg.Scan.ImageExtensions)+len(h.cfg.Scan.TextExtensions))
+	allowedExts = append(allowedExts, h.cfg.Scan.ImageExtensions...)
+	allowedExts = append(allowedExts, h.cfg.Scan.TextExtensions...)
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts)
 	if err != nil {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
