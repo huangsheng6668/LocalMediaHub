@@ -30,7 +30,7 @@ func TestGetTaggedMediaReturnsMatchingFiles(t *testing.T) {
 			ImageExtensions: []string{".jpg"},
 		},
 	}
-	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions)
+	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
 	if _, err := scanner.Scan(context.Background(), cfg.Scan.GetRoots()); err != nil {
 		t.Fatalf("failed to seed scanner cache: %v", err)
 	}

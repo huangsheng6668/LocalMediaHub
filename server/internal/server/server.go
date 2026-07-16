@@ -44,7 +44,7 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to get local IP: %w", err)
 	}
 
-	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions)
+	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
 	if err := scanner.StartWatching(cfg.Scan.Roots); err != nil {
 		fmt.Printf("Warning: failed to start filesystem watcher: %v\n", err)
 	}

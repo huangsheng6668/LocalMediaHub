@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func TestScanner(t *testing.T) {
 	err = os.WriteFile(filepath.Join(tempDir, "video2.mkv"), []byte("dummy"), 0644)
 	assert.NoError(t, err)
 	
-	scanner := NewScanner([]string{".mp4", ".mkv"}, []string{".jpg", ".png"})
+	scanner := NewScanner([]string{".mp4", ".mkv"}, []string{".jpg", ".png"}, nil)
 	assert.NotNil(t, scanner)
 	
 	// Check configured extensions
@@ -107,7 +108,7 @@ func TestScanCachesPerType(t *testing.T) {
 	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "i.jpg"), []byte("i"), 0644))
 	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "skip.txt"), []byte("x"), 0644))
 
-	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"}, nil)
 	files, err := scanner.Scan(context.Background(), []string{tempDir})
 	assert.NoError(t, err)
 	assert.Len(t, files, 2)
@@ -154,7 +155,7 @@ func TestScan_PopulatesCacheDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"}, nil)
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -199,7 +200,7 @@ func TestScan_CacheDirsSorted(t *testing.T) {
 		}
 	}
 
-	scanner := NewScanner([]string{}, []string{".jpg"})
+	scanner := NewScanner([]string{}, []string{".jpg"}, nil)
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -228,7 +229,7 @@ func TestScan_CollectsAncestorDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	scanner := NewScanner([]string{".mp4"}, []string{})
+	scanner := NewScanner([]string{".mp4"}, []string{}, nil)
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatalf("Scan failed: %v", err)
 	}
@@ -264,7 +265,7 @@ func TestGetCachedDirs_ReturnsAllOnEmptyScope(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
 	}
 
-	scanner := NewScanner([]string{}, []string{".jpg"})
+	scanner := NewScanner([]string{}, []string{".jpg"}, nil)
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +289,7 @@ func TestGetCachedDirs_ScopeFilter(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
 	}
 
-	scanner := NewScanner([]string{}, []string{".jpg"})
+	scanner := NewScanner([]string{}, []string{".jpg"}, nil)
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +310,7 @@ func TestGetCachedDirs_ExcludesScopeRoot(t *testing.T) {
 	os.MkdirAll(sub, 0755)
 	os.WriteFile(filepath.Join(sub, "x.jpg"), []byte("fake"), 0644)
 
-	scanner := NewScanner([]string{}, []string{".jpg"})
+	scanner := NewScanner([]string{}, []string{".jpg"}, nil)
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +339,7 @@ func TestGetCachedDirs_MtimesPopulated(t *testing.T) {
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
 
-	scanner := NewScanner([]string{}, []string{".jpg"})
+	scanner := NewScanner([]string{}, []string{".jpg"}, nil)
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +365,7 @@ func TestInvalidateCache_ClearsCacheDirs(t *testing.T) {
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "x.jpg"), []byte("fake"), 0644)
 
-	scanner := NewScanner([]string{}, []string{".jpg"})
+	scanner := NewScanner([]string{}, []string{".jpg"}, nil)
 	if _, err := scanner.Scan(context.Background(), []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +396,7 @@ func TestScan_PopulatesCacheByDir(t *testing.T) {
 	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "A", "sub", "v2.mp4"), []byte("x"), 0644))
 	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "B", "v3.mp4"), []byte("x"), 0644))
 
-	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"}, nil)
 	_, err := scanner.Scan(context.Background(), []string{tempDir})
 	assert.NoError(t, err)
 
@@ -421,7 +422,7 @@ func TestInvalidateCache_ClearsCacheByDir(t *testing.T) {
 	tempDir := t.TempDir()
 	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "v.mp4"), []byte("x"), 0644))
 
-	scanner := NewScanner([]string{".mp4"}, nil)
+	scanner := NewScanner([]string{".mp4"}, nil, nil)
 	_, err := scanner.Scan(context.Background(), []string{tempDir})
 	assert.NoError(t, err)
 
@@ -450,7 +451,7 @@ func BenchmarkScan_WithCacheByDir(b *testing.B) {
 		}
 	}
 
-	scanner := NewScanner([]string{".mp4"}, nil)
+	scanner := NewScanner([]string{".mp4"}, nil, nil)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
@@ -472,7 +473,7 @@ func TestGetCachedByDir(t *testing.T) {
 	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "HasFiles", "v.mp4"), []byte("x"), 0644))
 	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "HasFiles", "sub", "v2.mp4"), []byte("x"), 0644))
 
-	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"}, nil)
 	_, err := scanner.Scan(context.Background(), []string{tempDir})
 	assert.NoError(t, err)
 
@@ -498,7 +499,7 @@ func TestGetCachedByDir_CacheMissTriggersScan(t *testing.T) {
 	tempDir := t.TempDir()
 	assert.NoError(t, os.WriteFile(filepath.Join(tempDir, "v.mp4"), []byte("x"), 0644))
 
-	scanner := NewScanner([]string{".mp4"}, []string{".jpg"})
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"}, nil)
 	// 注意：未调 Scan，cacheByDir 为 nil
 
 	ctx := context.Background()
@@ -520,7 +521,7 @@ func TestGetCachedByDir_SortedByName(t *testing.T) {
 		assert.NoError(t, os.WriteFile(filepath.Join(tempDir, name), []byte("x"), 0644))
 	}
 
-	scanner := NewScanner([]string{".mp4"}, nil)
+	scanner := NewScanner([]string{".mp4"}, nil, nil)
 	_, err := scanner.Scan(context.Background(), []string{tempDir})
 	assert.NoError(t, err)
 
@@ -548,7 +549,7 @@ func BenchmarkGetCachedByDir_LargeCache(b *testing.B) {
 			[]byte("x"), 0644))
 	}
 
-	scanner := NewScanner([]string{".mp4"}, nil)
+	scanner := NewScanner([]string{".mp4"}, nil, nil)
 	_, err := scanner.Scan(context.Background(), []string{tempDir})
 	if err != nil {
 		b.Fatal(err)
@@ -610,4 +611,68 @@ func BenchmarkFindOwnerRoot(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = findOwnerRoot(paths[i%len(paths)], roots)
 	}
+}
+
+// TestScanTextFiles 验证 Task 2：扫描器把 .txt/.epub 文件识别为 mediaType="text"，
+// 并写入 cache["text"]。同时确认这些文件进入 allFiles 与 cacheByDir（与 video/image 对称）。
+func TestScanTextFiles(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "novel.txt"), []byte("第一章 开始\n正文"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "book.epub"), []byte("PK\x03\x04"), 0644))
+
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"}, []string{".txt", ".epub"})
+	files, err := scanner.Scan(context.Background(), []string{dir})
+	require.NoError(t, err)
+	require.Len(t, files, 2)
+
+	scanner.mu.RLock()
+	textFiles := scanner.cache["text"]
+	scanner.mu.RUnlock()
+	assert.Len(t, textFiles, 2)
+	for _, f := range textFiles {
+		assert.Equal(t, "text", f.MediaType)
+	}
+}
+
+// TestScannerTextExtsGetter 验证 TextExts() 返回小写化的扩展名 map。
+func TestScannerTextExtsGetter(t *testing.T) {
+	s := NewScanner(nil, nil, []string{".txt", ".EPUB"})
+	assert.True(t, s.TextExts()[".txt"])
+	assert.True(t, s.TextExts()[".epub"])
+}
+
+// TestScanTextOnScanCompleteFilter 验证 Task 2 的关键约束：text 文件不进入
+// OnScanComplete 回调（书没有缩略图）。回调只收到 video/image 文件。
+func TestScanTextOnScanCompleteFilter(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "novel.txt"), []byte("hello"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "clip.mp4"), []byte("x"), 0644))
+
+	var got []models.MediaFile
+	var gotMu sync.Mutex
+	scanner := NewScanner([]string{".mp4"}, nil, []string{".txt"})
+	scanner.OnScanComplete = func(files []models.MediaFile) {
+		gotMu.Lock()
+		got = append(got, files...)
+		gotMu.Unlock()
+	}
+	_, err := scanner.Scan(context.Background(), []string{dir})
+	require.NoError(t, err)
+
+	// 回调在 goroutine 中触发；轮询等待，最多 1s。
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		gotMu.Lock()
+		n := len(got)
+		gotMu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	gotMu.Lock()
+	defer gotMu.Unlock()
+	require.Len(t, got, 1, "OnScanComplete should receive only non-text files")
+	assert.Equal(t, "video", got[0].MediaType)
 }

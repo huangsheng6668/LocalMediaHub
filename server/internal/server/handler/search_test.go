@@ -53,7 +53,7 @@ func TestSearchScopesResultsToRequestedPathAndReturnsFolders(t *testing.T) {
 			ImageExtensions: []string{".jpg"},
 		},
 	}
-	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions)
+	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
 	if _, err := scanner.Scan(context.Background(), cfg.Scan.GetRoots()); err != nil {
 		t.Fatalf("failed to seed scanner cache: %v", err)
 	}
@@ -106,7 +106,7 @@ func newTestHandlerWithScanner(t *testing.T, root string, videoExts, imageExts [
 			ImageExtensions: imageExts,
 		},
 	}
-	scanner := service.NewScanner(videoExts, imageExts)
+	scanner := service.NewScanner(videoExts, imageExts, nil)
 	h := New(cfg, scanner, nil, nil, nil)
 	return h, scanner
 }

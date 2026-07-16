@@ -26,6 +26,7 @@ type Scanner struct {
 	cacheTTL       time.Duration
 	videoExts      map[string]bool
 	imageExts      map[string]bool
+	textExts       map[string]bool
 	sf             singleflight.Group
 	OnScanComplete func(files []models.MediaFile)
 	// bgCtx/bgCancel bound the lifetime of admin-triggered background scans.
@@ -50,7 +51,7 @@ type Scanner struct {
 	cacheByDir map[string][]models.MediaFile
 }
 
-func NewScanner(videoExts, imageExts []string) *Scanner {
+func NewScanner(videoExts, imageExts, textExts []string) *Scanner {
 	vExts := make(map[string]bool)
 	for _, e := range videoExts {
 		vExts[strings.ToLower(e)] = true
@@ -59,12 +60,17 @@ func NewScanner(videoExts, imageExts []string) *Scanner {
 	for _, e := range imageExts {
 		iExts[strings.ToLower(e)] = true
 	}
+	tExts := make(map[string]bool)
+	for _, e := range textExts {
+		tExts[strings.ToLower(e)] = true
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scanner{
 		cache:       make(map[string][]models.MediaFile),
 		cacheTTL:    60 * time.Second,
 		videoExts:   vExts,
 		imageExts:   iExts,
+		textExts:    tExts,
 		bgCtx:       ctx,
 		bgCancel:    cancel,
 		cacheDirs:   nil,
@@ -80,6 +86,11 @@ func (s *Scanner) VideoExts() map[string]bool {
 // ImageExts returns the image extension map for handler use.
 func (s *Scanner) ImageExts() map[string]bool {
 	return s.imageExts
+}
+
+// TextExts returns the text extension map for handler use.
+func (s *Scanner) TextExts() map[string]bool {
+	return s.textExts
 }
 
 // TriggerScan kicks off a background scan bound to the scanner's own lifecycle
@@ -154,12 +165,15 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 				s.mu.RLock()
 				isVideo := s.videoExts[ext]
 				isImage := s.imageExts[ext]
+				isText := s.textExts[ext]
 				s.mu.RUnlock()
 
 				if isVideo {
 					mediaType = "video"
 				} else if isImage {
 					mediaType = "image"
+				} else if isText {
+					mediaType = "text"
 				} else {
 					return nil
 				}
@@ -232,6 +246,7 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	allFiles := make([]models.MediaFile, 0)
 	videoFiles := make([]models.MediaFile, 0)
 	imageFiles := make([]models.MediaFile, 0)
+	textFiles := make([]models.MediaFile, 0)
 	for _, subList := range results {
 		for _, f := range subList {
 			allFiles = append(allFiles, f)
@@ -240,6 +255,8 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 				videoFiles = append(videoFiles, f)
 			case "image":
 				imageFiles = append(imageFiles, f)
+			case "text":
+				textFiles = append(textFiles, f)
 			}
 		}
 	}
@@ -267,6 +284,7 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	s.cache["all"] = allFiles
 	s.cache["video"] = videoFiles
 	s.cache["image"] = imageFiles
+	s.cache["text"] = textFiles
 	s.cacheDirs = cacheDirs
 	s.cacheDirMap = cacheDirMap
 	s.cacheByDir = byDir
@@ -275,7 +293,17 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	s.mu.Unlock()
 
 	if callback != nil {
-		go callback(allFiles)
+		// Text files (books) have no thumbnails; filter them out of the
+		// thumbnail-generation callback so the thumbnailer doesn't try to
+		// process them. Video and image files are forwarded as before.
+		thumbOnly := make([]models.MediaFile, 0, len(allFiles))
+		for _, f := range allFiles {
+			if f.MediaType == "text" {
+				continue
+			}
+			thumbOnly = append(thumbOnly, f)
+		}
+		go callback(thumbOnly)
 	}
 
 	return allFiles, nil
