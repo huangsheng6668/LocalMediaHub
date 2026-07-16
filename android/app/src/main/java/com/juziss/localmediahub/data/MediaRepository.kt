@@ -45,11 +45,22 @@ class MediaRepository @Inject constructor(
     /**
      * Generic GET that fetches JSON and deserializes via an explicit TypeToken.
      * The type is fully captured at compile time → immune to R8 type-erasure.
+     *
+     * forceNetwork: when true, sends `Cache-Control: no-cache` so OkHttp skips
+     * its disk cache and revalidates with the server. Used after mutations
+     * (delete) so refreshCurrentDirectory reflects the just-deleted entry
+     * instead of a stale max-age=5 cached response.
      */
-    private suspend fun <T> httpGet(url: String, type: java.lang.reflect.Type): NetworkResult<T> =
+    private suspend fun <T> httpGet(
+        url: String,
+        type: java.lang.reflect.Type,
+        forceNetwork: Boolean = false,
+    ): NetworkResult<T> =
         withContext(Dispatchers.IO) {
             try {
-                val request = Request.Builder().url(url).get().build()
+                val builder = Request.Builder().url(url).get()
+                if (forceNetwork) builder.header("Cache-Control", "no-cache")
+                val request = builder.build()
                 http.newCall(request).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
@@ -139,9 +150,13 @@ class MediaRepository @Inject constructor(
     suspend fun getFolders(): NetworkResult<List<Folder>> =
         httpGet("$baseUrl/api/v1/folders", object : TypeToken<List<Folder>>() {}.type)
 
-    suspend fun browseFolder(relativePath: String): NetworkResult<BrowseResult> =
+    suspend fun browseFolder(
+        relativePath: String,
+        forceNetwork: Boolean = false,
+    ): NetworkResult<BrowseResult> =
         httpGet("$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/browse",
-            object : TypeToken<BrowseResult>() {}.type)
+            object : TypeToken<BrowseResult>() {}.type,
+            forceNetwork = forceNetwork)
 
     suspend fun getFolderFilesRecursive(relativePath: String): NetworkResult<List<MediaFile>> =
         httpGet("$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/files",
@@ -166,9 +181,13 @@ class MediaRepository @Inject constructor(
     suspend fun getSystemDrives(): NetworkResult<List<String>> =
         httpGet("$baseUrl/api/v1/system/drives", object : TypeToken<List<String>>() {}.type)
 
-    suspend fun browseSystemPath(path: String): NetworkResult<SystemBrowseResult> =
+    suspend fun browseSystemPath(
+        path: String,
+        forceNetwork: Boolean = false,
+    ): NetworkResult<SystemBrowseResult> =
         httpGet("$baseUrl/api/v1/system/browse?path=${URLEncoder.encode(path, "UTF-8")}",
-            object : TypeToken<SystemBrowseResult>() {}.type)
+            object : TypeToken<SystemBrowseResult>() {}.type,
+            forceNetwork = forceNetwork)
 
     // ── Health check ──────────────────────────────────────────
 

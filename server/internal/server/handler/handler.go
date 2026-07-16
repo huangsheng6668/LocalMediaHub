@@ -110,8 +110,11 @@ func setMediaCacheHeaders(c echo.Context) {
 // contain path / file metadata specific to this server's filesystem.
 // Contrast with media endpoints which use 'public, max-age=86400' (Round 3).
 const (
-	// cacheBrief: 60s — endpoints that change when scan/add/delete files.
-	cacheBrief = "private, max-age=60"
+	// cacheBrief: 5s — endpoints that change when scan/add/delete files.
+	// Kept short on purpose: clients re-fetch these URLs right after a
+	// delete/add, and a long max-age made the list show stale entries
+	// (deleted files still listed) until the cache expired.
+	cacheBrief = "private, max-age=5"
 	// cacheStandard: 300s — endpoints that change with tag operations / paging.
 	cacheStandard = "private, max-age=300"
 	// cacheStatic: 3600s — endpoints that almost never change.

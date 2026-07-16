@@ -34,9 +34,11 @@ export async function deleteMediaFile(file) {
         if (state.playingFile && state.playingFile.path === file.path) {
             elements.btnCloseVideoModal.click();
         }
-        // Reload folder contents
+        // Reload folder contents (bypassCache: the server may have served the
+        // previous list response with a short max-age, so a plain fetch could
+        // hit the browser HTTP cache and re-show the just-deleted entry).
         if (state.activeTab === 'browser') {
-            browsePath(state.currentPath);
+            browsePath(state.currentPath, true);
         } else if (state.activeTab === 'dashboard') {
             renderDashboard();
         }
@@ -73,8 +75,8 @@ export async function deleteFolder(folder) {
         });
 
         showToast('文件夹删除成功', 'success');
-        // Reload folder contents
-        browsePath(state.currentPath);
+        // Reload folder contents (bypassCache — see deleteMediaFile for rationale).
+        browsePath(state.currentPath, true);
     } catch (e) {
         showToast(`删除失败: ${e.message}`, 'error');
     }

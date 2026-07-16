@@ -88,12 +88,19 @@ async function loadSystemDrives() {
 }
 
 // Browse specific path
-export async function browsePath(path) {
+// bypassCache: append a cache-busting query param so the browser re-fetches
+// the list after mutations (delete/add) instead of serving a stale cached
+// response. Required because server-side JSON list endpoints are served with
+// Cache-Control: max-age=N for bandwidth savings.
+export async function browsePath(path, bypassCache = false) {
     state.currentPath = path;
 
     let url = `${state.apiBase}/api/v1/folders/${encodeRoutePath(path)}/browse`;
     if (state.isSystemBrowse) {
         url = `${state.apiBase}/api/v1/system/browse?path=${encodeURIComponent(path)}`;
+    }
+    if (bypassCache) {
+        url += `${url.includes('?') ? '&' : '?'}_t=${Date.now()}`;
     }
 
     elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">正在读取目录结构...</div>';

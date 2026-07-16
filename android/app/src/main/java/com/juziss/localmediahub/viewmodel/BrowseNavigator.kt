@@ -285,7 +285,7 @@ internal class BrowseNavigator(
         return repository.getMediaOriginalImageUrl(file.path)
     }
 
-    suspend fun refreshCurrentDirectory() {
+    suspend fun refreshCurrentDirectory(forceNetwork: Boolean = false) {
         val path = sharedState.currentPath.value
         val state = sharedState.browseState.value
         if (state is BrowseState.TagCollection) {
@@ -300,7 +300,7 @@ internal class BrowseNavigator(
             if (path.isEmpty()) {
                 loadSystemDrives()
             } else {
-                when (val result = repository.browseSystemPath(path)) {
+                when (val result = repository.browseSystemPath(path, forceNetwork = forceNetwork)) {
                     is NetworkResult.Success -> applySystemResult(result.data)
                     is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
                     is NetworkResult.Loading -> {}
@@ -310,7 +310,7 @@ internal class BrowseNavigator(
             if (path.isEmpty()) {
                 loadRoots()
             } else {
-                when (val result = repository.browseFolder(path)) {
+                when (val result = repository.browseFolder(path, forceNetwork = forceNetwork)) {
                     is NetworkResult.Success -> applyFolderResult(result.data)
                     is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
                     is NetworkResult.Loading -> {}

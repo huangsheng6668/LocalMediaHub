@@ -45,7 +45,7 @@ internal class DeleteController(
     fun deletePath(
         path: String,
         recursive: Boolean,
-        onRefresh: (suspend () -> Unit)?,
+        onRefresh: (suspend (Boolean) -> Unit)?,
         scope: CoroutineScope
     ) {
         scope.launch {
@@ -53,7 +53,10 @@ internal class DeleteController(
             when (val result = deletePathSync(path, recursive)) {
                 is NetworkResult.Success -> {
                     _deleteState.value = DeleteState.Success(result.data)
-                    onRefresh?.invoke()
+                    // forceNetwork = true: skip OkHttp cache so the refreshed
+                    // list reflects the just-deleted entry instead of a stale
+                    // max-age=5 response.
+                    onRefresh?.invoke(true)
                 }
                 is NetworkResult.Error -> {
                     _deleteState.value = DeleteState.Error(result.message)
@@ -66,7 +69,7 @@ internal class DeleteController(
     fun deletePaths(
         paths: List<String>,
         recursive: Boolean,
-        onRefresh: (suspend () -> Unit)?,
+        onRefresh: (suspend (Boolean) -> Unit)?,
         scope: CoroutineScope
     ) {
         scope.launch {
@@ -86,7 +89,7 @@ internal class DeleteController(
             }
             if (anySuccess) {
                 _deleteState.value = DeleteState.Success("成功删除了选中的文件")
-                onRefresh?.invoke()
+                onRefresh?.invoke(true)
             } else if (errorMessage != null) {
                 _deleteState.value = DeleteState.Error(errorMessage)
             } else {
