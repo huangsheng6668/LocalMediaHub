@@ -269,6 +269,18 @@ class MediaRepository @Inject constructor(
             BookChapterContent::class.java,
         )
 
+    /**
+     * Streaming variant of [getBookInfo]: returns the raw JSON [ResponseBody]
+     * so the caller (DownloadWorker) can write the bytes verbatim to the
+     * `<filename>.json` sidecar next to the downloaded book file, preserving
+     * the exact server response without a serialize/deserialize round-trip.
+     *
+     * Task 14: offline sidecar prep. Failures are tolerated by the caller —
+     * a missing sidecar only means offline rendering falls back to online.
+     */
+    suspend fun downloadBookInfoSidecar(path: String): NetworkResult<ResponseBody> =
+        httpStream("$baseUrl/api/v1/books/info?path=${URLEncoder.encode(path, "UTF-8")}")
+
     // ════════════════════════════════════════════════════════════════════════
     //  URL builders (unchanged — used by Coil / ExoPlayer, not Retrofit)
     // ════════════════════════════════════════════════════════════════════════

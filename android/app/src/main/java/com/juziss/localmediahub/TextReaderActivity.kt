@@ -33,6 +33,10 @@ class TextReaderActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val path = intent.getStringExtra(EXTRA_PATH).orEmpty()
+        // TODO Task 14a (deferred): when intent.getBooleanExtra(EXTRA_IS_LOCAL, false),
+        // load chapter text directly from the local file + sidecar JSON instead of
+        // hitting /api/v1/books/*. For now, EXTRA_IS_LOCAL is ignored and online
+        // fetch is used (works as long as the server is reachable).
         setContent {
             LocalMediaHubTheme {
                 LaunchedEffect(path) { viewModel.loadBook(path) }
