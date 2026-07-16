@@ -44,6 +44,7 @@ fun DownloadsScreen(
     onVideoClick: (MediaFile, String) -> Unit,
     onImageClick: (MediaFile, List<MediaFile>) -> Unit,
     viewModel: BrowseViewModel,
+    onTextClick: (MediaFile) -> Unit = {},
 ) {
     val downloads by viewModel.downloadedFiles.collectAsState(initial = emptyList())
     var selectedEntryForDelete by remember { mutableStateOf<DownloadEntry?>(null) }
@@ -294,14 +295,16 @@ fun DownloadsScreen(
                         DownloadItemCard(
                             entry = entry,
                             onClick = {
-                                if (entry.file.mediaType == "video") {
-                                    onVideoClick(entry.file, entry.localPath)
-                                } else {
-                                    val imagesAtLevel = filesAtLevel
-                                        .filter { it.file.mediaType == "image" }
-                                        .map { it.file }
-                                        .sortedBy { it.name }
-                                    onImageClick(entry.file, imagesAtLevel)
+                                when (entry.file.mediaType) {
+                                    "video" -> onVideoClick(entry.file, entry.localPath)
+                                    "image" -> {
+                                        val imagesAtLevel = filesAtLevel
+                                            .filter { it.file.mediaType == "image" }
+                                            .map { it.file }
+                                            .sortedBy { it.name }
+                                        onImageClick(entry.file, imagesAtLevel)
+                                    }
+                                    "text" -> onTextClick(entry.file)
                                 }
                             },
                             onDeleteClick = {
@@ -526,33 +529,40 @@ private fun DownloadItemCard(
                     .background(MaterialTheme.colorScheme.secondaryContainer),
                 contentAlignment = Alignment.Center
             ) {
-                if (entry.file.mediaType == "image") {
-                    AsyncImage(
+                when (entry.file.mediaType) {
+                    "image" -> AsyncImage(
                         model = "file://${entry.localPath}",
                         contentDescription = entry.file.name,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
-                } else {
-                    Icon(
-                        painterResource(R.drawable.ic_movie),
+                    "video" -> {
+                        Icon(
+                            painterResource(R.drawable.ic_movie),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                    "text" -> Icon(
+                        painterResource(R.drawable.ic_text_file),
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(32.dp)
                     )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Filled.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
                 }
             }
  
@@ -571,7 +581,12 @@ private fun DownloadItemCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (entry.file.mediaType == "video") stringResource(R.string.video) else stringResource(R.string.image),
+                    text = when (entry.file.mediaType) {
+                        "video" -> stringResource(R.string.video)
+                        "image" -> stringResource(R.string.image)
+                        "text" -> "小说"
+                        else -> ""
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold

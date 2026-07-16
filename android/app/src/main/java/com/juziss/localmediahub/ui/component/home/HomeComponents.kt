@@ -491,6 +491,13 @@ fun RecentMediaCard(
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(34.dp),
                     )
+                } else if (entry.file.mediaType == "text") {
+                    Icon(
+                        painterResource(R.drawable.ic_text_file),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(34.dp),
+                    )
                 }
                 AsyncImage(
                     model = getThumbnailUrl(entry),
@@ -527,7 +534,11 @@ fun RecentMediaCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = if (entry.file.mediaType == "image") "图片" else "视频",
+                    text = when (entry.file.mediaType) {
+                        "image" -> "图片"
+                        "text" -> "小说"
+                        else -> "视频"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -674,6 +685,21 @@ fun DownloadedPreviewCard(
                         .fillMaxWidth()
                         .height(124.dp),
                 )
+            } else if (entry.file.mediaType == "text") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(124.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_text_file),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(40.dp),
+                    )
+                }
             } else {
                 Box(
                     modifier = Modifier
@@ -708,7 +734,11 @@ fun DownloadedPreviewCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = if (entry.file.mediaType == "image") "图片" else "视频",
+                    text = when (entry.file.mediaType) {
+                        "image" -> "图片"
+                        "text" -> "小说"
+                        else -> "视频"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,

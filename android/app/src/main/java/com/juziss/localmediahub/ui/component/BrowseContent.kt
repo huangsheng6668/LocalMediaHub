@@ -30,6 +30,7 @@ internal fun FavoritesContent(
     favoriteFiles: List<MediaFile>,
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile, List<MediaFile>) -> Unit,
+    onTextClick: (MediaFile) -> Unit,
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
     getThumbnailUrl: (MediaFile) -> String,
@@ -105,12 +106,20 @@ internal fun FavoritesContent(
                         onClick = remember(file, onImageClick, favoriteFiles) { { onImageClick(file, favoriteFiles) } },
                         onLongClick = longClick,
                     )
+                    "text" -> TextCard(
+                        file = file,
+                        isUnsupported = file.extension.lowercase() !in SUPPORTED_TEXT_EXTENSIONS,
+                        isFavorite = isFavorite(file.relativePath),
+                        onToggleFavorite = toggle,
+                        onClick = remember(file, onTextClick) { { onTextClick(file) } },
+                        onLongClick = longClick,
+                    )
                 }
             }
         }
     }
 }
- 
+
 @Composable
 internal fun SearchContent(
     searchState: SearchState,
@@ -118,6 +127,7 @@ internal fun SearchContent(
     onFolderClick: (Folder) -> Unit,
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile) -> Unit,
+    onTextClick: (MediaFile) -> Unit,
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
     getThumbnailUrl: (MediaFile) -> String,
@@ -184,6 +194,14 @@ internal fun SearchContent(
                                 onClick = remember(file, onImageClick) { { onImageClick(file) } },
                                 onLongClick = longClick,
                             )
+                            "text" -> TextCard(
+                                file = file,
+                                isUnsupported = file.extension.lowercase() !in SUPPORTED_TEXT_EXTENSIONS,
+                                isFavorite = isFavorite(file.relativePath),
+                                onToggleFavorite = toggle,
+                                onClick = remember(file, onTextClick) { { onTextClick(file) } },
+                                onLongClick = longClick,
+                            )
                         }
                     }
                 }
@@ -200,6 +218,7 @@ internal fun BrowseContent(
     onFolderClick: (Folder) -> Unit,
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile) -> Unit,
+    onTextClick: (MediaFile) -> Unit,
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
     onFileLongClick: (MediaFile) -> Unit = {},
@@ -322,6 +341,15 @@ internal fun BrowseContent(
                             onLongClick = longClick,
                             isSelected = isSelected(file.relativePath),
                         )
+                        "text" -> TextCard(
+                            file = file,
+                            isUnsupported = file.extension.lowercase() !in SUPPORTED_TEXT_EXTENSIONS,
+                            isFavorite = isFavorite(file.relativePath),
+                            onToggleFavorite = toggle,
+                            onClick = remember(file, onTextClick) { { onTextClick(file) } },
+                            onLongClick = longClick,
+                            isSelected = isSelected(file.relativePath),
+                        )
                     }
                 }
             }
@@ -376,3 +404,11 @@ internal fun BrowseContent(
         }
     }
 }
+
+/**
+ * Extensions the TextReaderActivity can open. Anything else tagged as
+ * mediaType="text" (e.g. .mobi, .azw3) renders with an "暂不支持" badge and
+ * surfaces a Toast on click. Kept here so all Browse grids share one source of
+ * truth for the unsupported-format check.
+ */
+internal val SUPPORTED_TEXT_EXTENSIONS: Set<String> = setOf(".txt", ".epub")

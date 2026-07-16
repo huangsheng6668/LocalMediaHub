@@ -61,8 +61,10 @@ fun BrowseScreen(
     onExitBrowse: () -> Unit,
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile, List<MediaFile>) -> Unit,
+    onTextClick: (MediaFile) -> Unit,
     onFavoriteVideoClick: (MediaFile, Boolean) -> Unit,
     onFavoriteImageClick: (MediaFile, List<MediaFile>, Boolean) -> Unit,
+    onFavoriteTextClick: (MediaFile, Boolean) -> Unit = { file, _ -> onTextClick(file) },
     viewModel: BrowseViewModel = viewModel(),
 ) {
     val browseState by viewModel.browseState.collectAsState()
@@ -328,6 +330,24 @@ fun BrowseScreen(
                 Unit
             }
         }
+
+        val handleTextClick = remember(selectionMode, onTextClick) {
+            { file: MediaFile ->
+                if (selectionMode) {
+                    if (selectedFiles.any { it.relativePath == file.relativePath }) {
+                        selectedFiles.removeAll { it.relativePath == file.relativePath }
+                        if (selectedFiles.isEmpty()) {
+                            selectionMode = false
+                        }
+                    } else {
+                        selectedFiles.add(file)
+                    }
+                } else {
+                    onTextClick(file)
+                }
+                Unit
+            }
+        }
         var itemToDelete by remember { mutableStateOf<Any?>(null) }
         var showDeleteConfirm by remember { mutableStateOf(false) }
         var deleteRecursive by remember { mutableStateOf(true) }
@@ -447,6 +467,7 @@ fun BrowseScreen(
                 onBrowseFolder = viewModel::browseFolder,
                 onVideoClick = onVideoClick,
                 onImageClick = onImageClick,
+                onTextClick = onTextClick,
                 onToggleFavorite = onToggleFavoriteCb,
                 isFavorite = isFavoriteCb,
                 getThumbnailUrl = viewModel::getThumbnailUrl,
@@ -460,6 +481,9 @@ fun BrowseScreen(
                 },
                 onImageClick = { file, allFiles ->
                     onFavoriteImageClick(file, allFiles.filter { it.mediaType == "image" }, viewModel.isFavoriteSystemBrowse(file))
+                },
+                onTextClick = { file ->
+                    onFavoriteTextClick(file, viewModel.isFavoriteSystemBrowse(file))
                 },
                 onToggleFavorite = onToggleFavoriteCb,
                 isFavorite = isFavoriteCb,
@@ -475,6 +499,7 @@ fun BrowseScreen(
                 activeTagFilter = activeTagFilter,
                 onVideoClick = handleVideoClick,
                 onImageClick = handleImageClick,
+                onTextClick = handleTextClick,
                 onToggleFavorite = onToggleFavoriteCb,
                 isFavorite = isFavoriteCb,
                 onFileLongClick = onFileLongClickCb,

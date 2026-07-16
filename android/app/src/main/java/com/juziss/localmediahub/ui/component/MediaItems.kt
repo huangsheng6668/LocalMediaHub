@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
@@ -321,6 +322,114 @@ internal fun ImageCard(
                             contentDescription = "Selected",
                             tint = Color.White,
                             modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Card for mediaType="text" files. Renders a document icon plus the file name
+ * and an optional "暂不支持" badge when the format is one the reader cannot
+ * open (e.g. .mobi, .azw3). The favorite toggle and selection overlay mirror
+ * VideoCard / ImageCard so existing multi-select flows work unchanged.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun TextCard(
+    file: MediaFile,
+    isUnsupported: Boolean,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+    isSelected: Boolean = false,
+) {
+    val containerColor = if (isUnsupported) MaterialTheme.colorScheme.surfaceVariant
+        else MaterialTheme.colorScheme.surface
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(containerColor = containerColor),
+        elevation = CardDefaults.elevatedCardElevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 6.dp,
+        ),
+    ) {
+        Box {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_text_file),
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = if (isUnsupported) MaterialTheme.colorScheme.outline
+                           else MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = file.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = file.extension.uppercase(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (isUnsupported) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.outline,
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text(
+                            text = "暂不支持",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.surface,
+                        )
+                    }
+                }
+            }
+            FavoriteToggleIcon(
+                isFavorite = isFavorite,
+                onClick = onToggleFavorite,
+                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+            )
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp))
+                )
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .size(24.dp)
+                        .align(Alignment.TopStart),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.Done,
+                            contentDescription = "Selected",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
                         )
                     }
                 }

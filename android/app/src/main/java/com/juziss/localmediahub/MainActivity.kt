@@ -1,6 +1,7 @@
 package com.juziss.localmediahub
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -180,41 +181,48 @@ fun LocalMediaHubApp() {
                             },
                             navigateToVideoPlayer = { },
                             navigateToImagePreview = { navController.navigate("imagePreview") },
+                            onTextReady = { file ->
+                                openTextFile(context, file, isLocal = false)
+                            },
                         )
                     }
                 },
                 onFavoriteClick = { file ->
-                    if (file.mediaType == "video") {
-                        appScope.launch {
-                            val isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file)
-                            val streamUrl = homeViewModel.getFavoriteStreamUrl(file)
-                            when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
-                                is VideoOpenAction.PlayDirectly ->
-                                    playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
-                                is VideoOpenAction.ShowCompletedDialog ->
-                                    resumeRequest = ResumePlaybackRequest(
-                                        file = file,
-                                        isSystemBrowse = isSystemBrowse,
-                                        streamUrl = streamUrl,
-                                        positionMs = action.positionMs,
-                                        durationMs = action.durationMs,
-                                    )
+                    when (file.mediaType) {
+                        "video" -> {
+                            appScope.launch {
+                                val isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file)
+                                val streamUrl = homeViewModel.getFavoriteStreamUrl(file)
+                                when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
+                                    is VideoOpenAction.PlayDirectly ->
+                                        playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
+                                    is VideoOpenAction.ShowCompletedDialog ->
+                                        resumeRequest = ResumePlaybackRequest(
+                                            file = file,
+                                            isSystemBrowse = isSystemBrowse,
+                                            streamUrl = streamUrl,
+                                            positionMs = action.positionMs,
+                                            durationMs = action.durationMs,
+                                        )
+                                }
                             }
                         }
-                    } else {
-                        appScope.launch {
-                            val isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file)
-                            recentActivityStore.addRecentMedia(
-                                file = file,
-                                isSystemBrowse = isSystemBrowse,
-                            )
-                            val sisterImages = homeViewModel.getSisterImages(file, isSystemBrowse)
-                            currentImageFile = file
-                            imageList = sisterImages
-                            currentImageUsesSystemUrl = isSystemBrowse
-                            currentImageIsLocal = false
-                            navController.navigate("imagePreview")
+                        "image" -> {
+                            appScope.launch {
+                                val isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file)
+                                recentActivityStore.addRecentMedia(
+                                    file = file,
+                                    isSystemBrowse = isSystemBrowse,
+                                )
+                                val sisterImages = homeViewModel.getSisterImages(file, isSystemBrowse)
+                                currentImageFile = file
+                                imageList = sisterImages
+                                currentImageUsesSystemUrl = isSystemBrowse
+                                currentImageIsLocal = false
+                                navController.navigate("imagePreview")
+                            }
                         }
+                        "text" -> openTextFile(context, file, isLocal = false)
                     }
                 },
                 onDisconnect = {
@@ -228,28 +236,32 @@ fun LocalMediaHubApp() {
                 downloadedEntries = downloadedEntries,
                 onOpenDownloads = { navController.navigate("downloads") },
                 onDownloadClick = { entry ->
-                    if (entry.file.mediaType == "video") {
-                        appScope.launch {
-                            val streamUrl = "file://${entry.localPath}"
-                            when (val action = checkPlaybackProgress(entry.file, false, recentActivityStore)) {
-                                is VideoOpenAction.PlayDirectly ->
-                                    playVideo(entry.file, streamUrl, action.positionMs, false)
-                                is VideoOpenAction.ShowCompletedDialog ->
-                                    resumeRequest = ResumePlaybackRequest(
-                                        file = entry.file,
-                                        isSystemBrowse = false,
-                                        streamUrl = streamUrl,
-                                        positionMs = action.positionMs,
-                                        durationMs = action.durationMs,
-                                    )
+                    when (entry.file.mediaType) {
+                        "video" -> {
+                            appScope.launch {
+                                val streamUrl = "file://${entry.localPath}"
+                                when (val action = checkPlaybackProgress(entry.file, false, recentActivityStore)) {
+                                    is VideoOpenAction.PlayDirectly ->
+                                        playVideo(entry.file, streamUrl, action.positionMs, false)
+                                    is VideoOpenAction.ShowCompletedDialog ->
+                                        resumeRequest = ResumePlaybackRequest(
+                                            file = entry.file,
+                                            isSystemBrowse = false,
+                                            streamUrl = streamUrl,
+                                            positionMs = action.positionMs,
+                                            durationMs = action.durationMs,
+                                        )
+                                }
                             }
                         }
-                    } else {
-                        currentImageFile = entry.file
-                        imageList = listOf(entry.file)
-                        currentImageIsLocal = true
-                        currentImageUsesSystemUrl = false
-                        navController.navigate("imagePreview")
+                        "image" -> {
+                            currentImageFile = entry.file
+                            imageList = listOf(entry.file)
+                            currentImageIsLocal = true
+                            currentImageUsesSystemUrl = false
+                            navController.navigate("imagePreview")
+                        }
+                        "text" -> openTextFile(context, entry.file, isLocal = true)
                     }
                 },
                 viewModel = homeViewModel,
@@ -289,6 +301,9 @@ fun LocalMediaHubApp() {
                     currentImageUsesSystemUrl = browseViewModel.isSystemBrowseMode()
                     currentImageIsLocal = false
                     navController.navigate("imagePreview")
+                },
+                onTextClick = { file ->
+                    openTextFile(context, file, isLocal = false)
                 },
                 onFavoriteVideoClick = { file, isSystemBrowse ->
                     appScope.launch {
@@ -387,6 +402,9 @@ fun LocalMediaHubApp() {
                     currentImageIsLocal = true
                     navController.navigate("imagePreview")
                 },
+                onTextClick = { file ->
+                    openTextFile(context, file, isLocal = true)
+                },
                 viewModel = browseViewModel
             )
         }
@@ -424,32 +442,36 @@ private suspend fun openRecentMedia(
     onImageReady: (MediaFile, List<MediaFile>) -> Unit,
     navigateToVideoPlayer: () -> Unit,
     navigateToImagePreview: () -> Unit,
+    onTextReady: (MediaFile) -> Unit = {},
 ) {
-    if (entry.file.mediaType == "video") {
-        val streamUrl = homeViewModel.getVideoStreamUrl(entry)
-        when (val action = checkPlaybackProgress(entry.file, entry.isSystemBrowse, recentActivityStore)) {
-            is VideoOpenAction.PlayDirectly -> {
-                onVideoReady(entry.file, streamUrl, action.positionMs)
-                navigateToVideoPlayer()
-            }
-            is VideoOpenAction.ShowCompletedDialog -> {
-                onShowResumeDialog(
-                    ResumePlaybackRequest(
-                        file = entry.file,
-                        isSystemBrowse = entry.isSystemBrowse,
-                        streamUrl = streamUrl,
-                        positionMs = action.positionMs,
-                        durationMs = action.durationMs,
+    when (entry.file.mediaType) {
+        "video" -> {
+            val streamUrl = homeViewModel.getVideoStreamUrl(entry)
+            when (val action = checkPlaybackProgress(entry.file, entry.isSystemBrowse, recentActivityStore)) {
+                is VideoOpenAction.PlayDirectly -> {
+                    onVideoReady(entry.file, streamUrl, action.positionMs)
+                    navigateToVideoPlayer()
+                }
+                is VideoOpenAction.ShowCompletedDialog -> {
+                    onShowResumeDialog(
+                        ResumePlaybackRequest(
+                            file = entry.file,
+                            isSystemBrowse = entry.isSystemBrowse,
+                            streamUrl = streamUrl,
+                            positionMs = action.positionMs,
+                            durationMs = action.durationMs,
+                        )
                     )
-                )
+                }
             }
         }
-        return
+        "text" -> onTextReady(entry.file)
+        else -> {
+            val sisterImages = homeViewModel.getSisterImages(entry.file, entry.isSystemBrowse)
+            onImageReady(entry.file, sisterImages)
+            navigateToImagePreview()
+        }
     }
-
-    val sisterImages = homeViewModel.getSisterImages(entry.file, entry.isSystemBrowse)
-    onImageReady(entry.file, sisterImages)
-    navigateToImagePreview()
 }
 
 private fun openPlaybackProgress(
@@ -483,5 +505,24 @@ private suspend fun checkPlaybackProgress(
         VideoOpenAction.ShowCompletedDialog(progress.positionMs, progress.durationMs)
     } else {
         VideoOpenAction.PlayDirectly(progress.positionMs)
+    }
+}
+
+/**
+ * Routes a mediaType="text" file to the TextReaderActivity, or shows a Toast
+ * for unsupported formats (e.g. .mobi, .azw3) so the user gets feedback rather
+ * than a silent no-op. `isLocal` distinguishes downloaded files from remote
+ * ones (server path) — TextReaderActivity uses it to pick the data source.
+ */
+private fun openTextFile(
+    context: android.content.Context,
+    file: MediaFile,
+    isLocal: Boolean,
+) {
+    val ext = file.extension.lowercase()
+    if (ext == ".txt" || ext == ".epub") {
+        context.startActivity(TextReaderActivity.newIntent(context, file.path, isLocal))
+    } else {
+        Toast.makeText(context, "暂不支持该格式", Toast.LENGTH_SHORT).show()
     }
 }
