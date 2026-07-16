@@ -2,7 +2,8 @@
 
 - **日期**：2026-07-17
 - **作者**：brainstorming session
-- **状态**：spec（待用户审阅 → 转入 writing-plans）
+- **状态**：spec（已审阅修订 → 待用户确认 → 转入 writing-plans）
+- **审阅**：2026-07-17 代码审核通过，已修正 10+ 处与现有代码不符的问题
 
 ## 背景与目标
 
@@ -57,15 +58,26 @@ scan:
 DefaultTextExtensions = []string{".txt", ".epub", ".mobi", ".azw3"}
 ```
 
+**联动更新**：`handler.go` 的 `isMediaExt()` 和 `mediaExtensions()` 需要同步纳入 `TextExtensions`，否则 `SystemBrowse` handler 不会返回文本文件（`system.go:94` 调用 `isMediaExt` 过滤非媒体文件）。
+
 ### Scanner 扩展（`server/internal/service/scanner.go`）
 
 - `Scanner` 增加 `textExts map[string]bool` 字段
-- `NewScanner` 签名扩展：`NewScanner(videoExts, imageExts, textExts []string)`
-- `Scan()` 的 mediaType 判定增加 `text` 分支：
+- `NewScanner` 签名扩展：`NewScanner(videoExts, imageExts, textExts []string)`（当前签名只有 `videoExts, imageExts`，调用方 `server.go:47` 需同步修改）
+- `Scan()` 的 mediaType 判定增加 `text` 分支（当前 `scanner.go:159-164` 只有 video/image 二分支）：
   ```go
   if isVideo { mediaType = "video" } else if isImage { mediaType = "image" } else if isText { mediaType = "text" } else { return nil }
   ```
-- 新增 `cache["text"]` 分组、`Scan()` 合并阶段把 text 文件归入 `textFiles` slice
+- **缓存合并**（`scanner.go:230-269`）：当前 `switch f.MediaType` 只处理 `"video"` 和 `"image"` 两个分支，text 文件会落入 `allFiles` 但不会进入类型缓存。需增加 `textFiles` slice 和 `cache["text"]` 分组：
+  ```go
+  textFiles := make([]models.MediaFile, 0)
+  // switch 内增加：
+  case "text":
+      textFiles = append(textFiles, f)
+  // 锁内增加：
+  s.cache["text"] = textFiles
+  ```
+- **OnScanComplete 过滤**：当前回调 `callback(allFiles)` 会把所有文件发给 `ThumbnailService.PreGenerateThumbnails`，文本文件没有缩略图。需在回调前过滤掉 `MediaType == "text"` 的文件，或在 `PreGenerateThumbnails` 内跳过非 video/image 文件。推荐后者（防御性更强）。
 - 新增 `TextExts() map[string]bool` getter（对齐 `VideoExts` / `ImageExts`）
 
 ### 新增子包 `server/internal/service/bookparser/`
@@ -160,7 +172,13 @@ func (b *Book) ChapterText(idx int) (string, error)
 - DRM 加密 → `ErrEncrypted`
 - 文件 > 100MB → `ErrTooLarge`
 
-**依赖**：`archive/zip`、`golang.org/x/net/html`（已在用）、`encoding/xml`——**零新依赖**。
+**依赖**：
+- `archive/zip`（标准库）
+- `encoding/xml`（标准库）
+- `golang.org/x/net/html` — ⚠️ 当前仅为 **indirect** 依赖（`go.mod:42`），项目 Go 代码中未直接 import。本次使用将提升为 **direct** 依赖。
+- `golang.org/x/text/encoding/simplifiedchinese`（txt 编码检测用）— ⚠️ 同样当前为 **indirect** 依赖（`go.mod:44`），将提升为 direct。
+
+两个 `x/` 包均已在 `go.mod` 的 indirect 列表中（被其他依赖传递引入），`go mod tidy` 只需将 `// indirect` 注释移除，不会引入全新 module。但需注意这**不是零新依赖**——是零新 module、两个新 direct import。
 
 ### mobi/azw3 处理（`bookparser/unsupported.go`）
 
@@ -195,16 +213,64 @@ func (s *BookService) GetBook(path string) (*Book, error)
 
 ### REST 端点（`server/internal/server/handler/books.go`）
 
+⚠️ **路径设计修正**：原方案 `/api/v1/media/text/*` 与现有 `/api/v1/media/*` 路由组冲突。现有 `/media/*` 提供统一的 `thumbnail`/`original`/`stream`/`duration` 端点，且整个 group 挂载了 `authMw`（`server.go:207`）。文本阅读是独立的资源语义，不适合塞入 media 组。改用独立 `/api/v1/books/*` 路由组：
+
 | 方法 | 路径 | 行为 |
 |------|------|------|
-| GET | `/api/v1/media/text/info?path=...` | 返回 `Book`（不含正文） |
-| GET | `/api/v1/media/text/chapter?path=...&index=N` | 返回第 N 章正文（纯文本） |
+| GET | `/api/v1/books/info?path=...` | 返回 `Book` JSON（不含正文） |
+| GET | `/api/v1/books/chapter?path=...&index=N` | 返回 `{"title": "...", "content": "..."}` JSON |
 
-两个端点都走现有 `ValidateAccessibleMediaPath` + token 鉴权中间件，不引入新安全模型。
+章节端点改为返回 JSON 而非纯文本，理由：
+1. 与项目所有其他端点的 JSON 响应格式一致
+2. 可以附带 `title` 等元数据，前端不需要额外请求
+3. 错误响应已经是 JSON `{"error": "..."}` 格式，混合纯文本响应会让客户端解析变复杂
+
+路由注册（`server.go` `registerRoutes` 内）：
+```go
+books := api.Group("/books", authMw)
+books.GET("/info", h.GetBookInfo)
+books.GET("/chapter", h.GetBookChapter)
+```
+
+两个端点都走现有 `ValidateAccessibleMediaPath` + token 鉴权中间件，`allowedExtensions` 传入 `cfg.Scan.TextExtensions`，不引入新安全模型。
+
+#### ⚠️ 其他现有 Go 处理器联调细节修改：
+1. **`media.go` (MediaOriginal)**：原先仅允许 `ImageExtensions`，需修改以支持小说文件下载：
+   ```go
+   allowedExts := append(h.cfg.Scan.ImageExtensions, h.cfg.Scan.TextExtensions...)
+   resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts)
+   ```
+2. **`system.go` (SystemBrowse)**：遍历盘符或目录时，原逻辑对非图片媒体默认标记为 `"video"`，需要增加 text 分支：
+   ```go
+   // 如果 isMediaExt，但不在 ImageExtensions 中，需额外检查 TextExtensions：
+   mediaType := "video"
+   isImg := false
+   for _, imgExt := range h.cfg.Scan.ImageExtensions {
+       if strings.EqualFold(ext, imgExt) {
+           mediaType = "image"
+           isImg = true
+           break
+       }
+   }
+   if !isImg {
+       for _, txtExt := range h.cfg.Scan.TextExtensions {
+           if strings.EqualFold(ext, txtExt) {
+               mediaType = "text"
+               break
+           }
+       }
+   }
+   ```
+3. **`folders.go` (BrowseFolder / DownloadFolderZip)**：
+   - `BrowseFolder` 中动态扫描磁盘返回子文件时，需包含 `h.scanner.TextExts()`，并将匹配项标记为 `"text"` 类型。
+   - `DownloadFolderZip` 同样需将 text 扩展名加入扫描，允许目录 ZIP 打包中包含书籍。
+4. **`tags.go` (buildTaggedMediaFallback)**：fallback 查询时，`switch` 必须增加对 `h.scanner.TextExts()[ext]` 的支持并返回 `"text"` 媒体类型，否则被标记的标签书籍会丢失。
 
 ### Server struct 扩展
 
-`server/internal/server/server.go` 的 `Server` 增加 `BookService *service.BookService` 字段，handler 接收引用。
+`server/internal/server/server.go` 的 `Server` 增加 `BookService *service.BookService` 字段。
+
+`Handler` struct（`handler.go:15`）增加 `books *service.BookService` 字段，`New()` 构造函数（`handler.go:24`）增加对应参数。调用方 `server.go:90` 同步修改。
 
 ## 错误处理与边界
 
@@ -254,9 +320,9 @@ func (s *BookService) GetBook(path string) (*Book, error)
 data class BookChapter(
     val index: Int,
     val title: String,
-    val charStart: Int = 0,
-    val charEnd: Int = 0,
-    val manifestId: String? = null,
+    @SerializedName("char_start") val charStart: Int = 0,
+    @SerializedName("char_end") val charEnd: Int = 0,
+    @SerializedName("manifest_id") val manifestId: String? = null,
 ) : Parcelable
 
 @Parcelize
@@ -266,14 +332,25 @@ data class Book(
     val title: String,
     val charset: String? = null,
     val chapters: List<BookChapter>,
-    val modTime: String,
+    @SerializedName("mod_time") val modTime: String,
 ) : Parcelable
+
+// 章节内容响应（对应 /api/v1/books/chapter 的 JSON 返回）
+data class BookChapterContent(
+    val title: String,
+    val content: String,
+)
 ```
 
-**`data/MediaRepository.kt`** 新增：
+⚠️ 注意：JSON 字段命名需要 `@SerializedName` 注解，与服务端 `json:"char_start"` 等 tag 对齐。现有 `MediaFile` 已使用此模式（见 `Models.kt:18-22`）。
+
+**`data/MediaRepository.kt`** 新增（⚠️ 项目使用 **OkHttp + Gson** 而非 Retrofit，需对齐现有 `httpGet<T>` 模式）：
 ```kotlin
-suspend fun getBookInfo(path: String): NetworkResult<Book>
-suspend fun getBookChapter(path: String, index: Int): NetworkResult<String>
+suspend fun getBookInfo(path: String): NetworkResult<Book> =
+    httpGet("${baseUrl}/api/v1/books/info?path=${encode(path)}", Book::class.java)
+
+suspend fun getBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> =
+    httpGet("${baseUrl}/api/v1/books/chapter?path=${encode(path)}&index=$index", BookChapterContent::class.java)
 ```
 
 **`data/RecentActivityStore.kt`** 扩展：
@@ -325,9 +402,31 @@ suspend fun getBookChapter(path: String, index: Int): NetworkResult<String>
 - mobi/azw3 点击 → Toast
 - 复用 `MediaItems.kt` 加 `TextCard` composable
 
+**⚠️ 关键：`when(file.mediaType)` 全量排查**
+
+当前代码库中有 **20+ 处** 使用 `when(file.mediaType)` 或 `if (file.mediaType == "video")` 的二分支判断，均无 `else` 分支。新增 `mediaType = "text"` 后，文本文件会**静默跳过**（不渲染、不处理）。此外，部分地方如果走到了 `else` 分支（即假设所有非 video 都是 image），会导致严重错误。需逐一排查并添加 `"text"` 分支或 `else` 兜底：
+
+| 文件 | 行为 | 修改方式 |
+|------|------|----------|
+| `BrowseContent.kt` (4 处 `when`) | 网格渲染 | 增加 `"text" -> TextCard(...)` |
+| `BrowseStateContent.kt` (3 处) | 状态内容渲染 | 同上 |
+| `BrowseSearchView.kt` | 搜索结果过滤 | 增加 text 分支 |
+| `HomeComponents.kt` (4 处) | 首页卡片 | 增加书籍卡片或过滤 |
+| `MainActivity.kt` (3 处 `if mediaType == "video"`) | 点击/下载点击路由 | **严重**：原逻辑 `if (mediaType == "video") ... else ... (imagePreview)`，点击下载的 text 文件会误入 `imagePreview`。需重写为 `when` 分支，并在 text 分支下显式使用 `Intent` 启动 `TextReaderActivity`。 |
+| `DownloadsScreen.kt` (3 处) | 下载列表 | **严重**：1. 点击事件原逻辑若非 video 则默认进入 image 列表预览（会导致崩溃）；需改为 `when` 并在 text 分支调用本地文本阅读器。 2. 缩略图区域原逻辑仅在 `"image"` 时加载，否则直接显示视频胶卷/播放图标；需为 text 增加文档图标。 3. 类型标签原先 `if video "视频" else "图片"`；需为 text 渲染 "小说" 标签。 |
+| `DownloadManager.kt` | URL 选择 | 当前 `if video then streamUrl else imageUrl`。由于我们扩展了 `MediaOriginal` 对 `TextExtensions` 的支持，此处的 `imageUrl` (即 `/api/v1/media/original?path=...`) 可以正确作为书籍的下载链接，但建议增加注释说明避免后续误解。 |
+| `GridContainers.kt` | 瀑布流 | 仅影响 image，text 不参与，无需改 |
+
+#### 📖 离线阅读与解析架构设计
+由于章节切分和 EPUB/TXT 解析逻辑（`bookparser`）位于 Go 服务端，当客户端离线时无法直接发起 HTTP 请求获取章节数据。为此，首期设计支持以下离线缓存方案（方案 A）：
+1. **元数据伴随下载**：在 `DownloadWorker` 下载书籍（txt/epub）时，额外拉取服务端的 `/api/v1/books/info?path=...`，将其序列化并保存为本地的同名 `.json` 文件（例如 `book.txt.json`）。
+2. **正文离线提取**：
+   - 对于 **txt**，客户端 `TextReaderViewModel` 探测到 `is_local == true` 时，从本地 JSON 读取 `BookChapter` 偏移列表。当跳转章节时，直接使用 `RandomAccessFile`（或 `BufferedInputStream`）配合 `charStart`/`charEnd` 直接截取并解码本地的文本片段。
+   - 对于 **epub**，使用 Java/Kotlin 内置的 `java.util.zip.ZipFile`，在本地读取 OPF/NCX 对应的 XHTML 路径，直接解析本地的 HTML 段落，无需连接服务器。
+
 ### 导航
 
-独立 Activity，不走 NavHost。`Intent(this, TextReaderActivity::class.java)` + Extra，与 `VideoPlayerActivity` 一致。
+独立 Activity，不走 NavHost。`Intent(this, TextReaderActivity::class.java)` + Extra，与 `VideoPlayerActivity` 一致。启动时需携带 `path` 与 `is_local` 标志，以便在离线和在线状态间无缝切换。
 
 ### Hilt
 
@@ -352,8 +451,8 @@ suspend fun getBookChapter(path: String, index: Int): NetworkResult<String>
 ### `api.js` 扩展
 
 ```js
-getBookInfo(path)          // GET /api/v1/media/text/info
-getBookChapter(path, idx)  // GET /api/v1/media/text/chapter
+getBookInfo(path)          // GET /api/v1/books/info
+getBookChapter(path, idx)  // GET /api/v1/books/chapter
 ```
 
 ### `browserView.js` 扩展
@@ -367,7 +466,7 @@ DOM 结构（沿用 `dom.js` 模板风格）：header（返回 / 标题）+ 正�
 行为：
 - 进入时 `getBookInfo` → 渲染 TOC
 - 读 `localStorage['book_progress:' + path]` → 跳到上次章节
-- `getBookChapter` → `element.textContent = chapterText`（避免 XSS）
+- `getBookChapter` → 返回 `{title, content}` JSON → `element.textContent = content`（避免 XSS）
 - 翻页 / 选章节 → 存进度（章节索引 + 滚动像素）
 - mobi/azw3 → 占位页
 
@@ -419,9 +518,18 @@ DOM 结构（沿用 `dom.js` 模板风格）：header（返回 / 标题）+ 正�
 - 文件不存在 → `ErrIoFailure`
 
 **`handler/books_test.go`**：
-- `GET /text/info`：合法 / 越界 403 / 不存在 500 / mobi 200+unsupported
-- `GET /text/chapter`：合法 / 越界 index 400 / 路径越界 403
+- `GET /books/info`：合法 / 越界 403 / 不存在 500 / mobi 200+unsupported
+- `GET /books/chapter`：合法 JSON 响应（含 title + content） / 越界 index 400 / 路径越界 403
 - token 鉴权 401
+
+**`scanner_test.go` 扩展**：
+- text 文件被正确扫描并归入 `cache["text"]`
+- `cacheByDir` 包含 text 文件
+- `GetCachedByType(ctx, roots, "text")` 返回正确结果
+
+**`handler.go` 扩展测试**：
+- `isMediaExt` 识别 `.txt` / `.epub` / `.mobi` / `.azw3`
+- `mediaExtensions` 包含 text 扩展名
 
 ### Android 单元测试（Kotlin）
 
@@ -473,3 +581,4 @@ C 阶段（独立 spec）：
 - **txt 编码误判**：GB18030 兜底已覆盖 99%+，剩余极端场景留作 C 阶段加"手动切换编码"兜底。
 - **epub 格式多样性**：EPUB 2/3 + 各种 metadata 变体，靠测试集覆盖典型场景，损坏文件走 `ErrInvalidEpub`。
 - **章节正则误命中**：`common` profile 经过实战筛选，但稀有章节样式仍可能漏检；C 阶段 profile 切换可解决。
+- **mediaType 散布范围广**：Android 客户端 20+ 处硬编码 `"video"` / `"image"` 二分支判断（无 `else`），遗漏任何一处会导致文本文件静默不可见或崩溃。需编写集成测试验证 Browse 页面可正确显示和点击 `mediaType == "text"` 的文件。
