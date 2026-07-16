@@ -1,11 +1,13 @@
 package com.juziss.localmediahub.ui.component.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
@@ -57,6 +61,7 @@ import com.juziss.localmediahub.util.formatTime
 import com.juziss.localmediahub.viewmodel.CollectionSummary
 import com.juziss.localmediahub.viewmodel.HomeUiState
 import com.juziss.localmediahub.viewmodel.LibrarySummary
+import com.juziss.localmediahub.viewmodel.RecentBookEntry
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -756,6 +761,113 @@ fun DownloadedPreviewCard(
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }
+        }
+    }
+}
+
+/**
+ * "我的书架" card — horizontally scrolling list of recently opened books.
+ *
+ * Hidden entirely when [books] is empty (returns without emitting any
+ * composable). Each tile shows the book's filename, format icon, and the
+ * chapter index the reader will resume from. Tapping a tile delegates to
+ * [onOpen], which the Home screen wires to TextReaderActivity.
+ */
+@Composable
+fun BookshelfCard(
+    books: List<RecentBookEntry>,
+    onOpen: (RecentBookEntry) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (books.isEmpty()) return
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_text_file),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.size(20.dp),
+                )
+                Text(
+                    text = stringResource(R.string.home_section_bookshelf),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(books, key = { it.path }) { entry ->
+                    BookshelfTile(entry = entry, onClick = { onOpen(entry) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookshelfTile(
+    entry: RecentBookEntry,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+        ),
+        modifier = Modifier.width(112.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_text_file),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(40.dp),
+            )
+            Text(
+                text = entry.title,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Text(
+                text = stringResource(R.string.home_bookshelf_chapter, entry.chapterIndex + 1),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+            Text(
+                text = entry.format.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

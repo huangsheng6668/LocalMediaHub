@@ -10,6 +10,8 @@ import com.juziss.localmediahub.ui.component.home.FavoritePreviewCard
 import com.juziss.localmediahub.ui.component.home.DownloadedPreviewCard
 import com.juziss.localmediahub.ui.component.home.StatusNoticeCard
 import com.juziss.localmediahub.ui.component.home.SectionHeader
+import com.juziss.localmediahub.ui.component.home.BookshelfCard
+import com.juziss.localmediahub.TextReaderActivity
  
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -100,6 +102,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val recentBooks by viewModel.recentBooks.collectAsState()
     val context = LocalContext.current
  
     Scaffold(
@@ -263,6 +266,25 @@ fun HomeScreen(
                             )
                         }
                     }
+                }
+            }
+
+            if (recentBooks.isNotEmpty()) {
+                item {
+                    SectionHeader(
+                        title = stringResource(R.string.home_section_bookshelf),
+                        subtitle = stringResource(R.string.home_section_bookshelf_desc),
+                    )
+                }
+                item {
+                    BookshelfCard(
+                        books = recentBooks,
+                        onOpen = { entry ->
+                            context.startActivity(
+                                TextReaderActivity.newIntent(context, entry.path)
+                            )
+                        },
+                    )
                 }
             }
  
