@@ -34,6 +34,18 @@ data class PlaybackProgressEntry(
     val updatedAt: Long,
 )
 
+/**
+ * 客户端保存的电子书阅读进度。path 为书在服务端的 relativePath;
+ * chapterIndex 是当前章节索引;scrollOffsetPx 是章节内滚动像素偏移;
+ * lastReadAt 是 epoch 毫秒,用于排序书架展示。
+ */
+data class BookProgress(
+    val path: String,
+    val chapterIndex: Int,
+    val scrollOffsetPx: Int,
+    val lastReadAt: Long,
+)
+
 internal fun deriveLocationTitle(path: String, fallback: String = ""): String {
     if (fallback.isNotBlank()) return fallback
 
@@ -117,6 +129,9 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
     private val recentMediaKey = stringPreferencesKey("recent_media")
     private val lastBrowseLocationKey = stringPreferencesKey("last_browse_location")
     private val playbackProgressKey = stringPreferencesKey("playback_progress")
+    private val bookProgressKey = stringPreferencesKey("book_progress")
+
+    private val typeMapBookProgress = object : TypeToken<MutableMap<String, BookProgress>>() {}.type
 
     val recentMedia: Flow<List<RecentMediaEntry>> = context.recentActivityDataStore.data.map { preferences ->
         decodeRecentMedia(preferences[recentMediaKey])
@@ -129,6 +144,14 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
     val playbackProgress: Flow<List<PlaybackProgressEntry>> = context.recentActivityDataStore.data.map { preferences ->
         decodePlaybackProgress(preferences[playbackProgressKey])
     }
+
+    val bookProgressFlow: Flow<Map<String, BookProgress>> = context.recentActivityDataStore.data.map { preferences ->
+        decodeBookProgress(preferences[bookProgressKey])
+    }
+
+    /** 以 lastReadAt 倒序返回全部阅读进度(供 HomeViewModel 书架使用)。 */
+    fun getAllBookProgressFlow(): Flow<List<BookProgress>> = bookProgressFlow
+        .map { map -> map.values.sortedByDescending { it.lastReadAt } }
 
     suspend fun addRecentMedia(
         file: MediaFile,
@@ -222,6 +245,43 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
         return findPlaybackProgress(current, file, isSystemBrowse)
     }
 
+    /** 查询单本书的阅读进度。无记录返回 null。 */
+    suspend fun getBookProgress(path: String): BookProgress? {
+        val current = context.recentActivityDataStore.data.map { preferences ->
+            decodeBookProgress(preferences[bookProgressKey])
+        }.firstOrNull() ?: emptyMap()
+        return current[path]
+    }
+
+    /** 保存或覆盖一本书的阅读进度(以 path 为 key)。 */
+    suspend fun saveBookProgress(progress: BookProgress) {
+        context.recentActivityDataStore.edit { preferences ->
+            val current = decodeBookProgress(preferences[bookProgressKey]).toMutableMap()
+            current[progress.path] = progress
+            preferences[bookProgressKey] = if (current.isEmpty()) "" else gson.toJson(current)
+        }
+    }
+
+    /** 删除单本书的阅读进度。不存在时为 no-op。 */
+    suspend fun clearBookProgress(path: String) {
+        context.recentActivityDataStore.edit { preferences ->
+            val current = decodeBookProgress(preferences[bookProgressKey]).toMutableMap()
+            if (current.remove(path) == null) return@edit
+            preferences[bookProgressKey] = if (current.isEmpty()) "" else gson.toJson(current)
+        }
+    }
+
+    /** 清空全部阅读进度。用于书架"清空"操作及测试隔离。 */
+    suspend fun clearAllBookProgress() {
+        context.recentActivityDataStore.edit { preferences ->
+            preferences[bookProgressKey] = ""
+        }
+    }
+
+    /** 以 lastReadAt 倒序返回全部阅读进度。 */
+    suspend fun getAllBookProgress(): List<BookProgress> =
+        getAllBookProgressFlow().firstOrNull() ?: emptyList()
+
     private fun decodeRecentMedia(json: String?): List<RecentMediaEntry> {
         if (json.isNullOrBlank()) return emptyList()
         return try {
@@ -248,6 +308,15 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
             gson.fromJson<List<PlaybackProgressEntry>>(json, type) ?: emptyList()
         } catch (_: Exception) {
             emptyList()
+        }
+    }
+
+    private fun decodeBookProgress(json: String?): Map<String, BookProgress> {
+        if (json.isNullOrBlank()) return emptyMap()
+        return try {
+            gson.fromJson<Map<String, BookProgress>>(json, typeMapBookProgress) ?: emptyMap()
+        } catch (_: Exception) {
+            emptyMap()
         }
     }
 }
