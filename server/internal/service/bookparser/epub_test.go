@@ -242,3 +242,47 @@ func TestEpubEmptyChapterFallback(t *testing.T) {
 	assert.Equal(t, "[本章节为空]", blocks[0].Value, "empty-body chapter must render the placeholder, not blank")
 	assert.Equal(t, "text", blocks[0].Type)
 }
+
+func TestExtractBlocksImageSrc(t *testing.T) {
+	xhtml := []byte(`<html><body>
+        <p>intro text</p>
+        <img src="images/cover.jpg" alt="cover"/>
+        <p>outro text</p>
+    </body></html>`)
+	blocks := extractBlocks(xhtml)
+	require.Len(t, blocks, 3)
+	assert.Equal(t, "text", blocks[0].Type)
+	assert.Contains(t, blocks[0].Value, "intro text")
+	assert.Equal(t, "image", blocks[1].Type)
+	assert.Equal(t, "images/cover.jpg", blocks[1].Src)
+	assert.Equal(t, "text", blocks[2].Type)
+	assert.Contains(t, blocks[2].Value, "outro text")
+}
+
+func TestExtractBlocksDataUriPreserved(t *testing.T) {
+	dataURI := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+	xhtml := []byte(`<html><body>
+        <img src="` + dataURI + `"/>
+    </body></html>`)
+	blocks := extractBlocks(xhtml)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, "image", blocks[0].Type)
+	assert.Equal(t, dataURI, blocks[0].Src)
+}
+
+func TestExtractBlocksImageOnlyChapter(t *testing.T) {
+	xhtml := []byte(`<html><body>
+        <img src="page1.png"/>
+        <img src="page2.png"/>
+    </body></html>`)
+	blocks := extractBlocks(xhtml)
+	require.Len(t, blocks, 2)
+	assert.Equal(t, "image", blocks[0].Type)
+	assert.Equal(t, "page1.png", blocks[0].Src)
+	assert.Equal(t, "image", blocks[1].Type)
+	assert.Equal(t, "page2.png", blocks[1].Src)
+	// Verify no text block was synthesized as a placeholder
+	for _, b := range blocks {
+		assert.NotEqual(t, "text", b.Type)
+	}
+}
