@@ -45,18 +45,23 @@ func parseTxt(path string, info os.FileInfo) (*Book, error) {
 }
 
 func decodeTxt(raw []byte) (string, string) {
+	var decoded string
+	var charset string
 	if bytes.HasPrefix(raw, []byte{0xEF, 0xBB, 0xBF}) {
-		return string(raw[3:]), "UTF-8"
+		decoded, charset = string(raw[3:]), "UTF-8"
+	} else if utf8.Valid(raw) {
+		decoded, charset = string(raw), "UTF-8"
+	} else {
+		dec := simplifiedchinese.GB18030.NewDecoder()
+		gb, _, err := transform.String(dec, string(raw))
+		if err == nil && utf8.ValidString(gb) {
+			decoded, charset = gb, "GB18030"
+		} else {
+			decoded, charset = string(raw), "UTF-8"
+		}
 	}
-	if utf8.Valid(raw) {
-		return string(raw), "UTF-8"
-	}
-	dec := simplifiedchinese.GB18030.NewDecoder()
-	gb, _, err := transform.String(dec, string(raw))
-	if err == nil && utf8.ValidString(gb) {
-		return gb, "GB18030"
-	}
-	return string(raw), "UTF-8"
+	decoded = strings.ReplaceAll(decoded, "\r\n", "\n")
+	return decoded, charset
 }
 
 type chapterMark struct {

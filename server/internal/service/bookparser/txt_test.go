@@ -3,6 +3,7 @@ package bookparser
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -69,6 +70,37 @@ func TestTxtChapterOffsetsRoundTrip(t *testing.T) {
 	c1, err := b.ChapterText(1)
 	require.NoError(t, err)
 	assert.Contains(t, c1, "第二章正文")
+}
+
+func TestTxtChapterOffsetsRoundTripCRLF(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "r_crlf.txt")
+	writeBytes(t, p, []byte("第一章 A\r\n第一章正文\r\n第二章 B\r\n第二章正文"))
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 2)
+	c0, err := b.ChapterText(0)
+	require.NoError(t, err)
+	assert.Contains(t, c0, "第一章正文")
+	assert.NotContains(t, c0, "第二章")
+	c1, err := b.ChapterText(1)
+	require.NoError(t, err)
+	assert.Contains(t, c1, "第二章正文")
+}
+
+func TestTxtChapterOffsetsRoundTripCRLF_Drift(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "drift.txt")
+	content := "第一章 A\r\nline1\r\nline2\r\nline3\r\nline4\r\nline5\r\nline6\r\nline7\r\nline8\r\nline9\r\nline10\r\n第二章 B\r\n第二章正文"
+	writeBytes(t, p, []byte(content))
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 2)
+	c1, err := b.ChapterText(1)
+	require.NoError(t, err)
+	
+	// Chapter 1 should start exactly with the chapter title "第二章 B", not with "lineX" from Chapter 0.
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(c1), "第二章 B"), "c1 should start with '第二章 B', but got: %q", c1)
 }
 
 func TestTxtTooLargeRejected(t *testing.T) {
