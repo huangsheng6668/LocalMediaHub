@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  * Hilt ViewModel backing [com.juziss.localmediahub.TextReaderActivity].
@@ -60,6 +59,12 @@ class TextReaderViewModel @Inject constructor(
 
     private val _bookmarks = MutableStateFlow<List<Bookmark>>(emptyList())
     val bookmarks: StateFlow<List<Bookmark>> = _bookmarks.asStateFlow()
+
+    // One-shot toast channel for bookmark add feedback. Non-null means a toast
+    // should be shown; the UI calls [consumeBookmarkToast] after presenting it.
+    // Success path stays silent (the bookmarks list simply refreshes).
+    private val _bookmarkToast = MutableStateFlow<String?>(null)
+    val bookmarkToast: StateFlow<String?> = _bookmarkToast.asStateFlow()
 
     init {
         // Bootstrap reader settings from DataStore so the UI starts with the
@@ -197,19 +202,19 @@ class TextReaderViewModel @Inject constructor(
     }
 
     /**
-     * Adds a bookmark for the current chapter + given paragraph. Returns
-     * false if the same (bookPath, chapterIndex, paragraphIndex) exists, or
-     * if no book is loaded.
+     * Adds a bookmark for the current chapter + given paragraph. On duplicate
+     * (same bookPath, chapterIndex, paragraphIndex already exists) the store
+     * returns false and [bookmarkToast] is populated for the UI to display
+     * "已存在书签". No-op if no book is loaded.
      *
-     * The store call is synchronous ([runBlocking]) so the returned Boolean
-     * accurately reflects the dedup outcome — UI snackbar / toast branches on
-     * it. DataStore writes are fast (single file edit) and this runs on a
-     * user-initiated action (long-press), not a hot path, so the brief block
-     * is acceptable. The [bookmarks] flow refreshes via [loadBookmarksFor]'s
-     * ongoing collection without any extra refresh call here.
+     * The store call runs in [viewModelScope] (non-blocking) — the dedup
+     * outcome is surfaced via [bookmarkToast] for the UI to display ("已存在
+     * 书签" on duplicate). The success path stays silent because the
+     * [bookmarks] flow refreshes via [loadBookmarksFor]'s ongoing collection
+     * without any extra refresh call here.
      */
-    fun addBookmarkFromParagraph(paragraphIndex: Int, preview: String): Boolean {
-        val b = _book.value ?: return false
+    fun addBookmarkFromParagraph(paragraphIndex: Int, preview: String) {
+        val b = _book.value ?: return
         val bm = Bookmark(
             bookPath = b.path,
             chapterIndex = _currentIndex.value,
@@ -217,7 +222,18 @@ class TextReaderViewModel @Inject constructor(
             preview = preview.take(30),
             createdAt = System.currentTimeMillis(),
         )
-        return runBlocking { store.addBookmark(bm) }
+        viewModelScope.launch {
+            val added = store.addBookmark(bm)
+            if (!added) _bookmarkToast.value = "已存在书签"
+        }
+    }
+
+    /**
+     * Clears [bookmarkToast] once the UI has shown it. Idempotent — calling
+     * when the value is already null is a no-op.
+     */
+    fun consumeBookmarkToast() {
+        _bookmarkToast.value = null
     }
 
     /** Deletes a bookmark from DataStore. Flow collection refreshes [bookmarks]. */

@@ -18,6 +18,10 @@ const STORAGE_PREFIX = 'book_progress:';
 // clearing any previous render so re-navigating to a different book does not
 // leak DOM or event listeners from the previous one.
 export async function renderTextReader(container, path) {
+    // Invoke prior cleanup FIRST so listener/rAF leaks from a previous render
+    // (if any) are released before we wipe innerHTML below.
+    if (typeof container._cleanupReader === 'function') container._cleanupReader();
+
     if (!path) {
         container.innerHTML = '<div class="text-reader__error">缺少 path 参数</div>';
         return;
@@ -201,13 +205,14 @@ export async function renderTextReader(container, path) {
             scrollRafId = null;
         }
     });
-    document.addEventListener('visibilitychange', () => {
+    function onVisibilityChange() {
         if (document.hidden && isScrolling) {
             isScrolling = false;
             scrollBtn.textContent = '▶';
             if (scrollRafId !== null) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
         }
-    });
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     // 6. Render chapter text as <p> elements (replaces textContent-on-container).
     // Keeps XSS safety (each <p> set via textContent) and enables per-paragraph
@@ -285,7 +290,7 @@ export async function renderTextReader(container, path) {
                     del.addEventListener('click', (e) => {
                         e.stopPropagation();
                         readerPrefs.removeBookmark(bm);
-                        renderDrawer.refresh('bookmarks');
+                        drawer.refresh('bookmarks');
                     });
                     row.appendChild(title);
                     row.appendChild(del);
@@ -307,15 +312,16 @@ export async function renderTextReader(container, path) {
                 refresh(btn.dataset.tab);
             });
         });
-        renderDrawer.refresh = refresh;
         refresh('toc');
+        return { refresh };
     }
 
     // 8. Re-render bookmarks tab when prefs change.
+    const drawer = renderDrawerTabs();
     const unsubBms = readerPrefs.subscribe((e) => {
-        if (e.detail?.type === 'bookmarks' && renderDrawer.refresh) {
+        if (e.detail?.type === 'bookmarks') {
             const activeTab = els.drawer.querySelector('.text-reader__tab--active')?.dataset.tab;
-            renderDrawer.refresh(activeTab || 'toc');
+            drawer.refresh(activeTab || 'toc');
         }
     });
 
@@ -324,10 +330,10 @@ export async function renderTextReader(container, path) {
     container._cleanupReader = () => {
         unsubPrefs();
         unsubBms();
+        document.removeEventListener('visibilitychange', onVisibilityChange);
         if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
     };
 
-    renderDrawerTabs();
     await loadChapter(startIdx);
 
     // loadChapter: fetch one chapter by zero-based index and update the view.

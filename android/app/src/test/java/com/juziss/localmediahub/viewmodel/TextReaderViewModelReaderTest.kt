@@ -124,14 +124,15 @@ class TextReaderViewModelReaderTest {
         dispatcher.scheduler.advanceUntilIdle()
         // _book now populated; bookmarks flow is per-path, must be reloaded
         vm.loadBookmarksFor("/b.txt")
-        val ok = vm.addBookmarkFromParagraph(0, "preview")
-        assertTrue(ok)
+        vm.addBookmarkFromParagraph(0, "preview")
         dispatcher.scheduler.advanceUntilIdle()
         coVerify {
             store.addBookmark(match {
                 it.bookPath == "/b.txt" && it.paragraphIndex == 0 && it.preview == "preview"
             })
         }
+        // Success path stays silent — no toast emitted.
+        assertEquals(null, vm.bookmarkToast.value)
     }
 
     @Test
@@ -148,7 +149,14 @@ class TextReaderViewModelReaderTest {
         vm.loadBook("/b.txt")
         dispatcher.scheduler.advanceUntilIdle()
         vm.loadBookmarksFor("/b.txt")
-        val ok = vm.addBookmarkFromParagraph(0, "p")
-        assertFalse(ok)
+        vm.addBookmarkFromParagraph(0, "p")
+        // Duplicate detection now runs in viewModelScope; advance the
+        // scheduler so the launched coroutine has a chance to populate
+        // bookmarkToast before the assertion.
+        dispatcher.scheduler.advanceUntilIdle()
+        assertEquals("已存在书签", vm.bookmarkToast.value)
+        // Consume clears the one-shot toast.
+        vm.consumeBookmarkToast()
+        assertEquals(null, vm.bookmarkToast.value)
     }
 }

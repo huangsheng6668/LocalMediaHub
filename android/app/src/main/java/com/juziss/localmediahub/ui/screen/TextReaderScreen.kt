@@ -94,6 +94,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val settings by viewModel.readerSettings.collectAsState()
     val isAutoScrolling by viewModel.isAutoScrolling.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
+    val bookmarkToast by viewModel.bookmarkToast.collectAsState()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -105,6 +106,15 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     // Reload bookmarks whenever the open book changes.
     LaunchedEffect(book?.path) {
         book?.path?.let { viewModel.loadBookmarksFor(it) }
+    }
+
+    // Surface bookmark-add feedback (e.g. "已存在书签" on duplicate) as a
+    // Toast, then clear the one-shot state so recomposition doesn't re-fire.
+    LaunchedEffect(bookmarkToast) {
+        bookmarkToast?.let {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_SHORT).show()
+            viewModel.consumeBookmarkToast()
+        }
     }
 
     // Auto-scroll loop — runs in the UI layer so LazyListState stays here.
