@@ -15,13 +15,13 @@ import (
 )
 
 var commonRules = []*regexp.Regexp{
-	regexp.MustCompile(`^第[一二三四五六七八九十百千零0-9０-９]+[章节回卷集部篇]($|[\s\d._\-—·　：:～~])`),
+	regexp.MustCompile(`^第[一二三四五六七八九十百千零0-9０-９]+[章节回卷集部篇]($|[\s\d._\-—·　：:～~、，,;；])`),
 	regexp.MustCompile(`^Chapter\s+\d+`),
-	regexp.MustCompile(`^楔子($|[\s　：:～~])`),
-	regexp.MustCompile(`^序章($|[\s　：:～~])`),
-	regexp.MustCompile(`^尾声($|[\s　：:～~])`),
-	regexp.MustCompile(`^前言($|[\s　：:～~])`),
-	regexp.MustCompile(`^后记($|[\s　：:～~])`),
+	regexp.MustCompile(`^楔子($|[\s　：:～~、，,;；])`),
+	regexp.MustCompile(`^序章($|[\s　：:～~、，,;；])`),
+	regexp.MustCompile(`^尾声($|[\s　：:～~、，,;；])`),
+	regexp.MustCompile(`^前言($|[\s　：:～~、，,;；])`),
+	regexp.MustCompile(`^后记($|[\s　：:～~、，,;；])`),
 }
 
 func parseTxt(path string, info os.FileInfo) (*Book, error) {

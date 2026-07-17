@@ -106,18 +106,19 @@ func TestTxtChapterOffsetsRoundTripCRLF_Drift(t *testing.T) {
 func TestTxtChapterRegexComprehensive(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "comprehensive.txt")
-	content := "楔子～开启故事\n第一章　龙回故乡\n第１章：走马上任\n第229章-尾声\n后记"
+	content := "楔子～开启故事\n第一章　龙回故乡\n第１章：走马上任\n第229章-尾声\n第０１章、第一次性交示范课\n后记"
 	writeBytes(t, p, []byte(content))
 	b, err := Parse(p)
 	require.NoError(t, err)
 	
-	// Should match: 楔子, 第一章, 第１章, 第229章, 后记
-	require.Len(t, b.Chapters, 5)
+	// Should match: 楔子, 第一章, 第１章, 第229章, 第０１章, 后记
+	require.Len(t, b.Chapters, 6)
 	assert.Equal(t, "楔子～开启故事", b.Chapters[0].Title)
 	assert.Equal(t, "第一章　龙回故乡", b.Chapters[1].Title)
 	assert.Equal(t, "第１章：走马上任", b.Chapters[2].Title)
 	assert.Equal(t, "第229章-尾声", b.Chapters[3].Title)
-	assert.Equal(t, "后记", b.Chapters[4].Title)
+	assert.Equal(t, "第０１章、第一次性交示范课", b.Chapters[4].Title)
+	assert.Equal(t, "后记", b.Chapters[5].Title)
 }
 
 func TestTxtTooLargeRejected(t *testing.T) {
