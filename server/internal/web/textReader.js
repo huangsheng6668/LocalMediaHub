@@ -8,6 +8,7 @@
 // this module — browserView intercepts them and shows a "暂不支持" toast.
 import { getBookInfo, getBookChapter } from './api.js';
 import { showToast } from './toast.js';
+import * as readerPrefs from './readerPrefs.js';
 
 const STORAGE_PREFIX = 'book_progress:';
 
@@ -62,6 +63,12 @@ export async function renderTextReader(container, path) {
         ? clamp(progress.chapterIndex || 0, 0, Math.max(0, chapterCount - 1))
         : 0;
 
+    // closeDrawer: shared helper used by TOC and bookmark tab handlers.
+    function closeDrawer() {
+        els.drawer.classList.add('text-reader__drawer--hidden');
+        els.drawer.setAttribute('aria-hidden', 'true');
+    }
+
     els.back.addEventListener('click', () => {
         // Prefer browser history; fall back to dashboard so the user is never
         // stranded if they deep-linked #/read directly.
@@ -77,11 +84,250 @@ export async function renderTextReader(container, path) {
     els.toc.addEventListener('click', () => toggleDrawer(book, els.drawer));
     els.drawer.addEventListener('chapter-select', (e) => {
         loadChapter(e.detail);
-        // Auto-close drawer on selection for small-screen usability.
-        els.drawer.classList.add('text-reader__drawer--hidden');
-        els.drawer.setAttribute('aria-hidden', 'true');
+        closeDrawer();
     });
 
+    // ===== Reader settings integration (Task 8) =====
+
+    // 1. Build settings dialog (HTML5 <dialog>), append into container.
+    const dialog = document.createElement('dialog');
+    dialog.id = 'reader-settings-dialog';
+    dialog.innerHTML = `
+        <form method="dialog">
+            <h3>阅读设置</h3>
+            <fieldset>
+                <legend>字体大小</legend>
+                ${['SMALL','MEDIUM','LARGE','XLARGE'].map(v =>
+                    `<label><input type="radio" name="fontSize" value="${v}"> ${ {SMALL:'小',MEDIUM:'中',LARGE:'大',XLARGE:'超大'}[v] }</label>`
+                ).join('')}
+            </fieldset>
+            <fieldset>
+                <legend>行距</legend>
+                ${['COMPACT','STANDARD','LOOSE'].map(v =>
+                    `<label><input type="radio" name="lineHeight" value="${v}"> ${ {COMPACT:'紧凑',STANDARD:'标准',LOOSE:'宽松'}[v] }</label>`
+                ).join('')}
+            </fieldset>
+            <fieldset>
+                <legend>主题</legend>
+                ${['DAY','NIGHT','EYE_CARE'].map(v =>
+                    `<label><input type="radio" name="theme" value="${v}"> ${ {DAY:'日间',NIGHT:'夜间',EYE_CARE:'护眼'}[v] }</label>`
+                ).join('')}
+            </fieldset>
+            <fieldset>
+                <legend>自动滚动速度</legend>
+                <input type="range" name="autoScrollSpeed" min="1" max="10" value="5">
+                <span data-bind="speedLabel">5</span>
+            </fieldset>
+            <menu>
+                <button type="submit">关闭</button>
+            </menu>
+        </form>
+    `;
+    container.appendChild(dialog);
+
+    // 2. Add Aa + play/pause buttons to header.
+    const settingsBtn = document.createElement('button');
+    settingsBtn.className = 'text-reader__icon-btn';
+    settingsBtn.type = 'button';
+    settingsBtn.ariaLabel = '阅读设置';
+    settingsBtn.textContent = 'Aa';
+    settingsBtn.addEventListener('click', () => dialog.showModal());
+
+    const scrollBtn = document.createElement('button');
+    scrollBtn.className = 'text-reader__icon-btn';
+    scrollBtn.type = 'button';
+    scrollBtn.ariaLabel = '自动滚动';
+    scrollBtn.textContent = '▶';
+
+    const headerRight = document.createElement('div');
+    headerRight.className = 'text-reader__header-actions';
+    headerRight.appendChild(settingsBtn);
+    headerRight.appendChild(scrollBtn);
+    els.header.appendChild(headerRight);
+
+    // 3. Apply current settings (CSS vars + dialog controls).
+    function applySettingsToUI() {
+        const s = readerPrefs.getSettings();
+        const root = document.documentElement;
+        const theme = readerPrefs.THEME_PRESETS[s.theme];
+        root.style.setProperty('--reader-bg', theme.bg);
+        root.style.setProperty('--reader-fg', theme.fg);
+        root.style.setProperty('--reader-font-size', readerPrefs.FONT_SIZES[s.fontSize] + 'px');
+        root.style.setProperty('--reader-line-height', readerPrefs.LINE_HEIGHTS[s.lineHeight]);
+        // Reflect into dialog controls
+        dialog.querySelector(`input[name="fontSize"][value="${s.fontSize}"]`)?.checked = true;
+        dialog.querySelector(`input[name="lineHeight"][value="${s.lineHeight}"]`)?.checked = true;
+        dialog.querySelector(`input[name="theme"][value="${s.theme}"]`)?.checked = true;
+        dialog.querySelector('input[name="autoScrollSpeed"]').value = s.autoScrollSpeed;
+        dialog.querySelector('[data-bind="speedLabel"]').textContent = s.autoScrollSpeed;
+    }
+    applySettingsToUI();
+    const unsubPrefs = readerPrefs.subscribe(() => applySettingsToUI());
+
+    // 4. Settings change handlers — let the dialog's `change` event bubble.
+    dialog.addEventListener('change', (e) => {
+        const t = e.target;
+        if (t.name === 'autoScrollSpeed') {
+            readerPrefs.saveSettings({ autoScrollSpeed: parseInt(t.value, 10) });
+        } else if (t.name) {
+            readerPrefs.saveSettings({ [t.name]: t.value });
+        }
+    });
+
+    // 5. Auto-scroll via rAF + float truncation fix.
+    let isScrolling = false;
+    let currentScrollTop = 0;
+    let scrollRafId = null;
+    function scrollLoop() {
+        if (!isScrolling) return;
+        const speed = readerPrefs.getSettings().autoScrollSpeed;
+        const pxPerFrame = speed * 0.5;
+        currentScrollTop += pxPerFrame;
+        els.content.scrollTop = currentScrollTop;
+        // Re-sync if browser clamped (e.g. reached bottom).
+        if (Math.abs(els.content.scrollTop - currentScrollTop) > 1) {
+            currentScrollTop = els.content.scrollTop;
+        }
+        scrollRafId = requestAnimationFrame(scrollLoop);
+    }
+    scrollBtn.addEventListener('click', () => {
+        isScrolling = !isScrolling;
+        scrollBtn.textContent = isScrolling ? '⏸' : '▶';
+        if (isScrolling) {
+            currentScrollTop = els.content.scrollTop;
+            scrollRafId = requestAnimationFrame(scrollLoop);
+        } else if (scrollRafId !== null) {
+            cancelAnimationFrame(scrollRafId);
+            scrollRafId = null;
+        }
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && isScrolling) {
+            isScrolling = false;
+            scrollBtn.textContent = '▶';
+            if (scrollRafId !== null) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
+        }
+    });
+
+    // 6. Render chapter text as <p> elements (replaces textContent-on-container).
+    // Keeps XSS safety (each <p> set via textContent) and enables per-paragraph
+    // hover bookmark button.
+    function renderParagraphs(content) {
+        const paras = (content || '').split('\n\n').filter(p => p.trim());
+        els.content.innerHTML = '';
+        paras.forEach((text, idx) => {
+            const p = document.createElement('p');
+            p.textContent = text;  // XSS safe
+            p.dataset.paraIndex = idx;
+            // Hover bookmark button
+            const btn = document.createElement('button');
+            btn.className = 'text-reader__para-bookmark';
+            btn.type = 'button';
+            btn.textContent = '+';
+            btn.title = '添加书签';
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const ok = readerPrefs.addBookmark({
+                    bookPath: path,
+                    chapterIndex: currentIdx,
+                    paragraphIndex: idx,
+                    preview: text.slice(0, 30),
+                    createdAt: Date.now(),
+                });
+                showToast(ok ? '已添加书签' : '已存在书签', ok ? 'success' : 'info');
+            });
+            p.appendChild(btn);
+            els.content.appendChild(p);
+        });
+    }
+
+    // 7. TOC Tab (目录 / 书签).
+    function renderDrawerTabs() {
+        const tabs = document.createElement('div');
+        tabs.className = 'text-reader__tabs';
+        tabs.innerHTML = `
+            <button class="text-reader__tab text-reader__tab--active" data-tab="toc">目录</button>
+            <button class="text-reader__tab" data-tab="bookmarks">书签 (<span data-bm-count>0</span>)</button>
+        `;
+        const panel = document.createElement('div');
+        panel.className = 'text-reader__tab-panel';
+        els.drawer.innerHTML = '';
+        els.drawer.appendChild(tabs);
+        els.drawer.appendChild(panel);
+        function refresh(tab) {
+            panel.innerHTML = '';
+            if (tab === 'toc') {
+                (book.chapters || []).forEach((ch, i) => {
+                    const btn = document.createElement('button');
+                    btn.className = 'text-reader__drawer-item';
+                    btn.textContent = ch.title || `第 ${i + 1} 章`;
+                    btn.addEventListener('click', () => {
+                        loadChapter(i);
+                        closeDrawer();
+                    });
+                    panel.appendChild(btn);
+                });
+            } else {
+                const bms = readerPrefs.getBookmarks(path);
+                tabs.querySelector('[data-bm-count]').textContent = bms.length;
+                if (bms.length === 0) {
+                    panel.innerHTML = '<div class="text-reader__empty">暂无书签，悬停段落 + 添加</div>';
+                    return;
+                }
+                bms.forEach(bm => {
+                    const row = document.createElement('div');
+                    row.className = 'text-reader__drawer-item';
+                    const title = document.createElement('span');
+                    title.textContent = `第 ${bm.chapterIndex + 1} 章 · ${bm.preview}`;
+                    const del = document.createElement('button');
+                    del.className = 'text-reader__drawer-del';
+                    del.textContent = '✕';
+                    del.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        readerPrefs.removeBookmark(bm);
+                        renderDrawer.refresh('bookmarks');
+                    });
+                    row.appendChild(title);
+                    row.appendChild(del);
+                    row.addEventListener('click', () => {
+                        loadChapter(bm.chapterIndex).then(() => {
+                            const target = els.content.querySelector(`p[data-para-index="${bm.paragraphIndex}"]`);
+                            target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            closeDrawer();
+                        });
+                    });
+                    panel.appendChild(row);
+                });
+            }
+        }
+        tabs.querySelectorAll('.text-reader__tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabs.querySelectorAll('.text-reader__tab').forEach(b => b.classList.remove('text-reader__tab--active'));
+                btn.classList.add('text-reader__tab--active');
+                refresh(btn.dataset.tab);
+            });
+        });
+        renderDrawer.refresh = refresh;
+        refresh('toc');
+    }
+
+    // 8. Re-render bookmarks tab when prefs change.
+    const unsubBms = readerPrefs.subscribe((e) => {
+        if (e.detail?.type === 'bookmarks' && renderDrawer.refresh) {
+            const activeTab = els.drawer.querySelector('.text-reader__tab--active')?.dataset.tab;
+            renderDrawer.refresh(activeTab || 'toc');
+        }
+    });
+
+    // Cleanup on re-render: container.innerHTML gets cleared next time, so we
+    // stash unsubscribers + rAF cancellation on the container node.
+    container._cleanupReader = () => {
+        unsubPrefs();
+        unsubBms();
+        if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
+    };
+
+    renderDrawerTabs();
     await loadChapter(startIdx);
 
     // loadChapter: fetch one chapter by zero-based index and update the view.
@@ -94,10 +340,10 @@ export async function renderTextReader(container, path) {
         currentIdx = idx;
         try {
             const chapter = await getBookChapter(path, idx);
-            // textContent (not innerHTML) prevents any XSS from chapter text —
-            // matches the security note in the brief and the Android client.
             els.title.textContent = `${chapter.title || ''} — ${book.title || ''}`;
-            els.content.textContent = chapter.content || '';
+            // Per-paragraph rendering preserves XSS safety and enables the
+            // hover-to-add bookmark button (each <p> uses textContent).
+            renderParagraphs(chapter.content || '');
             els.progress.textContent = `第 ${idx + 1} / ${chapterCount} 章`;
             els.content.scrollTop = 0;
             saveProgress(path, { chapterIndex: idx, scrollOffset: 0, lastReadAt: Date.now() });
@@ -137,6 +383,7 @@ function clamp(n, lo, hi) {
 function bindEls(root) {
     return {
         back: root.querySelector('.text-reader__back'),
+        header: root.querySelector('.text-reader__header'),
         title: root.querySelector('.text-reader__title'),
         content: root.querySelector('.text-reader__content'),
         prev: root.querySelector('.text-reader__prev'),
