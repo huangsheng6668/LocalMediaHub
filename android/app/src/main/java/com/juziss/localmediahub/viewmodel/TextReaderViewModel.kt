@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.juziss.localmediahub.data.Book
 import com.juziss.localmediahub.data.BookProgress
+import com.juziss.localmediahub.data.Bookmark
 import com.juziss.localmediahub.data.MediaRepository
+import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.network.NetworkResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -13,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * Hilt ViewModel backing [com.juziss.localmediahub.TextReaderActivity].
@@ -46,6 +49,25 @@ class TextReaderViewModel @Inject constructor(
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    // Task 5 (text-reader C-phase): reader settings, auto-scroll, bookmarks.
+
+    private val _readerSettings = MutableStateFlow(ReaderSettings())
+    val readerSettings: StateFlow<ReaderSettings> = _readerSettings.asStateFlow()
+
+    private val _isAutoScrolling = MutableStateFlow(false)
+    val isAutoScrolling: StateFlow<Boolean> = _isAutoScrolling.asStateFlow()
+
+    private val _bookmarks = MutableStateFlow<List<Bookmark>>(emptyList())
+    val bookmarks: StateFlow<List<Bookmark>> = _bookmarks.asStateFlow()
+
+    init {
+        // Bootstrap reader settings from DataStore so the UI starts with the
+        // persisted font/line-height/theme instead of the default on every cold start.
+        viewModelScope.launch {
+            store.readerSettingsFlow.collect { _readerSettings.value = it }
+        }
+    }
 
     /**
      * Loads book metadata for [path] and resumes at the last saved chapter
@@ -102,6 +124,9 @@ class TextReaderViewModel @Inject constructor(
                             lastReadAt = System.currentTimeMillis(),
                         )
                     )
+                    // Chapter change halts auto-scroll — continuing across the
+                    // boundary would jump-scroll the new chapter unexpectedly.
+                    _isAutoScrolling.value = false
                 }
                 is NetworkResult.Error -> _error.value = r.message ?: "加载失败"
                 NetworkResult.Loading -> Unit
@@ -119,5 +144,64 @@ class TextReaderViewModel @Inject constructor(
     /** Returns to the previous chapter when not already at the start. */
     fun prevChapter() {
         if (_currentIndex.value > 0) loadChapter(_currentIndex.value - 1)
+    }
+
+    // ---- Task 5: reader settings, auto-scroll, bookmarks ------------------
+
+    /** Updates and persists reader settings. */
+    fun updateSettings(settings: ReaderSettings) {
+        _readerSettings.value = settings
+        viewModelScope.launch { store.saveReaderSettings(settings) }
+    }
+
+    /** Toggles auto-scroll on/off. UI runs the scroll loop via LaunchedEffect. */
+    fun toggleAutoScroll() {
+        _isAutoScrolling.value = !_isAutoScrolling.value
+    }
+
+    /**
+     * Stops auto-scroll. Called by UI on manual scroll, chapter change, or
+     * any user-initiated navigation that would conflict with auto-scroll.
+     */
+    fun stopAutoScroll() {
+        _isAutoScrolling.value = false
+    }
+
+    /** Reloads the bookmark list for [path] from DataStore into [_bookmarks]. */
+    fun loadBookmarksFor(path: String) {
+        viewModelScope.launch {
+            store.getBookmarksFlow(path).collect { _bookmarks.value = it }
+        }
+    }
+
+    /**
+     * Adds a bookmark for the current chapter + given paragraph. Returns
+     * false if the same (bookPath, chapterIndex, paragraphIndex) exists, or
+     * if no book is loaded.
+     *
+     * The store call is synchronous ([runBlocking]) so the returned Boolean
+     * accurately reflects the dedup outcome — UI snackbar / toast branches on
+     * it. DataStore writes are fast (single file edit) and this runs on a
+     * user-initiated action (long-press), not a hot path, so the brief block
+     * is acceptable. The [bookmarks] flow refreshes via [loadBookmarksFor]'s
+     * ongoing collection without any extra refresh call here.
+     */
+    fun addBookmarkFromParagraph(paragraphIndex: Int, preview: String): Boolean {
+        val b = _book.value ?: return false
+        val bm = Bookmark(
+            bookPath = b.path,
+            chapterIndex = _currentIndex.value,
+            paragraphIndex = paragraphIndex,
+            preview = preview.take(30),
+            createdAt = System.currentTimeMillis(),
+        )
+        return runBlocking { store.addBookmark(bm) }
+    }
+
+    /** Deletes a bookmark from DataStore. Flow collection refreshes [bookmarks]. */
+    fun deleteBookmark(bm: Bookmark) {
+        viewModelScope.launch {
+            store.deleteBookmark(bm)
+        }
     }
 }
