@@ -46,8 +46,11 @@ import kotlinx.coroutines.launch
  * - Body is a [LazyColumn] of paragraphs obtained by splitting the current
  *   chapter text on `"\n\n"` and filtering blank paragraphs.
  *
- * Loading and error overlays are rendered centered on top of the body so the
- * previous chapter remains visible underneath (matches Read-it-later app UX).
+ * The error overlay replaces the chapter body; the previous chapter is not
+ * retained on error. The [LazyColumn] is only shown when there is no error
+ * and the chapter is not loading (see `if (error == null && !isLoading)`),
+ * so during loading or error states the body is hidden rather than kept
+ * visible underneath.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

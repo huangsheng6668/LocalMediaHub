@@ -13,6 +13,29 @@ import (
 	"golang.org/x/net/html"
 )
 
+// MaxEpubEntrySize caps the number of bytes we are willing to read from a
+// single decompressed entry inside an epub (container.xml, OPF, NCX/nav, or
+// manifest XHTML). The outer-file guard MaxEpubSize limits the compressed
+// archive size, but a small compressed file can still decompress into a
+// multi-GB entry (zip bomb). 16 MiB is well above any legitimate OPF/NCX/XHTML
+// payload while keeping worst-case memory bounded.
+const MaxEpubEntrySize = 16 * 1024 * 1024
+
+// readCapped reads at most max+1 bytes from r so the caller can detect
+// truncation. If the underlying reader yields more than max bytes it returns
+// an error wrapping ErrTooLarge instead of allocating the full body.
+func readCapped(r io.Reader, max int64) ([]byte, error) {
+	limited := io.LimitReader(r, max+1)
+	b, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > max {
+		return nil, fmt.Errorf("%w: epub entry exceeds %d bytes", ErrTooLarge, max)
+	}
+	return b, nil
+}
+
 func parseEpub(path string, info os.FileInfo) (*Book, error) {
 	if info.Size() > MaxEpubSize {
 		return nil, fmt.Errorf("%w: %d bytes", ErrTooLarge, info.Size())
@@ -88,13 +111,20 @@ func (b *Book) epubChapterText(idx int) (string, error) {
 		return "[本章节解析失败]", nil
 	}
 	defer rc.Close()
-	body, err := io.ReadAll(rc)
+	body, err := readCapped(rc, MaxEpubEntrySize)
 	if err != nil {
 		return "[本章节解析失败]", nil
 	}
 	text, imgOnly := extractXhtmlText(body)
 	if imgOnly {
 		return "[本章节为图片版，暂不支持]", nil
+	}
+	if text == "" {
+		// No text and no images — e.g. a chapter whose body is rendered purely
+		// via CSS background-image, or a malformed XHTML the walker couldn't
+		// extract anything from. Surface a placeholder instead of returning
+		// an empty string (which would render as a blank page in the reader).
+		return "[本章节解析失败]", nil
 	}
 	return text, nil
 }
@@ -105,7 +135,7 @@ func readContainerOpfPath(zr *zip.Reader) (string, error) {
 		return "", fmt.Errorf("%w: missing container.xml: %v", ErrInvalidEpub, err)
 	}
 	defer f.Close()
-	data, _ := io.ReadAll(f)
+	data, _ := readCapped(f, MaxEpubEntrySize)
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
 		t, err := dec.Token()
@@ -200,7 +230,7 @@ func readToc(zr *zip.Reader, ncxID string, manifest map[string]string, opfDir st
 	for _, href := range manifest {
 		full := joinZipPath(opfDir, href)
 		if f, err := zr.Open(full); err == nil {
-			data, _ := io.ReadAll(f)
+			data, _ := readCapped(f, MaxEpubEntrySize)
 			f.Close()
 			if toc := parseNavToc(data); len(toc) > 0 {
 				return toc, nil
@@ -211,7 +241,7 @@ func readToc(zr *zip.Reader, ncxID string, manifest map[string]string, opfDir st
 		if href, ok := manifest[ncxID]; ok {
 			full := joinZipPath(opfDir, href)
 			if f, err := zr.Open(full); err == nil {
-				data, _ := io.ReadAll(f)
+				data, _ := readCapped(f, MaxEpubEntrySize)
 				f.Close()
 				return parseNcx(data), nil
 			}
@@ -335,7 +365,7 @@ func readZipFile(files []*zip.File, name string) ([]byte, error) {
 				return nil, err
 			}
 			defer rc.Close()
-			return io.ReadAll(rc)
+			return readCapped(rc, MaxEpubEntrySize)
 		}
 	}
 	return nil, fmt.Errorf("not found: %s", name)
