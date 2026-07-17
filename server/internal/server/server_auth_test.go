@@ -23,6 +23,7 @@ func newAuthTestConfig(t *testing.T, token string) *config.Config {
 			Token: token,
 		},
 		Scan: config.ScanConfig{
+			Roots:           []string{t.TempDir()},
 			VideoExtensions: []string{".mp4"},
 			ImageExtensions: []string{".jpg"},
 		},
@@ -40,6 +41,7 @@ func TestServerRejectsAdminWithoutToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
+	defer srv.Stop()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/config", nil)
 	req.Header.Set(echo.HeaderAuthorization, "Bearer wrong-token")
@@ -57,6 +59,7 @@ func TestServerAcceptsAdminWithCorrectToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
+	defer srv.Stop()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/config", nil)
 	req.Header.Set(echo.HeaderAuthorization, "Bearer required-token")
@@ -74,6 +77,7 @@ func TestServerOpenModeWhenTokenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
+	defer srv.Stop()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/config", nil)
 	rec := httptest.NewRecorder()
