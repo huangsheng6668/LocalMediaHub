@@ -152,9 +152,10 @@ func TestServerStartAndStopGracefulShutdown(t *testing.T) {
 }
 
 func TestRegisterRoutesJsonCacheControl(t *testing.T) {
+	root := t.TempDir()
 	cfg := &config.Config{
 		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0},
-		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Scan:   config.ScanConfig{Roots: []string{root}, VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
 		Thumbnail: config.ThumbnailConfig{
 			CacheDir: filepath.Join(t.TempDir(), "thumb"), MaxSize: 64, Format: "jpeg",
 		},

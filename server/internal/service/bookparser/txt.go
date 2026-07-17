@@ -15,7 +15,7 @@ import (
 )
 
 var commonRules = []*regexp.Regexp{
-	regexp.MustCompile(`^第[一二三四五六七八九十百千零0-9０-９]+[章节回卷集部篇]($|[\s\d._\-—·　：:～~、，,;；])`),
+	regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[一二三四五六七八九十百千零0-9０-９]+\s*[章节回卷集部篇]`),
 	regexp.MustCompile(`^Chapter\s+\d+`),
 	regexp.MustCompile(`^楔子($|[\s　：:～~、，,;；])`),
 	regexp.MustCompile(`^序章($|[\s　：:～~、，,;；])`),

@@ -386,6 +386,9 @@ dependencies {
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("org.robolectric:robolectric:4.13")
+    // mockk added in text-reader C-phase Task 5 for TextReaderViewModel unit
+    // tests. 1.13.12 is the first mockk release with full Kotlin 2.x support.
+    testImplementation("io.mockk:mockk:1.13.12")
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

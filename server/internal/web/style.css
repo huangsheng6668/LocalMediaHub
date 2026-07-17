@@ -1676,12 +1676,175 @@ body {
     flex-grow: 1;
     overflow-y: auto;
     padding: 24px 28px;
-    color: var(--text-white);
-    font-size: 16px;
-    line-height: 1.85;
-    white-space: pre-wrap; /* preserve paragraph breaks from chapter text */
+    background-color: var(--reader-bg, var(--bg-card));
+    color: var(--reader-fg, var(--text-white));
+    font-size: var(--reader-font-size, 16px);
+    line-height: var(--reader-line-height, 1.85);
     word-break: break-word;
     outline: none;
+    position: relative;
+}
+
+.text-reader__content p {
+    margin-bottom: 1.2em;
+    text-indent: 2em;
+    position: relative;
+}
+
+.text-reader__content p:last-child {
+    margin-bottom: 0;
+}
+
+/* Hover-to-show bookmark button on each paragraph */
+.text-reader__para-bookmark {
+    position: absolute;
+    right: 4px;
+    top: 0;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    border-radius: var(--border-radius-sm);
+    opacity: 0;
+    transition: opacity 0.15s;
+    cursor: pointer;
+}
+
+.text-reader__content p:hover .text-reader__para-bookmark {
+    opacity: 1;
+}
+
+/* Header actions (Aa + play/pause) */
+.text-reader__header-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.text-reader__icon-btn {
+    min-width: 36px;
+    height: 36px;
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-card);
+    color: var(--text-white);
+    cursor: pointer;
+}
+
+.text-reader__icon-btn:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+/* TOC tabs */
+.text-reader__tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 8px;
+}
+
+.text-reader__tab {
+    flex: 1;
+    padding: 12px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-size: 13px;
+}
+
+.text-reader__tab--active {
+    color: var(--text-white);
+    border-bottom-color: var(--primary);
+}
+
+.text-reader__tab-panel {
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.text-reader__drawer-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--text-white);
+    cursor: pointer;
+    border-radius: var(--border-radius-sm);
+    font-size: 13px;
+}
+
+.text-reader__drawer-item:hover {
+    background-color: rgba(124, 58, 237, 0.15);
+}
+
+.text-reader__drawer-del {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+}
+
+.text-reader__drawer-del:hover {
+    color: var(--text-white);
+}
+
+.text-reader__empty {
+    padding: 16px;
+    color: var(--text-muted);
+    text-align: center;
+    font-size: 13px;
+}
+
+dialog#reader-settings-dialog {
+    background-color: var(--bg-card);
+    color: var(--text-white);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    padding: 24px;
+    max-width: 480px;
+}
+
+dialog#reader-settings-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+dialog#reader-settings-dialog h3 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+}
+
+dialog#reader-settings-dialog fieldset {
+    border: 1px solid var(--border-color);
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border-radius: var(--border-radius-sm);
+}
+
+dialog#reader-settings-dialog legend {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 0 4px;
+}
+
+dialog#reader-settings-dialog label {
+    display: inline-block;
+    margin-right: 12px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+dialog#reader-settings-dialog menu {
+    text-align: right;
 }
 
 .text-reader__footer {
