@@ -14,7 +14,9 @@ package service
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 
 	"golang.org/x/sync/singleflight"
@@ -72,4 +74,71 @@ func (s *BookService) GetBook(path string) (*bookparser.Book, error) {
 		return nil, err
 	}
 	return v.(*bookparser.Book), nil
+}
+
+// GetChapterBlocks returns the ordered content blocks for chapter idx of the
+// book at path. Image blocks' Src is rewritten to a
+// /api/v1/books/image?path=...&manifest=... URL that the client can fetch
+// through the authenticated book-image endpoint, unless the original Src is
+// empty, a data: URI, or an absolute http(s):// URL — these are passed through
+// unchanged. If no manifest entry matches the Src, the Src is set to "" so
+// clients can render a placeholder (e.g. "[本图片无法显示]").
+//
+// The returned slice is a fresh copy; callers may mutate it. The underlying
+// *Book remains shared and must not be mutated.
+func (s *BookService) GetChapterBlocks(path string, idx int) ([]bookparser.Block, error) {
+	b, err := s.GetBook(path)
+	if err != nil {
+		return nil, err
+	}
+	blocks, err := b.ChapterBlocks(idx)
+	if err != nil {
+		return nil, err
+	}
+	// ChapterBlocks may return the parser's backing slice (epub path) or a
+	// fresh slice (placeholder fallback). Copy defensively so we never
+	// mutate the cached *Book's internal state.
+	out := make([]bookparser.Block, len(blocks))
+	copy(out, blocks)
+	for i := range out {
+		if out[i].Type != "image" {
+			continue
+		}
+		src := out[i].Src
+		if src == "" ||
+			strings.HasPrefix(src, "data:") ||
+			strings.HasPrefix(src, "http://") ||
+			strings.HasPrefix(src, "https://") {
+			continue
+		}
+		manifestID := reverseLookupManifest(b.EpubManifest(), src)
+		if manifestID == "" {
+			out[i].Src = ""
+			continue
+		}
+		out[i].Src = fmt.Sprintf("/api/v1/books/image?path=%s&manifest=%s",
+			url.QueryEscape(path), url.QueryEscape(manifestID))
+	}
+	return out, nil
+}
+
+// reverseLookupManifest returns the manifest id whose href matches src after
+// NormalizeHref is applied to both sides. NormalizeHref strips #fragment
+// suffixes and normalises slash direction, so a src of "images/foo.jpg#bar"
+// matches a manifest href of "images\foo.jpg". Returns "" if no entry matches
+// or the manifest is nil/empty.
+func reverseLookupManifest(manifest map[string]string, src string) string {
+	if manifest == nil || src == "" {
+		return ""
+	}
+	normalized := bookparser.NormalizeHref(src)
+	if normalized == "" {
+		return ""
+	}
+	for id, href := range manifest {
+		if bookparser.NormalizeHref(href) == normalized {
+			return id
+		}
+	}
+	return ""
 }
