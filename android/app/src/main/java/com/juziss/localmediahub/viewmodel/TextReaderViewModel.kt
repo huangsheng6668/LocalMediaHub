@@ -146,6 +146,28 @@ class TextReaderViewModel @Inject constructor(
         if (_currentIndex.value > 0) loadChapter(_currentIndex.value - 1)
     }
 
+    /**
+     * Called by the UI layer (throttled via snapshotFlow + debounce) to persist
+     * the within-chapter scroll position. Unlike [loadChapter], this does NOT
+     * re-fetch chapter content — it only writes the scroll offset so the next
+     * session can resume mid-chapter.
+     *
+     * Task 6 (text-reader C-phase).
+     */
+    fun persistScrollProgress(firstVisibleItemIndex: Int, firstVisibleItemScrollOffset: Int) {
+        val b = _book.value ?: return
+        viewModelScope.launch {
+            store.saveBookProgress(
+                BookProgress(
+                    path = b.path,
+                    chapterIndex = _currentIndex.value,
+                    scrollOffsetPx = firstVisibleItemScrollOffset,
+                    lastReadAt = System.currentTimeMillis(),
+                )
+            )
+        }
+    }
+
     // ---- Task 5: reader settings, auto-scroll, bookmarks ------------------
 
     /** Updates and persists reader settings. */
