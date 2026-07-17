@@ -66,10 +66,11 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 	}
 	h := handler.New(
 		cfg,
-		service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions),
+		service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions),
 		nil,
 		service.NewStreamingService(""),
 		thumbnailService,
+		nil,
 	)
 	s.registerRoutes(h)
 
@@ -168,9 +169,12 @@ func TestRegisterRoutesJsonCacheControl(t *testing.T) {
 		path      string
 		wantCache string
 	}{
-		// brief = 60s — endpoints that change when scan/add/delete files
-		{"/api/v1/folders", "private, max-age=60"},
-		{"/api/v1/search?q=foo", "private, max-age=60"},
+		// brief = 5s — endpoints that change when scan/add/delete files.
+		// Kept short on purpose (commit 205768e lowered from 60s) so clients
+		// re-fetching right after a delete/add see fresh data, not a stale
+		// max-age=60 response.
+		{"/api/v1/folders", "private, max-age=5"},
+		{"/api/v1/search?q=foo", "private, max-age=5"},
 		// standard = 300s — endpoints that change with tag operations / paging
 		{"/api/v1/videos", "private, max-age=300"},
 		{"/api/v1/images", "private, max-age=300"},

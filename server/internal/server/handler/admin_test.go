@@ -44,7 +44,7 @@ func TestUpdateConfigRejectsBlockedRoot(t *testing.T) {
 					Format:   "jpeg",
 				},
 			}
-			h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions), nil, nil, nil)
+			h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
 
 			e := echo.New()
 			body, _ := json.Marshal(map[string][]string{"roots": {blocked}})
@@ -84,7 +84,7 @@ func TestUpdateConfigAcceptsValidRoot(t *testing.T) {
 			Format:   "jpeg",
 		},
 	}
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions), nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
 
 	e := echo.New()
 	body, _ := json.Marshal(map[string][]string{"roots": {validRoot}})

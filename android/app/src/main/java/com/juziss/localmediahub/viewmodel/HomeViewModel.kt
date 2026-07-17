@@ -17,8 +17,11 @@ import com.juziss.localmediahub.network.ServerConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -30,6 +33,20 @@ data class LibrarySummary(
 data class CollectionSummary(
     val tag: Tag,
     val itemCount: Int,
+)
+
+/**
+ * Bookshelf tile shown on the Home screen. Derived from [BookProgress] rows
+ * in RecentActivityStore: one entry per book the user has opened in the
+ * text reader, filtered to formats the reader actually supports (txt/epub)
+ * and capped to the 10 most recently read titles.
+ */
+data class RecentBookEntry(
+    val path: String,
+    val title: String,
+    val chapterIndex: Int,
+    val lastReadAt: Long,
+    val format: String,
 )
 
 data class HomeUiState(
@@ -53,8 +70,39 @@ class HomeViewModel @Inject constructor(
     private val repository: MediaRepository,
 ) : ViewModel() {
 
+    private companion object {
+        /** Cap on the number of book tiles shown in the "我的书架" card. */
+        const val BOOKSHELF_MAX_ITEMS: Int = 10
+    }
+
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    /**
+     * "我的书架" tile data — the user's 10 most recently opened books.
+     *
+     * Source: [RecentActivityStore.getAllBookProgressFlow] (already sorted
+     * by lastReadAt desc). We filter to formats the text reader supports
+     * (txt/epub) and project each row into the lighter [RecentBookEntry]
+     * shape that the Home composable consumes. Empty list = hide card.
+     */
+    val recentBooks: StateFlow<List<RecentBookEntry>> =
+        recentActivityStore.getAllBookProgressFlow()
+            .map { progressList ->
+                progressList
+                    .filter { isSupportedBookFormat(it.path) }
+                    .take(BOOKSHELF_MAX_ITEMS)
+                    .map { p ->
+                        RecentBookEntry(
+                            path = p.path,
+                            title = p.path.substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.'),
+                            chapterIndex = p.chapterIndex,
+                            lastReadAt = p.lastReadAt,
+                            format = bookFormatFromPath(p.path),
+                        )
+                    }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Single combine collector over the 6 store flows feeding HomeUiState.
     // Replaces the prior 6 independent launches, each of which did its own
@@ -169,6 +217,14 @@ class HomeViewModel @Inject constructor(
     fun getFavoriteStreamUrl(file: MediaFile): String {
         return repository.getMediaStreamUrl(file.path)
     }
+
+    private fun isSupportedBookFormat(path: String): Boolean {
+        val ext = path.substringAfterLast('.', "").lowercase()
+        return ext == "txt" || ext == "epub"
+    }
+
+    private fun bookFormatFromPath(path: String): String =
+        path.substringAfterLast('.', "").lowercase()
 
     private fun buildCollections(
         tagsResult: NetworkResult<List<Tag>>,

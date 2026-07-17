@@ -48,6 +48,14 @@
             android:taskAffinity="com.juziss.localmediahub.video"
             android:theme="@style/Theme.LocalMediaHub"
             tools:targetApi="34" />
+
+        <activity
+            android:name=".TextReaderActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:label="阅读"
+            android:theme="@style/Theme.LocalMediaHub"
+            tools:targetApi="34" />
     </application>
 
 </manifest>

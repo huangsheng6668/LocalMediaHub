@@ -30,7 +30,7 @@ func TestGetTaggedMediaReturnsMatchingFiles(t *testing.T) {
 			ImageExtensions: []string{".jpg"},
 		},
 	}
-	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions)
+	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
 	if _, err := scanner.Scan(context.Background(), cfg.Scan.GetRoots()); err != nil {
 		t.Fatalf("failed to seed scanner cache: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestGetTaggedMediaReturnsMatchingFiles(t *testing.T) {
 		t.Fatalf("failed to associate file: %v", err)
 	}
 
-	h := New(cfg, scanner, tagsService, nil, nil)
+	h := New(cfg, scanner, tagsService, nil, nil, nil)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tags/"+tag.ID+"/media", nil)
 	rec := httptest.NewRecorder()

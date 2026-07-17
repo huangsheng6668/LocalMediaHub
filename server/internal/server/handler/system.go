@@ -100,10 +100,20 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 					modTime = info.ModTime()
 				}
 				mediaType := "video"
+				matched := false
 				for _, imgExt := range h.cfg.Scan.ImageExtensions {
 					if strings.EqualFold(ext, imgExt) {
 						mediaType = "image"
+						matched = true
 						break
+					}
+				}
+				if !matched {
+					for _, txtExt := range h.cfg.Scan.TextExtensions {
+						if strings.EqualFold(ext, txtExt) {
+							mediaType = "text"
+							break
+						}
 					}
 				}
 				files = append(files, models.MediaFile{

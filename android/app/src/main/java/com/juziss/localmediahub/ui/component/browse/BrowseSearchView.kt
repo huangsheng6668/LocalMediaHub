@@ -14,6 +14,7 @@ internal fun BrowseSearchView(
     onBrowseFolder: (path: String, name: String) -> Unit,
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile, List<MediaFile>) -> Unit,
+    onTextClick: (MediaFile) -> Unit,
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
     getThumbnailUrl: (MediaFile) -> String,
@@ -36,6 +37,7 @@ internal fun BrowseSearchView(
             }
             onImageClick(file, allImages)
         },
+        onTextClick = onTextClick,
         onToggleFavorite = onToggleFavorite,
         isFavorite = isFavorite,
         getThumbnailUrl = getThumbnailUrl,

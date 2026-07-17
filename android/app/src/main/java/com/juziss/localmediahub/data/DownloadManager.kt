@@ -20,6 +20,10 @@ class DownloadManager @Inject constructor(
         onMessage: (String) -> Unit
     ) {
         val gson = Gson()
+        // Text files use imageUrl (= /api/v1/media/original) because Task 8
+        // extended MediaOriginal to allow TextExtensions. This is the download
+        // URL for books; the TextReaderActivity consumes the local file or the
+        // /api/v1/books/* endpoints for chapter rendering.
         val inputData = Data.Builder()
             .putString("type", "file")
             .putString("file_json", gson.toJson(file))

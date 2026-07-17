@@ -21,6 +21,9 @@ export const elements = {
     viewBrowser: document.getElementById('view-browser'),
     viewTags: document.getElementById('view-tags'),
     viewSettings: document.getElementById('view-settings'),
+    // Reader view (Task 15): hosts textReader render output and is reused as
+    // the bookshelf container in Task 16 — single shared off-menu surface.
+    viewReader: document.getElementById('view-reader'),
 
     // Stats
     statRoots: document.getElementById('stat-roots'),
@@ -28,6 +31,9 @@ export const elements = {
     statImages: document.getElementById('stat-images'),
     statTags: document.getElementById('stat-tags'),
     dashboardRecent: document.getElementById('dashboard-recent'),
+    // Bookshelf dashboard embed host (Task 16). Stays empty when no
+    // book_progress:* entries exist in localStorage.
+    dashboardBookshelf: document.getElementById('dashboard-bookshelf'),
     infoIp: document.getElementById('info-ip'),
     infoHost: document.getElementById('info-host'),
     infoScanRoots: document.getElementById('info-scan-roots'),

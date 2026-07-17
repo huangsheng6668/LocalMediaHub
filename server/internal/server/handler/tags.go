@@ -153,6 +153,8 @@ func (h *Handler) buildTaggedMediaFallback(pathStr string) (models.MediaFile, bo
 		mediaType = "video"
 	case h.scanner.ImageExts()[ext]:
 		mediaType = "image"
+	case h.scanner.TextExts()[ext]:
+		mediaType = "text"
 	default:
 		return models.MediaFile{}, false
 	}

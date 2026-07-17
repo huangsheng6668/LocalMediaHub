@@ -29,6 +29,7 @@ internal fun BrowseStateContent(
     activeTagFilter: Tag?,
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile, List<MediaFile>) -> Unit,
+    onTextClick: (MediaFile) -> Unit,
     onToggleFavorite: (MediaFile) -> Unit,
     isFavorite: (String) -> Boolean,
     onFileLongClick: (MediaFile) -> Unit,
@@ -149,6 +150,7 @@ internal fun BrowseStateContent(
                     onImageClick = { file ->
                         onImageClick(file, filteredFiles.filter { it.mediaType == "image" })
                     },
+                    onTextClick = onTextClick,
                     onToggleFavorite = onToggleFavorite,
                     isFavorite = isFavorite,
                     onFileLongClick = onFileLongClick,
@@ -203,6 +205,7 @@ internal fun BrowseStateContent(
                     onImageClick = { file ->
                         onImageClick(file, filteredFiles.filter { it.mediaType == "image" })
                     },
+                    onTextClick = onTextClick,
                     onToggleFavorite = onToggleFavorite,
                     isFavorite = isFavorite,
                     onFileLongClick = onFileLongClick,
@@ -250,6 +253,7 @@ internal fun BrowseStateContent(
                         onImageClick = { file ->
                             onImageClick(file, collection.files.filter { it.mediaType == "image" })
                         },
+                        onTextClick = onTextClick,
                         onToggleFavorite = onToggleFavorite,
                         isFavorite = isFavorite,
                         onFileLongClick = onFileLongClick,

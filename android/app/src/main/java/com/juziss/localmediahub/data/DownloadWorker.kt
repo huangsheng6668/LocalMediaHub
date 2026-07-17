@@ -104,6 +104,34 @@ class DownloadWorker(
                 }
 
                 downloadsStore.addDownload(file, localFile.absolutePath)
+
+                // Task 14: best-effort offline sidecar. After a .txt/.epub lands
+                // on disk, also fetch /api/v1/books/info?path=<originalPath> and
+                // save the JSON next to the file as <filename>.json. Failure is
+                // tolerated — a missing sidecar only disables offline rendering
+                // and the reader falls back to the online /api/v1/books/* flow.
+                val ext = localFile.extension.lowercase()
+                if (ext == "txt" || ext == "epub") {
+                    try {
+                        val sidecarResult = repository.downloadBookInfoSidecar(file.path)
+                        if (sidecarResult is NetworkResult.Success) {
+                            sidecarResult.data.use { body ->
+                                val sidecar = File(localFile.parentFile, "${localFile.name}.json")
+                                body.byteStream().use { input ->
+                                    FileOutputStream(sidecar).use { output ->
+                                        input.copyTo(output)
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w(
+                            "DownloadWorker",
+                            "sidecar fetch failed for ${file.name}: ${e.message}"
+                        )
+                    }
+                }
+
                 showToast("${file.name} 下载成功！")
                 updateNotification(notificationId, "下载成功", file.name)
                 return@withContext Result.success()

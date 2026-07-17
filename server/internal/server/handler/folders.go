@@ -125,9 +125,6 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 		return respondInternalError(c, err)
 	}
 
-	videoExts := h.scanner.VideoExts()
-	imageExts := h.scanner.ImageExts()
-
 	folders := make([]models.Folder, 0)
 	files := make([]models.MediaFile, 0)
 
@@ -148,12 +145,8 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 			})
 		} else {
 			ext := strings.ToLower(filepath.Ext(entry.Name()))
-			mediaType := ""
-			if videoExts[ext] {
-				mediaType = "video"
-			} else if imageExts[ext] {
-				mediaType = "image"
-			} else {
+			mediaType := h.classifyMediaType(ext)
+			if mediaType == "" {
 				continue
 			}
 
@@ -213,9 +206,6 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 	zipWriter := zip.NewWriter(c.Response().Writer)
 	defer zipWriter.Close()
 
-	videoExts := h.scanner.VideoExts()
-	imageExts := h.scanner.ImageExts()
-
 	err = filepath.Walk(pathStr, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -225,7 +215,7 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 		}
 
 		ext := strings.ToLower(filepath.Ext(info.Name()))
-		if !videoExts[ext] && !imageExts[ext] {
+		if h.classifyMediaType(ext) == "" {
 			return nil
 		}
 
@@ -268,4 +258,26 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 		slog.Error("Zip download failed", "method", c.Request().Method, "path", c.Path(), "dir", pathStr, "error", err)
 	}
 	return nil
+}
+
+// classifyMediaType returns "video" / "image" / "text" for a lowercase file
+// extension (with or without a leading dot — callers pass the result of
+// filepath.Ext which always includes the dot, and the scanner maps store
+// extensions in the same form). Returns "" for non-media files, which
+// BrowseFolder / DownloadFolderZip treat as "skip this entry".
+//
+// The map lookups reuse the scanner's already-built extension sets so there
+// is no per-entry allocation on the hot path.
+func (h *Handler) classifyMediaType(ext string) string {
+	ext = strings.ToLower(ext)
+	if h.scanner.VideoExts()[ext] {
+		return "video"
+	}
+	if h.scanner.ImageExts()[ext] {
+		return "image"
+	}
+	if h.scanner.TextExts()[ext] {
+		return "text"
+	}
+	return ""
 }

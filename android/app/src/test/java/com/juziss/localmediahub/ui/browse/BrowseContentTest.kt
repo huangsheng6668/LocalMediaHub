@@ -33,7 +33,7 @@ class BrowseContentTest {
             BrowseContent(
                 folders = listOf(Folder(name = "Films", path = "/Films", relativePath = "Films")),
                 files = listOf(file("v.mp4")),
-                onFolderClick = {}, onVideoClick = {}, onImageClick = {},
+                onFolderClick = {}, onVideoClick = {}, onImageClick = {}, onTextClick = {},
                 onToggleFavorite = {}, isFavorite = { false },
                 state = BrowseContentState(SortOrder.NAME_ASC, SortOrder.NAME_ASC, "/Films", null),
                 onSaveScrollPosition = { p, i -> saved = p to i },

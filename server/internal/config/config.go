@@ -10,6 +10,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DefaultTextExtensions is used when scan.text_extensions is omitted.
+var DefaultTextExtensions = []string{".txt", ".epub", ".mobi", ".azw3"}
+
 type Config struct {
 	Server    ServerConfig    `yaml:"server" json:"server"`
 	Scan      ScanConfig      `yaml:"scan" json:"scan"`
@@ -27,6 +30,7 @@ type ScanConfig struct {
 	Roots           []string `yaml:"roots,omitempty" json:"roots,omitempty"`
 	VideoExtensions []string `yaml:"video_extensions" json:"video_extensions"`
 	ImageExtensions []string `yaml:"image_extensions" json:"image_extensions"`
+	TextExtensions  []string `yaml:"text_extensions,omitempty" json:"text_extensions,omitempty"`
 	AutoDetectRoots bool     `yaml:"auto_detect_roots,omitempty" json:"auto_detect_roots,omitempty"`
 
 	// Cached result of auto-detected drives (only used when Roots is empty).
@@ -112,6 +116,7 @@ type ScanConfigPublic struct {
 	Roots           []string `json:"roots,omitempty"`
 	VideoExtensions []string `json:"video_extensions"`
 	ImageExtensions []string `json:"image_extensions"`
+	TextExtensions  []string `json:"text_extensions,omitempty"`
 	AutoDetectRoots bool     `json:"auto_detect_roots,omitempty"`
 }
 
@@ -124,7 +129,7 @@ type SystemConfigPublic struct {
 func (c *Config) Public() ConfigPublic {
 	return ConfigPublic{
 		Server:    ServerConfigPublic{Host: c.Server.Host, Port: c.Server.Port},
-		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions, AutoDetectRoots: c.Scan.AutoDetectRoots},
+		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions, TextExtensions: c.Scan.TextExtensions, AutoDetectRoots: c.Scan.AutoDetectRoots},
 		Thumbnail: c.Thumbnail,
 		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots, EnableDelete: c.System.EnableDelete},
 	}
@@ -178,6 +183,9 @@ func LoadFromBytes(data []byte) (*Config, error) {
 	}
 	if len(cfg.Scan.Roots) == 0 && len(cfg.System.AllowedRoots) > 0 {
 		cfg.Scan.Roots = append([]string(nil), cfg.System.AllowedRoots...)
+	}
+	if len(cfg.Scan.TextExtensions) == 0 {
+		cfg.Scan.TextExtensions = append([]string(nil), DefaultTextExtensions...)
 	}
 	return &cfg, nil
 }

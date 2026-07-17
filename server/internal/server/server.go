@@ -44,7 +44,7 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to get local IP: %w", err)
 	}
 
-	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions)
+	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
 	if err := scanner.StartWatching(cfg.Scan.Roots); err != nil {
 		fmt.Printf("Warning: failed to start filesystem watcher: %v\n", err)
 	}
@@ -57,6 +57,7 @@ func New(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create thumbnail service: %w", err)
 	}
+	bookService := service.NewBookService()
 
 	s := &Server{
 		Echo:      e,
@@ -87,7 +88,8 @@ func New(cfg *config.Config) (*Server, error) {
 		s.Thumbnail.PreGenerateThumbnails(files, ctx, hotPaths)
 	}
 
-	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService)
+	// books: BookService wired in Task 8 — drives /api/v1/books/info|chapter.
+	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, bookService)
 
 	s.registerRoutes(h)
 
@@ -209,6 +211,13 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	media.GET("/original", h.MediaOriginal)
 	media.GET("/stream", h.MediaStream)
 	media.GET("/duration", h.MediaDuration)
+
+	// Books (text-reader, Task 8): metadata + per-chapter text content for
+	// .txt / .epub files. Auth-gated because chapter content can be large and
+	// these endpoints perform disk I/O on each chapter fetch.
+	books := api.Group("/books", authMw)
+	books.GET("/info", h.GetBookInfo)
+	books.GET("/chapter", h.GetBookChapter)
 
 	// Admin page
 }

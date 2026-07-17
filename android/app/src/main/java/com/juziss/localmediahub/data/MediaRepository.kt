@@ -255,6 +255,32 @@ class MediaRepository @Inject constructor(
             }
     }
 
+    // ── Books (text-reader) ───────────────────────────────────
+
+    suspend fun getBookInfo(path: String): NetworkResult<Book> =
+        httpGet(
+            "$baseUrl/api/v1/books/info?path=${URLEncoder.encode(path, "UTF-8")}",
+            Book::class.java,
+        )
+
+    suspend fun getBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> =
+        httpGet(
+            "$baseUrl/api/v1/books/chapter?path=${URLEncoder.encode(path, "UTF-8")}&index=$index",
+            BookChapterContent::class.java,
+        )
+
+    /**
+     * Streaming variant of [getBookInfo]: returns the raw JSON [ResponseBody]
+     * so the caller (DownloadWorker) can write the bytes verbatim to the
+     * `<filename>.json` sidecar next to the downloaded book file, preserving
+     * the exact server response without a serialize/deserialize round-trip.
+     *
+     * Task 14: offline sidecar prep. Failures are tolerated by the caller —
+     * a missing sidecar only means offline rendering falls back to online.
+     */
+    suspend fun downloadBookInfoSidecar(path: String): NetworkResult<ResponseBody> =
+        httpStream("$baseUrl/api/v1/books/info?path=${URLEncoder.encode(path, "UTF-8")}")
+
     // ════════════════════════════════════════════════════════════════════════
     //  URL builders (unchanged — used by Coil / ExoPlayer, not Retrofit)
     // ════════════════════════════════════════════════════════════════════════

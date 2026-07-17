@@ -130,6 +130,16 @@ function onBrowserListClick(e) {
         browsePath(actionEl.dataset.path || '');
     } else if (action === 'open') {
         if (state.currentFiles[idx]) openMedia(state.currentFiles[idx]);
+    } else if (action === 'text-open') {
+        // Text/ebook open (Task 15): route to the reader view. Tag/delete
+        // buttons inside the card have their own data-action and stop
+        // propagation implicitly via .closest() returning the inner button.
+        const f = state.currentFiles[idx];
+        if (f) {
+            window.location.hash = `#/read?path=${encodeURIComponent(f.path)}`;
+        }
+    } else if (action === 'text-unsupported') {
+        showToast('暂不支持该格式（仅支持 .txt / .epub）', 'info');
     } else if (action === 'tag') {
         if (state.currentFiles[idx]) openTaggingDialog(state.currentFiles[idx]);
     } else if (action === 'delete-folder') {
@@ -173,6 +183,47 @@ export function renderBrowserList() {
     // 2. Media Files
     state.currentFiles.forEach((file, index) => {
         const isVideo = file.media_type === 'video';
+        const isText = file.media_type === 'text';
+
+        // Text / ebook files (Task 15): render as a "document card" with a doc
+        // icon instead of a thumbnail. .txt and .epub open the reader at
+        // #/read?path=...; other text extensions (mobi/azw3) are surfaced by
+        // the scanner under media_type=text but cannot be opened by the reader
+        // — show a "暂不支持" badge and a toast on click so the user knows why
+        // nothing happens.
+        if (isText) {
+            const ext = (file.extension || '').toLowerCase();
+            const isUnsupportedText = !['.txt', '.epub'].includes(ext);
+            const docIcon = ext === '.epub' ? '📘' : '📄';
+            const safeName = escapeHtml(file.name);
+            const safeExt = escapeHtml(file.extension);
+            const unsupportedBadge = isUnsupportedText
+                ? '<span class="card-badge" style="background-color: rgba(239,68,68,0.2); color: #fca5a5;">暂不支持</span>'
+                : '';
+            html += `
+                <div class="media-card text-card ${isUnsupportedText ? 'text-card--unsupported' : ''}"
+                     data-action="${isUnsupportedText ? 'text-unsupported' : 'text-open'}"
+                     data-index="${index}">
+                    <div class="card-preview">
+                        <span class="card-preview-icon">${docIcon}</span>
+                    </div>
+                    <div class="card-actions-overlay">
+                        <button class="card-action-btn" title="分类标签" data-action="tag" data-index="${index}">🏷️</button>
+                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">🗑️</button>` : ''}
+                    </div>
+                    <div class="card-details">
+                        <div class="card-title" title="${safeName}">${safeName}</div>
+                        <div class="card-meta">
+                            <span class="card-badge">${safeExt.toUpperCase()}</span>
+                            ${unsupportedBadge}
+                            <span>${formatSize(file.size)}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
         const fallbackIcon = isVideo ? '🎬' : '🖼️';
         let previewHtml = '';
         let playOverlay = '';

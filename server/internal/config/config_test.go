@@ -393,3 +393,37 @@ func TestLogSecurityWarnings(t *testing.T) {
 		})
 	}
 }
+
+func TestScanConfigDefaultTextExtensions(t *testing.T) {
+	cfg, err := LoadFromBytes([]byte(`scan:
+  video_extensions: [".mp4"]
+  image_extensions: [".jpg"]
+`))
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	if len(cfg.Scan.TextExtensions) == 0 {
+		t.Fatalf("expected default TextExtensions to be populated when omitted")
+	}
+	want := map[string]bool{".txt": true, ".epub": true, ".mobi": true, ".azw3": true}
+	for _, e := range cfg.Scan.TextExtensions {
+		if !want[e] {
+			t.Fatalf("unexpected ext %q in default TextExtensions", e)
+		}
+	}
+}
+
+func TestPublicExposesTextExtensions(t *testing.T) {
+	cfg, err := LoadFromBytes([]byte(`scan:
+  video_extensions: [".mp4"]
+  image_extensions: [".jpg"]
+  text_extensions: [".txt", ".epub"]
+`))
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	pub := cfg.Public()
+	if len(pub.Scan.TextExtensions) != 2 {
+		t.Fatalf("expected 2 text extensions in public, got %d (%v)", len(pub.Scan.TextExtensions), pub.Scan.TextExtensions)
+	}
+}
