@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { renderTextReader } from './textReader.js';
+import { render as renderBookshelf } from './bookshelf.js';
 
 // hashParams: tiny helper to extract query params from a hash like
 // #/read?path=foo%20bar. Returns an empty Map when there is no query string.
@@ -64,14 +65,14 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
             renderTextReader(elements.viewReader, path);
         }
     } else if (hash.startsWith('#/bookshelf')) {
-        // Bookshelf view is implemented in Task 16. Until then render a clear
-        // placeholder so deep-linking #/bookshelf does not show a blank page.
+        // Bookshelf view (Task 16): scans localStorage for every book_progress
+        // entry and renders a grid of clickable cards. Shares the same off-menu
+        // #view-reader section that #/read uses.
         state.activeTab = 'bookshelf';
         if (elements.pageTitle) elements.pageTitle.textContent = '书架';
         if (elements.viewReader) {
             elements.viewReader.classList.add('active');
-            elements.viewReader.innerHTML =
-                '<div class="text-reader__error">书架即将上线 (Task 16)</div>';
+            renderBookshelf(elements.viewReader);
         }
     }
 }

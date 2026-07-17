@@ -5,6 +5,7 @@ import { apiRequest, escapeHtml } from './api.js';
 import { elements } from './dom.js';
 import { formatSize } from './utils.js';
 import { openVideoPlayer } from './videoPlayer.js';
+import { renderSection as renderBookshelfSection } from './bookshelf.js';
 
 // Delegated click dispatcher for dashboard recent items
 function onDashboardRecentClick(e) {
@@ -18,6 +19,13 @@ function onDashboardRecentClick(e) {
 
 // Render Dashboard (Tab 1)
 export async function renderDashboard() {
+    // 0. Bookshelf section (Task 16): reads localStorage synchronously, so we
+    // can paint it before the first network request resolves. renderSection
+    // is a no-op when no book_progress:* entries exist.
+    if (elements.dashboardBookshelf) {
+        renderBookshelfSection(elements.dashboardBookshelf);
+    }
+
     // 1. Fetch total files
     try {
         let totalVideos = 0;

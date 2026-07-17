@@ -31,6 +31,9 @@ export const elements = {
     statImages: document.getElementById('stat-images'),
     statTags: document.getElementById('stat-tags'),
     dashboardRecent: document.getElementById('dashboard-recent'),
+    // Bookshelf dashboard embed host (Task 16). Stays empty when no
+    // book_progress:* entries exist in localStorage.
+    dashboardBookshelf: document.getElementById('dashboard-bookshelf'),
     infoIp: document.getElementById('info-ip'),
     infoHost: document.getElementById('info-host'),
     infoScanRoots: document.getElementById('info-scan-roots'),
