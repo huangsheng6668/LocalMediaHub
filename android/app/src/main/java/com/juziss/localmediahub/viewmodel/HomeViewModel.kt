@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
 import javax.inject.Inject
 
 data class LibrarySummary(
@@ -96,7 +95,7 @@ class HomeViewModel @Inject constructor(
                     .map { p ->
                         RecentBookEntry(
                             path = p.path,
-                            title = File(p.path).nameWithoutExtension,
+                            title = p.path.substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.'),
                             chapterIndex = p.chapterIndex,
                             lastReadAt = p.lastReadAt,
                             format = bookFormatFromPath(p.path),
