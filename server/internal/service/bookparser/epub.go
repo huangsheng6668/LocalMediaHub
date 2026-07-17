@@ -21,10 +21,10 @@ import (
 // payload while keeping worst-case memory bounded.
 const MaxEpubEntrySize = 16 * 1024 * 1024
 
-// readCapped reads at most max+1 bytes from r so the caller can detect
+// ReadCapped reads at most max+1 bytes from r so the caller can detect
 // truncation. If the underlying reader yields more than max bytes it returns
 // an error wrapping ErrTooLarge instead of allocating the full body.
-func readCapped(r io.Reader, max int64) ([]byte, error) {
+func ReadCapped(r io.Reader, max int64) ([]byte, error) {
 	limited := io.LimitReader(r, max+1)
 	b, err := io.ReadAll(limited)
 	if err != nil {
@@ -76,7 +76,7 @@ func parseEpub(path string, info os.FileInfo) (*Book, error) {
 	for href, title := range toc {
 		for i := range chapters {
 			idref := chapters[i].ManifestID
-			if h, ok := opfData.manifest[idref]; ok && normalizeHref(h) == normalizeHref(href) {
+			if h, ok := opfData.manifest[idref]; ok && NormalizeHref(h) == NormalizeHref(href) {
 				chapters[i].Title = title
 			}
 		}
@@ -94,39 +94,36 @@ func parseEpub(path string, info os.FileInfo) (*Book, error) {
 	return book, nil
 }
 
-func (b *Book) epubChapterText(idx int) (string, error) {
+// epubChapterBlocks opens the epub zip, reads the XHTML for chapter idx,
+// and returns its content as ordered Blocks. Image srcs are raw epub
+// hrefs (relative or absolute paths, data: URIs, http(s):// URLs) —
+// BookService rewrites relative ones to /api/v1/books/image URLs.
+//
+// Failures degrade gracefully: missing manifest entry, missing zip entry,
+// or read errors all return a single "[本章节解析失败]" text block rather
+// than propagating an error, so the reader can still paginate.
+func (b *Book) epubChapterBlocks(idx int) ([]Block, error) {
 	c := b.Chapters[idx]
 	href, ok := b.epubManifest[c.ManifestID]
 	if !ok {
-		return "[本章节解析失败]", nil
+		return []Block{{Type: "text", Value: "[本章节解析失败]"}}, nil
 	}
-	fullPath := joinZipPath(b.epubOpfDir, href)
+	fullPath := JoinZipPath(b.epubOpfDir, href)
 	zr, err := zip.OpenReader(b.Path)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrIoFailure, err)
+		return nil, fmt.Errorf("%w: %v", ErrIoFailure, err)
 	}
 	defer zr.Close()
 	rc, err := zr.Open(fullPath)
 	if err != nil {
-		return "[本章节解析失败]", nil
+		return []Block{{Type: "text", Value: "[本章节解析失败]"}}, nil
 	}
 	defer rc.Close()
-	body, err := readCapped(rc, MaxEpubEntrySize)
+	body, err := ReadCapped(rc, MaxEpubEntrySize)
 	if err != nil {
-		return "[本章节解析失败]", nil
+		return []Block{{Type: "text", Value: "[本章节解析失败]"}}, nil
 	}
-	text, imgOnly := extractXhtmlText(body)
-	if imgOnly {
-		return "[本章节为图片版，暂不支持]", nil
-	}
-	if text == "" {
-		// No text and no images — e.g. a chapter whose body is rendered purely
-		// via CSS background-image, or a malformed XHTML the walker couldn't
-		// extract anything from. Surface a placeholder instead of returning
-		// an empty string (which would render as a blank page in the reader).
-		return "[本章节解析失败]", nil
-	}
-	return text, nil
+	return extractBlocks(body), nil
 }
 
 func readContainerOpfPath(zr *zip.Reader) (string, error) {
@@ -135,7 +132,7 @@ func readContainerOpfPath(zr *zip.Reader) (string, error) {
 		return "", fmt.Errorf("%w: missing container.xml: %v", ErrInvalidEpub, err)
 	}
 	defer f.Close()
-	data, _ := readCapped(f, MaxEpubEntrySize)
+	data, _ := ReadCapped(f, MaxEpubEntrySize)
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	for {
 		t, err := dec.Token()
@@ -228,9 +225,9 @@ func extractDcTitle(data []byte) string {
 
 func readToc(zr *zip.Reader, ncxID string, manifest map[string]string, opfDir string) (map[string]string, error) {
 	for _, href := range manifest {
-		full := joinZipPath(opfDir, href)
+		full := JoinZipPath(opfDir, href)
 		if f, err := zr.Open(full); err == nil {
-			data, _ := readCapped(f, MaxEpubEntrySize)
+			data, _ := ReadCapped(f, MaxEpubEntrySize)
 			f.Close()
 			if toc := parseNavToc(data); len(toc) > 0 {
 				return toc, nil
@@ -239,9 +236,9 @@ func readToc(zr *zip.Reader, ncxID string, manifest map[string]string, opfDir st
 	}
 	if ncxID != "" {
 		if href, ok := manifest[ncxID]; ok {
-			full := joinZipPath(opfDir, href)
+			full := JoinZipPath(opfDir, href)
 			if f, err := zr.Open(full); err == nil {
-				data, _ := readCapped(f, MaxEpubEntrySize)
+				data, _ := ReadCapped(f, MaxEpubEntrySize)
 				f.Close()
 				return parseNcx(data), nil
 			}
@@ -318,43 +315,78 @@ func textOf(n *html.Node) string {
 	return sb.String()
 }
 
-func extractXhtmlText(data []byte) (string, bool) {
+// extractBlocks walks an XHTML byte slice and produces ordered Blocks.
+// <img>/<image> flush the current text buffer and push an image Block
+// with the raw src. <br> writes '\n' to the buffer. Block-level elements
+// (p/div/h1-h6/li/blockquote/section/title) flush on both enter and exit.
+// Returns a single "[本章节为空]" placeholder if no content was produced.
+func extractBlocks(data []byte) []Block {
 	doc, err := html.Parse(bytes.NewReader(data))
 	if err != nil {
-		return "[本章节解析失败]", false
+		return []Block{{Type: "text", Value: "[本章节解析失败]"}}
 	}
-	var sb strings.Builder
-	imgCount, textCount := 0, 0
+	var blocks []Block
+	var textBuf strings.Builder
+	flush := func() {
+		if s := strings.TrimSpace(textBuf.String()); s != "" {
+			blocks = append(blocks, Block{Type: "text", Value: s})
+		}
+		textBuf.Reset()
+	}
+	isBlockElement := func(tagName string) bool {
+		switch tagName {
+		case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "section", "title":
+			return true
+		}
+		return false
+	}
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
-			switch n.Data {
-			case "img", "image":
-				imgCount++
-				sb.WriteString("[图片]")
-				return
-			case "p", "div", "br", "h1", "h2", "h3":
-				if sb.Len() > 0 {
-					sb.WriteString("\n\n")
+			if n.Data == "img" || n.Data == "image" {
+				flush()
+				if src := extractImgSrc(n); src != "" {
+					blocks = append(blocks, Block{Type: "image", Src: src})
 				}
+				return
 			}
-		}
-		if n.Type == html.TextNode {
-			s := strings.TrimSpace(n.Data)
-			if s != "" {
-				sb.WriteString(s)
-				textCount++
+			if n.Data == "br" {
+				textBuf.WriteByte('\n')
+				return
 			}
+			if isBlockElement(n.Data) {
+				flush()
+			}
+		} else if n.Type == html.TextNode {
+			textBuf.WriteString(n.Data)
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
 		}
+		if n.Type == html.ElementNode && isBlockElement(n.Data) {
+			flush()
+		}
 	}
 	walk(doc)
-	if textCount == 0 && imgCount > 0 {
-		return "", true
+	flush()
+	if len(blocks) == 0 {
+		return []Block{{Type: "text", Value: "[本章节为空]"}}
 	}
-	return strings.TrimSpace(sb.String()), false
+	return blocks
+}
+
+// extractImgSrc pulls the src (HTML <img>) or xlink:href/href (SVG <image>)
+// from a parsed node. Returns "" if no usable attribute is found.
+func extractImgSrc(n *html.Node) string {
+	for _, a := range n.Attr {
+		if a.Key == "src" && a.Val != "" {
+			return a.Val
+		}
+		if (a.Key == "xlink:href" || a.Key == "href" || (a.Namespace == "xlink" && a.Key == "href")) && a.Val != "" {
+			return a.Val
+		}
+	}
+	return ""
 }
 
 func readZipFile(files []*zip.File, name string) ([]byte, error) {
@@ -365,20 +397,25 @@ func readZipFile(files []*zip.File, name string) ([]byte, error) {
 				return nil, err
 			}
 			defer rc.Close()
-			return readCapped(rc, MaxEpubEntrySize)
+			return ReadCapped(rc, MaxEpubEntrySize)
 		}
 	}
 	return nil, fmt.Errorf("not found: %s", name)
 }
 
-func joinZipPath(dir, href string) string {
+// JoinZipPath resolves a (possibly relative) href against the OPF directory
+// inside an epub zip and strips any fragment. Exported so BookService can
+// perform manifest reverse-lookups when rewriting image srcs.
+func JoinZipPath(dir, href string) string {
 	if dir == "" || dir == "." {
-		return normalizeHref(href)
+		return NormalizeHref(href)
 	}
-	return normalizeHref(filepath.ToSlash(filepath.Join(dir, href)))
+	return NormalizeHref(filepath.ToSlash(filepath.Join(dir, href)))
 }
 
-func normalizeHref(s string) string {
+// NormalizeHref canonicalises an epub href: forward slashes, no fragment.
+// Exported so BookService can match manifest entries against toc hrefs.
+func NormalizeHref(s string) string {
 	s = filepath.ToSlash(s)
 	if i := strings.IndexByte(s, '#'); i >= 0 {
 		s = s[:i]

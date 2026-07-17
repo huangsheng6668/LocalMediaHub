@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -84,12 +85,29 @@ func (h *Handler) GetBookChapter(c echo.Context) error {
 	if idx >= len(b.Chapters) {
 		return respondError(c, http.StatusBadRequest, "index out of range")
 	}
-	text, err := b.ChapterText(idx)
+	blocks, err := b.ChapterBlocks(idx)
 	if err != nil {
 		return mapBookError(c, err)
 	}
+	// Temporarily join blocks back into a single string so chapterResponse
+	// keeps its current shape. Task 8 replaces this with the real blocks
+	// response and the new image endpoint.
+	var sb strings.Builder
+	for _, blk := range blocks {
+		if blk.Type == "text" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString(blk.Value)
+		} else if blk.Type == "image" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString("[图片]")
+		}
+	}
 	setJsonCacheBrief(c)
-	return c.JSON(http.StatusOK, chapterResponse{Title: b.Chapters[idx].Title, Content: text})
+	return c.JSON(http.StatusOK, chapterResponse{Title: b.Chapters[idx].Title, Content: sb.String()})
 }
 
 // mapBookError translates bookparser error sentinels to HTTP status codes.
