@@ -21,6 +21,9 @@ export const elements = {
     viewBrowser: document.getElementById('view-browser'),
     viewTags: document.getElementById('view-tags'),
     viewSettings: document.getElementById('view-settings'),
+    // Reader view (Task 15): hosts textReader render output and is reused as
+    // the bookshelf container in Task 16 — single shared off-menu surface.
+    viewReader: document.getElementById('view-reader'),
 
     // Stats
     statRoots: document.getElementById('stat-roots'),

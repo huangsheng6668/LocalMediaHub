@@ -32,6 +32,19 @@ export async function apiRequest(url, options = {}) {
     return res.json();
 }
 
+// Book / text-reader helpers (Task 15): thin wrappers over the books API so
+// textReader.js does not hard-code URLs. They use the shared apiRequest helper
+// which injects the Authorization header and surfaces 401 via AUTH_REQUIRED.
+export async function getBookInfo(path) {
+    return apiRequest(`/api/v1/books/info?path=${encodeURIComponent(path)}`);
+}
+
+export async function getBookChapter(path, index) {
+    return apiRequest(
+        `/api/v1/books/chapter?path=${encodeURIComponent(path)}&index=${encodeURIComponent(index)}`
+    );
+}
+
 // XSS Prevention: Safe HTML escaping for dynamic content
 export function escapeHtml(str) {
     if (str === null || str === undefined) return '';
