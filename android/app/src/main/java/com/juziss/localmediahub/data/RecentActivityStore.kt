@@ -130,8 +130,11 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
     private val lastBrowseLocationKey = stringPreferencesKey("last_browse_location")
     private val playbackProgressKey = stringPreferencesKey("playback_progress")
     private val bookProgressKey = stringPreferencesKey("book_progress")
+    private val readerSettingsKey = stringPreferencesKey("reader_settings")
+    private val bookBookmarksKey = stringPreferencesKey("book_bookmarks")
 
     private val typeMapBookProgress = object : TypeToken<MutableMap<String, BookProgress>>() {}.type
+    private val typeMapBookmarks = object : TypeToken<MutableMap<String, MutableList<Bookmark>>>() {}.type
 
     val recentMedia: Flow<List<RecentMediaEntry>> = context.recentActivityDataStore.data.map { preferences ->
         decodeRecentMedia(preferences[recentMediaKey])
@@ -152,6 +155,15 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
     /** 以 lastReadAt 倒序返回全部阅读进度(供 HomeViewModel 书架使用)。 */
     fun getAllBookProgressFlow(): Flow<List<BookProgress>> = bookProgressFlow
         .map { map -> map.values.sortedByDescending { it.lastReadAt } }
+
+    val readerSettingsFlow: Flow<ReaderSettings> = context.recentActivityDataStore.data.map { preferences ->
+        decodeReaderSettings(preferences[readerSettingsKey])
+    }
+
+    fun getBookmarksFlow(path: String): Flow<List<Bookmark>> =
+        context.recentActivityDataStore.data.map { preferences ->
+            decodeBookmarks(preferences[bookBookmarksKey])[path] ?: emptyList()
+        }
 
     suspend fun addRecentMedia(
         file: MediaFile,
@@ -282,6 +294,91 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
     suspend fun getAllBookProgress(): List<BookProgress> =
         getAllBookProgressFlow().firstOrNull() ?: emptyList()
 
+    /** 读取全局阅读器设置;未保存过时返回默认值。 */
+    suspend fun getReaderSettings(): ReaderSettings {
+        return readerSettingsFlow.firstOrNull() ?: ReaderSettings()
+    }
+
+    /** 保存或覆盖全局阅读器设置。 */
+    suspend fun saveReaderSettings(settings: ReaderSettings) {
+        context.recentActivityDataStore.edit { preferences ->
+            preferences[readerSettingsKey] = gson.toJson(settings)
+        }
+    }
+
+    /** 清空全局阅读器设置(回退到默认)。用于测试隔离与重置。 */
+    suspend fun clearAllReaderSettings() {
+        context.recentActivityDataStore.edit { preferences ->
+            preferences[readerSettingsKey] = ""
+        }
+    }
+
+    /** 查询单本书的全部书签;无记录返回空列表。 */
+    suspend fun getBookmarks(path: String): List<Bookmark> {
+        val all = context.recentActivityDataStore.data.map { preferences ->
+            decodeBookmarks(preferences[bookBookmarksKey])
+        }.firstOrNull() ?: emptyMap()
+        return all[path] ?: emptyList()
+    }
+
+    /**
+     * 添加书签。若已存在相同 (bookPath, chapterIndex, paragraphIndex) 的书签,
+     * 返回 false 且不覆盖原有 createdAt(不做 upsert)。
+     */
+    suspend fun addBookmark(bookmark: Bookmark): Boolean {
+        var added = false
+        context.recentActivityDataStore.edit { preferences ->
+            val all = decodeBookmarks(preferences[bookBookmarksKey])
+                .mapValuesTo(mutableMapOf()) { it.value.toMutableList() }
+            val list = all.getOrPut(bookmark.bookPath) { mutableListOf() }
+            val exists = list.any {
+                it.chapterIndex == bookmark.chapterIndex &&
+                    it.paragraphIndex == bookmark.paragraphIndex
+            }
+            if (!exists) {
+                list.add(bookmark)
+                all[bookmark.bookPath] = list
+                preferences[bookBookmarksKey] = encodeBookmarks(all)
+                added = true
+            }
+        }
+        return added
+    }
+
+    /** 删除匹配 (bookPath, chapterIndex, paragraphIndex) 的书签;不存在时为 no-op。 */
+    suspend fun deleteBookmark(bookmark: Bookmark) {
+        context.recentActivityDataStore.edit { preferences ->
+            val all = decodeBookmarks(preferences[bookBookmarksKey]).toMutableMap()
+            val list = all[bookmark.bookPath]?.toMutableList() ?: return@edit
+            list.removeAll {
+                it.chapterIndex == bookmark.chapterIndex &&
+                    it.paragraphIndex == bookmark.paragraphIndex
+            }
+            if (list.isEmpty()) {
+                all.remove(bookmark.bookPath)
+            } else {
+                all[bookmark.bookPath] = list
+            }
+            preferences[bookBookmarksKey] = if (all.isEmpty()) "" else encodeBookmarks(all)
+        }
+    }
+
+    /** 清空单本书的全部书签;不存在时为 no-op。 */
+    suspend fun clearBookmarks(path: String) {
+        context.recentActivityDataStore.edit { preferences ->
+            val all = decodeBookmarks(preferences[bookBookmarksKey]).toMutableMap()
+            if (all.remove(path) == null) return@edit
+            preferences[bookBookmarksKey] = if (all.isEmpty()) "" else encodeBookmarks(all)
+        }
+    }
+
+    /** 清空所有书签(跨全部书)。用于测试隔离与全局重置。 */
+    suspend fun clearAllBookmarks() {
+        context.recentActivityDataStore.edit { preferences ->
+            preferences[bookBookmarksKey] = ""
+        }
+    }
+
     private fun decodeRecentMedia(json: String?): List<RecentMediaEntry> {
         if (json.isNullOrBlank()) return emptyList()
         return try {
@@ -318,5 +415,27 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
         } catch (_: Exception) {
             emptyMap()
         }
+    }
+
+    private fun decodeReaderSettings(json: String?): ReaderSettings {
+        if (json.isNullOrBlank()) return ReaderSettings()
+        return try {
+            gson.fromJson(json, ReaderSettings::class.java) ?: ReaderSettings()
+        } catch (_: Exception) {
+            ReaderSettings()
+        }
+    }
+
+    private fun decodeBookmarks(json: String?): Map<String, List<Bookmark>> {
+        if (json.isNullOrBlank()) return emptyMap()
+        return try {
+            gson.fromJson<Map<String, List<Bookmark>>>(json, typeMapBookmarks) ?: emptyMap()
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun encodeBookmarks(map: Map<String, List<Bookmark>>): String {
+        return gson.toJson(map)
     }
 }
