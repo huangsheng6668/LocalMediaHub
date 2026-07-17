@@ -98,27 +98,38 @@ func extractBlocks(data []byte) []Block {
         }
         textBuf.Reset()
     }
+    isBlockElement := func(tagName string) bool {
+        switch tagName {
+        case "p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "section", "title":
+            return true
+        }
+        return false
+    }
     var walk func(*html.Node)
     walk = func(n *html.Node) {
         if n.Type == html.ElementNode {
-            switch n.Data {
-            case "img", "image":
+            if n.Data == "img" || n.Data == "image" {
                 flush()
                 if src := extractImgSrc(n); src != "" {
                     blocks = append(blocks, Block{Type: "image", Src: src})
                 }
                 return
-            case "p", "div", "br", "h1", "h2", "h3":
-                if textBuf.Len() > 0 {
-                    textBuf.WriteString("\n\n")
-                }
             }
-        }
-        if n.Type == html.TextNode {
+            if n.Data == "br" {
+                textBuf.WriteByte('\n')
+                return
+            }
+            if isBlockElement(n.Data) {
+                flush()
+            }
+        } else if n.Type == html.TextNode {
             textBuf.WriteString(n.Data)
         }
         for c := n.FirstChild; c != nil; c = c.NextSibling {
             walk(c)
+        }
+        if n.Type == html.ElementNode && isBlockElement(n.Data) {
+            flush()
         }
     }
     walk(doc)
@@ -138,7 +149,7 @@ func extractImgSrc(n *html.Node) string {
         if a.Key == "src" && a.Val != "" {
             return a.Val
         }
-        if (a.Key == "xlink:href" || a.Key == "href") && a.Val != "" {
+        if (a.Key == "xlink:href" || a.Key == "href" || (a.Namespace == "xlink" && a.Key == "href")) && a.Val != "" {
             return a.Val
         }
     }
@@ -163,10 +174,10 @@ func (s *BookService) GetChapterBlocks(path string, idx int) ([]bookparser.Block
             continue
         }
         src := blocks[i].Src
-        if src == "" || strings.HasPrefix(src, "data:") {
+        if src == "" || strings.HasPrefix(src, "data:") || strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
             continue
         }
-        manifestID := reverseLookupManifest(b.EpubManifest(), b.EpubOpfDir(), src)
+        manifestID := reverseLookupManifest(b.EpubManifest(), src)
         if manifestID == "" {
             blocks[i].Src = ""
             continue
@@ -181,8 +192,8 @@ func (s *BookService) GetChapterBlocks(path string, idx int) ([]bookparser.Block
 ### `reverseLookupManifest`
 
 ```go
-func reverseLookupManifest(manifest map[string]string, opfDir, src string) string {
-    normalized := bookparser.NormalizeHref(bookparser.JoinZipPath(opfDir, src))
+func reverseLookupManifest(manifest map[string]string, src string) string {
+    normalized := bookparser.NormalizeHref(src)
     for id, href := range manifest {
         if bookparser.NormalizeHref(href) == normalized {
             return id
@@ -207,11 +218,11 @@ func (s *BookService) ReadImageBytes(path, manifestID string) ([]byte, string, e
     if !ok {
         return nil, "", fmt.Errorf("%w: manifest id not found: %s", ErrInvalidEpub, manifestID)
     }
-    // 防御性：拒绝 .. 路径段（manifest 来自 XML 解析，理论安全，但加一层保险）
-    if strings.Contains(href, "..") {
+    // 防御性：避免 Zip Path Traversal。fullPath 不得逃逸出 zip 根目录。
+    fullPath := bookparser.JoinZipPath(b.EpubOpfDir(), href)
+    if strings.HasPrefix(fullPath, "../") || fullPath == ".." || strings.HasPrefix(fullPath, "/") {
         return nil, "", fmt.Errorf("%w: invalid manifest href", ErrInvalidEpub)
     }
-    fullPath := bookparser.JoinZipPath(b.EpubOpfDir(), href)
     zr, err := zip.OpenReader(path)
     if err != nil {
         return nil, "", fmt.Errorf("%w: %v", ErrIoFailure, err)
@@ -289,18 +300,22 @@ books.GET("/image", h.GetBookImage)  // 新增
 ### `authMw` 扩展（`middleware/auth.go`）
 
 ```go
-func AuthMiddleware(token string) echo.MiddlewareFunc {
+func BearerToken(token string) echo.MiddlewareFunc {
     return func(next echo.HandlerFunc) echo.HandlerFunc {
         return func(c echo.Context) error {
             if token == "" {
                 return next(c)
             }
-            provided := strings.TrimPrefix(c.Request().Header.Get("Authorization"), "Bearer ")
-            if provided == "" {
+            var provided string
+            auth := c.Request().Header.Get(echo.HeaderAuthorization)
+            const prefix = "Bearer "
+            if strings.HasPrefix(auth, prefix) {
+                provided = auth[len(prefix):]
+            } else {
                 provided = c.QueryParam("token")  // fallback for <img src>
             }
-            if provided != token {
-                return c.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+            if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+                return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
             }
             return next(c)
         }
@@ -337,7 +352,7 @@ data class BookChapterContent(
 
 - `_chapterText: MutableStateFlow<String>` → `_chapterBlocks: MutableStateFlow<List<Block>>`
 - `loadChapter` 成功分支：`_chapterBlocks.value = r.data.blocks`
-- `addBookmarkFromParagraph(blockIndex: Int)`：从 `_chapterBlocks.value[blockIndex]` 取 block，仅允许 type=="text"，preview = `block.value?.take(30)`
+- `addBookmarkFromParagraph(blockIndex: Int)`：从 `_chapterBlocks.value[blockIndex]` 取 block，仅允许 type=="text"，由 VM 提取 `preview = block.value?.take(30) ?: ""`，无需 UI 传入 preview
 
 ### UI（`ui/screen/TextReaderScreen.kt`）
 
@@ -347,18 +362,30 @@ val blocks by viewModel.chapterBlocks.collectAsState()
 LazyColumn(state = listState, ...) {
     itemsIndexed(blocks) { blockIdx, block ->
         when (block.type) {
-            "text" -> Text(
-                text = block.value ?: "",
-                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-                    .combinedClickable(onClick = {}, onLongClick = { showMenuAt = blockIdx }),
-                style = LocalTextStyle.current.copy(
-                    fontSize = settings.fontSize.sp.sp,
-                    lineHeight = (settings.fontSize.sp * settings.lineHeight.multiplier).sp,
-                ),
-            )
+            "text" -> {
+                ParagraphItem(
+                    text = block.value ?: "",
+                    fontSizeSp = settings.fontSize.sp.sp,
+                    lineHeightSp = (settings.fontSize.sp * settings.lineHeight.multiplier).sp,
+                    onAddBookmark = {
+                        viewModel.addBookmarkFromParagraph(blockIdx)
+                    },
+                    onCopy = {
+                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("paragraph", block.value ?: ""))
+                    },
+                )
+            }
             "image" -> {
                 if (block.src.isNullOrEmpty()) {
-                    Text("[本图片无法显示]", ...)
+                    Text(
+                        text = "[本图片无法显示]",
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontStyle = FontStyle.Italic,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
                 } else {
                     AsyncImage(
                         model = block.src,
@@ -374,24 +401,9 @@ LazyColumn(state = listState, ...) {
 
 ### Coil token 注入验证
 
-`OkHttpModule` 必须确认 `ImageLoader` 使用的 OkHttpClient 包含 auth interceptor（自动注入 `Authorization: Bearer <token>`）。如果当前不带，本次需要加上：
+经过确认，Android 客户端现有的 `LocalMediaHubApplication.newImageLoader()` 已经使用 Hilt 注入的单例 `okHttpClient`，而该客户端在 `OkHttpModule` 中已经配置了 `AuthInterceptor`（通过 lazy provider 自动读取最新 token 并注入 `Authorization: Bearer <token>` 请求头）。
 
-```kotlin
-// OkHttpModule.kt 内 ImageLoader 用的 OkHttpClient
-val imageHttpClient = OkHttpClient.Builder()
-    .addInterceptor { chain ->
-        val req = chain.request().newBuilder()
-            .header("Authorization", "Bearer ${serverConfig.token}")
-            .build()
-        chain.proceed(req)
-    }
-    .build()
-
-val imageLoader = ImageLoader.Builder(context)
-    .components { add(NativeDecoderFactory()) }
-    .okHttpClient(imageHttpClient)
-    .build()
-```
+因此，Coil 的 `AsyncImage` 发起的图片请求会自动携带身份验证凭据，**无需在此处为 Coil 编写额外的 OkHttpClient 构建逻辑**。这保持了应用的网络连接池共享和统一的拦截器管道。
 
 ### 不改动的部分
 
@@ -451,6 +463,7 @@ function renderBlocks(blocks) {
 // appendTokenQueryParam: 给 image URL 加上 token query param
 // （因为 <img> 不走 fetch，无法注入 Authorization 头）
 function appendTokenQueryParam(url) {
+    if (!url || url.startsWith('data:')) return url;
     const token = getAuthToken();  // 从现有 auth 模块拿
     if (!token) return url;
     const sep = url.includes('?') ? '&' : '?';
@@ -567,8 +580,8 @@ CI 闸门：
 
 ## 风险
 
-- **Coil token 注入**：如果当前 `ImageLoader` 用的 OkHttpClient 不带 auth interceptor，所有 `AsyncImage` 加载 `/api/v1/books/image` 会 401。Plan 必须包含验证步骤。
+- **Coil token 注入**：已确认应用全局的 Hilt-managed `okHttpClient` 已内置 `AuthInterceptor`，Coil 自动复用此 client，因此图片请求会自动携带 Authorization 头，不存在 401 风险。
 - **query param token 暴露**：token 出现在 URL 里，浏览器历史/日志会留痕。单用户局域网场景风险可接受；未来公网部署需要换成 cookie-based auth 或 signed URL。
-- **manifest 反查漏匹配**：如果 epub 用了 `#fragment` 或 URL encoding 的 src，`NormalizeHref` 必须正确处理。测试覆盖。
+- **manifest 反查漏匹配**：如果 epub 用了 `#fragment` 或 URL encoding 的 src，`NormalizeHref` 引入了 `url.PathUnescape` 以统一解码 percent-encoding 字符，可进行精准反查，且已跳过 `http://` / `https://` 的远程图片。
 - **响应体膨胀**：章节 JSON 略大于纯文本（每个 block 一个对象），但与原 content 字符串差异不大（10~20%），可接受。
 - **txt 路径行为变化**：原 txt 直接返回整段字符串，客户端按 `\n\n` split；新 txt 服务端 split 后客户端不 split。LazyColumn item 数量变化（从 1 个变成 N 个），但不影响功能——书签 `paragraphIndex` 语义变为 block index，向后兼容 C-phase 已存数据。
