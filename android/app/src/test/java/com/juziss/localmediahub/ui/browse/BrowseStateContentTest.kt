@@ -31,7 +31,7 @@ class BrowseStateContentTest {
                 isSystemBrowse = false,
                 tags = emptyList(),
                 activeTagFilter = null,
-                onVideoClick = {}, onImageClick = { _, _ -> },
+                onVideoClick = {}, onImageClick = { _, _ -> }, onTextClick = {},
                 onToggleFavorite = {}, isFavorite = { false },
                 onFileLongClick = {}, onFolderLongClick = {},
                 onRetry = { retried = true },
