@@ -22,15 +22,18 @@ func BearerToken(token string) echo.MiddlewareFunc {
 			if token == "" {
 				return next(c)
 			}
+			var provided string
 			auth := c.Request().Header.Get(echo.HeaderAuthorization)
 			const prefix = "Bearer "
-			if !strings.HasPrefix(auth, prefix) {
-				return c.JSON(
-					http.StatusUnauthorized,
-					map[string]string{"error": "Unauthorized"},
-				)
+			if strings.HasPrefix(auth, prefix) {
+				provided = auth[len(prefix):]
+			} else {
+				// Fallback for clients that cannot set headers (e.g. <img src>
+				// tags loading from /api/v1/books/image). Header takes
+				// precedence so this does not change behavior for any
+				// existing client.
+				provided = c.QueryParam("token")
 			}
-			provided := auth[len(prefix):]
 			if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
 				return c.JSON(
 					http.StatusUnauthorized,

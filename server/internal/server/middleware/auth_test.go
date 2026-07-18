@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBearerToken(t *testing.T) {
@@ -105,4 +107,44 @@ func TestBearerToken(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBearerTokenAcceptsTokenInQueryParam(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/img?token=secret", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	h := BearerToken("secret")(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	err := h(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestBearerTokenHeaderTakesPrecedenceOverQueryParam(t *testing.T) {
+	e := echo.New()
+	// header has correct token; query has wrong token. Should pass.
+	req := httptest.NewRequest(http.MethodGet, "/api?token=wrong", nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer secret")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	h := BearerToken("secret")(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	err := h(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestBearerTokenRejectsInvalidQueryParamToken(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/img?token=wrong", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	h := BearerToken("secret")(func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	})
+	_ = h(c)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
