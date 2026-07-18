@@ -1,3 +1,21 @@
+/* Web reader fonts (Phase 3). woff2 files are embedded via web.Assets
+   and served at /fonts/*.woff2 — see web.go embed directive. font-display:
+   swap ensures text remains visible during the (first-load) font fetch. */
+@font-face {
+    font-family: "LXGW WenKai";
+    src: url("/fonts/LXGWWenKai-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Noto Serif SC";
+    src: url("/fonts/NotoSerifSC-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
 /* Core Design Tokens & Variables */
 :root {
     --bg-main: #0a0a0f;
