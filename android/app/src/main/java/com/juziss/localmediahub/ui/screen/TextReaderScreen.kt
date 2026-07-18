@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -61,6 +62,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import com.juziss.localmediahub.data.Bookmark
 import com.juziss.localmediahub.ui.component.reader.ReaderSettingsSheet
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
@@ -87,7 +89,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val book by viewModel.book.collectAsState()
-    val text by viewModel.chapterText.collectAsState()
+    val blocks by viewModel.chapterBlocks.collectAsState()
     val idx by viewModel.currentIndex.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -270,27 +272,49 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                         )
                     }
                     if (error == null && !isLoading) {
-                        val paras = remember(text) {
-                            text.split("\n\n").filter { it.isNotBlank() }
-                        }
                         LazyColumn(
                             state = listState,
                             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
                             contentPadding = PaddingValues(vertical = 16.dp),
                         ) {
-                            itemsIndexed(paras) { paraIdx, para ->
-                                ParagraphItem(
-                                    text = para,
-                                    fontSizeSp = settings.fontSize.sp.sp,
-                                    lineHeightSp = (settings.fontSize.sp * settings.lineHeight.multiplier).sp,
-                                    onAddBookmark = {
-                                        viewModel.addBookmarkFromParagraph(paraIdx, para.take(30))
-                                    },
-                                    onCopy = {
-                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        cm.setPrimaryClip(ClipData.newPlainText("paragraph", para))
-                                    },
-                                )
+                            itemsIndexed(blocks) { blockIdx, block ->
+                                when (block.type) {
+                                    "text" -> ParagraphItem(
+                                        text = block.value ?: "",
+                                        fontSizeSp = settings.fontSize.sp.sp,
+                                        lineHeightSp = (settings.fontSize.sp * settings.lineHeight.multiplier).sp,
+                                        onAddBookmark = {
+                                            // Returns false for image/out-of-range blocks;
+                                            // duplicate feedback is delivered via bookmarkToast.
+                                            viewModel.addBookmarkFromParagraph(blockIdx)
+                                        },
+                                        onCopy = {
+                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            cm.setPrimaryClip(ClipData.newPlainText("paragraph", block.value ?: ""))
+                                        },
+                                    )
+                                    "image" -> {
+                                        if (block.src.isNullOrEmpty()) {
+                                            Text(
+                                                text = "[本图片无法显示]",
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                ),
+                                            )
+                                        } else {
+                                            // Auth headers (Bearer token) are injected by
+                                            // LocalMediaHubApplication's Hilt-provided OkHttpClient
+                                            // via AuthInterceptor — no per-call setup needed.
+                                            AsyncImage(
+                                                model = block.src,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

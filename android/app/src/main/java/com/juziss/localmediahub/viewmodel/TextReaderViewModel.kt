@@ -2,6 +2,7 @@ package com.juziss.localmediahub.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.juziss.localmediahub.data.Block
 import com.juziss.localmediahub.data.Book
 import com.juziss.localmediahub.data.BookProgress
 import com.juziss.localmediahub.data.Bookmark
@@ -40,8 +41,8 @@ class TextReaderViewModel @Inject constructor(
     private val _currentIndex = MutableStateFlow(0)
     val currentIndex: StateFlow<Int> = _currentIndex.asStateFlow()
 
-    private val _chapterText = MutableStateFlow("")
-    val chapterText: StateFlow<String> = _chapterText.asStateFlow()
+    private val _chapterBlocks = MutableStateFlow<List<Block>>(emptyList())
+    val chapterBlocks: StateFlow<List<Block>> = _chapterBlocks.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -120,7 +121,7 @@ class TextReaderViewModel @Inject constructor(
             when (val r = repo.getBookChapter(b.path, index)) {
                 is NetworkResult.Success -> {
                     _currentIndex.value = index
-                    _chapterText.value = r.data.content
+                    _chapterBlocks.value = r.data.blocks
                     store.saveBookProgress(
                         BookProgress(
                             path = b.path,
@@ -202,10 +203,12 @@ class TextReaderViewModel @Inject constructor(
     }
 
     /**
-     * Adds a bookmark for the current chapter + given paragraph. On duplicate
-     * (same bookPath, chapterIndex, paragraphIndex already exists) the store
-     * returns false and [bookmarkToast] is populated for the UI to display
-     * "已存在书签". No-op if no book is loaded.
+     * Adds a bookmark for the current chapter + given block. The preview is
+     * extracted internally from the block's text value (first 30 chars). Image
+     * blocks and out-of-range indices are rejected (returns false) — only text
+     * blocks can carry a bookmark. On duplicate (same bookPath, chapterIndex,
+     * paragraphIndex already exists) the store returns false and
+     * [bookmarkToast] is populated for the UI to display "已存在书签".
      *
      * The store call runs in [viewModelScope] (non-blocking) — the dedup
      * outcome is surfaced via [bookmarkToast] for the UI to display ("已存在
@@ -213,19 +216,25 @@ class TextReaderViewModel @Inject constructor(
      * [bookmarks] flow refreshes via [loadBookmarksFor]'s ongoing collection
      * without any extra refresh call here.
      */
-    fun addBookmarkFromParagraph(paragraphIndex: Int, preview: String) {
-        val b = _book.value ?: return
+    fun addBookmarkFromParagraph(blockIndex: Int): Boolean {
+        val b = _book.value ?: return false
+        val blocks = _chapterBlocks.value
+        if (blockIndex !in blocks.indices) return false
+        val block = blocks[blockIndex]
+        if (block.type != "text") return false  // bookmarks only on text blocks
+        val preview = block.value?.take(30) ?: ""
         val bm = Bookmark(
             bookPath = b.path,
             chapterIndex = _currentIndex.value,
-            paragraphIndex = paragraphIndex,
-            preview = preview.take(30),
+            paragraphIndex = blockIndex,  // field name retained per spec
+            preview = preview,
             createdAt = System.currentTimeMillis(),
         )
         viewModelScope.launch {
             val added = store.addBookmark(bm)
             if (!added) _bookmarkToast.value = "已存在书签"
         }
+        return true
     }
 
     /**
