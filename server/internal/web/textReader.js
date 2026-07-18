@@ -189,9 +189,19 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             </fieldset>
             <fieldset>
                 <legend>主题</legend>
-                ${['DAY','NIGHT','EYE_CARE'].map(v =>
-                    `<label><input type="radio" name="theme" value="${v}"> ${ {DAY:'日间',NIGHT:'夜间',EYE_CARE:'护眼'}[v] }</label>`
-                ).join('')}
+                <div class="reader-settings__theme-grid">
+                    ${[
+                        ['DAY','日间·纸白'],['DAY_BRIGHT','日间·亮白'],['EYE_CARE','护眼·米黄'],
+                        ['PARCHMENT','羊皮纸'],['NIGHT','夜间·深空'],['NIGHT_BLACK','夜间·纯黑'],
+                        ['AUTO','跟随系统'],
+                    ].map(([v,label]) =>
+                        `<label class="reader-settings__theme-opt">
+                            <input type="radio" name="theme" value="${v}">
+                            <span class="reader-settings__theme-swatch" data-theme="${v}"></span>
+                            <span class="reader-settings__theme-label">${label}</span>
+                        </label>`
+                    ).join('')}
+                </div>
             </fieldset>
             <fieldset>
                 <legend>自动滚动速度</legend>
@@ -238,13 +248,29 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     function applySettingsToUI() {
         const s = readerPrefs.getSettings();
         const root = document.documentElement;
-        const theme = readerPrefs.THEME_PRESETS[s.theme] || readerPrefs.THEME_PRESETS.DAY;
+
+        // AUTO resolves to DAY/NIGHT based on prefers-color-scheme
+        let themeKey = s.theme;
+        if (themeKey === 'AUTO') {
+            const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            themeKey = isDark ? 'NIGHT' : 'DAY';
+        }
+        const theme = readerPrefs.THEME_PRESETS[themeKey];
+
+        // Body + chrome CSS variables
         root.style.setProperty('--reader-bg', theme.bg);
         root.style.setProperty('--reader-fg', theme.fg);
-        root.style.setProperty('--reader-border', theme.border || '#3f3f46');
+        root.style.setProperty('--reader-chrome-bg', theme.chromeBg);
+        root.style.setProperty('--reader-chrome-fg', theme.chromeFg);
+        root.style.setProperty('--reader-muted', theme.muted);
+        root.style.setProperty('--reader-border', theme.border);
         root.style.setProperty('--reader-font-size', s.fontSize + 'px');
         root.style.setProperty('--reader-line-height', String(s.lineHeight));
-        // Reflect into dialog controls
+
+        // Overall App-variable override driven by data-reader-theme attribute
+        document.body.dataset.readerTheme = themeKey;
+
+        // Reflect into dialog controls (translate V2 numeric <-> V1 radio enum)
         const fontEnum = FONT_SIZE_TO_ENUM[s.fontSize];
         const fontInput = fontEnum && dialog.querySelector(`input[name="fontSize"][value="${fontEnum}"]`);
         if (fontInput) fontInput.checked = true;
@@ -255,13 +281,19 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (themeInput) themeInput.checked = true;
         dialog.querySelector('input[name="autoScrollSpeed"]').value = s.autoScrollSpeed;
         dialog.querySelector('[data-bind="speedLabel"]').textContent = s.autoScrollSpeed;
-
         if (els.autoscrollSpeedVal) {
             els.autoscrollSpeedVal.textContent = s.autoScrollSpeed;
         }
     }
     applySettingsToUI();
     const unsubPrefs = readerPrefs.subscribe(() => applySettingsToUI());
+
+    // AUTO follow-system: re-resolve when OS dark/light changes
+    const mediaDark = window.matchMedia('(prefers-color-scheme: dark)');
+    function onSystemColorSchemeChange() {
+        if (readerPrefs.getSettings().theme === 'AUTO') applySettingsToUI();
+    }
+    mediaDark.addEventListener('change', onSystemColorSchemeChange);
 
     // 4. Settings change handlers — let the dialog's `change` event bubble.
     dialog.addEventListener('change', (e) => {
@@ -540,6 +572,8 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         unsubPrefs();
         unsubBms();
         document.removeEventListener('visibilitychange', onVisibilityChange);
+        mediaDark.removeEventListener('change', onSystemColorSchemeChange);
+        delete document.body.dataset.readerTheme;
         if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
         if (autoNextChapterTimer) clearTimeout(autoNextChapterTimer);
     };
