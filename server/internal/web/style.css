@@ -1695,6 +1695,31 @@ body {
     margin-bottom: 0;
 }
 
+/* Inline images rendered from epub image blocks (Task 11). Kept outside the
+   <p> indent flow so they read as block-level figures. */
+.text-reader__image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 12px auto;
+    border-radius: 4px;
+}
+
+/* Placeholder styling for image blocks whose src was missing/invalid — the
+   JS sets alt="[本图片无法显示]" in that case. Attribute selector keeps this
+   rule narrowly scoped so legitimate alt text on real images is unaffected. */
+.text-reader__content img[alt="[本图片无法显示]"] {
+    display: block;
+    width: 100%;
+    padding: 16px;
+    box-sizing: border-box;
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    background: var(--bg-elevated, var(--bg-card));
+    border-radius: 4px;
+}
+
 /* Hover-to-show bookmark button on each paragraph */
 .text-reader__para-bookmark {
     position: absolute;

@@ -6,7 +6,7 @@
 // Mirrors the Android TextReaderViewModel contract: /api/v1/books/info and
 // /api/v1/books/chapter. The unsupported formats (.mobi / .azw3) never reach
 // this module — browserView intercepts them and shows a "暂不支持" toast.
-import { getBookInfo, getBookChapter } from './api.js';
+import { getBookInfo, getBookChapter, getAuthToken } from './api.js';
 import { showToast } from './toast.js';
 import * as readerPrefs from './readerPrefs.js';
 
@@ -214,16 +214,43 @@ export async function renderTextReader(container, path) {
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
 
-    // 6. Render chapter text as <p> elements (replaces textContent-on-container).
-    // Keeps XSS safety (each <p> set via textContent) and enables per-paragraph
-    // hover bookmark button.
-    function renderParagraphs(content) {
-        const paras = (content || '').split('\n\n').filter(p => p.trim());
+    // 6. Render chapter content block-by-block. Each block is either:
+    //   - {type:'text',  value:string}  → <p> with textContent (XSS safe) +
+    //                                     hover-to-add-bookmark button.
+    //   - {type:'image', src:string}    → <img loading='lazy'> with the token
+    //                                     appended as a query param (browsers
+    //                                     cannot set Authorization headers on
+    //                                     <img src> requests). A missing src
+    //                                     renders an alt-text placeholder.
+    //
+    // Block index replaces the old paragraphIndex so C-phase bookmark scroll
+    // (p[data-para-index]) still works — we set both dataset attributes.
+    function renderBlocks(blocks) {
         els.content.innerHTML = '';
-        paras.forEach((text, idx) => {
+        (blocks || []).forEach((block, idx) => {
+            if (block && block.type === 'image') {
+                const img = document.createElement('img');
+                img.className = 'text-reader__image';
+                img.loading = 'lazy';
+                if (block.src) {
+                    // src is server-controlled (already URL-encoded by the
+                    // service) and points at our own /api/v1/books/image —
+                    // safe to assign directly.
+                    img.src = appendTokenQueryParam(block.src);
+                } else {
+                    img.alt = '[本图片无法显示]';
+                }
+                els.content.appendChild(img);
+                return;
+            }
+            // Default / text block (also tolerates unknown types by treating
+            // their .value as text so a future server addition never injects
+            // untrusted HTML).
+            const text = (block && typeof block.value === 'string') ? block.value : '';
             const p = document.createElement('p');
             p.textContent = text;  // XSS safe
-            p.dataset.paraIndex = idx;
+            p.dataset.blockIndex = String(idx);
+            p.dataset.paraIndex = String(idx);  // C-phase bookmark scroll compat
             // Hover bookmark button
             const btn = document.createElement('button');
             btn.className = 'text-reader__para-bookmark';
@@ -347,9 +374,11 @@ export async function renderTextReader(container, path) {
         try {
             const chapter = await getBookChapter(path, idx);
             els.title.textContent = `${chapter.title || ''} — ${book.title || ''}`;
-            // Per-paragraph rendering preserves XSS safety and enables the
-            // hover-to-add bookmark button (each <p> uses textContent).
-            renderParagraphs(chapter.content || '');
+            // Per-block rendering preserves XSS safety (each <p> uses
+            // textContent) and renders inline <img> for image blocks. Falls
+            // back to splitting legacy chapter.content on blank lines when the
+            // server response does not yet include blocks.
+            renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content));
             els.progress.textContent = `第 ${idx + 1} / ${chapterCount} 章`;
             els.content.scrollTop = 0;
             saveProgress(path, { chapterIndex: idx, scrollOffset: 0, lastReadAt: Date.now() });
@@ -383,6 +412,28 @@ function saveProgress(path, p) {
 
 function clamp(n, lo, hi) {
     return Math.max(lo, Math.min(hi, n));
+}
+
+// blocksFromLegacyContent converts an old-style chapter.content string into
+// the new block array shape so this client keeps working even if a chapter
+// payload lacks the (newer) `blocks` field. Each blank-line-separated
+// paragraph becomes a {type:'text'} block.
+function blocksFromLegacyContent(content) {
+    return (content || '')
+        .split('\n\n')
+        .filter(p => p.trim())
+        .map(p => ({ type: 'text', value: p }));
+}
+
+// appendTokenQueryParam adds ?token=... (or &token=...) to a URL so that
+// <img> tags — which cannot set Authorization headers — can authenticate
+// against /api/v1/books/image. Returns the URL unchanged when no token is
+// configured (open-auth-mode servers).
+function appendTokenQueryParam(url) {
+    const token = getAuthToken();
+    if (!token) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return url + sep + 'token=' + encodeURIComponent(token);
 }
 
 // Cache DOM references once per render so we don't query on every chapter load.
