@@ -17,7 +17,7 @@ const STORAGE_PREFIX = 'book_progress:';
 // The container is the #view-reader section element. We always start by
 // clearing any previous render so re-navigating to a different book does not
 // leak DOM or event listeners from the previous one.
-export async function renderTextReader(container, path) {
+export async function renderTextReader(container, path, chapterParam, paraParam) {
     // Invoke prior cleanup FIRST so listener/rAF leaks from a previous render
     // (if any) are released before we wipe innerHTML below.
     if (typeof container._cleanupReader === 'function') container._cleanupReader();
@@ -42,9 +42,38 @@ export async function renderTextReader(container, path) {
             </footer>
         </div>
         <div class="text-reader__drawer text-reader__drawer--hidden" aria-hidden="true"></div>
+        
+        <!-- Floating Autoscroll Control Panel -->
+        <div class="text-reader__autoscroll-panel text-reader__autoscroll-panel--hidden" id="autoscroll-panel">
+            <button class="autoscroll-panel-btn" id="autoscroll-panel-play">⏸</button>
+            <button class="autoscroll-panel-btn" id="autoscroll-panel-minus" title="减速">-</button>
+            <span class="autoscroll-panel-text">速度: <span id="autoscroll-val-speed">5</span></span>
+            <button class="autoscroll-panel-btn" id="autoscroll-panel-plus" title="加速">+</button>
+        </div>
     `;
 
     const els = bindEls(container);
+
+    function scrollToParagraph(paraIdx) {
+        let attempts = 0;
+        const maxAttempts = 15; // retry up to 1.5 seconds for complete layout reflow
+        function tryScroll() {
+            const target = els.content.querySelector(`p[data-para-index="${paraIdx}"]`);
+            if (target) {
+                const targetY = Math.max(0, target.offsetTop - 16);
+                els.content.scrollTop = targetY;
+                // Double check if we actually scrolled close to targetY (unless content height is too small)
+                if (Math.abs(els.content.scrollTop - targetY) > 5 && attempts < maxAttempts) {
+                    attempts++;
+                    setTimeout(tryScroll, 100);
+                }
+            } else if (attempts < maxAttempts) {
+                attempts++;
+                setTimeout(tryScroll, 100);
+            }
+        }
+        setTimeout(tryScroll, 50);
+    }
 
     let currentIdx = 0;
     let chapterCount = 0;
@@ -62,10 +91,16 @@ export async function renderTextReader(container, path) {
     }
 
     chapterCount = (book.chapters || []).length;
-    const progress = loadProgress(path);
-    const startIdx = progress
-        ? clamp(progress.chapterIndex || 0, 0, Math.max(0, chapterCount - 1))
-        : 0;
+    
+    let startIdx = 0;
+    if (chapterParam !== undefined && chapterParam !== null) {
+        startIdx = clamp(parseInt(chapterParam, 10) || 0, 0, Math.max(0, chapterCount - 1));
+    } else {
+        const progress = loadProgress(path);
+        if (progress) {
+            startIdx = clamp(progress.chapterIndex || 0, 0, Math.max(0, chapterCount - 1));
+        }
+    }
 
     // closeDrawer: shared helper used by TOC and bookmark tab handlers.
     function closeDrawer() {
@@ -84,6 +119,47 @@ export async function renderTextReader(container, path) {
     });
     els.next.addEventListener('click', () => {
         if (currentIdx < chapterCount - 1) loadChapter(Math.min(chapterCount - 1, currentIdx + 1));
+    });
+
+    // Left/Right side click chapter navigation
+    els.content.addEventListener('mousemove', (e) => {
+        if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) {
+            els.content.style.cursor = 'default';
+            return;
+        }
+        const rect = els.content.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const width = rect.width;
+        const ratio = clickX / width;
+        if (ratio < 0.25 || ratio > 0.75) {
+            els.content.style.cursor = 'pointer';
+        } else {
+            els.content.style.cursor = 'default';
+        }
+    });
+
+    els.content.addEventListener('click', (e) => {
+        if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) return;
+        if (window.getSelection() && window.getSelection().toString().trim() !== '') return;
+        
+        const rect = els.content.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const width = rect.width;
+        const ratio = clickX / width;
+        
+        if (ratio < 0.25) {
+            if (currentIdx > 0) {
+                loadChapter(currentIdx - 1);
+            } else {
+                showToast('已经是第一章了', 'info');
+            }
+        } else if (ratio > 0.75) {
+            if (currentIdx < chapterCount - 1) {
+                loadChapter(currentIdx + 1);
+            } else {
+                showToast('已经是最后一章了', 'info');
+            }
+        }
     });
     els.toc.addEventListener('click', () => toggleDrawer(book, els.drawer));
     els.drawer.addEventListener('chapter-select', (e) => {
@@ -150,10 +226,10 @@ export async function renderTextReader(container, path) {
     els.header.appendChild(headerRight);
 
     // 3. Apply current settings (CSS vars + dialog controls).
-    // Phase 1 bridge: settings are now V2-shape (numeric fontSize/lineHeight).
-    // The dialog still exposes 4 font radios (SMALL/MEDIUM/LARGE/XLARGE) and
-    // 3 line-height radios (COMPACT/STANDARD/LOOSE) for visual continuity;
-    // we translate at the boundary. Phase 3/4 will replace this with sliders.
+    // Phase 1: settings are V2-shape (numeric fontSize/lineHeight). The dialog
+    // still exposes 4 font radios (SMALL/MEDIUM/LARGE/XLARGE) and 3 line-height
+    // radios (COMPACT/STANDARD/LOOSE) for visual continuity; we translate at the
+    // boundary. Phase 3/4 will replace this with continuous sliders.
     const FONT_SIZE_TO_ENUM = { 14: 'SMALL', 16: 'MEDIUM', 18: 'LARGE', 20: 'XLARGE' };
     const LINE_HEIGHT_TO_ENUM = { 1.4: 'COMPACT', 1.8: 'STANDARD', 2.2: 'LOOSE' };
     const ENUM_TO_FONT_SIZE = { SMALL: 14, MEDIUM: 16, LARGE: 18, XLARGE: 20 };
@@ -165,10 +241,10 @@ export async function renderTextReader(container, path) {
         const theme = readerPrefs.THEME_PRESETS[s.theme] || readerPrefs.THEME_PRESETS.DAY;
         root.style.setProperty('--reader-bg', theme.bg);
         root.style.setProperty('--reader-fg', theme.fg);
-        root.style.setProperty('--reader-border', theme.border);
+        root.style.setProperty('--reader-border', theme.border || '#3f3f46');
         root.style.setProperty('--reader-font-size', s.fontSize + 'px');
         root.style.setProperty('--reader-line-height', String(s.lineHeight));
-        // Reflect into dialog controls (translate numeric V2 -> enum radio values)
+        // Reflect into dialog controls
         const fontEnum = FONT_SIZE_TO_ENUM[s.fontSize];
         const fontInput = fontEnum && dialog.querySelector(`input[name="fontSize"][value="${fontEnum}"]`);
         if (fontInput) fontInput.checked = true;
@@ -179,18 +255,21 @@ export async function renderTextReader(container, path) {
         if (themeInput) themeInput.checked = true;
         dialog.querySelector('input[name="autoScrollSpeed"]').value = s.autoScrollSpeed;
         dialog.querySelector('[data-bind="speedLabel"]').textContent = s.autoScrollSpeed;
+
+        if (els.autoscrollSpeedVal) {
+            els.autoscrollSpeedVal.textContent = s.autoScrollSpeed;
+        }
     }
     applySettingsToUI();
     const unsubPrefs = readerPrefs.subscribe(() => applySettingsToUI());
 
     // 4. Settings change handlers — let the dialog's `change` event bubble.
-    // Phase 1 bridge: dialog radios still use enum strings; translate to V2
-    // numeric values before persisting.
     dialog.addEventListener('change', (e) => {
         const t = e.target;
         if (t.name === 'autoScrollSpeed') {
             readerPrefs.saveSettings({ autoScrollSpeed: parseInt(t.value, 10) });
         } else if (t.name === 'fontSize') {
+            // V1 radio value (enum string) -> V2 numeric
             if (Object.prototype.hasOwnProperty.call(ENUM_TO_FONT_SIZE, t.value)) {
                 readerPrefs.saveSettings({ fontSize: ENUM_TO_FONT_SIZE[t.value] });
             }
@@ -203,38 +282,116 @@ export async function renderTextReader(container, path) {
         }
     });
 
-    // 5. Auto-scroll via rAF + float truncation fix.
+    // 5. Auto-scroll via rAF
     let isScrolling = false;
     let currentScrollTop = 0;
     let scrollRafId = null;
-    function scrollLoop() {
-        if (!isScrolling) return;
-        const speed = readerPrefs.getSettings().autoScrollSpeed;
-        const pxPerFrame = speed * 0.5;
-        currentScrollTop += pxPerFrame;
-        els.content.scrollTop = currentScrollTop;
-        // Re-sync if browser clamped (e.g. reached bottom).
-        if (Math.abs(els.content.scrollTop - currentScrollTop) > 1) {
-            currentScrollTop = els.content.scrollTop;
-        }
-        scrollRafId = requestAnimationFrame(scrollLoop);
+    let autoNextChapterTimer = null;
+
+    function startAutoScroll() {
+        currentScrollTop = els.content.scrollTop;
+        scrollLoop();
     }
-    scrollBtn.addEventListener('click', () => {
-        isScrolling = !isScrolling;
-        scrollBtn.textContent = isScrolling ? '⏸' : '▶';
-        if (isScrolling) {
-            currentScrollTop = els.content.scrollTop;
-            scrollRafId = requestAnimationFrame(scrollLoop);
-        } else if (scrollRafId !== null) {
+
+    function stopAutoScroll() {
+        isScrolling = false;
+        scrollBtn.textContent = '▶';
+        if (els.autoscrollPlay) els.autoscrollPlay.textContent = '▶';
+        if (scrollRafId !== null) {
             cancelAnimationFrame(scrollRafId);
             scrollRafId = null;
         }
+        if (autoNextChapterTimer) {
+            clearTimeout(autoNextChapterTimer);
+            autoNextChapterTimer = null;
+        }
+    }
+
+    function scrollLoop() {
+        if (!isScrolling) return;
+
+        const speed = readerPrefs.getSettings().autoScrollSpeed;
+        const pxPerFrame = speed * 0.15; // Smooth, readable slower scroll speeds
+        currentScrollTop += pxPerFrame;
+        els.content.scrollTop = currentScrollTop;
+
+        // Re-sync if browser clamped
+        if (Math.abs(els.content.scrollTop - currentScrollTop) > 1) {
+            currentScrollTop = els.content.scrollTop;
+        }
+
+        // Check if reached bottom of current chapter
+        if (els.content.scrollTop + els.content.clientHeight >= els.content.scrollHeight - 5) {
+            stopAutoScroll();
+            showToast('已到达本章底部，即将载入下一章...', 'info');
+            autoNextChapterTimer = setTimeout(() => {
+                if (currentIdx < chapterCount - 1) {
+                    loadChapter(currentIdx + 1);
+                    currentScrollTop = 0;
+                    els.content.scrollTop = 0;
+                    isScrolling = true;
+                    scrollBtn.textContent = '⏸';
+                    if (els.autoscrollPlay) els.autoscrollPlay.textContent = '⏸';
+                    startAutoScroll();
+                } else {
+                    showToast('已读完本书最后一章', 'success');
+                }
+            }, 2000);
+            return;
+        }
+
+        scrollRafId = requestAnimationFrame(scrollLoop);
+    }
+
+    scrollBtn.addEventListener('click', () => {
+        isScrolling = !isScrolling;
+        scrollBtn.textContent = isScrolling ? '⏸' : '▶';
+        if (els.autoscrollPanel) {
+            els.autoscrollPanel.classList.toggle('text-reader__autoscroll-panel--hidden', !isScrolling);
+            if (els.autoscrollPlay) els.autoscrollPlay.textContent = isScrolling ? '⏸' : '▶';
+        }
+        if (isScrolling) {
+            startAutoScroll();
+        } else {
+            stopAutoScroll();
+        }
     });
+
+    if (els.autoscrollPlay) {
+        els.autoscrollPlay.addEventListener('click', () => {
+            isScrolling = !isScrolling;
+            scrollBtn.textContent = isScrolling ? '⏸' : '▶';
+            els.autoscrollPlay.textContent = isScrolling ? '⏸' : '▶';
+            if (isScrolling) {
+                startAutoScroll();
+            } else {
+                stopAutoScroll();
+            }
+        });
+    }
+
+    if (els.autoscrollMinus) {
+        els.autoscrollMinus.addEventListener('click', () => {
+            const s = readerPrefs.getSettings();
+            const nextSpeed = Math.max(1, s.autoScrollSpeed - 1);
+            readerPrefs.saveSettings({ autoScrollSpeed: nextSpeed });
+        });
+    }
+
+    if (els.autoscrollPlus) {
+        els.autoscrollPlus.addEventListener('click', () => {
+            const s = readerPrefs.getSettings();
+            const nextSpeed = Math.min(10, s.autoScrollSpeed + 1);
+            readerPrefs.saveSettings({ autoScrollSpeed: nextSpeed });
+        });
+    }
+
     function onVisibilityChange() {
         if (document.hidden && isScrolling) {
-            isScrolling = false;
-            scrollBtn.textContent = '▶';
-            if (scrollRafId !== null) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
+            stopAutoScroll();
+            if (els.autoscrollPanel) {
+                els.autoscrollPanel.classList.add('text-reader__autoscroll-panel--hidden');
+            }
         }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -346,12 +503,12 @@ export async function renderTextReader(container, path) {
                     });
                     row.appendChild(title);
                     row.appendChild(del);
-                    row.addEventListener('click', () => {
-                        loadChapter(bm.chapterIndex).then(() => {
-                            const target = els.content.querySelector(`p[data-para-index="${bm.paragraphIndex}"]`);
-                            target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            closeDrawer();
-                        });
+                    row.addEventListener('click', async () => {
+                        if (currentIdx !== bm.chapterIndex) {
+                            await loadChapter(bm.chapterIndex);
+                        }
+                        scrollToParagraph(bm.paragraphIndex);
+                        closeDrawer();
                     });
                     panel.appendChild(row);
                 });
@@ -378,15 +535,21 @@ export async function renderTextReader(container, path) {
     });
 
     // Cleanup on re-render: container.innerHTML gets cleared next time, so we
-    // stash unsubscribers + rAF cancellation on the container node.
+    // stash subscribers + rAF cancellation on the container node.
     container._cleanupReader = () => {
         unsubPrefs();
         unsubBms();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
+        if (autoNextChapterTimer) clearTimeout(autoNextChapterTimer);
     };
 
     await loadChapter(startIdx);
+
+    // If an initial paragraph bookmark parameter is specified in the URL, scroll to it
+    if (paraParam !== undefined && paraParam !== null) {
+        scrollToParagraph(parseInt(paraParam, 10));
+    }
 
     // loadChapter: fetch one chapter by zero-based index and update the view.
     // Guarded by isLoadingChapter so rapid prev/next clicks do not race and
@@ -473,6 +636,11 @@ function bindEls(root) {
         toc: root.querySelector('.text-reader__toc'),
         progress: root.querySelector('.text-reader__progress'),
         drawer: root.querySelector('.text-reader__drawer'),
+        autoscrollPanel: root.querySelector('#autoscroll-panel'),
+        autoscrollPlay: root.querySelector('#autoscroll-panel-play'),
+        autoscrollMinus: root.querySelector('#autoscroll-panel-minus'),
+        autoscrollPlus: root.querySelector('#autoscroll-panel-plus'),
+        autoscrollSpeedVal: root.querySelector('#autoscroll-val-speed'),
     };
 }
 
