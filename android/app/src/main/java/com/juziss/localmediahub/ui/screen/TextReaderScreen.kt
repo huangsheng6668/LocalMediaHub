@@ -4,10 +4,14 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.WindowManager
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
@@ -37,6 +41,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -67,6 +72,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -317,52 +324,103 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                         val maxContentDp = min(720, configuration.screenWidthDp - 32).dp
                         val contentDp = settings.contentWidthDp.dp.coerceAtMost(maxContentDp)
 
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            LazyColumn(
-                                state = listState,
-                                modifier = Modifier.width(contentDp),
-                                contentPadding = PaddingValues(vertical = 16.dp),
-                            ) {
-                                itemsIndexed(blocks) { blockIdx, block ->
-                                    when (block.type) {
-                                        "text" -> ParagraphItem(
-                                            text = block.value ?: "",
-                                            fontSizeSp = settings.fontSizeSp.sp,
-                                            lineHeightSp = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
-                                            fontFamily = settings.fontFamily.toFontFamily(),
-                                            firstLineIndent = settings.firstLineIndent,
-                                            paragraphGapEm = if (settings.paragraphSpacing) 1.6f else 1.2f,
-                                            onAddBookmark = {
-                                                // Returns false for image/out-of-range blocks;
-                                                // duplicate feedback is delivered via bookmarkToast.
-                                                viewModel.addBookmarkFromParagraph(blockIdx)
-                                            },
-                                            onCopy = {
-                                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                cm.setPrimaryClip(ClipData.newPlainText("paragraph", block.value ?: ""))
-                                            },
+                        // Phase 6: chapter content wrapped in AnimatedContent so
+                        // switching chapters fades the body in (120ms) over a
+                        // 0ms fade-out. chapterKey changes whenever the block
+                        // list identity changes, which retriggers the animation.
+                        val chapterKey = blocks.hashCode()
+                        AnimatedContent(
+                            targetState = chapterKey,
+                            transitionSpec = {
+                                fadeIn(tween(120)) togetherWith fadeOut(tween(0))
+                            },
+                            label = "chapterTransition",
+                        ) { _ ->
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.width(contentDp),
+                                    contentPadding = PaddingValues(vertical = 16.dp),
+                                ) {
+                                    // item 0: 章节大标题（居中 serif + 40dp 装饰线）
+                                    item {
+                                        val chapterTitle = book?.chapters?.getOrNull(idx)?.title ?: ""
+                                        Text(
+                                            text = chapterTitle,
+                                            style = MaterialTheme.typography.titleMedium.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = (settings.fontSizeSp + 6).sp,
+                                                fontFamily = FontFamily.Serif,
+                                                textAlign = TextAlign.Center,
+                                            ),
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 32.dp, bottom = 24.dp),
                                         )
-                                        "image" -> {
-                                            if (block.src.isNullOrEmpty()) {
-                                                Text(
-                                                    text = "[本图片无法显示]",
-                                                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    ),
-                                                )
-                                            } else {
-                                                // Auth headers (Bearer token) are injected by
-                                                // LocalMediaHubApplication's Hilt-provided OkHttpClient
-                                                // via AuthInterceptor — no per-call setup needed.
-                                                AsyncImage(
-                                                    model = block.src,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                                )
+                                        HorizontalDivider(
+                                            modifier = Modifier
+                                                .width(40.dp)
+                                                .padding(bottom = 16.dp),
+                                            color = MaterialTheme.colorScheme.outline,
+                                        )
+                                    }
+
+                                    itemsIndexed(blocks) { blockIdx, block ->
+                                        when (block.type) {
+                                            "text" -> ParagraphItem(
+                                                text = block.value ?: "",
+                                                fontSizeSp = settings.fontSizeSp.sp,
+                                                lineHeightSp = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
+                                                fontFamily = settings.fontFamily.toFontFamily(),
+                                                firstLineIndent = settings.firstLineIndent,
+                                                paragraphGapEm = if (settings.paragraphSpacing) 1.6f else 1.2f,
+                                                onAddBookmark = {
+                                                    // Returns false for image/out-of-range blocks;
+                                                    // duplicate feedback is delivered via bookmarkToast.
+                                                    viewModel.addBookmarkFromParagraph(blockIdx)
+                                                },
+                                                onCopy = {
+                                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                    cm.setPrimaryClip(ClipData.newPlainText("paragraph", block.value ?: ""))
+                                                },
+                                            )
+                                            "image" -> {
+                                                if (block.src.isNullOrEmpty()) {
+                                                    Text(
+                                                        text = "[本图片无法显示]",
+                                                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        ),
+                                                    )
+                                                } else {
+                                                    // Auth headers (Bearer token) are injected by
+                                                    // LocalMediaHubApplication's Hilt-provided OkHttpClient
+                                                    // via AuthInterceptor — no per-call setup needed.
+                                                    AsyncImage(
+                                                        model = block.src,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                                    )
+                                                }
                                             }
                                         }
+                                    }
+
+                                    // item N: 章节末尾 ❖（点击下一章）
+                                    item {
+                                        Text(
+                                            text = "❖",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 24.dp)
+                                                .clickable { viewModel.nextChapter() },
+                                        )
                                     }
                                 }
                             }
