@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -13,11 +12,12 @@ import (
 )
 
 // chapterResponse is the JSON body returned by GetBookChapter. The client
-// renders Content directly (already decoded UTF-8 text for txt, or extracted
-// XHTML text content for epub).
+// renders Blocks in order: text blocks render as paragraphs, image blocks
+// render as <img> tags whose Src is either a data: URI, an absolute http(s)
+// URL, or a /api/v1/books/image endpoint URL (rewritten by BookService).
 type chapterResponse struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	Title  string             `json:"title"`
+	Blocks []bookparser.Block `json:"blocks"`
 }
 
 // GetBookInfo parses the file at ?path=... and returns its Book metadata
@@ -85,29 +85,51 @@ func (h *Handler) GetBookChapter(c echo.Context) error {
 	if idx >= len(b.Chapters) {
 		return respondError(c, http.StatusBadRequest, "index out of range")
 	}
-	blocks, err := b.ChapterBlocks(idx)
+	blocks, err := h.books.GetChapterBlocks(resolved, idx)
 	if err != nil {
 		return mapBookError(c, err)
 	}
-	// Temporarily join blocks back into a single string so chapterResponse
-	// keeps its current shape. Task 8 replaces this with the real blocks
-	// response and the new image endpoint.
-	var sb strings.Builder
-	for _, blk := range blocks {
-		if blk.Type == "text" {
-			if sb.Len() > 0 {
-				sb.WriteString("\n\n")
-			}
-			sb.WriteString(blk.Value)
-		} else if blk.Type == "image" {
-			if sb.Len() > 0 {
-				sb.WriteString("\n\n")
-			}
-			sb.WriteString("[图片]")
-		}
-	}
 	setJsonCacheBrief(c)
-	return c.JSON(http.StatusOK, chapterResponse{Title: b.Chapters[idx].Title, Content: sb.String()})
+	return c.JSON(http.StatusOK, chapterResponse{
+		Title:  b.Chapters[idx].Title,
+		Blocks: blocks,
+	})
+}
+
+// GetBookImage returns the raw bytes of a single image resource inside an
+// epub, identified by its manifest id. Path is validated against scan roots
+// + system allowed roots with the text-extension allow-list (epub is a text
+// extension). Bytes are served with a 1-day browser cache via
+// setMediaCacheHeaders. Used by reader clients rendering <img> tags whose
+// Src was rewritten to /api/v1/books/image by BookService.GetChapterBlocks.
+func (h *Handler) GetBookImage(c echo.Context) error {
+	pathStr := c.QueryParam("path")
+	if pathStr == "" {
+		return respondError(c, http.StatusBadRequest, "path required")
+	}
+	manifestID := c.QueryParam("manifest")
+	if manifestID == "" {
+		return respondError(c, http.StatusBadRequest, "manifest required")
+	}
+	allowedExts := append([]string{}, h.cfg.Scan.TextExtensions...)
+	resolved, err := service.ValidateAccessibleMediaPath(
+		pathStr,
+		h.cfg.Scan.GetRoots(),
+		h.cfg.GetSystemAllowedRoots(),
+		allowedExts,
+	)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
+	}
+	if h.books == nil {
+		return respondInternalError(c, errors.New("book service unavailable"))
+	}
+	data, contentType, err := h.books.ReadImageBytes(resolved, manifestID)
+	if err != nil {
+		return mapBookError(c, err)
+	}
+	setMediaCacheHeaders(c)
+	return c.Blob(http.StatusOK, contentType, data)
 }
 
 // mapBookError translates bookparser error sentinels to HTTP status codes.
