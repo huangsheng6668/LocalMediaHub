@@ -24,8 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import com.juziss.localmediahub.data.ReaderFontSize
-import com.juziss.localmediahub.data.ReaderLineHeight
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
 
@@ -37,6 +35,10 @@ import com.juziss.localmediahub.data.ReaderTheme
  * The body is delegated to [ReaderSettingsSheetContent] so it can be unit
  * tested in isolation — [ModalBottomSheet] hosts its content in a separate
  * window whose input dispatch is not reliably drivable under Robolectric.
+ *
+ * Phase 1: font size + line height are still 4 / 3 discrete options (V1 UX
+ * preserved), but the underlying values are now V2 numeric (Int / Float)
+ * rather than enum. Phase 3/4 will replace this with continuous sliders.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,6 +54,26 @@ fun ReaderSettingsSheet(
     ) {
         ReaderSettingsSheetContent(settings = settings, onChange = onChange)
     }
+}
+
+// V1 → V2 transition: keep the 4-step font / 3-step line-height option lists
+// (V1 visual) but as numeric primitives matching the V2 ReaderSettings shape.
+private val FONT_SIZE_OPTIONS = listOf(14, 16, 18, 20)
+private val LINE_HEIGHT_OPTIONS = listOf(1.4f, 1.8f, 2.2f)
+
+private fun fontSizeLabel(sp: Int): String = when (sp) {
+    14 -> "小"
+    16 -> "中"
+    18 -> "大"
+    20 -> "超大"
+    else -> sp.toString()
+}
+
+private fun lineHeightLabel(m: Float): String = when (m) {
+    1.4f -> "紧凑"
+    1.8f -> "标准"
+    2.2f -> "宽松"
+    else -> m.toString()
 }
 
 /**
@@ -71,20 +93,20 @@ fun ReaderSettingsSheetContent(
         // Section: font size
         Text("字体大小", style = MaterialTheme.typography.labelLarge)
         ChipRow(
-            options = ReaderFontSize.entries,
-            selected = settings.fontSize,
-            labelFor = { it.label() },
-            onSelect = { onChange(settings.copy(fontSize = it)) },
+            options = FONT_SIZE_OPTIONS,
+            selected = settings.fontSizeSp,
+            labelFor = { fontSizeLabel(it) },
+            onSelect = { onChange(settings.copy(fontSizeSp = it)) },
         )
         Spacer(Modifier.size(16.dp))
 
         // Section: line height
         Text("行距", style = MaterialTheme.typography.labelLarge)
         ChipRow(
-            options = ReaderLineHeight.entries,
-            selected = settings.lineHeight,
-            labelFor = { it.label() },
-            onSelect = { onChange(settings.copy(lineHeight = it)) },
+            options = LINE_HEIGHT_OPTIONS,
+            selected = settings.lineHeightMultiplier,
+            labelFor = { lineHeightLabel(it) },
+            onSelect = { onChange(settings.copy(lineHeightMultiplier = it)) },
         )
         Spacer(Modifier.size(16.dp))
 
@@ -157,17 +179,4 @@ private fun ThemeChipRow(
             )
         }
     }
-}
-
-private fun ReaderFontSize.label(): String = when (this) {
-    ReaderFontSize.SMALL -> "小"
-    ReaderFontSize.MEDIUM -> "中"
-    ReaderFontSize.LARGE -> "大"
-    ReaderFontSize.XLARGE -> "超大"
-}
-
-private fun ReaderLineHeight.label(): String = when (this) {
-    ReaderLineHeight.COMPACT -> "紧凑"
-    ReaderLineHeight.STANDARD -> "标准"
-    ReaderLineHeight.LOOSE -> "宽松"
 }

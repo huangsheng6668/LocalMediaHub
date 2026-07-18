@@ -38,9 +38,14 @@ class RecentActivityStoreReaderSettingsTest {
     @Test
     fun saveReaderSettings_updates_flow() = runBlocking {
         val updated = ReaderSettings(
-            fontSize = ReaderFontSize.XLARGE,
-            lineHeight = ReaderLineHeight.LOOSE,
+            fontFamily = ReaderFontFamily.KAITI,
+            fontSizeSp = 20,
+            lineHeightMultiplier = 2.2f,
+            contentWidthDp = 700,
+            firstLineIndent = false,
+            paragraphSpacing = true,
             theme = ReaderTheme.NIGHT,
+            immersiveMode = true,
             autoScrollSpeed = 8,
         )
         store.saveReaderSettings(updated)

@@ -6,7 +6,6 @@ import com.juziss.localmediahub.data.BookChapter
 import com.juziss.localmediahub.data.BookChapterContent
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
-import com.juziss.localmediahub.data.ReaderFontSize
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
 import com.juziss.localmediahub.network.NetworkResult
@@ -76,7 +75,7 @@ class TextReaderViewModelReaderTest {
         // single default-ReaderSettings emission lands before updateSettings
         // sets the new value (otherwise the collector overwrites the update).
         dispatcher.scheduler.advanceUntilIdle()
-        val updated = ReaderSettings(fontSize = ReaderFontSize.XLARGE, theme = ReaderTheme.NIGHT)
+        val updated = ReaderSettings(fontSizeSp = 20, theme = ReaderTheme.NIGHT)
         vm.updateSettings(updated)
         // updateSettings persists via viewModelScope.launch; run the scheduler
         // so saveReaderSettings actually executes before coVerify checks it.

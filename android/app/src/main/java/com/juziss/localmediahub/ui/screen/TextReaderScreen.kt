@@ -281,8 +281,8 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                 when (block.type) {
                                     "text" -> ParagraphItem(
                                         text = block.value ?: "",
-                                        fontSizeSp = settings.fontSize.sp.sp,
-                                        lineHeightSp = (settings.fontSize.sp * settings.lineHeight.multiplier).sp,
+                                        fontSizeSp = settings.fontSizeSp.sp,
+                                        lineHeightSp = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
                                         onAddBookmark = {
                                             // Returns false for image/out-of-range blocks;
                                             // duplicate feedback is delivered via bookmarkToast.
