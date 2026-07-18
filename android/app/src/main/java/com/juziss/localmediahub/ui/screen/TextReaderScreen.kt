@@ -4,8 +4,12 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.WindowManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -103,6 +108,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val isAutoScrolling by viewModel.isAutoScrolling.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkToast by viewModel.bookmarkToast.collectAsState()
+    val chromeVisible by viewModel.chromeVisible.collectAsState()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -229,44 +235,70 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
         ) {
             Scaffold(
                 topBar = {
-                    TopAppBar(
-                        title = { Text(book?.chapters?.getOrNull(idx)?.title ?: book?.title ?: "") },
-                        navigationIcon = {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { showSettings = true }) {
-                                Text("Aa")
-                            }
-                            IconButton(onClick = { viewModel.toggleAutoScroll() }) {
-                                if (isAutoScrolling) {
-                                    Text("‖")
-                                } else {
-                                    Icon(Icons.Filled.PlayArrow, contentDescription = "自动滚动")
+                    // Phase 5: 沉浸模式 — fadeIn/fadeOut 让栏平滑显隐；不显时
+                    // AnimatedVisibility 从组合中移除栏（含其点击区），让正文
+                    // 上下区域可被读取。
+                    AnimatedVisibility(visible = chromeVisible, enter = fadeIn(), exit = fadeOut()) {
+                        TopAppBar(
+                            title = { Text(book?.chapters?.getOrNull(idx)?.title ?: book?.title ?: "") },
+                            navigationIcon = {
+                                IconButton(onClick = onBack) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                                 }
-                            }
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Filled.Menu, contentDescription = "目录")
-                            }
-                        },
-                    )
+                            },
+                            actions = {
+                                IconButton(onClick = { showSettings = true }) {
+                                    Text("Aa")
+                                }
+                                IconButton(onClick = { viewModel.toggleAutoScroll() }) {
+                                    if (isAutoScrolling) {
+                                        Text("‖")
+                                    } else {
+                                        Icon(Icons.Filled.PlayArrow, contentDescription = "自动滚动")
+                                    }
+                                }
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Filled.Menu, contentDescription = "目录")
+                                }
+                            },
+                        )
+                    }
                 },
                 bottomBar = {
-                    BottomAppBar {
-                        Text(
-                            "第 ${idx + 1} / ${book?.chapters?.size ?: 0} 章" +
-                                if (isAutoScrolling) " · 速:${settings.autoScrollSpeed}" else "",
-                            modifier = Modifier.padding(16.dp),
-                        )
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { viewModel.prevChapter() }) { Text("上一章") }
-                        TextButton(onClick = { viewModel.nextChapter() }) { Text("下一章") }
+                    AnimatedVisibility(visible = chromeVisible, enter = fadeIn(), exit = fadeOut()) {
+                        BottomAppBar {
+                            Text(
+                                "第 ${idx + 1} / ${book?.chapters?.size ?: 0} 章" +
+                                    if (isAutoScrolling) " · 速:${settings.autoScrollSpeed}" else "",
+                                modifier = Modifier.padding(16.dp),
+                            )
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { viewModel.prevChapter() }) { Text("上一章") }
+                            TextButton(onClick = { viewModel.nextChapter() }) { Text("下一章") }
+                        }
                     }
                 },
             ) { padding ->
-                Box(Modifier.fillMaxSize().padding(padding)) {
+                // Phase 5: 中区域点击切换沉浸栏；左/右 20% 翻章。pointerInput +
+                // detectTapGestures(onTap) 只消费单击事件，不消费拖动 —— LazyColumn
+                // 在此 Box 内部的滚动继续工作（手势分发先到 LazyColumn 的滚动
+                // pointerInput，onTap 在没有 drag 时才触发）。
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                val width = size.width.toFloat().coerceAtLeast(1f)
+                                val ratio = offset.x / width
+                                when {
+                                    ratio < 0.20f -> viewModel.prevChapter()
+                                    ratio > 0.80f -> viewModel.nextChapter()
+                                    else -> viewModel.toggleChrome()
+                                }
+                            }
+                        }
+                ) {
                     if (isLoading) {
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
                     }

@@ -189,4 +189,59 @@ class TextReaderViewModelReaderTest {
         // No store call should have been attempted for an image block.
         coVerify(exactly = 0) { store.addBookmark(any()) }
     }
+
+    // ---- Phase 5: 沉浸模式 chrome 可见性 --------------------------------
+
+    @Test
+    fun immersive_mode_hides_chrome_after_1500ms() = runTest(dispatcher) {
+        val store = mockk<RecentActivityStore>(relaxed = true)
+        coEvery { store.getBookProgress(any()) } returns null
+        coEvery { store.readerSettingsFlow } returns
+            flowOf(ReaderSettings(immersiveMode = true))
+        val repo = mockk<MediaRepository>(relaxed = true)
+        coEvery { repo.getBookInfo(any()) } returns NetworkResult.Success(fakeBook())
+        coEvery { repo.getBookChapter(any(), any()) } returns
+            NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
+
+        val vm = TextReaderViewModel(repo, store)
+        // Drain the init { readerSettingsFlow.collect } so immersiveMode=true is
+        // populated before loadBook's delay-branch checks _readerSettings.
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.loadBook("/b.txt")
+        // Run the synchronous portion of loadBook (getBookInfo is mocked as
+        // Success, NetworkResult dispatch is synchronous in mockk relaxed mode)
+        // WITHOUT advancing the dispatcher clock — otherwise advanceUntilIdle
+        // would race past the inner delay(1500) and hide chrome before we get
+        // to assert the immediate-visible anchor state.
+        dispatcher.scheduler.advanceTimeBy(0)
+        dispatcher.scheduler.runCurrent()
+        // Chrome is shown as a visual anchor immediately after load.
+        assertTrue(vm.chromeVisible.value)
+        // Wait the 1.5s anchor window — the launched coroutine should now have
+        // hidden chrome (immersiveMode is on).
+        dispatcher.scheduler.advanceTimeBy(1500)
+        dispatcher.scheduler.runCurrent()
+        assertFalse(vm.chromeVisible.value)
+    }
+
+    @Test
+    fun toggle_chrome_inverts_visibility_only_when_immersive_enabled() = runTest(dispatcher) {
+        val store = mockk<RecentActivityStore>(relaxed = true)
+        coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings(immersiveMode = false))
+        val repo = mockk<MediaRepository>(relaxed = true)
+        val vm = TextReaderViewModel(repo, store)
+        dispatcher.scheduler.advanceUntilIdle()
+        // immersiveMode off → toggleChrome is a no-op.
+        assertTrue(vm.chromeVisible.value)
+        vm.toggleChrome()
+        assertTrue(vm.chromeVisible.value)
+
+        // immersiveMode on → toggleChrome flips state.
+        vm.updateSettings(ReaderSettings(immersiveMode = true))
+        dispatcher.scheduler.advanceUntilIdle()
+        vm.toggleChrome()
+        assertFalse(vm.chromeVisible.value)
+        vm.toggleChrome()
+        assertTrue(vm.chromeVisible.value)
+    }
 }

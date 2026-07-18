@@ -12,6 +12,7 @@ import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.network.NetworkResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,6 +56,12 @@ class TextReaderViewModel @Inject constructor(
     private val _readerSettings = MutableStateFlow(ReaderSettings())
     val readerSettings: StateFlow<ReaderSettings> = _readerSettings.asStateFlow()
 
+    // Phase 5: 沉浸模式 — TopAppBar/BottomAppBar 可见性。当用户启用 immersiveMode
+    // 时，loadBook 成功后 1.5s 自动隐藏；中区域点击切换。immersiveMode 关闭时
+    // toggleChrome/hideChrome 为 no-op（栏始终可见）。
+    private val _chromeVisible = MutableStateFlow(true)
+    val chromeVisible: StateFlow<Boolean> = _chromeVisible.asStateFlow()
+
     private val _isAutoScrolling = MutableStateFlow(false)
     val isAutoScrolling: StateFlow<Boolean> = _isAutoScrolling.asStateFlow()
 
@@ -97,6 +104,17 @@ class TextReaderViewModel @Inject constructor(
                     val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
                     val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
                     loadChapter(idx)
+                    // Phase 5: 进入阅读器时栏先显示 1.5s 作为视觉锚点，再在用户
+                    // 启用沉浸模式时隐藏。launch 一个独立协程等待 delay，避免
+                    // 阻塞 loadBook 的其他分支；loadBook 重入由上层导航保证
+                    // 单实例（Activity 一次只持有一个 ViewModel）。
+                    _chromeVisible.value = true
+                    launch {
+                        delay(1500)
+                        if (_readerSettings.value.immersiveMode) {
+                            _chromeVisible.value = false
+                        }
+                    }
                 }
                 is NetworkResult.Error -> {
                     _error.value = r.message ?: "加载失败"
@@ -180,6 +198,32 @@ class TextReaderViewModel @Inject constructor(
     fun updateSettings(settings: ReaderSettings) {
         _readerSettings.value = settings
         viewModelScope.launch { store.saveReaderSettings(settings) }
+    }
+
+    // ---- Phase 5: 沉浸模式 chrome 可见性 --------------------------------
+
+    /**
+     * Toggles TopAppBar/BottomAppBar visibility — but only when the user has
+     * enabled immersiveMode. When immersiveMode is off, chrome is always
+     * visible and this call is a no-op (avoids surprising the user with a
+     * hidden bar they cannot reach).
+     */
+    fun toggleChrome() {
+        if (_readerSettings.value.immersiveMode) {
+            _chromeVisible.value = !_chromeVisible.value
+        }
+    }
+
+    /** Force-shows chrome (e.g. when opening settings). */
+    fun showChrome() {
+        _chromeVisible.value = true
+    }
+
+    /** Hides chrome — only effective when immersiveMode is enabled. */
+    fun hideChrome() {
+        if (_readerSettings.value.immersiveMode) {
+            _chromeVisible.value = false
+        }
     }
 
     /** Toggles auto-scroll on/off. UI runs the scroll loop via LaunchedEffect. */
