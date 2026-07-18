@@ -118,19 +118,44 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 	return chapters
 }
 
-func (b *Book) txtChapterText(idx int) (string, error) {
+// txtChapterBlocks reads the file, decodes via [decodeTxt], slices by
+// rune offsets CharStart..CharEnd, then splits on "\n\n" into multiple
+// text Blocks (empty paragraphs filtered). Returns a single "[本章节为空]"
+// placeholder block if the slice produces no non-empty paragraphs.
+func (b *Book) txtChapterBlocks(idx int) ([]Block, error) {
+	c := b.Chapters[idx]
 	raw, err := os.ReadFile(b.Path)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrIoFailure, err)
+		return nil, fmt.Errorf("%w: %v", ErrIoFailure, err)
 	}
-	decoded, _ := decodeTxt(raw)
-	runes := []rune(decoded)
-	c := b.Chapters[idx]
-	if c.CharEnd > len(runes) {
-		c.CharEnd = len(runes)
+	text, _ := decodeTxt(raw)
+	runes := []rune(text)
+	start := clampInt(c.CharStart, 0, len(runes))
+	end := clampInt(c.CharEnd, 0, len(runes))
+	if start > end {
+		start = end
 	}
-	if c.CharStart > len(runes) {
-		c.CharStart = len(runes)
+	slice := string(runes[start:end])
+	paras := strings.Split(slice, "\n\n")
+	blocks := make([]Block, 0, len(paras))
+	for _, p := range paras {
+		if s := strings.TrimSpace(p); s != "" {
+			blocks = append(blocks, Block{Type: "text", Value: s})
+		}
 	}
-	return string(runes[c.CharStart:c.CharEnd]), nil
+	if len(blocks) == 0 {
+		return []Block{{Type: "text", Value: "[本章节为空]"}}, nil
+	}
+	return blocks, nil
+}
+
+// clampInt returns v clipped to [lo, hi]. Used for CharStart/CharEnd bounds.
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }

@@ -17,6 +17,23 @@ func writeBytes(t *testing.T, path string, data []byte) {
 	require.NoError(t, os.WriteFile(path, data, 0644))
 }
 
+// joinTextBlocks concatenates all text-block Values with "\n\n" so existing
+// round-trip assertions (which were written against the old ChapterText
+// string API) keep working after the migration to ChapterBlocks.
+func joinTextBlocks(blocks []Block) string {
+	var sb strings.Builder
+	for _, blk := range blocks {
+		if blk.Type != "text" {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(blk.Value)
+	}
+	return sb.String()
+}
+
 func TestTxtUtf8BomDetected(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "u8.txt")
@@ -40,10 +57,11 @@ func TestTxtGB18030Detected(t *testing.T) {
 	b, err := Parse(p)
 	require.NoError(t, err)
 	assert.Equal(t, "GB18030", b.Charset)
-	txt, err := b.ChapterText(0)
+	txt, err := b.ChapterBlocks(0)
 	require.NoError(t, err)
-	assert.True(t, utf8.ValidString(txt))
-	assert.Contains(t, txt, "开始")
+	joined := joinTextBlocks(txt)
+	assert.True(t, utf8.ValidString(joined))
+	assert.Contains(t, joined, "开始")
 }
 
 func TestTxtNoChapterMatchBecomesSingleChapter(t *testing.T) {
@@ -56,20 +74,22 @@ func TestTxtNoChapterMatchBecomesSingleChapter(t *testing.T) {
 	assert.Equal(t, "plain.txt", b.Chapters[0].Title)
 }
 
-func TestTxtChapterOffsetsRoundTrip(t *testing.T) {
+func TestTxtChapterBlocksSplit(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "r.txt")
 	writeBytes(t, p, []byte("第一章 A\n这是第一章的正文内容\n第二章 B\n这是第二章的正文内容"))
 	b, err := Parse(p)
 	require.NoError(t, err)
 	require.Len(t, b.Chapters, 2)
-	c0, err := b.ChapterText(0)
+	c0, err := b.ChapterBlocks(0)
 	require.NoError(t, err)
-	assert.Contains(t, c0, "这是第一章的正文内容")
-	assert.NotContains(t, c0, "第二章")
-	c1, err := b.ChapterText(1)
+	joined0 := joinTextBlocks(c0)
+	assert.Contains(t, joined0, "这是第一章的正文内容")
+	assert.NotContains(t, joined0, "第二章")
+	c1, err := b.ChapterBlocks(1)
 	require.NoError(t, err)
-	assert.Contains(t, c1, "这是第二章的正文内容")
+	joined1 := joinTextBlocks(c1)
+	assert.Contains(t, joined1, "这是第二章的正文内容")
 }
 
 func TestTxtChapterOffsetsRoundTripCRLF(t *testing.T) {
@@ -79,13 +99,15 @@ func TestTxtChapterOffsetsRoundTripCRLF(t *testing.T) {
 	b, err := Parse(p)
 	require.NoError(t, err)
 	require.Len(t, b.Chapters, 2)
-	c0, err := b.ChapterText(0)
+	c0, err := b.ChapterBlocks(0)
 	require.NoError(t, err)
-	assert.Contains(t, c0, "这是第一章的正文内容")
-	assert.NotContains(t, c0, "第二章")
-	c1, err := b.ChapterText(1)
+	joined0 := joinTextBlocks(c0)
+	assert.Contains(t, joined0, "这是第一章的正文内容")
+	assert.NotContains(t, joined0, "第二章")
+	c1, err := b.ChapterBlocks(1)
 	require.NoError(t, err)
-	assert.Contains(t, c1, "这是第二章的正文内容")
+	joined1 := joinTextBlocks(c1)
+	assert.Contains(t, joined1, "这是第二章的正文内容")
 }
 
 func TestTxtChapterOffsetsRoundTripCRLF_Drift(t *testing.T) {
@@ -96,11 +118,12 @@ func TestTxtChapterOffsetsRoundTripCRLF_Drift(t *testing.T) {
 	b, err := Parse(p)
 	require.NoError(t, err)
 	require.Len(t, b.Chapters, 2)
-	c1, err := b.ChapterText(1)
+	c1, err := b.ChapterBlocks(1)
 	require.NoError(t, err)
-	
+	joined1 := joinTextBlocks(c1)
+
 	// Chapter 1 should start exactly with the chapter title "第二章 B", not with "lineX" from Chapter 0.
-	assert.True(t, strings.HasPrefix(strings.TrimSpace(c1), "第二章 B"), "c1 should start with '第二章 B', but got: %q", c1)
+	assert.True(t, strings.HasPrefix(strings.TrimSpace(joined1), "第二章 B"), "c1 should start with '第二章 B', but got: %q", joined1)
 }
 
 func TestTxtChapterRegexComprehensive(t *testing.T) {

@@ -214,10 +214,14 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	// Books (text-reader, Task 8): metadata + per-chapter text content for
 	// .txt / .epub files. Auth-gated because chapter content can be large and
-	// these endpoints perform disk I/O on each chapter fetch.
+	// these endpoints perform disk I/O on each chapter fetch. The /image
+	// endpoint serves raw image bytes from inside an epub; BearerToken
+	// middleware accepts a ?token= query fallback so <img> tags can
+	// authenticate via the rewritten Src URL produced by GetChapterBlocks.
 	books := api.Group("/books", authMw)
 	books.GET("/info", h.GetBookInfo)
 	books.GET("/chapter", h.GetBookChapter)
+	books.GET("/image", h.GetBookImage)
 
 	// Admin page
 }

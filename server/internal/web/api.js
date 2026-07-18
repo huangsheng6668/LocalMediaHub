@@ -45,6 +45,13 @@ export async function getBookChapter(path, index) {
     );
 }
 
+// getAuthToken exposes the current bearer token so non-fetch consumers (e.g.
+// <img src=...> tags, which cannot set Authorization headers) can append it
+// as a query param. Returns '' when no token is configured (open-auth mode).
+export function getAuthToken() {
+    return state.authToken || '';
+}
+
 // XSS Prevention: Safe HTML escaping for dynamic content
 export function escapeHtml(str) {
     if (str === null || str === undefined) return '';

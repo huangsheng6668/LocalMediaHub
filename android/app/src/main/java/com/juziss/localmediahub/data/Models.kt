@@ -108,10 +108,23 @@ data class Book(
 ) : Parcelable
 
 /**
- * Matches server/server/handler.chapterResponse — single-chapter text payload.
- * Property names already match JSON tags, so no @SerializedName needed.
+ * One ordered content unit of a chapter. Type is "text" (value holds the
+ * paragraph text) or "image" (src holds a URL or data: URI). Mirrors the
+ * server's bookparser.Block.
  */
+@Parcelize
+data class Block(
+    val type: String,
+    @SerializedName("value") val value: String? = null,
+    @SerializedName("src") val src: String? = null,
+) : Parcelable
+
+/**
+ * Matches server/server/handler.chapterResponse — single-chapter payload.
+ * Blocks is the ordered list of text/image content units.
+ */
+@Parcelize
 data class BookChapterContent(
     val title: String,
-    val content: String,
-)
+    val blocks: List<Block> = emptyList(),
+) : Parcelable

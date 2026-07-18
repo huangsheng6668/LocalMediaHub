@@ -4,8 +4,16 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.WindowManager
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +21,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,6 +41,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -57,10 +68,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
 import com.juziss.localmediahub.data.Bookmark
 import com.juziss.localmediahub.ui.component.reader.ReaderSettingsSheet
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
@@ -69,6 +88,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.min
 
 /**
  * Compose UI for [com.juziss.localmediahub.TextReaderActivity].
@@ -87,7 +107,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val book by viewModel.book.collectAsState()
-    val text by viewModel.chapterText.collectAsState()
+    val blocks by viewModel.chapterBlocks.collectAsState()
     val idx by viewModel.currentIndex.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
@@ -95,6 +115,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val isAutoScrolling by viewModel.isAutoScrolling.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkToast by viewModel.bookmarkToast.collectAsState()
+    val chromeVisible by viewModel.chromeVisible.collectAsState()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -221,44 +242,70 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
         ) {
             Scaffold(
                 topBar = {
-                    TopAppBar(
-                        title = { Text(book?.chapters?.getOrNull(idx)?.title ?: book?.title ?: "") },
-                        navigationIcon = {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { showSettings = true }) {
-                                Text("Aa")
-                            }
-                            IconButton(onClick = { viewModel.toggleAutoScroll() }) {
-                                if (isAutoScrolling) {
-                                    Text("‖")
-                                } else {
-                                    Icon(Icons.Filled.PlayArrow, contentDescription = "自动滚动")
+                    // Phase 5: 沉浸模式 — fadeIn/fadeOut 让栏平滑显隐；不显时
+                    // AnimatedVisibility 从组合中移除栏（含其点击区），让正文
+                    // 上下区域可被读取。
+                    AnimatedVisibility(visible = chromeVisible, enter = fadeIn(), exit = fadeOut()) {
+                        TopAppBar(
+                            title = { Text(book?.chapters?.getOrNull(idx)?.title ?: book?.title ?: "") },
+                            navigationIcon = {
+                                IconButton(onClick = onBack) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                                 }
-                            }
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(Icons.Filled.Menu, contentDescription = "目录")
-                            }
-                        },
-                    )
+                            },
+                            actions = {
+                                IconButton(onClick = { showSettings = true }) {
+                                    Text("Aa")
+                                }
+                                IconButton(onClick = { viewModel.toggleAutoScroll() }) {
+                                    if (isAutoScrolling) {
+                                        Text("‖")
+                                    } else {
+                                        Icon(Icons.Filled.PlayArrow, contentDescription = "自动滚动")
+                                    }
+                                }
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Filled.Menu, contentDescription = "目录")
+                                }
+                            },
+                        )
+                    }
                 },
                 bottomBar = {
-                    BottomAppBar {
-                        Text(
-                            "第 ${idx + 1} / ${book?.chapters?.size ?: 0} 章" +
-                                if (isAutoScrolling) " · 速:${settings.autoScrollSpeed}" else "",
-                            modifier = Modifier.padding(16.dp),
-                        )
-                        Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { viewModel.prevChapter() }) { Text("上一章") }
-                        TextButton(onClick = { viewModel.nextChapter() }) { Text("下一章") }
+                    AnimatedVisibility(visible = chromeVisible, enter = fadeIn(), exit = fadeOut()) {
+                        BottomAppBar {
+                            Text(
+                                "第 ${idx + 1} / ${book?.chapters?.size ?: 0} 章" +
+                                    if (isAutoScrolling) " · 速:${settings.autoScrollSpeed}" else "",
+                                modifier = Modifier.padding(16.dp),
+                            )
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { viewModel.prevChapter() }) { Text("上一章") }
+                            TextButton(onClick = { viewModel.nextChapter() }) { Text("下一章") }
+                        }
                     }
                 },
             ) { padding ->
-                Box(Modifier.fillMaxSize().padding(padding)) {
+                // Phase 5: 中区域点击切换沉浸栏；左/右 20% 翻章。pointerInput +
+                // detectTapGestures(onTap) 只消费单击事件，不消费拖动 —— LazyColumn
+                // 在此 Box 内部的滚动继续工作（手势分发先到 LazyColumn 的滚动
+                // pointerInput，onTap 在没有 drag 时才触发）。
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .pointerInput(Unit) {
+                            detectTapGestures { offset ->
+                                val width = size.width.toFloat().coerceAtLeast(1f)
+                                val ratio = offset.x / width
+                                when {
+                                    ratio < 0.20f -> viewModel.prevChapter()
+                                    ratio > 0.80f -> viewModel.nextChapter()
+                                    else -> viewModel.toggleChrome()
+                                }
+                            }
+                        }
+                ) {
                     if (isLoading) {
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
                     }
@@ -270,27 +317,112 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                         )
                     }
                     if (error == null && !isLoading) {
-                        val paras = remember(text) {
-                            text.split("\n\n").filter { it.isNotBlank() }
-                        }
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                            contentPadding = PaddingValues(vertical = 16.dp),
-                        ) {
-                            itemsIndexed(paras) { paraIdx, para ->
-                                ParagraphItem(
-                                    text = para,
-                                    fontSizeSp = settings.fontSize.sp.sp,
-                                    lineHeightSp = (settings.fontSize.sp * settings.lineHeight.multiplier).sp,
-                                    onAddBookmark = {
-                                        viewModel.addBookmarkFromParagraph(paraIdx, para.take(30))
-                                    },
-                                    onCopy = {
-                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        cm.setPrimaryClip(ClipData.newPlainText("paragraph", para))
-                                    },
-                                )
+                        // Phase 3: clamp content width so novel text stays in a
+                        // readable column even on wide/tablet screens. We honor
+                        // settings.contentWidthDp but never exceed screenWidthDp-32.
+                        val configuration = LocalConfiguration.current
+                        val maxContentDp = min(720, configuration.screenWidthDp - 32).dp
+                        val contentDp = settings.contentWidthDp.dp.coerceAtMost(maxContentDp)
+
+                        // Phase 6: chapter content wrapped in AnimatedContent so
+                        // switching chapters fades the body in (120ms) over a
+                        // 0ms fade-out. chapterKey changes whenever the block
+                        // list identity changes, which retriggers the animation.
+                        val chapterKey = blocks.hashCode()
+                        AnimatedContent(
+                            targetState = chapterKey,
+                            transitionSpec = {
+                                fadeIn(tween(120)) togetherWith fadeOut(tween(0))
+                            },
+                            label = "chapterTransition",
+                        ) { _ ->
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.width(contentDp),
+                                    contentPadding = PaddingValues(vertical = 16.dp),
+                                ) {
+                                    // item 0: 章节大标题（居中 serif + 40dp 装饰线）
+                                    item {
+                                        val chapterTitle = book?.chapters?.getOrNull(idx)?.title ?: ""
+                                        Text(
+                                            text = chapterTitle,
+                                            style = MaterialTheme.typography.titleMedium.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = (settings.fontSizeSp + 6).sp,
+                                                fontFamily = FontFamily.Serif,
+                                                textAlign = TextAlign.Center,
+                                            ),
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 32.dp, bottom = 24.dp),
+                                        )
+                                        HorizontalDivider(
+                                            modifier = Modifier
+                                                .width(40.dp)
+                                                .padding(bottom = 16.dp),
+                                            color = MaterialTheme.colorScheme.outline,
+                                        )
+                                    }
+
+                                    itemsIndexed(blocks) { blockIdx, block ->
+                                        when (block.type) {
+                                            "text" -> ParagraphItem(
+                                                text = block.value ?: "",
+                                                fontSizeSp = settings.fontSizeSp.sp,
+                                                lineHeightSp = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
+                                                fontFamily = settings.fontFamily.toFontFamily(),
+                                                firstLineIndent = settings.firstLineIndent,
+                                                paragraphGapEm = if (settings.paragraphSpacing) 1.6f else 1.2f,
+                                                onAddBookmark = {
+                                                    // Returns false for image/out-of-range blocks;
+                                                    // duplicate feedback is delivered via bookmarkToast.
+                                                    viewModel.addBookmarkFromParagraph(blockIdx)
+                                                },
+                                                onCopy = {
+                                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                                    cm.setPrimaryClip(ClipData.newPlainText("paragraph", block.value ?: ""))
+                                                },
+                                            )
+                                            "image" -> {
+                                                if (block.src.isNullOrEmpty()) {
+                                                    Text(
+                                                        text = "[本图片无法显示]",
+                                                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        ),
+                                                    )
+                                                } else {
+                                                    // Auth headers (Bearer token) are injected by
+                                                    // LocalMediaHubApplication's Hilt-provided OkHttpClient
+                                                    // via AuthInterceptor — no per-call setup needed.
+                                                    AsyncImage(
+                                                        model = block.src,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // item N: 章节末尾 ❖（点击下一章）
+                                    item {
+                                        Text(
+                                            text = "❖",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 24.dp)
+                                                .clickable { viewModel.nextChapter() },
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -310,15 +442,19 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
 
 /**
  * One paragraph row with long-press → context [DropdownMenu] offering
- * "添加书签" / "复制段落". Font size and line-height are driven by the
+ * "添加书签" / "复制段落". Phase 3 applies V2 typography (font family,
+ * font size, line height, first-line indent, paragraph gap) driven by the
  * current [com.juziss.localmediahub.data.ReaderSettings].
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ParagraphItem(
+internal fun ParagraphItem(
     text: String,
     fontSizeSp: TextUnit,
     lineHeightSp: TextUnit,
+    fontFamily: FontFamily,
+    firstLineIndent: Boolean,
+    paragraphGapEm: Float,  // 1.2f or 1.6f
     onAddBookmark: () -> Unit,
     onCopy: () -> Unit,
 ) {
@@ -328,7 +464,7 @@ private fun ParagraphItem(
             text = text,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(vertical = 6.dp)
+                .padding(vertical = (paragraphGapEm * 4).dp)  // 粗略：1em ≈ 4dp 段间距视觉
                 .combinedClickable(
                     onClick = {},
                     onLongClick = { showMenu = true },
@@ -336,6 +472,8 @@ private fun ParagraphItem(
             style = LocalTextStyle.current.copy(
                 fontSize = fontSizeSp,
                 lineHeight = lineHeightSp,
+                fontFamily = fontFamily,
+                textIndent = if (firstLineIndent) TextIndent(firstLine = 2.em) else TextIndent.None,
             ),
         )
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {

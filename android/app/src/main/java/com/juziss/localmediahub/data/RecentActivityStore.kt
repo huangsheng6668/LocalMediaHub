@@ -420,9 +420,17 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
     private fun decodeReaderSettings(json: String?): ReaderSettings {
         if (json.isNullOrBlank()) return ReaderSettings()
         return try {
-            gson.fromJson(json, ReaderSettings::class.java) ?: ReaderSettings()
+            val migrated = migrateReaderSettingsJson(json)
+            gson.fromJson(migrated, ReaderSettings::class.java) ?: ReaderSettings()
         } catch (_: Exception) {
             ReaderSettings()
+        }
+    }
+
+    /** Test-only: 直接注入 raw JSON 到 reader_settings key，用于 V1→V2 迁移测试。 */
+    internal suspend fun injectRawReaderSettingsForTest(raw: String) {
+        context.recentActivityDataStore.edit { preferences ->
+            preferences[readerSettingsKey] = raw
         }
     }
 
@@ -437,5 +445,64 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
 
     private fun encodeBookmarks(map: Map<String, List<Bookmark>>): String {
         return gson.toJson(map)
+    }
+}
+
+/**
+ * 把 V1 reader_settings JSON 改写为 V2 形态，交给 Gson 反序列化。
+ *
+ * V1 → V2 三种变化都要处理：
+ *  1. `fontSize`（V1 字符串枚举名 "SMALL"/"MEDIUM"/"LARGE"/"XLARGE"）
+ *     → `fontSizeSp`（V2 Int 12..28）。
+ *  2. `lineHeight`（V1 字符串枚举名 "COMPACT"/"STANDARD"/"LOOSE"）
+ *     → `lineHeightMultiplier`（V2 Float）。
+ *  3. 其他字段（theme/autoScrollSpeed）形态未变，透传即可。
+ *
+ * Gson 默认无法把字符串 `"MEDIUM"` 反序列化为 Int，会抛 JsonSyntaxException。
+ * 我们在 Gson 解析前手工改写 JsonObject，保证迁移不丢失非 font-size 字段。
+ *
+ * 关键点：V1 key 是 `fontSize`/`lineHeight`，V2 字段是 `fontSizeSp`/
+ * `lineHeightMultiplier`，因此同时改 key 名 + value 类型。如果只改 value 不
+ * 改 key，Gson 找不到对应字段会静默忽略，得到 default 16/1.8。
+ */
+private val v1FontSizeMap = mapOf(
+    "SMALL" to 14, "MEDIUM" to 16, "LARGE" to 18, "XLARGE" to 20,
+)
+private val v1LineHeightMap = mapOf(
+    "COMPACT" to 1.4f, "STANDARD" to 1.8f, "LOOSE" to 2.2f,
+)
+
+private fun migrateReaderSettingsJson(raw: String): String {
+    return try {
+        val obj = com.google.gson.JsonParser.parseString(raw).asJsonObject
+
+        // fontSize -> fontSizeSp, 字符串枚举名 -> 数字
+        val fs = obj.remove("fontSize")
+        if (fs != null && fs.isJsonPrimitive) {
+            val prim = fs.asJsonPrimitive
+            val mapped: Any? = when {
+                prim.isString -> v1FontSizeMap[prim.asString]
+                prim.isNumber -> prim.asNumber.toInt()
+                else -> null
+            }
+            if (mapped != null) obj.addProperty("fontSizeSp", mapped as Int)
+        }
+
+        // lineHeight -> lineHeightMultiplier, 字符串枚举名 -> 数字
+        val lh = obj.remove("lineHeight")
+        if (lh != null && lh.isJsonPrimitive) {
+            val prim = lh.asJsonPrimitive
+            val mapped: Any? = when {
+                prim.isString -> v1LineHeightMap[prim.asString]
+                prim.isNumber -> prim.asNumber.toFloat()
+                else -> null
+            }
+            if (mapped != null) obj.addProperty("lineHeightMultiplier", mapped as Float)
+        }
+
+        obj.toString()
+    } catch (_: Exception) {
+        // 解析失败就让上层 Gson 再失败、走 fallback 默认值
+        raw
     }
 }

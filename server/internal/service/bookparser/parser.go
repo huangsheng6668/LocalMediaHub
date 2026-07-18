@@ -1,5 +1,5 @@
 // Package bookparser parses local ebook files into a Book structure with
-// chapter metadata. The full text is NOT retained — ChapterText re-reads
+// chapter metadata. The full text is NOT retained — ChapterBlocks re-reads
 // the file on demand to keep cache entries small.
 package bookparser
 
@@ -64,16 +64,39 @@ func Parse(path string) (*Book, error) {
 	}
 }
 
-func (b *Book) ChapterText(idx int) (string, error) {
+// Block is one ordered unit of a chapter's content. A chapter is a []Block.
+// Text blocks carry plain UTF-8 text in Value; image blocks carry a URL or
+// data: URI in Src. The service layer rewrites relative epub paths to
+// /api/v1/books/image URLs before returning blocks to clients.
+type Block struct {
+	Type  string `json:"type"`            // "text" | "image"
+	Value string `json:"value,omitempty"` // text block
+	Src   string `json:"src,omitempty"`   // image block
+}
+
+// ChapterBlocks returns the ordered content blocks for chapter idx.
+// Image blocks' Src is the raw epub href (relative path, absolute path,
+// data: URI, or http(s):// URL). Callers (BookService) rewrite the
+// relative ones to /api/v1/books/image endpoint URLs.
+func (b *Book) ChapterBlocks(idx int) ([]Block, error) {
 	if idx < 0 || idx >= len(b.Chapters) {
-		return "", fmt.Errorf("chapter index out of range")
+		return nil, fmt.Errorf("chapter index out of range: %d", idx)
 	}
 	switch b.Format {
 	case "txt":
-		return b.txtChapterText(idx)
+		return b.txtChapterBlocks(idx)
 	case "epub":
-		return b.epubChapterText(idx)
+		return b.epubChapterBlocks(idx)
 	default:
-		return "", ErrUnsupported
+		return nil, fmt.Errorf("%w: format %s", ErrUnsupported, b.Format)
 	}
 }
+
+// EpubManifest exposes the parsed OPF manifest (id → href) for service-layer
+// image-src rewriting. Returns nil for non-epub books. Callers must NOT
+// mutate the map.
+func (b *Book) EpubManifest() map[string]string { return b.epubManifest }
+
+// EpubOpfDir exposes the directory of the OPF file inside the epub zip,
+// used to resolve relative hrefs. Empty for non-epub books.
+func (b *Book) EpubOpfDir() string { return b.epubOpfDir }

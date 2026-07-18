@@ -2,6 +2,7 @@ package com.juziss.localmediahub.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.juziss.localmediahub.data.Block
 import com.juziss.localmediahub.data.Book
 import com.juziss.localmediahub.data.BookProgress
 import com.juziss.localmediahub.data.Bookmark
@@ -11,6 +12,7 @@ import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.network.NetworkResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,8 +42,8 @@ class TextReaderViewModel @Inject constructor(
     private val _currentIndex = MutableStateFlow(0)
     val currentIndex: StateFlow<Int> = _currentIndex.asStateFlow()
 
-    private val _chapterText = MutableStateFlow("")
-    val chapterText: StateFlow<String> = _chapterText.asStateFlow()
+    private val _chapterBlocks = MutableStateFlow<List<Block>>(emptyList())
+    val chapterBlocks: StateFlow<List<Block>> = _chapterBlocks.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -53,6 +55,12 @@ class TextReaderViewModel @Inject constructor(
 
     private val _readerSettings = MutableStateFlow(ReaderSettings())
     val readerSettings: StateFlow<ReaderSettings> = _readerSettings.asStateFlow()
+
+    // Phase 5: 沉浸模式 — TopAppBar/BottomAppBar 可见性。当用户启用 immersiveMode
+    // 时，loadBook 成功后 1.5s 自动隐藏；中区域点击切换。immersiveMode 关闭时
+    // toggleChrome/hideChrome 为 no-op（栏始终可见）。
+    private val _chromeVisible = MutableStateFlow(true)
+    val chromeVisible: StateFlow<Boolean> = _chromeVisible.asStateFlow()
 
     private val _isAutoScrolling = MutableStateFlow(false)
     val isAutoScrolling: StateFlow<Boolean> = _isAutoScrolling.asStateFlow()
@@ -96,6 +104,17 @@ class TextReaderViewModel @Inject constructor(
                     val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
                     val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
                     loadChapter(idx)
+                    // Phase 5: 进入阅读器时栏先显示 1.5s 作为视觉锚点，再在用户
+                    // 启用沉浸模式时隐藏。launch 一个独立协程等待 delay，避免
+                    // 阻塞 loadBook 的其他分支；loadBook 重入由上层导航保证
+                    // 单实例（Activity 一次只持有一个 ViewModel）。
+                    _chromeVisible.value = true
+                    launch {
+                        delay(1500)
+                        if (_readerSettings.value.immersiveMode) {
+                            _chromeVisible.value = false
+                        }
+                    }
                 }
                 is NetworkResult.Error -> {
                     _error.value = r.message ?: "加载失败"
@@ -120,7 +139,7 @@ class TextReaderViewModel @Inject constructor(
             when (val r = repo.getBookChapter(b.path, index)) {
                 is NetworkResult.Success -> {
                     _currentIndex.value = index
-                    _chapterText.value = r.data.content
+                    _chapterBlocks.value = r.data.blocks
                     store.saveBookProgress(
                         BookProgress(
                             path = b.path,
@@ -181,6 +200,32 @@ class TextReaderViewModel @Inject constructor(
         viewModelScope.launch { store.saveReaderSettings(settings) }
     }
 
+    // ---- Phase 5: 沉浸模式 chrome 可见性 --------------------------------
+
+    /**
+     * Toggles TopAppBar/BottomAppBar visibility — but only when the user has
+     * enabled immersiveMode. When immersiveMode is off, chrome is always
+     * visible and this call is a no-op (avoids surprising the user with a
+     * hidden bar they cannot reach).
+     */
+    fun toggleChrome() {
+        if (_readerSettings.value.immersiveMode) {
+            _chromeVisible.value = !_chromeVisible.value
+        }
+    }
+
+    /** Force-shows chrome (e.g. when opening settings). */
+    fun showChrome() {
+        _chromeVisible.value = true
+    }
+
+    /** Hides chrome — only effective when immersiveMode is enabled. */
+    fun hideChrome() {
+        if (_readerSettings.value.immersiveMode) {
+            _chromeVisible.value = false
+        }
+    }
+
     /** Toggles auto-scroll on/off. UI runs the scroll loop via LaunchedEffect. */
     fun toggleAutoScroll() {
         _isAutoScrolling.value = !_isAutoScrolling.value
@@ -202,10 +247,12 @@ class TextReaderViewModel @Inject constructor(
     }
 
     /**
-     * Adds a bookmark for the current chapter + given paragraph. On duplicate
-     * (same bookPath, chapterIndex, paragraphIndex already exists) the store
-     * returns false and [bookmarkToast] is populated for the UI to display
-     * "已存在书签". No-op if no book is loaded.
+     * Adds a bookmark for the current chapter + given block. The preview is
+     * extracted internally from the block's text value (first 30 chars). Image
+     * blocks and out-of-range indices are rejected (returns false) — only text
+     * blocks can carry a bookmark. On duplicate (same bookPath, chapterIndex,
+     * paragraphIndex already exists) the store returns false and
+     * [bookmarkToast] is populated for the UI to display "已存在书签".
      *
      * The store call runs in [viewModelScope] (non-blocking) — the dedup
      * outcome is surfaced via [bookmarkToast] for the UI to display ("已存在
@@ -213,19 +260,25 @@ class TextReaderViewModel @Inject constructor(
      * [bookmarks] flow refreshes via [loadBookmarksFor]'s ongoing collection
      * without any extra refresh call here.
      */
-    fun addBookmarkFromParagraph(paragraphIndex: Int, preview: String) {
-        val b = _book.value ?: return
+    fun addBookmarkFromParagraph(blockIndex: Int): Boolean {
+        val b = _book.value ?: return false
+        val blocks = _chapterBlocks.value
+        if (blockIndex !in blocks.indices) return false
+        val block = blocks[blockIndex]
+        if (block.type != "text") return false  // bookmarks only on text blocks
+        val preview = block.value?.take(30) ?: ""
         val bm = Bookmark(
             bookPath = b.path,
             chapterIndex = _currentIndex.value,
-            paragraphIndex = paragraphIndex,
-            preview = preview.take(30),
+            paragraphIndex = blockIndex,  // field name retained per spec
+            preview = preview,
             createdAt = System.currentTimeMillis(),
         )
         viewModelScope.launch {
             val added = store.addBookmark(bm)
             if (!added) _bookmarkToast.value = "已存在书签"
         }
+        return true
     }
 
     /**

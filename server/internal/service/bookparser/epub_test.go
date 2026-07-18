@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,16 +72,28 @@ func TestEpubParseExtractsTitleAndChapters(t *testing.T) {
 	assert.Equal(t, "Chapter One", b.Chapters[0].Title)
 }
 
-func TestEpubChapterTextExtract(t *testing.T) {
+func TestEpubChapterBlocksExtract(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "book.epub")
 	buildMinimalEpub(t, p)
 	b, err := Parse(p)
 	require.NoError(t, err)
-	c0, err := b.ChapterText(0)
+	blocks, err := b.ChapterBlocks(0)
 	require.NoError(t, err)
-	assert.Contains(t, c0, "First chapter body.")
-	assert.NotContains(t, c0, "<p>")
+	require.NotEmpty(t, blocks)
+	// Find at least one text block containing the body text.
+	found := false
+	joined := ""
+	for _, blk := range blocks {
+		if blk.Type == "text" {
+			joined += blk.Value
+			if strings.Contains(blk.Value, "First chapter body.") {
+				found = true
+			}
+		}
+	}
+	assert.True(t, found, "expected a text block containing body text, got %#v", blocks)
+	assert.NotContains(t, joined, "<p>")
 }
 
 func TestEpubTooLargeRejected(t *testing.T) {
@@ -96,23 +109,23 @@ func TestEpubTooLargeRejected(t *testing.T) {
 
 // TestEpubInnerEntrySizeCap constructs an epub whose outer file is well under
 // MaxEpubSize but whose OPF entry decompresses to > MaxEpubEntrySize. The
-// per-entry cap in readCapped must reject the entry with an error wrapping
+// per-entry cap in ReadCapped must reject the entry with an error wrapping
 // ErrTooLarge rather than allocating the full multi-MB body. We exercise
-// readCapped both directly (precise errors.Is assertion on the fix) and via
+// ReadCapped both directly (precise errors.Is assertion on the fix) and via
 // Parse (integration: the cap fires inside the real OPF read path).
 func TestEpubInnerEntrySizeCap(t *testing.T) {
-	// Direct unit test on the readCapped helper: feed it a stream one byte
+	// Direct unit test on the ReadCapped helper: feed it a stream one byte
 	// larger than the cap and assert ErrTooLarge surfaces with the right
 	// identity (errors.Is must traverse the wrap chain).
 	oversized := bytes.Repeat([]byte("x"), int(MaxEpubEntrySize)+1)
-	_, err := readCapped(bytes.NewReader(oversized), MaxEpubEntrySize)
+	_, err := ReadCapped(bytes.NewReader(oversized), MaxEpubEntrySize)
 	if !errors.Is(err, ErrTooLarge) {
-		t.Fatalf("readCapped: expected ErrTooLarge, got %v", err)
+		t.Fatalf("ReadCapped: expected ErrTooLarge, got %v", err)
 	}
 
 	// Boundary check: a body exactly at the cap must succeed.
 	atCap := bytes.Repeat([]byte("x"), int(MaxEpubEntrySize))
-	b, err := readCapped(bytes.NewReader(atCap), MaxEpubEntrySize)
+	b, err := ReadCapped(bytes.NewReader(atCap), MaxEpubEntrySize)
 	require.NoError(t, err)
 	assert.Len(t, b, int(MaxEpubEntrySize))
 
@@ -208,8 +221,8 @@ func TestEpubEmptyChapterFallback(t *testing.T) {
 </package>`)
 	// Chapter with no text nodes and no <img>/<image> tags — e.g. an empty
 	// <body> or a div that pulls its content purely from an external CSS
-	// background-image. extractXhtmlText returns ("", false) for this, which
-	// must become the fallback placeholder rather than a blank UI page.
+	// background-image. extractBlocks returns a single "[本章节为空]"
+	// placeholder for this, which must surface rather than a blank UI page.
 	writeRaw("OEBPS/ch1.xhtml", `<html><head></head><body><div></div></body></html>`)
 	writeRaw("OEBPS/toc.ncx", `<?xml version="1.0"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
@@ -223,7 +236,53 @@ func TestEpubEmptyChapterFallback(t *testing.T) {
 	b, err := Parse(p)
 	require.NoError(t, err)
 	require.Len(t, b.Chapters, 1)
-	text, err := b.ChapterText(0)
+	blocks, err := b.ChapterBlocks(0)
 	require.NoError(t, err)
-	assert.Equal(t, "[本章节解析失败]", text, "empty-body chapter must render the fallback placeholder, not blank")
+	require.Len(t, blocks, 1)
+	assert.Equal(t, "[本章节为空]", blocks[0].Value, "empty-body chapter must render the placeholder, not blank")
+	assert.Equal(t, "text", blocks[0].Type)
+}
+
+func TestExtractBlocksImageSrc(t *testing.T) {
+	xhtml := []byte(`<html><body>
+        <p>intro text</p>
+        <img src="images/cover.jpg" alt="cover"/>
+        <p>outro text</p>
+    </body></html>`)
+	blocks := extractBlocks(xhtml)
+	require.Len(t, blocks, 3)
+	assert.Equal(t, "text", blocks[0].Type)
+	assert.Contains(t, blocks[0].Value, "intro text")
+	assert.Equal(t, "image", blocks[1].Type)
+	assert.Equal(t, "images/cover.jpg", blocks[1].Src)
+	assert.Equal(t, "text", blocks[2].Type)
+	assert.Contains(t, blocks[2].Value, "outro text")
+}
+
+func TestExtractBlocksDataUriPreserved(t *testing.T) {
+	dataURI := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+	xhtml := []byte(`<html><body>
+        <img src="` + dataURI + `"/>
+    </body></html>`)
+	blocks := extractBlocks(xhtml)
+	require.Len(t, blocks, 1)
+	assert.Equal(t, "image", blocks[0].Type)
+	assert.Equal(t, dataURI, blocks[0].Src)
+}
+
+func TestExtractBlocksImageOnlyChapter(t *testing.T) {
+	xhtml := []byte(`<html><body>
+        <img src="page1.png"/>
+        <img src="page2.png"/>
+    </body></html>`)
+	blocks := extractBlocks(xhtml)
+	require.Len(t, blocks, 2)
+	assert.Equal(t, "image", blocks[0].Type)
+	assert.Equal(t, "page1.png", blocks[0].Src)
+	assert.Equal(t, "image", blocks[1].Type)
+	assert.Equal(t, "page2.png", blocks[1].Src)
+	// Verify no text block was synthesized as a placeholder
+	for _, b := range blocks {
+		assert.NotEqual(t, "text", b.Type)
+	}
 }

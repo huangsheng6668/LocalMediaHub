@@ -1,3 +1,21 @@
+/* Web reader fonts (Phase 3). woff2 files are embedded via web.Assets
+   and served at /fonts/*.woff2 — see web.go embed directive. font-display:
+   swap ensures text remains visible during the (first-load) font fetch. */
+@font-face {
+    font-family: "LXGW WenKai";
+    src: url("/fonts/LXGWWenKai-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Noto Serif SC";
+    src: url("/fonts/NotoSerifSC-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
 /* Core Design Tokens & Variables */
 :root {
     --bg-main: #0a0a0f;
@@ -1622,6 +1640,28 @@ body {
    column for comfortable line lengths on desktop.
    ====================================================================== */
 
+/* Immersive Reader Layout overrides */
+body[data-active-tab="read"] .main-header {
+    display: none;
+}
+
+body[data-active-tab="read"] .view-container {
+    padding: 0;
+    overflow: hidden;
+    height: 100vh;
+}
+
+body[data-active-tab="read"] .text-reader {
+    height: 100vh;
+    max-width: 100%;
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    background-color: var(--reader-bg, var(--bg-main));
+    color: var(--reader-fg, var(--text-main));
+}
+
 .text-reader {
     display: flex;
     flex-direction: column;
@@ -1638,15 +1678,17 @@ body {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-color);
-    background-color: rgba(0, 0, 0, 0.2);
+    padding: 12px max(16px, calc((100% - 800px) / 2));
+    border-bottom: 1px solid var(--reader-border);
+    background-color: var(--reader-chrome-bg);
+    color: var(--reader-chrome-fg);
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .text-reader__back {
     background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-white);
+    border: 1px solid var(--reader-border, var(--border-color));
+    color: var(--reader-fg, var(--text-white));
     width: 36px;
     height: 36px;
     border-radius: 50%;
@@ -1654,45 +1696,134 @@ body {
     font-size: 18px;
     line-height: 1;
     flex-shrink: 0;
-    transition: var(--transition-quick);
+    transition: var(--transition-quick), color 0.2s ease, border-color 0.2s ease;
 }
 
 .text-reader__back:hover {
     background-color: var(--primary);
     border-color: var(--primary);
+    color: var(--text-white);
 }
 
 .text-reader__title {
-    color: var(--text-white);
-    font-size: 14px;
+    color: var(--reader-fg, var(--text-white));
+    font-size: 15px;
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     flex-grow: 1;
+    transition: color 0.2s ease;
 }
 
 .text-reader__content {
     flex-grow: 1;
     overflow-y: auto;
-    padding: 24px 28px;
+    padding: 32px max(24px, calc((100% - var(--reader-content-width, 720px)) / 2));
     background-color: var(--reader-bg, var(--bg-card));
     color: var(--reader-fg, var(--text-white));
+    font-family: var(--reader-font-family, sans-serif);
     font-size: var(--reader-font-size, 16px);
     line-height: var(--reader-line-height, 1.85);
     word-break: break-word;
     outline: none;
     position: relative;
+    transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .text-reader__content p {
-    margin-bottom: 1.2em;
-    text-indent: 2em;
     position: relative;
+    margin-bottom: 1.2em;
 }
+.text-reader__content p.indent-on  { text-indent: 2em; }
+.text-reader__content p.indent-off { text-indent: 0; }
+.text-reader__content p.gap-on     { margin-bottom: 1.6em; }
+.text-reader__content p.gap-off    { margin-bottom: 1.2em; }
 
 .text-reader__content p:last-child {
     margin-bottom: 0;
+}
+
+/* Inline images rendered from epub image blocks (Task 11). Kept outside the
+   <p> indent flow so they read as block-level figures. */
+.text-reader__image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 12px auto;
+    border-radius: 4px;
+}
+
+/* Placeholder styling for image blocks whose src was missing/invalid — the
+   JS sets alt="[本图片无法显示]" in that case. Attribute selector keeps this
+   rule narrowly scoped so legitimate alt text on real images is unaffected. */
+.text-reader__content img[alt="[本图片无法显示]"] {
+    display: block;
+    width: 100%;
+    padding: 16px;
+    box-sizing: border-box;
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    background: var(--bg-elevated, var(--bg-card));
+    border-radius: 4px;
+}
+
+/* Phase 6: 章节大标题（正文顶部，独立于顶栏面包屑）。
+   固定 serif，居中，底部短装饰线 (::after)。字号随 --reader-font-size
+   浮动 +6px 与 Android 端对齐。 */
+.text-reader__chapter-title {
+    font-size: calc(var(--reader-font-size, 16px) + 6px);
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-weight: 600;
+    color: var(--reader-fg);
+    text-align: center;
+    margin: 2em 0 1.5em;
+    position: relative;
+}
+.text-reader__chapter-title::after {
+    content: "";
+    display: block;
+    width: 40px;
+    height: 1px;
+    background: var(--reader-border);
+    margin: 12px auto 0;
+}
+
+/* Phase 6: 首字下沉（仅 .text-reader__p--dropcap）。覆盖默认 indent-on。 */
+.text-reader__p--dropcap {
+    text-indent: 0 !important;
+}
+.text-reader__p--dropcap::first-letter {
+    font-size: 3.2em;
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-weight: 600;
+    float: left;
+    line-height: 0.9;
+    margin: 0.05em 0.12em 0 0;
+    color: var(--reader-fg);
+}
+
+/* Phase 6: 章节末尾装饰符号 ❖（点击下一章）。 */
+.text-reader__chapter-end {
+    text-align: center;
+    color: var(--reader-muted);
+    font-size: 20px;
+    padding: 24px 0 16px;
+    cursor: pointer;
+    user-select: none;
+}
+.text-reader__chapter-end:hover {
+    color: var(--reader-fg);
+}
+
+/* Phase 6: 章节切换淡入（120ms 关键帧动画）。 */
+@keyframes reader-chapter-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.text-reader__content--entering {
+    animation: reader-chapter-enter 120ms ease-out;
 }
 
 /* Hover-to-show bookmark button on each paragraph */
@@ -1727,21 +1858,23 @@ body {
     min-width: 36px;
     height: 36px;
     border-radius: var(--border-radius-md);
-    border: 1px solid var(--border-color);
-    background: var(--bg-card);
-    color: var(--text-white);
+    border: 1px solid var(--reader-border, var(--border-color));
+    background: var(--reader-bg, var(--bg-card));
+    color: var(--reader-fg, var(--text-white));
     cursor: pointer;
+    transition: var(--transition-quick), color 0.2s ease, border-color 0.2s ease;
 }
 
 .text-reader__icon-btn:hover {
     background: var(--primary);
     border-color: var(--primary);
+    color: var(--text-white);
 }
 
 /* TOC tabs */
 .text-reader__tabs {
     display: flex;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--reader-border, var(--border-color));
     margin-bottom: 8px;
 }
 
@@ -1750,14 +1883,17 @@ body {
     padding: 12px;
     background: transparent;
     border: none;
-    color: var(--text-muted);
+    color: var(--reader-fg, var(--text-muted));
+    opacity: 0.6;
     cursor: pointer;
     border-bottom: 2px solid transparent;
     font-size: 13px;
+    transition: color 0.2s ease, opacity 0.2s ease;
 }
 
 .text-reader__tab--active {
-    color: var(--text-white);
+    color: var(--reader-fg, var(--text-white));
+    opacity: 1;
     border-bottom-color: var(--primary);
 }
 
@@ -1775,32 +1911,40 @@ body {
     text-align: left;
     background: transparent;
     border: none;
-    color: var(--text-white);
+    color: var(--reader-fg, var(--text-white));
+    opacity: 0.85;
     cursor: pointer;
     border-radius: var(--border-radius-sm);
     font-size: 13px;
+    transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 }
 
 .text-reader__drawer-item:hover {
     background-color: rgba(124, 58, 237, 0.15);
+    color: var(--primary);
+    opacity: 1;
 }
 
 .text-reader__drawer-del {
     margin-left: auto;
     background: transparent;
     border: none;
-    color: var(--text-muted);
+    color: var(--reader-fg, var(--text-muted));
+    opacity: 0.6;
     cursor: pointer;
     padding: 2px 6px;
+    transition: color 0.2s ease, opacity 0.2s ease;
 }
 
 .text-reader__drawer-del:hover {
-    color: var(--text-white);
+    color: var(--reader-fg, var(--text-white));
+    opacity: 1;
 }
 
 .text-reader__empty {
     padding: 16px;
-    color: var(--text-muted);
+    color: var(--reader-fg, var(--text-muted));
+    opacity: 0.7;
     text-align: center;
     font-size: 13px;
 }
@@ -1852,32 +1996,65 @@ dialog#reader-settings-dialog menu {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 10px 16px;
-    border-top: 1px solid var(--border-color);
-    background-color: rgba(0, 0, 0, 0.2);
+    padding: 10px max(16px, calc((100% - 800px) / 2));
+    border-top: 1px solid var(--reader-border);
+    background-color: var(--reader-chrome-bg);
+    color: var(--reader-chrome-fg);
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .text-reader__footer button {
     background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-white);
+    border: 1px solid var(--reader-border, var(--border-color));
+    color: var(--reader-fg, var(--text-white));
     padding: 6px 14px;
     border-radius: var(--border-radius-sm);
     cursor: pointer;
     font-size: 12px;
-    transition: var(--transition-quick);
+    transition: var(--transition-quick), color 0.2s ease, border-color 0.2s ease;
 }
 
 .text-reader__footer button:hover:not(:disabled) {
     background-color: var(--primary);
     border-color: var(--primary);
+    color: var(--text-white);
 }
 
 .text-reader__progress {
-    color: var(--text-muted);
+    color: var(--reader-fg, var(--text-muted));
     font-size: 12px;
     flex-grow: 1;
     text-align: center;
+    opacity: 0.85;
+    transition: color 0.2s ease;
+}
+
+/* === Phase 5: 沉浸模式 ===
+   栏（header/footer）默认带 transition 以便进入/退出沉浸时平滑滑出。
+   沉浸态下 opacity→0、transform 滑出视口、pointer-events 关闭；正文上下
+   padding 收窄到 24px，给阅读区更多纵向空间。中间切换由 body 上的
+   data-reader-immersive 属性驱动（textReader.js 设置）。 */
+.text-reader__header,
+.text-reader__footer {
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.text-reader__content {
+    transition: padding 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                background-color 0.2s ease, color 0.2s ease;
+}
+body[data-reader-immersive="on"] .text-reader__header,
+body[data-reader-immersive="on"] .text-reader__footer {
+    opacity: 0;
+    transform: translateY(var(--immersive-translate, -100%));
+    pointer-events: none;
+}
+body[data-reader-immersive="on"] .text-reader__footer {
+    transform: translateY(100%);
+}
+body[data-reader-immersive="on"] .text-reader__content {
+    padding-top: 24px;
+    padding-bottom: 24px;
 }
 
 /* TOC slide-in drawer */
@@ -1888,21 +2065,23 @@ dialog#reader-settings-dialog menu {
     width: 280px;
     max-width: 80vw;
     height: 100vh;
-    background-color: var(--bg-card);
-    border-left: 1px solid var(--border-color);
+    background-color: var(--reader-bg, var(--bg-card));
+    color: var(--reader-fg, var(--text-white));
+    border-left: 1px solid var(--reader-border, var(--border-color));
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
     padding: 20px 16px;
     overflow-y: auto;
     z-index: 200;
-    transition: transform 0.2s ease-out;
+    transition: transform 0.2s ease-out, background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 .text-reader__drawer h3 {
-    color: var(--text-white);
+    color: var(--reader-fg, var(--text-white));
     font-size: 14px;
     margin: 0 0 12px 0;
     padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--reader-border, var(--border-color));
+    transition: color 0.2s ease, border-color 0.2s ease;
 }
 
 .text-reader__drawer.text-reader__drawer--hidden {
@@ -1912,18 +2091,20 @@ dialog#reader-settings-dialog menu {
 
 .text-reader__toc-item {
     display: block;
-    color: var(--text-muted);
+    color: var(--reader-fg, var(--text-muted));
+    opacity: 0.85;
     text-decoration: none;
     font-size: 13px;
     padding: 8px 10px;
     border-radius: var(--border-radius-sm);
-    transition: var(--transition-quick);
+    transition: var(--transition-quick), color 0.2s ease, opacity 0.2s ease;
     line-height: 1.4;
 }
 
 .text-reader__toc-item:hover {
     background-color: rgba(124, 58, 237, 0.15);
-    color: var(--text-white);
+    color: var(--primary);
+    opacity: 1;
 }
 
 /* Error / placeholder state used by both the reader and the bookshelf stub */
@@ -2009,5 +2190,217 @@ dialog#reader-settings-dialog menu {
 .bookshelf-card__progress {
     font-size: 12px;
     color: var(--text-muted);
+}
+
+/* Floating Autoscroll Control Panel */
+.text-reader__autoscroll-panel {
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px;
+    background: rgba(30, 30, 36, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 30px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+    transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s;
+    opacity: 1;
+    visibility: visible;
+}
+
+.text-reader__autoscroll-panel--hidden {
+    opacity: 0;
+    visibility: hidden;
+    transform: translate(-50%, 10px);
+}
+
+.autoscroll-panel-btn, .autoscroll-panel-btn-mode {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-white);
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.autoscroll-panel-btn:hover, .autoscroll-panel-btn-mode:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    transform: scale(1.05);
+}
+
+.autoscroll-panel-btn:active, .autoscroll-panel-btn-mode:active {
+    transform: scale(0.95);
+}
+
+.autoscroll-panel-text {
+    font-size: 13px;
+    color: var(--text-muted);
+    user-select: none;
+    white-space: nowrap;
+}
+
+#autoscroll-val-speed {
+    color: var(--text-white);
+    font-weight: 600;
+    margin-left: 2px;
+}
+
+/* Reader settings dialog — theme grid (Phase 2 Task 2.1) */
+.reader-settings__theme-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+}
+.reader-settings__theme-opt {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 4px;
+    border: 1px solid var(--reader-border, var(--border-color));
+    border-radius: var(--border-radius-md, 6px);
+    cursor: pointer;
+    font-size: 12px;
+}
+.reader-settings__theme-opt input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.reader-settings__theme-opt:has(input:checked) {
+    border-color: var(--primary);
+    background: rgba(0, 122, 255, 0.08);
+}
+.reader-settings__theme-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--reader-border, var(--border-color));
+    display: inline-block;
+}
+.reader-settings__theme-swatch[data-theme="DAY"]         { background: #FAF8F3; }
+.reader-settings__theme-swatch[data-theme="DAY_BRIGHT"]  { background: #FFFFFF; }
+.reader-settings__theme-swatch[data-theme="EYE_CARE"]    { background: #F4ECD8; }
+.reader-settings__theme-swatch[data-theme="PARCHMENT"]   { background: #EFE6D2; }
+.reader-settings__theme-swatch[data-theme="NIGHT"]       { background: #1A1A1F; }
+.reader-settings__theme-swatch[data-theme="NIGHT_BLACK"] { background: #000000; }
+.reader-settings__theme-swatch[data-theme="AUTO"] {
+    background: linear-gradient(135deg, #FAF8F3 0 50%, #1A1A1F 50% 100%);
+}
+.reader-settings__theme-label {
+    color: var(--reader-fg, var(--text-main));
+}
+
+/* 整体覆盖 App 变量：当 body 有 data-reader-theme 属性时（不限值），
+   阅读器子树内的 --bg-card / --text-main / --text-muted / --border-color
+   都被 reader theme 接管。Phase 2 Task 2.2 §5 (Chrome Theming)。 */
+body[data-reader-theme][data-active-tab="read"] .view-container,
+body[data-reader-theme] .text-reader,
+body[data-reader-theme] .text-reader__drawer,
+body[data-reader-theme] dialog#reader-settings-dialog,
+body[data-reader-theme] .text-reader__autoscroll-panel {
+    --bg-card: var(--reader-chrome-bg);
+    --bg-elevated: var(--reader-chrome-bg);
+    --text-main: var(--reader-fg);
+    --text-white: var(--reader-fg);
+    --text-muted: var(--reader-muted);
+    --border-color: var(--reader-border);
+}
+
+/* Phase 4 — Web settings dialog: 4-group layout with scrollable body */
+
+dialog#reader-settings-dialog {
+    padding: 0;
+    border: 1px solid var(--reader-border);
+    border-radius: var(--border-radius-lg, 12px);
+    background-color: var(--reader-chrome-bg);
+    color: var(--reader-fg);
+    max-width: 480px;
+    width: calc(100% - 32px);
+}
+dialog#reader-settings-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.4);
+}
+.reader-settings__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--reader-border);
+}
+.reader-settings__header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--reader-fg);
+}
+.reader-settings__close {
+    background: transparent;
+    border: none;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--reader-muted);
+}
+.reader-settings__body {
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 8px 16px 16px;
+}
+.reader-settings__group {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--reader-border);
+}
+.reader-settings__group:last-child { border-bottom: none; }
+.reader-settings__group h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--reader-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.reader-settings__row,
+.reader-settings__slider-row,
+.reader-settings__toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 6px 0;
+    color: var(--reader-fg);
+}
+.reader-settings__slider-row span,
+.reader-settings__toggle-row span,
+.reader-settings__row > span {
+    flex: 0 0 96px;
+    font-size: 13px;
+}
+.reader-settings__slider-row input[type="range"] {
+    flex: 1;
+}
+.reader-settings__slider-row output {
+    flex: 0 0 56px;
+    text-align: right;
+    font-size: 12px;
+    color: var(--reader-muted);
+    font-variant-numeric: tabular-nums;
+}
+.reader-settings__font-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 13px;
+}
+.reader-settings__toggle-row input[type="checkbox"] {
+    margin-left: auto;
 }
 
