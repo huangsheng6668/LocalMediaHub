@@ -150,18 +150,33 @@ export async function renderTextReader(container, path) {
     els.header.appendChild(headerRight);
 
     // 3. Apply current settings (CSS vars + dialog controls).
+    // Phase 1 bridge: settings are now V2-shape (numeric fontSize/lineHeight).
+    // The dialog still exposes 4 font radios (SMALL/MEDIUM/LARGE/XLARGE) and
+    // 3 line-height radios (COMPACT/STANDARD/LOOSE) for visual continuity;
+    // we translate at the boundary. Phase 3/4 will replace this with sliders.
+    const FONT_SIZE_TO_ENUM = { 14: 'SMALL', 16: 'MEDIUM', 18: 'LARGE', 20: 'XLARGE' };
+    const LINE_HEIGHT_TO_ENUM = { 1.4: 'COMPACT', 1.8: 'STANDARD', 2.2: 'LOOSE' };
+    const ENUM_TO_FONT_SIZE = { SMALL: 14, MEDIUM: 16, LARGE: 18, XLARGE: 20 };
+    const ENUM_TO_LINE_HEIGHT = { COMPACT: 1.4, STANDARD: 1.8, LOOSE: 2.2 };
+
     function applySettingsToUI() {
         const s = readerPrefs.getSettings();
         const root = document.documentElement;
-        const theme = readerPrefs.THEME_PRESETS[s.theme];
+        const theme = readerPrefs.THEME_PRESETS[s.theme] || readerPrefs.THEME_PRESETS.DAY;
         root.style.setProperty('--reader-bg', theme.bg);
         root.style.setProperty('--reader-fg', theme.fg);
-        root.style.setProperty('--reader-font-size', readerPrefs.FONT_SIZES[s.fontSize] + 'px');
-        root.style.setProperty('--reader-line-height', readerPrefs.LINE_HEIGHTS[s.lineHeight]);
-        // Reflect into dialog controls
-        dialog.querySelector(`input[name="fontSize"][value="${s.fontSize}"]`)?.checked = true;
-        dialog.querySelector(`input[name="lineHeight"][value="${s.lineHeight}"]`)?.checked = true;
-        dialog.querySelector(`input[name="theme"][value="${s.theme}"]`)?.checked = true;
+        root.style.setProperty('--reader-border', theme.border);
+        root.style.setProperty('--reader-font-size', s.fontSize + 'px');
+        root.style.setProperty('--reader-line-height', String(s.lineHeight));
+        // Reflect into dialog controls (translate numeric V2 -> enum radio values)
+        const fontEnum = FONT_SIZE_TO_ENUM[s.fontSize];
+        const fontInput = fontEnum && dialog.querySelector(`input[name="fontSize"][value="${fontEnum}"]`);
+        if (fontInput) fontInput.checked = true;
+        const lhEnum = LINE_HEIGHT_TO_ENUM[s.lineHeight];
+        const lhInput = lhEnum && dialog.querySelector(`input[name="lineHeight"][value="${lhEnum}"]`);
+        if (lhInput) lhInput.checked = true;
+        const themeInput = dialog.querySelector(`input[name="theme"][value="${s.theme}"]`);
+        if (themeInput) themeInput.checked = true;
         dialog.querySelector('input[name="autoScrollSpeed"]').value = s.autoScrollSpeed;
         dialog.querySelector('[data-bind="speedLabel"]').textContent = s.autoScrollSpeed;
     }
@@ -169,10 +184,20 @@ export async function renderTextReader(container, path) {
     const unsubPrefs = readerPrefs.subscribe(() => applySettingsToUI());
 
     // 4. Settings change handlers — let the dialog's `change` event bubble.
+    // Phase 1 bridge: dialog radios still use enum strings; translate to V2
+    // numeric values before persisting.
     dialog.addEventListener('change', (e) => {
         const t = e.target;
         if (t.name === 'autoScrollSpeed') {
             readerPrefs.saveSettings({ autoScrollSpeed: parseInt(t.value, 10) });
+        } else if (t.name === 'fontSize') {
+            if (Object.prototype.hasOwnProperty.call(ENUM_TO_FONT_SIZE, t.value)) {
+                readerPrefs.saveSettings({ fontSize: ENUM_TO_FONT_SIZE[t.value] });
+            }
+        } else if (t.name === 'lineHeight') {
+            if (Object.prototype.hasOwnProperty.call(ENUM_TO_LINE_HEIGHT, t.value)) {
+                readerPrefs.saveSettings({ lineHeight: ENUM_TO_LINE_HEIGHT[t.value] });
+            }
         } else if (t.name) {
             readerPrefs.saveSettings({ [t.name]: t.value });
         }
