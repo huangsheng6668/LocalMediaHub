@@ -249,15 +249,15 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         const s = readerPrefs.getSettings();
         const root = document.documentElement;
 
-        // AUTO resolves to DAY/NIGHT based on prefers-color-scheme
+        // AUTO 解析：根据 prefers-color-scheme 选 DAY/NIGHT（Phase 2 Task 2.2）
         let themeKey = s.theme;
         if (themeKey === 'AUTO') {
             const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
             themeKey = isDark ? 'NIGHT' : 'DAY';
         }
-        const theme = readerPrefs.THEME_PRESETS[themeKey];
+        const theme = readerPrefs.THEME_PRESETS[themeKey] || readerPrefs.THEME_PRESETS.DAY;
 
-        // Body + chrome CSS variables
+        // 正文 + chrome 变量
         root.style.setProperty('--reader-bg', theme.bg);
         root.style.setProperty('--reader-fg', theme.fg);
         root.style.setProperty('--reader-chrome-bg', theme.chromeBg);
@@ -267,10 +267,11 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         root.style.setProperty('--reader-font-size', s.fontSize + 'px');
         root.style.setProperty('--reader-line-height', String(s.lineHeight));
 
-        // Overall App-variable override driven by data-reader-theme attribute
+        // 整体覆盖 App 变量：body[data-reader-theme] 属性选择器驱动
+        // （不限值，子树内 --bg-card / --text-main / --border-color 等被 reader theme 接管）
         document.body.dataset.readerTheme = themeKey;
 
-        // Reflect into dialog controls (translate V2 numeric <-> V1 radio enum)
+        // Reflect into dialog controls
         const fontEnum = FONT_SIZE_TO_ENUM[s.fontSize];
         const fontInput = fontEnum && dialog.querySelector(`input[name="fontSize"][value="${fontEnum}"]`);
         if (fontInput) fontInput.checked = true;
@@ -281,19 +282,13 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (themeInput) themeInput.checked = true;
         dialog.querySelector('input[name="autoScrollSpeed"]').value = s.autoScrollSpeed;
         dialog.querySelector('[data-bind="speedLabel"]').textContent = s.autoScrollSpeed;
+
         if (els.autoscrollSpeedVal) {
             els.autoscrollSpeedVal.textContent = s.autoScrollSpeed;
         }
     }
     applySettingsToUI();
     const unsubPrefs = readerPrefs.subscribe(() => applySettingsToUI());
-
-    // AUTO follow-system: re-resolve when OS dark/light changes
-    const mediaDark = window.matchMedia('(prefers-color-scheme: dark)');
-    function onSystemColorSchemeChange() {
-        if (readerPrefs.getSettings().theme === 'AUTO') applySettingsToUI();
-    }
-    mediaDark.addEventListener('change', onSystemColorSchemeChange);
 
     // 4. Settings change handlers — let the dialog's `change` event bubble.
     dialog.addEventListener('change', (e) => {
@@ -565,6 +560,13 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             drawer.refresh(activeTab || 'toc');
         }
     });
+
+    // 8b. AUTO 跟随系统深浅模式：OS 切换时若当前主题是 AUTO，重新解析并应用。
+    const mediaDark = window.matchMedia('(prefers-color-scheme: dark)');
+    function onSystemColorSchemeChange() {
+        if (readerPrefs.getSettings().theme === 'AUTO') applySettingsToUI();
+    }
+    mediaDark.addEventListener('change', onSystemColorSchemeChange);
 
     // Cleanup on re-render: container.innerHTML gets cleared next time, so we
     // stash subscribers + rAF cancellation on the container node.
