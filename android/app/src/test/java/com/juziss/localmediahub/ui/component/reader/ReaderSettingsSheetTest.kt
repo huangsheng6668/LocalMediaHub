@@ -1,6 +1,8 @@
 package com.juziss.localmediahub.ui.component.reader
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -126,5 +128,52 @@ class ReaderSettingsSheetTest {
         composeRule.onNodeWithText(ReaderTheme.AUTO.label).performClick()
         assertNotNull(captured)
         assertEquals(ReaderTheme.AUTO, captured?.theme)
+    }
+
+    /**
+     * Phase 2 §1.2: when theme == AUTO, the 6 concrete theme FilterChips
+     * must be visually disabled (greyed out) while the AUTO chip itself
+     * stays enabled so the user can switch away from AUTO.
+     */
+    @Test
+    fun auto_theme_disables_concrete_theme_chips() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(theme = ReaderTheme.AUTO),
+                onChange = {},
+            )
+        }
+        composeRule.waitForIdle()
+        val concreteThemes = listOf(
+            ReaderTheme.DAY,
+            ReaderTheme.DAY_BRIGHT,
+            ReaderTheme.EYE_CARE,
+            ReaderTheme.PARCHMENT,
+            ReaderTheme.NIGHT,
+            ReaderTheme.NIGHT_BLACK,
+        )
+        concreteThemes.forEach { theme ->
+            composeRule.onNodeWithText(theme.label).assertIsNotEnabled()
+        }
+        // AUTO chip itself must remain selectable so the user can pick another theme
+        composeRule.onNodeWithText(ReaderTheme.AUTO.label).assertIsEnabled()
+    }
+
+    /**
+     * Phase 2 §1.2: when theme != AUTO, all theme chips (including AUTO and
+     * the currently selected one) must be enabled.
+     */
+    @Test
+    fun non_auto_theme_keeps_chips_enabled() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(theme = ReaderTheme.DAY),
+                onChange = {},
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText(ReaderTheme.DAY.label).assertIsEnabled()
+        composeRule.onNodeWithText(ReaderTheme.NIGHT.label).assertIsEnabled()
+        composeRule.onNodeWithText(ReaderTheme.AUTO.label).assertIsEnabled()
     }
 }

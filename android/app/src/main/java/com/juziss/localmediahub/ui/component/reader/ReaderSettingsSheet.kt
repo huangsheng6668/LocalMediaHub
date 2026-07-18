@@ -166,6 +166,12 @@ private fun ThemeChipRow(
     // narrow phones — switch to FlowRow so chips wrap. AUTO's swatch is a
     // half-light/half-dark gradient (its bg/fg are Transparent placeholders
     // until resolved by ReaderThemeScope).
+    //
+    // Phase 2 §1.2: when AUTO is selected the 6 concrete theme chips are
+    // disabled (greyed out by Material3) — AUTO itself stays enabled so the
+    // user can switch to a concrete theme; once they do, every chip becomes
+    // interactive again.
+    val isAutoSelected = selected == ReaderTheme.AUTO
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -174,6 +180,7 @@ private fun ThemeChipRow(
             FilterChip(
                 selected = theme == selected,
                 onClick = { onSelect(theme) },
+                enabled = !(isAutoSelected && theme != ReaderTheme.AUTO),
                 label = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ThemeSwatch(theme)
