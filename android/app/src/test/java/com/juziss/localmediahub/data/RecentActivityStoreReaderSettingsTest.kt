@@ -2,6 +2,7 @@ package com.juziss.localmediahub.data
 
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.juziss.localmediahub.ui.component.reader.ReaderFontFamily
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals

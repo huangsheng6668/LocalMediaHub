@@ -1,6 +1,7 @@
 package com.juziss.localmediahub.data
 
 import androidx.compose.ui.graphics.Color
+import com.juziss.localmediahub.ui.component.reader.ReaderFontFamily
 
 /**
  * 全局阅读器设置（V2）。一组设置应用于所有书。
@@ -79,21 +80,5 @@ enum class ReaderTheme(
     companion object {
         /** AUTO 在亮/暗模式下解析到的预设。 */
         fun resolveAuto(isDark: Boolean): ReaderTheme = if (isDark) NIGHT else DAY
-    }
-}
-
-/**
- * 阅读正文字体选项。Android 不打包字体，依赖系统字体映射。
- * KAITI 在多数 Android ROM 上没有独立楷体，toFontFamily() 回退到 Serif。
- */
-enum class ReaderFontFamily(val label: String) {
-    SYSTEM("无衬线"),
-    SERIF("宋体"),
-    KAITI("楷体");
-
-    fun toFontFamily(): androidx.compose.ui.text.font.FontFamily = when (this) {
-        SYSTEM -> androidx.compose.ui.text.font.FontFamily.Default
-        SERIF  -> androidx.compose.ui.text.font.FontFamily.Serif
-        KAITI  -> androidx.compose.ui.text.font.FontFamily.Serif
     }
 }
