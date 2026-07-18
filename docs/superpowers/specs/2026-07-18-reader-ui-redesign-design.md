@@ -28,21 +28,24 @@
 ```text
 SettingsV2 = {
   fontFamily:        'SYSTEM' | 'SERIF' | 'KAITI'
-  fontSize:          number   // 12–28，整数；默认 17
+  fontSize:          number   // 12–28，整数；默认 16
   lineHeight:        number   // 1.3–2.5，步长 0.1；默认 1.8
   contentWidth:      number   // Web 600–900 px / Android 360–720 dp；默认 Web 720 / Android 600
   firstLineIndent:   boolean  // 默认 true
   paragraphSpacing:  boolean  // 默认 false
   theme:             'DAY' | 'DAY_BRIGHT' | 'EYE_CARE' | 'PARCHMENT'
                    | 'NIGHT' | 'NIGHT_BLACK' | 'AUTO'
-  autoSystemTheme:   boolean  // 默认 false；on 时上面的 theme 组禁用
   immersiveMode:     boolean  // 默认 false
   autoScrollSpeed:   number   // 1–10（既有，保留）
 }
 ```
 
+> **审核修改说明**：移除了 `autoSystemTheme` 字段。原设计中 `theme: 'AUTO'` 已经表达了“跟随系统”语义，再加一个 `autoSystemTheme: boolean` 会产生两个控制点（`autoSystemTheme=true` 但 `theme='DAY'` 时行为不明确）。统一为：用户选择 `theme='AUTO'` 即启用跟随系统，选择其他主题即关闭。设置面板中“跟随系统”开关的 on/off 等价于将 `theme` 设为 `'AUTO'` / 恢复上次非 AUTO 主题。
+
 迁移（V1 → V2）：
-- `fontSize: 'SMALL' → 14, 'MEDIUM' → 17, 'LARGE' → 18, 'XLARGE' → 20`，其他值（含未定义）→ `17`
+- `fontSize: 'SMALL' → 14, 'MEDIUM' → 16, 'LARGE' → 18, 'XLARGE' → 20`，其他值（含未定义）→ `16`
+
+> **审核修改说明**：原文档 MEDIUM 映射为 17，但两端现有代码中 `MEDIUM` 的实际值是 `16`（Web `FONT_SIZES.MEDIUM = 16`，Android `ReaderFontSize.MEDIUM(16)`）。迁移必须保持与现有行为一致，否则老用户升级后字号会悄然变大。
 - `lineHeight: 'COMPACT' → 1.4, 'STANDARD' → 1.8, 'LOOSE' → 2.2`，其他 → `1.8`
 - `theme` 字段保留原值，`'DAY'/'NIGHT'/'EYE_CARE'` 直接兼容
 - 缺失字段填默认；损坏 JSON 整体回退默认；新字段（fontFamily / contentWidth / 等）填默认
@@ -65,8 +68,9 @@ SettingsV2 = {
 
 ### 1.2 跟随系统实现
 
-- Web：`window.matchMedia('(prefers-color-scheme: dark)')` 监听变化；`autoSystemTheme=true` 时强制使用 `AUTO` 解析路径
-- Android：`isSystemInDarkTheme()` Compose API；`autoSystemTheme=true` 时主题组 `FilterChip` 全部禁用
+- Web：`window.matchMedia('(prefers-color-scheme: dark)')` 监听变化；`theme === 'AUTO'` 时执行解析路径（亮→`DAY`，暗→`NIGHT`）
+- Android：`isSystemInDarkTheme()` Compose API；`theme == AUTO` 时主题组 6 个 `FilterChip` 全部禁用（灰显）
+- 两端均需缓存上次非 AUTO 主题值，当用户关闭“跟随系统”时恢复到该值而非总是 fallback 到 `DAY`
 
 ### 1.3 应用范围
 
@@ -80,12 +84,18 @@ SettingsV2 = {
 
 | 字体 | 风格 | 文件 | 大小（估） |
 |---|---|---|---|
-| LXGW WenKai（霞鹜文楷） | 楷体风手写感 | `LXGW WenKai Regular.woff2` | ~7 MB |
-| Noto Serif SC（思源宋体） | 传统宋体 | `NotoSerifSC Regular.woff2` | ~8 MB |
+| LXGW WenKai（霞鹜文楷） | 楷体风手写感 | `LXGWWenKai-Regular.woff2` | ~7 MB |
+| Noto Serif SC（思源宋体） | 传统宋体 | `NotoSerifSC-Regular.woff2` | ~8 MB |
 
 - 由 Go HTTP 服务器静态托管为公开资源（不参与 `/api/v1/books/image` 鉴权）
 - `@font-face` 声明 `font-display: swap`，先用系统字体渲染，加载完无缝替换
 - 仅打包 Regular 字重；woff2 格式
+- 文件名使用无空格命名，避免 URL 编码问题
+
+> **审核补充：字体加载优化**
+> - 本项目为局域网本地服务，15MB 字体在千兆内网下 < 200ms，可接受
+> - 仍建议在阅读器 HTML 中对首选字体添加 `<link rel="preload" as="font" type="font/woff2" crossorigin>` 以尽早触发下载
+> - 若未来考虑外网访问，可通过 `pyftsubset`（fonttools）对 CJK 字体做常用字子集化，将体积降至 2–3 MB
 
 ### 2.2 字体选项（3 档，两端枚举一致）
 
@@ -105,8 +115,8 @@ SettingsV2 = {
 
 ### 3.1 字号
 
-- 连续滑块：12–28，步长 1，默认 17
-- Web：`--reader-font-size: 17px` → `.text-reader__content { font-size: var(--reader-font-size) }`
+- 连续滑块：12–28，步长 1，默认 16
+- Web：`--reader-font-size: 16px` → `.text-reader__content { font-size: var(--reader-font-size) }`
 - Android：`TextStyle.fontSize = fontSize.sp`
 
 ### 3.2 行距
@@ -117,9 +127,10 @@ SettingsV2 = {
 
 ### 3.3 内容宽度
 
-- 连续滑块：Web 600–900 px（默认 720）；Android 360–720 dp（默认 600，按设备宽度自动 cap）
+- 连续滑块：Web 600–900 px（默认 720）；Android 360–720 dp（默认 600）
 - Web：`--reader-content-width` → `.text-reader__content { max-width: var(--reader-content-width); margin: 0 auto }`
 - Android：LazyColumn 包一层 `Box(Modifier.fillMaxWidth(), contentAlignment = Center)`，内层限宽
+- **Android 设备适配规则**：滑块上界 `min(720, screenWidthDp - 32)`（两侧各留 16dp），用户设置值超过设备宽度时自动 clamp 到上界；竖屏/横屏切换时重新计算上界但不修改用户已保存的值
 
 ### 3.4 段落开关
 
@@ -140,10 +151,12 @@ CSS class 组合：`<p class="text-reader__p indent-on gap-off">`，避免动态
 
 | 操作 | 行为 |
 |---|---|
-| 单击屏幕中区域（横向 25%–75%） | 切换沉浸开/关 |
-| 单击屏幕左 25% | 上一章（不退出沉浸） |
-| 单击屏幕右 25% | 下一章（不退出沉浸） |
+| 单击屏幕中区域（横向 20%–80%） | 切换沉浸开/关 |
+| 单击屏幕左 20% | 上一章（不退出沉浸） |
+| 单击屏幕右 20% | 下一章（不退出沉浸） |
 | `Esc`（仅 Web） | 退出沉浸 |
+
+> **审核修改说明**：将中区域从 25%–75%（50% 宽度）调整为 20%–80%（60% 宽度）。原比例下手机竖屏（~360dp）中区域仅 ~180dp，用户容易误触翻章热区。调整后中区域 ~216dp，翻章热区各 ~72dp，更合理。另外，现有代码中 Web 端已经是 25%/75% 分割点（`textReader.js` 中 `< 25%` = prev, `> 75%` = next），这个修改与现状差异很小，且新增的沉浸切换仅在中间区域触发，不会破坏现有翻章行为。
 
 不实现「临时唤出栏」的滑动手势，避免双状态栏交互复杂度。`autoScroll` 在沉浸模式下仍可用。
 
@@ -171,7 +184,8 @@ CSS class 组合：`<p class="text-reader__p indent-on gap-off">`，避免动态
 进入阅读器时给 `document.body` 设置 `data-reader-theme="<THEME>"` 属性；CSS 用属性选择器在阅读器子树内整体覆盖 App 变量：
 
 ```css
-body[data-reader-theme="NIGHT"] body[data-active-tab="read"] .view-container,
+/* 审核修正：两个属性选择器在同一个 body 上，必须写成复合选择器（无空格） */
+body[data-reader-theme="NIGHT"][data-active-tab="read"] .view-container,
 body[data-reader-theme="NIGHT"] .text-reader,
 body[data-reader-theme="NIGHT"] .text-reader__drawer,
 body[data-reader-theme="NIGHT"] dialog#reader-settings-dialog {
@@ -181,6 +195,8 @@ body[data-reader-theme="NIGHT"] dialog#reader-settings-dialog {
     --border-color: var(--reader-border);
 }
 ```
+
+> **审核修改说明**：原写法 `body[...] body[...]` 是后代选择器，要求第二个 `body` 嵌套在第一个 `body` 内——HTML 中 `<body>` 不会嵌套，该选择器永远不会匹配任何元素。修正为 `body[data-reader-theme="NIGHT"][data-active-tab="read"]` 复合选择器（同一元素同时具有两个属性）。
 
 顶栏 / 底栏显式使用 `var(--reader-chrome-bg)` / `var(--reader-chrome-fg)`，不再 fallback 到 `rgba(0,0,0,0.2)`。
 退出 / cleanup 时 `delete document.body.dataset.readerTheme`。
@@ -260,6 +276,8 @@ fun ReaderThemeScope(theme: ReaderTheme, content: @Composable () -> Unit) {
 - 引号开头的段落：CSS 标准行为（引号与首字一起下沉），不额外处理
 - 首段是图片 block：跳过，找第一个 text block 应用
 - 段落不足 4 字：不应用
+- 纯数字开头的段落（如“2024年…”）：正常应用，数字下沉视觉可接受
+- 纯标点/特殊符号开头（如“——”、“……”）：不应用，跳到下一个 text block
 
 Android 不实现（Compose 自定义 Layout 成本高，已知差异）。
 
@@ -278,13 +296,13 @@ Android 不实现（Compose 自定义 Layout 成本高，已知差异）。
 阅读设置                                 [×]
 
 ┌─ 外观 ─────────────────────────┐
-│ 跟随系统      [⚪─────]   off   │  toggle，开启时下面主题组禁用
-│ 主题（6 + AUTO）                │  2 行 × 3 列 radio + 圆色块预览
+│ 跟随系统      [⚪─────]   off   │  toggle（on = theme 设为 AUTO，下面主题组禁用灰显）
+│ 主题（6 选 1）                  │  2 行 × 3 列 radio + 圆色块预览
 │ 字体（3 档）                    │  radio
 └────────────────────────────────┘
 
 ┌─ 字号与行距 ───────────────────┐
-│ 字号      [────●────]  17 px   │
+│ 字号      [────●────]  16 px   │
 │ 行距      [──●──────]  1.8     │
 │ 宽度      [────●────]  720 px  │
 └────────────────────────────────┘
@@ -304,8 +322,9 @@ Android 不实现（Compose 自定义 Layout 成本高，已知差异）。
 
 ### 7.2 交互细节
 
-- 主题：6 radio 横向 2×3 网格，每项带圆色块预览
-- `跟随系统` toggle on 时，6 主题 radio 整组 disabled + 灰显
+- 主题：6 radio 横向 2×3 网格，每项带圆色块预览（不含 AUTO，AUTO 通过“跟随系统”开关控制）
+- `跟随系统` toggle on 时：`theme` 设为 `'AUTO'`，6 主题 radio 整组 disabled + 灰显
+- `跟随系统` toggle off 时：`theme` 恢复为上次选择的非 AUTO 值（缓存在内存中）
 - 滑块实时预览（不点应用），右侧实时数字标签
 - 段落 / 沉浸 toggles：iOS 风格左右 toggle
 - 关闭按钮：单个「关闭」，所有改动即时生效（无应用 / 取消）
@@ -320,21 +339,21 @@ Android 不实现（Compose 自定义 Layout 成本高，已知差异）。
 
 | 文件 | 改动摘要 |
 |---|---|
-| `server/internal/web/readerPrefs.js` | `THEME_PRESETS` 扩展到 6 + AUTO，每项加 chrome 字段；删除 `FONT_SIZES`/`LINE_HEIGHTS` 对外导出（仅内部迁移用）；新增 `FONT_FAMILIES`、`CONTENT_WIDTH_RANGE`；`DEFAULT_SETTINGS` 升级到 V2；新增 `migrateV1toV2` |
-| `server/internal/web/textReader.js` | `applySettingsToUI` 新增：`--reader-font-family`、`--reader-content-width`、`--reader-chrome-bg/fg`、`--reader-muted`；`document.body.dataset.readerTheme`；段落 indent/gap class 切换；首段 `text-reader__p--dropcap`；章节大标题渲染；章节末尾 `❖`；切章淡入；沉浸模式状态机；cleanup 移除 `data-reader-theme` |
-| `server/internal/web/style.css` | `body[data-reader-theme="..."]` 整体覆盖；header/footer 显式 chrome 变量；`--reader-content-width` / `--reader-font-family`；段落 indent/gap class；首字下沉；章节大标题；章节结束符号；淡入 keyframes；沉浸模式栏隐藏；`.reader-settings__*` 设置面板样式 |
-| `server/internal/web/fonts/` | 新增目录，放 2 个 woff2 文件 |
+| `server/internal/web/readerPrefs.js` | `THEME_PRESETS` 扩展到 6 + AUTO，每项加 chrome 字段；删除 `FONT_SIZES`/`LINE_HEIGHTS` 对外导出（仅内部迁移用）；新增 `FONT_FAMILIES`、`CONTENT_WIDTH_RANGE`；`DEFAULT_SETTINGS` 升级到 V2（不含 `autoSystemTheme`）；新增 `migrateV1toV2`；缓存 `lastNonAutoTheme` |
+| `server/internal/web/textReader.js` | `applySettingsToUI` 新增：`--reader-font-family`、`--reader-content-width`、`--reader-chrome-bg/fg`、`--reader-muted`；`document.body.dataset.readerTheme`；段落 indent/gap class 切换；首段 `text-reader__p--dropcap`（含标点开头跳过逻辑）；章节大标题渲染；章节末尾 `❖`；切章淡入；沉浸模式状态机（中区域 20%–80%）；cleanup 移除 `data-reader-theme` |
+| `server/internal/web/style.css` | `body[data-reader-theme="..."][data-active-tab="read"]` 复合选择器覆盖；header/footer 显式 chrome 变量；`--reader-content-width` / `--reader-font-family`；段落 indent/gap class；首字下沉；章节大标题；章节结束符号；淡入 keyframes；沉浸模式栏隐藏；`.reader-settings__*` 设置面板样式 |
+| `server/internal/web/fonts/` | 新增目录，放 2 个 woff2 文件（`LXGWWenKai-Regular.woff2`、`NotoSerifSC-Regular.woff2`） |
 
 ### 8.2 Android 端（新增 1 文件）
 
 | 文件 | 改动摘要 |
 |---|---|
-| `data/ReaderSettings.kt` | `ReaderTheme` 加 chrome 字段、加 `DAY_BRIGHT/PARCHMENT/NIGHT_BLACK/AUTO`；删 `ReaderFontSize/ReaderLineHeight` enum，改 `fontSizeSp:Int / lineHeightMultiplier:Float`；加 `fontFamily / contentWidthDp / firstLineIndent / paragraphSpacing / immersiveMode / autoSystemTheme` |
-| `data/RecentActivityStore.kt` | reader_settings 序列化升级 V2 + V1 兼容反序列化 |
+| `data/ReaderSettings.kt` | `ReaderTheme` 加 chrome 字段、加 `DAY_BRIGHT/PARCHMENT/NIGHT_BLACK/AUTO`；删 `ReaderFontSize/ReaderLineHeight` enum，改 `fontSizeSp:Int / lineHeightMultiplier:Float`；加 `fontFamily / contentWidthDp / firstLineIndent / paragraphSpacing / immersiveMode`（无 `autoSystemTheme`，由 `theme=AUTO` 统一表达） |
+| `data/RecentActivityStore.kt` | reader_settings 序列化升级 V2 + V1 兼容反序列化；缓存 `lastNonAutoTheme` 用于关闭跟随系统时恢复 |
 | `ui/component/reader/ReaderThemeWrapper.kt` | 升级为 `ReaderThemeScope`（覆盖 MaterialTheme colorScheme、包整个 Scaffold、监听 AUTO） |
-| `ui/screen/TextReaderScreen.kt` | `ReaderThemeScope` 移到 Scaffold 外层；沉浸模式状态机；中区域点击切换沉浸；章节大标题作为 LazyColumn 首项；正文宽度 Box 居中；切章 AnimatedContent 淡入；末尾 ❖ item |
-| `ui/component/reader/ReaderSettingsSheet.kt` | 完全重排：4 组（外观 / 字号与行距 / 段落 / 行为）；主题 6 FilterChip + 圆色块；字体 3 FilterChip；3 Slider；5 Switch |
-| `viewmodel/TextReaderViewModel.kt` | 兼容 AUTO；`updateSettings` 透传 V2；进入书籍后 1.5 秒沉浸栏隐藏时序 |
+| `ui/screen/TextReaderScreen.kt` | `ReaderThemeScope` 移到 Scaffold 外层；沉浸模式状态机；中区域（20%–80%）点击切换沉浸；章节大标题作为 LazyColumn 首项；正文宽度 Box 居中；切章 AnimatedContent 淡入；末尾 ❖ item |
+| `ui/component/reader/ReaderSettingsSheet.kt` | 完全重排：4 组（外观 / 字号与行距 / 段落 / 行为）；主题 6 FilterChip + 圆色块；字体 3 FilterChip；3 Slider；4 Switch（“跟随系统”toggle 控制 theme=AUTO，不是独立字段） |
+| `viewmodel/TextReaderViewModel.kt` | 兼容 AUTO + 缓存 lastNonAutoTheme；`updateSettings` 透传 V2；进入书籍后 1.5 秒沉浸栏隐藏时序 |
 | **新增** `ui/component/reader/ReaderFontFamily.kt` | enum：`SYSTEM/SERIF/KAITI`，提供 `toFontFamily()` 映射 |
 
 ### 8.3 PR 拆分（6 个，风险递增）
@@ -350,11 +369,12 @@ Android 不实现（Compose 自定义 Layout 成本高，已知差异）。
 
 | 风险 | 缓解 |
 |---|---|
-| Web 字体文件大，首屏白屏 | `font-display: swap` + woff2 + preload |
+| Web 字体文件大，首屏白屏 | `font-display: swap` + woff2 + `<link rel="preload">` |
 | Android MaterialTheme 局部覆盖影响 ModalDrawerSheet 行为 | 实施时跑 `TextReaderScreenThemeTest` 全套，发现问题再 narrow |
 | 老用户 V1 settings 读不到 V2 | `migrateV1toV2` + 单测覆盖；迁移失败 fallback DEFAULT |
 | 沉浸模式中区域点击与现状冲突 | 现状中区域 click 无副作用，新行为是新增（不破坏） |
 | 章节大标题与顶栏标题重复 | 视觉上是「面包屑 + 装饰性大标题」双层；若反馈冗余，后续可加开关 |
+| `theme=AUTO` 关闭后不知恢复哪个主题 | 两端内存缓存 `lastNonAutoTheme`；初始化时若 `theme=AUTO` 则 fallback `DAY` |
 
 ## §9 测试策略
 
@@ -368,7 +388,7 @@ Android 不实现（Compose 自定义 Layout 成本高，已知差异）。
 
 | 文件 | 改动 |
 |---|---|
-| `ReaderSettingsSheetTest.kt` | 改：构造 V2 实例；新：6 主题 FilterChip 渲染、AUTO 开启后主题组禁用、3 滑块实时改变 settings 值、5 toggles、字体 3 档切换 |
+| `ReaderSettingsSheetTest.kt` | 改：构造 V2 实例；新：6 主题 FilterChip 渲染、"跟随系统"toggle 开启后 theme=AUTO 且主题组禁用、3 滑块实时改变 settings 值、4 toggles（跟随系统/首行缩进/段间距/沉浸）、字体 3 档切换 |
 | `TextReaderScreenThemeTest.kt` | 改：6 主题各自渲染断言；新：AUTO 在 dark 时切 NIGHT、Scaffold 外层包 ReaderThemeScope 后 TopAppBar 颜色跟随 |
 | `TextReaderViewModelReaderTest.kt` | 新：AUTO 解析为 DAY/NIGHT 的逻辑、沉浸 1.5 秒后栏隐藏时序、`updateSettings` 持久化 V2 形状 |
 | `RecentActivityStoreReaderSettingsTest.kt` | 新：V1 → V2 迁移用例、V2 round-trip |
