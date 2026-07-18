@@ -213,3 +213,105 @@ func TestReverseLookupManifest(t *testing.T) {
 		assert.Equal(t, "", reverseLookupManifest(nil, "images/foo.jpg"))
 	})
 }
+
+// png1x1 is a minimal 1x1 transparent PNG used as test image payload.
+var png1x1 = []byte{
+	0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
+	0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+	0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
+	0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+	0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+	0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+	0x42, 0x60, 0x82,
+}
+
+// buildEpubWithImageBytes writes a minimal epub whose manifest image entry
+// actually contains the supplied image bytes (unlike buildEpubWithImage, which
+// writes a zero-byte placeholder). The image is stored at
+// "OEBPS/<imgHref>" and declared as <item id=imgManifestID href=imgHref .../>.
+// imgHref must be relative (no leading slash, no fragment).
+func buildEpubWithImageBytes(t *testing.T, imgManifestID, imgHref string, imgBytes []byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "book.epub")
+	f, err := os.Create(p)
+	require.NoError(t, err)
+	defer f.Close()
+	w := zip.NewWriter(f)
+
+	mustWriteStr := func(name, body string) {
+		fw, err := w.Create(name)
+		require.NoError(t, err)
+		_, err = fw.Write([]byte(body))
+		require.NoError(t, err)
+	}
+	mustWriteBytes := func(name string, body []byte) {
+		fw, err := w.Create(name)
+		require.NoError(t, err)
+		_, err = fw.Write(body)
+		require.NoError(t, err)
+	}
+
+	mustWriteStr("mimetype", "application/epub+zip")
+	mustWriteStr("META-INF/container.xml", `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`)
+	mustWriteStr("OEBPS/content.opf", `<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Image Bytes Book</dc:title>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="`+imgManifestID+`" href="`+imgHref+`" media-type="image/png"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="ch1"/>
+  </spine>
+</package>`)
+	mustWriteStr("OEBPS/ch1.xhtml", `<html><body><p>chapter with image</p></body></html>`)
+	imgEntry := strings.TrimPrefix(filepath.ToSlash(imgHref), "/")
+	if i := strings.IndexByte(imgEntry, '#'); i >= 0 {
+		imgEntry = imgEntry[:i]
+	}
+	mustWriteBytes("OEBPS/"+imgEntry, imgBytes)
+	mustWriteStr("OEBPS/toc.ncx", `<?xml version="1.0"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="n1"><navLabel><text>Only Chapter</text></navLabel><content src="ch1.xhtml"/></navPoint>
+  </navMap>
+</ncx>`)
+	require.NoError(t, w.Close())
+	require.NoError(t, f.Close())
+	return p
+}
+
+func TestReadImageBytes(t *testing.T) {
+	p := buildEpubWithImageBytes(t, "cover", "Images/test.png", png1x1)
+	svc := NewBookService()
+
+	t.Run("success", func(t *testing.T) {
+		data, ct, err := svc.ReadImageBytes(p, "cover")
+		require.NoError(t, err)
+		assert.Equal(t, png1x1, data)
+		assert.Equal(t, "image/png", ct)
+	})
+
+	t.Run("manifest not found", func(t *testing.T) {
+		_, _, err := svc.ReadImageBytes(p, "nonexistent")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, bookparser.ErrInvalidEpub)
+	})
+
+	t.Run("non-epub file rejected", func(t *testing.T) {
+		txtPath := filepath.Join(t.TempDir(), "book.txt")
+		require.NoError(t, os.WriteFile(txtPath, []byte("hello"), 0644))
+		_, _, err := svc.ReadImageBytes(txtPath, "any")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, bookparser.ErrUnsupported)
+	})
+}

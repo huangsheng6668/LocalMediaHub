@@ -12,10 +12,12 @@
 package service
 
 import (
+	"archive/zip"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -141,4 +143,70 @@ func reverseLookupManifest(manifest map[string]string, src string) string {
 		}
 	}
 	return ""
+}
+
+// ReadImageBytes opens the epub at path, looks up manifestID in the OPF
+// manifest, and returns the raw image bytes plus a MIME content type inferred
+// from the file extension.
+//
+// Security: fullPath is rejected if it starts with "/", "../", or equals ".." —
+// defends against path traversal even though manifest hrefs come from parsed
+// XML and should be safe.
+//
+// Size: capped at bookparser.MaxEpubEntrySize (16 MiB) per image —
+// maliciously large entries return an error wrapping bookparser.ErrTooLarge.
+func (s *BookService) ReadImageBytes(path, manifestID string) ([]byte, string, error) {
+	b, err := s.GetBook(path)
+	if err != nil {
+		return nil, "", err
+	}
+	if b.Format != "epub" {
+		return nil, "", fmt.Errorf("%w: image fetch only for epub", bookparser.ErrUnsupported)
+	}
+	manifest := b.EpubManifest()
+	href, ok := manifest[manifestID]
+	if !ok {
+		return nil, "", fmt.Errorf("%w: manifest id not found: %s", bookparser.ErrInvalidEpub, manifestID)
+	}
+	fullPath := bookparser.JoinZipPath(b.EpubOpfDir(), href)
+	// Defensive: block any path that would escape the zip root.
+	if strings.HasPrefix(fullPath, "../") || fullPath == ".." || strings.HasPrefix(fullPath, "/") {
+		return nil, "", fmt.Errorf("%w: invalid manifest href: %s", bookparser.ErrInvalidEpub, fullPath)
+	}
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %v", bookparser.ErrIoFailure, err)
+	}
+	defer zr.Close()
+	rc, err := zr.Open(fullPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: image not found in epub: %s", bookparser.ErrInvalidEpub, fullPath)
+	}
+	defer rc.Close()
+	data, err := bookparser.ReadCapped(rc, bookparser.MaxEpubEntrySize)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, mimeByExtension(filepath.Ext(fullPath)), nil
+}
+
+// mimeByExtension maps common image extensions to MIME types. Returns
+// "application/octet-stream" for unknown extensions.
+func mimeByExtension(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		return "application/octet-stream"
+	}
 }
