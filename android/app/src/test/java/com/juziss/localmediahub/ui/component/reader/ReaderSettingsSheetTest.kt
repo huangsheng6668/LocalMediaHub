@@ -27,12 +27,13 @@ import org.robolectric.RobolectricTestRunner
  * [androidx.compose.material3.ModalBottomSheet] host. The ModalBottomSheet
  * hosts its content in a separate window whose input dispatch is not
  * reliably drivable under Robolectric, so testing the extracted body keeps
- * the assertions exercising the real UI logic (ChipRow / ThemeChipRow /
- * label / onChange handlers) without the host getting in the way.
+ * the assertions exercising the real UI logic (font chips / sliders /
+ * switches / ThemeChipRow / onChange handlers) without the host getting in
+ * the way.
  *
- * Phase 1: assertions migrated from V1 enum to V2 numeric form
- * (`fontSizeSp:Int`, `lineHeightMultiplier:Float`). Theme labels are now the
- * full V2 strings ("日间·纸白" / "夜间·深空" / "护眼·米黄" / ...).
+ * Phase 3: discrete font/line-height chips replaced with continuous sliders
+ * (verified via the "字号 16" / "行距 1.8" labels); font-family FilterChips
+ * added; paragraph toggles added.
  *
  * Note: the project does not have Truth on the test classpath (confirmed in
  * T2), so we use plain JUnit [assertEquals] / [assertNotNull] assertions.
@@ -43,28 +44,41 @@ class ReaderSettingsSheetTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
 
+    /**
+     * Phase 3: section titles and slider value labels render with default
+     * settings (16 / 1.8 / DAY). The discrete "小"/"紧凑" chips no longer
+     * exist — they are replaced by slider value labels "字号 16" / "行距 1.8".
+     */
     @Test
-    fun renders_all_four_sections_and_default_selections() {
+    fun renders_all_sections_and_default_selections() {
         composeRule.setContent {
             ReaderSettingsSheetContent(
-                settings = ReaderSettings(),  // MEDIUM=16, STANDARD=1.8, DAY, speed=5
+                settings = ReaderSettings(),  // SYSTEM / 16 / 1.8 / DAY / speed=5
                 onChange = {},
             )
         }
         composeRule.waitForIdle()
-        // Section labels
-        composeRule.onNodeWithText("字体大小").assertExists()
-        composeRule.onNodeWithText("行距").assertExists()
-        composeRule.onNodeWithText("主题").assertExists()
-        composeRule.onNodeWithText("自动滚动速度").assertExists()
-        // Chip labels (at least one of each)
-        composeRule.onNodeWithText("小").assertExists()
-        composeRule.onNodeWithText("紧凑").assertExists()
+        // Section titles
+        composeRule.onNodeWithText("阅读设置").assertExists()
+        composeRule.onNodeWithText("外观").assertExists()
+        composeRule.onNodeWithText("字号与行距").assertExists()
+        composeRule.onNodeWithText("段落").assertExists()
+        composeRule.onNodeWithText("行为").assertExists()
+        // Slider value labels (default font 16, line height 1.8, width 600, speed 5)
+        composeRule.onNodeWithText("字号 16").assertExists()
+        composeRule.onNodeWithText("行距 1.8").assertExists()
+        composeRule.onNodeWithText("宽度 600").assertExists()
+        composeRule.onNodeWithText("自动滚动速度 5").assertExists()
+        // Paragraph toggle labels
+        composeRule.onNodeWithText("首行缩进").assertExists()
+        composeRule.onNodeWithText("段间距").assertExists()
+        composeRule.onNodeWithText("沉浸模式").assertExists()
+        // Theme chip (at least DAY)
         composeRule.onNodeWithText(ReaderTheme.DAY.label).assertExists()
     }
 
     @Test
-    fun clicking_font_chip_fires_onChange_with_new_size() {
+    fun clicking_font_family_chip_fires_onchange_with_new_family() {
         var captured: ReaderSettings? = null
         composeRule.setContent {
             ReaderSettingsSheetContent(
@@ -73,16 +87,17 @@ class ReaderSettingsSheetTest {
             )
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("超大").performClick()
+        composeRule.onNodeWithText(ReaderFontFamily.SERIF.label).performClick()
         assertNotNull(captured)
-        assertEquals(20, captured?.fontSizeSp)  // V2 numeric (XLARGE -> 20)
+        assertEquals(ReaderFontFamily.SERIF, captured?.fontFamily)
         // Other settings preserved
-        assertEquals(1.8f, captured?.lineHeightMultiplier ?: -1f, 0.0001f)  // V2 numeric (STANDARD -> 1.8)
+        assertEquals(16, captured?.fontSizeSp)
+        assertEquals(1.8f, captured?.lineHeightMultiplier ?: -1f, 0.0001f)
         assertEquals(ReaderTheme.DAY, captured?.theme)
     }
 
     @Test
-    fun clicking_theme_chip_fires_onChange_with_new_theme() {
+    fun clicking_theme_chip_fires_onchange_with_new_theme() {
         var captured: ReaderSettings? = null
         composeRule.setContent {
             ReaderSettingsSheetContent(
@@ -175,5 +190,23 @@ class ReaderSettingsSheetTest {
         composeRule.onNodeWithText(ReaderTheme.DAY.label).assertIsEnabled()
         composeRule.onNodeWithText(ReaderTheme.NIGHT.label).assertIsEnabled()
         composeRule.onNodeWithText(ReaderTheme.AUTO.label).assertIsEnabled()
+    }
+
+    /**
+     * Phase 3 Task 3.5: settings sheet must render all 3 ReaderFontFamily
+     * FilterChips (SYSTEM / SERIF / KAITI) so users can switch fonts.
+     */
+    @Test
+    fun settings_sheet_renders_all_font_families() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = {},
+            )
+        }
+        composeRule.waitForIdle()
+        ReaderFontFamily.entries.forEach { ff ->
+            composeRule.onNodeWithText(ff.label).assertExists()
+        }
     }
 }
