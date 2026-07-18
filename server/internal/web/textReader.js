@@ -121,18 +121,21 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (currentIdx < chapterCount - 1) loadChapter(Math.min(chapterCount - 1, currentIdx + 1));
     });
 
-    // Left/Right side click chapter navigation
+    // Left 20% / right 20% = prev/next chapter; middle 60% = toggle immersive
+    // (Phase 5). Middle hot-zone only toggles chrome when the user has enabled
+    // immersiveMode in settings — otherwise middle clicks are inert so legacy
+    // users do not see accidental chrome hide/show.
     els.content.addEventListener('mousemove', (e) => {
         if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) {
             els.content.style.cursor = 'default';
             return;
         }
         const rect = els.content.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const width = rect.width;
-        const ratio = clickX / width;
-        if (ratio < 0.25 || ratio > 0.75) {
-            els.content.style.cursor = 'pointer';
+        const ratio = (e.clientX - rect.left) / rect.width;
+        if (ratio < 0.20 || ratio > 0.80) {
+            els.content.style.cursor = 'pointer';  // 翻章热区
+        } else if (readerPrefs.getSettings().immersiveMode) {
+            els.content.style.cursor = 'pointer';  // 可切换沉浸
         } else {
             els.content.style.cursor = 'default';
         }
@@ -141,23 +144,26 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     els.content.addEventListener('click', (e) => {
         if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) return;
         if (window.getSelection() && window.getSelection().toString().trim() !== '') return;
-        
+
         const rect = els.content.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const width = rect.width;
-        const ratio = clickX / width;
-        
-        if (ratio < 0.25) {
+        const ratio = (e.clientX - rect.left) / rect.width;
+
+        if (ratio < 0.20) {
             if (currentIdx > 0) {
                 loadChapter(currentIdx - 1);
             } else {
                 showToast('已经是第一章了', 'info');
             }
-        } else if (ratio > 0.75) {
+        } else if (ratio > 0.80) {
             if (currentIdx < chapterCount - 1) {
                 loadChapter(currentIdx + 1);
             } else {
                 showToast('已经是最后一章了', 'info');
+            }
+        } else {
+            // 中区域：仅在用户启用沉浸模式时切换
+            if (readerPrefs.getSettings().immersiveMode) {
+                if (isImmersive) exitImmersive(); else enterImmersive();
             }
         }
     });
@@ -346,6 +352,43 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     }
     applySettingsToUI();
     const unsubPrefs = readerPrefs.subscribe(() => applySettingsToUI());
+
+    // === Phase 5: 沉浸模式状态机 ===
+    // isImmersive tracks whether chrome is currently hidden. The body's
+    // data-reader-immersive attribute drives the CSS slide/fade transitions
+    // (see style.css). scheduleImmersiveEntry() shows chrome for 1.5s on book
+    // load (a visual anchor) before hiding — only if immersiveMode is on.
+    let isImmersive = false;
+    function enterImmersive() {
+        isImmersive = true;
+        document.body.dataset.readerImmersive = 'on';
+    }
+    function exitImmersive() {
+        isImmersive = false;
+        delete document.body.dataset.readerImmersive;
+    }
+
+    let immersiveEntryTimer = null;
+    function scheduleImmersiveEntry() {
+        if (immersiveEntryTimer) clearTimeout(immersiveEntryTimer);
+        if (readerPrefs.getSettings().immersiveMode) {
+            exitImmersive();  // 先显示栏作为视觉锚点
+            immersiveEntryTimer = setTimeout(() => {
+                if (readerPrefs.getSettings().immersiveMode) enterImmersive();
+            }, 1500);
+        } else {
+            exitImmersive();
+        }
+    }
+    scheduleImmersiveEntry();
+
+    // Esc 退出沉浸（键盘可达性 + 误触恢复路径）。
+    function onKeyDown(e) {
+        if (e.key === 'Escape' && isImmersive) {
+            exitImmersive();
+        }
+    }
+    document.addEventListener('keydown', onKeyDown);
 
     // AUTO follow-system: re-resolve when OS dark/light changes
     const mediaDark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -637,8 +680,11 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         unsubPrefs();
         unsubBms();
         document.removeEventListener('visibilitychange', onVisibilityChange);
+        document.removeEventListener('keydown', onKeyDown);
         mediaDark.removeEventListener('change', onSystemColorSchemeChange);
         delete document.body.dataset.readerTheme;
+        if (immersiveEntryTimer) clearTimeout(immersiveEntryTimer);
+        exitImmersive();
         if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
         if (autoNextChapterTimer) clearTimeout(autoNextChapterTimer);
     };

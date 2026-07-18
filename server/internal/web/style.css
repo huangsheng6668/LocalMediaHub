@@ -1972,6 +1972,34 @@ dialog#reader-settings-dialog menu {
     transition: color 0.2s ease;
 }
 
+/* === Phase 5: 沉浸模式 ===
+   栏（header/footer）默认带 transition 以便进入/退出沉浸时平滑滑出。
+   沉浸态下 opacity→0、transform 滑出视口、pointer-events 关闭；正文上下
+   padding 收窄到 24px，给阅读区更多纵向空间。中间切换由 body 上的
+   data-reader-immersive 属性驱动（textReader.js 设置）。 */
+.text-reader__header,
+.text-reader__footer {
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.text-reader__content {
+    transition: padding 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                background-color 0.2s ease, color 0.2s ease;
+}
+body[data-reader-immersive="on"] .text-reader__header,
+body[data-reader-immersive="on"] .text-reader__footer {
+    opacity: 0;
+    transform: translateY(var(--immersive-translate, -100%));
+    pointer-events: none;
+}
+body[data-reader-immersive="on"] .text-reader__footer {
+    transform: translateY(100%);
+}
+body[data-reader-immersive="on"] .text-reader__content {
+    padding-top: 24px;
+    padding-bottom: 24px;
+}
+
 /* TOC slide-in drawer */
 .text-reader__drawer {
     position: fixed;
