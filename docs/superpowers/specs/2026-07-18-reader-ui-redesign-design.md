@@ -70,7 +70,8 @@ SettingsV2 = {
 
 - Web：`window.matchMedia('(prefers-color-scheme: dark)')` 监听变化；`theme === 'AUTO'` 时执行解析路径（亮→`DAY`，暗→`NIGHT`）
 - Android：`isSystemInDarkTheme()` Compose API；`theme == AUTO` 时主题组 6 个 `FilterChip` 全部禁用（灰显）
-- 两端均需缓存上次非 AUTO 主题值，当用户关闭“跟随系统”时恢复到该值而非总是 fallback 到 `DAY`
+
+> **修订说明（2026-07-18）**：原文要求“缓存上次非 AUTO 主题值，用户关闭跟随系统时恢复”。该需求建立在“独立跟随系统 toggle”的 UI 前提上。本项目的实际 UI 把 AUTO 作为 7 个主题 radio/FilterChip 之一（无独立 toggle），用户从 AUTO 切回时是主动点击某个具体主题——不存在“恢复上次”的实际场景。删除该要求。
 
 ### 1.3 应用范围
 
