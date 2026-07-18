@@ -175,18 +175,35 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     dialog.innerHTML = `
         <form method="dialog">
             <h3>阅读设置</h3>
+
             <fieldset>
-                <legend>字体大小</legend>
-                ${['SMALL','MEDIUM','LARGE','XLARGE'].map(v =>
-                    `<label><input type="radio" name="fontSize" value="${v}"> ${ {SMALL:'小',MEDIUM:'中',LARGE:'大',XLARGE:'超大'}[v] }</label>`
+                <legend>字体</legend>
+                ${['SYSTEM','SERIF','KAITI'].map(v =>
+                    `<label><input type="radio" name="fontFamily" value="${v}"> ${ {SYSTEM:'无衬线',SERIF:'宋体',KAITI:'楷体'}[v] }</label>`
                 ).join('')}
             </fieldset>
+
             <fieldset>
-                <legend>行距</legend>
-                ${['COMPACT','STANDARD','LOOSE'].map(v =>
-                    `<label><input type="radio" name="lineHeight" value="${v}"> ${ {COMPACT:'紧凑',STANDARD:'标准',LOOSE:'宽松'}[v] }</label>`
-                ).join('')}
+                <legend>字号 (<span data-bind="fontSizeLabel">16</span> px)</legend>
+                <input type="range" name="fontSizeSlider" min="12" max="28" step="1" value="16">
             </fieldset>
+
+            <fieldset>
+                <legend>行距 (<span data-bind="lineHeightLabel">1.8</span>)</legend>
+                <input type="range" name="lineHeightSlider" min="1.3" max="2.5" step="0.1" value="1.8">
+            </fieldset>
+
+            <fieldset>
+                <legend>宽度 (<span data-bind="contentWidthLabel">720</span> px)</legend>
+                <input type="range" name="contentWidthSlider" min="600" max="900" step="10" value="720">
+            </fieldset>
+
+            <fieldset>
+                <legend>段落</legend>
+                <label><input type="checkbox" name="firstLineIndent" checked> 首行缩进</label>
+                <label><input type="checkbox" name="paragraphSpacing"> 段间距</label>
+            </fieldset>
+
             <fieldset>
                 <legend>主题</legend>
                 <div class="reader-settings__theme-grid">
@@ -203,11 +220,12 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                     ).join('')}
                 </div>
             </fieldset>
+
             <fieldset>
-                <legend>自动滚动速度</legend>
+                <legend>自动滚动速度 (<span data-bind="speedLabel">5</span>)</legend>
                 <input type="range" name="autoScrollSpeed" min="1" max="10" value="5">
-                <span data-bind="speedLabel">5</span>
             </fieldset>
+
             <menu>
                 <button type="submit">关闭</button>
             </menu>
@@ -236,15 +254,9 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     els.header.appendChild(headerRight);
 
     // 3. Apply current settings (CSS vars + dialog controls).
-    // Phase 1: settings are V2-shape (numeric fontSize/lineHeight). The dialog
-    // still exposes 4 font radios (SMALL/MEDIUM/LARGE/XLARGE) and 3 line-height
-    // radios (COMPACT/STANDARD/LOOSE) for visual continuity; we translate at the
-    // boundary. Phase 3/4 will replace this with continuous sliders.
-    const FONT_SIZE_TO_ENUM = { 14: 'SMALL', 16: 'MEDIUM', 18: 'LARGE', 20: 'XLARGE' };
-    const LINE_HEIGHT_TO_ENUM = { 1.4: 'COMPACT', 1.8: 'STANDARD', 2.2: 'LOOSE' };
-    const ENUM_TO_FONT_SIZE = { SMALL: 14, MEDIUM: 16, LARGE: 18, XLARGE: 20 };
-    const ENUM_TO_LINE_HEIGHT = { COMPACT: 1.4, STANDARD: 1.8, LOOSE: 2.2 };
-
+    // Phase 3: settings are V2-shape (numeric fontSize/lineHeight/contentWidth,
+    // boolean firstLineIndent/paragraphSpacing, fontFamily enum). The dialog
+    // exposes continuous sliders + paragraph toggles + 3 font radio options.
     function applySettingsToUI() {
         const s = readerPrefs.getSettings();
         const root = document.documentElement;
@@ -266,21 +278,43 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         root.style.setProperty('--reader-border', theme.border);
         root.style.setProperty('--reader-font-size', s.fontSize + 'px');
         root.style.setProperty('--reader-line-height', String(s.lineHeight));
+        root.style.setProperty('--reader-font-family', readerPrefs.FONT_FAMILIES[s.fontFamily] || readerPrefs.FONT_FAMILIES.SYSTEM);
+        root.style.setProperty('--reader-content-width', s.contentWidth + 'px');
 
         // Overall App-variable override driven by data-reader-theme attribute
         document.body.dataset.readerTheme = themeKey;
 
-        // Reflect into dialog controls (translate V2 numeric <-> V1 radio enum)
-        const fontEnum = FONT_SIZE_TO_ENUM[s.fontSize];
-        const fontInput = fontEnum && dialog.querySelector(`input[name="fontSize"][value="${fontEnum}"]`);
-        if (fontInput) fontInput.checked = true;
-        const lhEnum = LINE_HEIGHT_TO_ENUM[s.lineHeight];
-        const lhInput = lhEnum && dialog.querySelector(`input[name="lineHeight"][value="${lhEnum}"]`);
-        if (lhInput) lhInput.checked = true;
+        // Reflect into dialog controls (V2 sliders + font radio + toggles).
+        const ffInput = dialog.querySelector(`input[name="fontFamily"][value="${s.fontFamily}"]`);
+        if (ffInput) ffInput.checked = true;
+        const fontSizeSlider = dialog.querySelector('input[name="fontSizeSlider"]');
+        if (fontSizeSlider) {
+            fontSizeSlider.value = s.fontSize;
+            const fsLabel = dialog.querySelector('[data-bind="fontSizeLabel"]');
+            if (fsLabel) fsLabel.textContent = s.fontSize + ' px';
+        }
+        const lhSlider = dialog.querySelector('input[name="lineHeightSlider"]');
+        if (lhSlider) {
+            lhSlider.value = s.lineHeight;
+            const lhLabel = dialog.querySelector('[data-bind="lineHeightLabel"]');
+            if (lhLabel) lhLabel.textContent = s.lineHeight.toFixed(1);
+        }
+        const cwSlider = dialog.querySelector('input[name="contentWidthSlider"]');
+        if (cwSlider) {
+            cwSlider.value = s.contentWidth;
+            const cwLabel = dialog.querySelector('[data-bind="contentWidthLabel"]');
+            if (cwLabel) cwLabel.textContent = s.contentWidth + ' px';
+        }
+        const indentToggle = dialog.querySelector('input[name="firstLineIndent"]');
+        if (indentToggle) indentToggle.checked = s.firstLineIndent;
+        const gapToggle = dialog.querySelector('input[name="paragraphSpacing"]');
+        if (gapToggle) gapToggle.checked = s.paragraphSpacing;
         const themeInput = dialog.querySelector(`input[name="theme"][value="${s.theme}"]`);
         if (themeInput) themeInput.checked = true;
-        dialog.querySelector('input[name="autoScrollSpeed"]').value = s.autoScrollSpeed;
-        dialog.querySelector('[data-bind="speedLabel"]').textContent = s.autoScrollSpeed;
+        const speedSlider = dialog.querySelector('input[name="autoScrollSpeed"]');
+        if (speedSlider) speedSlider.value = s.autoScrollSpeed;
+        const speedLabel = dialog.querySelector('[data-bind="speedLabel"]');
+        if (speedLabel) speedLabel.textContent = s.autoScrollSpeed;
         if (els.autoscrollSpeedVal) {
             els.autoscrollSpeedVal.textContent = s.autoScrollSpeed;
         }
@@ -298,17 +332,18 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     // 4. Settings change handlers — let the dialog's `change` event bubble.
     dialog.addEventListener('change', (e) => {
         const t = e.target;
-        if (t.name === 'autoScrollSpeed') {
+        if (t.name === 'fontSizeSlider') {
+            readerPrefs.saveSettings({ fontSize: parseInt(t.value, 10) });
+        } else if (t.name === 'lineHeightSlider') {
+            readerPrefs.saveSettings({ lineHeight: parseFloat(t.value) });
+        } else if (t.name === 'contentWidthSlider') {
+            readerPrefs.saveSettings({ contentWidth: parseInt(t.value, 10) });
+        } else if (t.name === 'firstLineIndent' || t.name === 'paragraphSpacing') {
+            readerPrefs.saveSettings({ [t.name]: t.checked });
+        } else if (t.name === 'fontFamily') {
+            readerPrefs.saveSettings({ fontFamily: t.value });
+        } else if (t.name === 'autoScrollSpeed') {
             readerPrefs.saveSettings({ autoScrollSpeed: parseInt(t.value, 10) });
-        } else if (t.name === 'fontSize') {
-            // V1 radio value (enum string) -> V2 numeric
-            if (Object.prototype.hasOwnProperty.call(ENUM_TO_FONT_SIZE, t.value)) {
-                readerPrefs.saveSettings({ fontSize: ENUM_TO_FONT_SIZE[t.value] });
-            }
-        } else if (t.name === 'lineHeight') {
-            if (Object.prototype.hasOwnProperty.call(ENUM_TO_LINE_HEIGHT, t.value)) {
-                readerPrefs.saveSettings({ lineHeight: ENUM_TO_LINE_HEIGHT[t.value] });
-            }
         } else if (t.name) {
             readerPrefs.saveSettings({ [t.name]: t.value });
         }
@@ -465,6 +500,11 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             p.textContent = text;  // XSS safe
             p.dataset.blockIndex = String(idx);
             p.dataset.paraIndex = String(idx);  // C-phase bookmark scroll compat
+            // Phase 3: per-paragraph indent/gap classes driven by V2 toggles.
+            // Class names map 1:1 to CSS rules in style.css.
+            const indent = readerPrefs.getSettings().firstLineIndent ? 'indent-on' : 'indent-off';
+            const gap = readerPrefs.getSettings().paragraphSpacing ? 'gap-on' : 'gap-off';
+            p.className = `text-reader__p ${indent} ${gap}`;
             // Hover bookmark button
             const btn = document.createElement('button');
             btn.className = 'text-reader__para-bookmark';
