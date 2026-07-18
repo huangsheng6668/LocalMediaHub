@@ -174,61 +174,84 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     dialog.id = 'reader-settings-dialog';
     dialog.innerHTML = `
         <form method="dialog">
-            <h3>阅读设置</h3>
+            <header class="reader-settings__header">
+                <h3>阅读设置</h3>
+                <button type="submit" class="reader-settings__close" aria-label="关闭">×</button>
+            </header>
+            <div class="reader-settings__body">
 
-            <fieldset>
-                <legend>字体</legend>
-                ${['SYSTEM','SERIF','KAITI'].map(v =>
-                    `<label><input type="radio" name="fontFamily" value="${v}"> ${ {SYSTEM:'无衬线',SERIF:'宋体',KAITI:'楷体'}[v] }</label>`
-                ).join('')}
-            </fieldset>
+                <section class="reader-settings__group">
+                    <h4>外观</h4>
 
-            <fieldset>
-                <legend>字号 (<span data-bind="fontSizeLabel">16</span> px)</legend>
-                <input type="range" name="fontSizeSlider" min="12" max="28" step="1" value="16">
-            </fieldset>
+                    <div class="reader-settings__row">
+                        <span>字体</span>
+                        <div class="reader-settings__font-row">
+                            ${['SYSTEM','SERIF','KAITI'].map(v =>
+                                `<label><input type="radio" name="fontFamily" value="${v}"> ${ {SYSTEM:'无衬线',SERIF:'宋体',KAITI:'楷体'}[v] }</label>`
+                            ).join('')}
+                        </div>
+                    </div>
 
-            <fieldset>
-                <legend>行距 (<span data-bind="lineHeightLabel">1.8</span>)</legend>
-                <input type="range" name="lineHeightSlider" min="1.3" max="2.5" step="0.1" value="1.8">
-            </fieldset>
+                    <div class="reader-settings__theme-grid">
+                        ${[
+                            ['DAY','日间·纸白'],['DAY_BRIGHT','日间·亮白'],['EYE_CARE','护眼·米黄'],
+                            ['PARCHMENT','羊皮纸'],['NIGHT','夜间·深空'],['NIGHT_BLACK','夜间·纯黑'],
+                            ['AUTO','跟随系统'],
+                        ].map(([v,label]) =>
+                            `<label class="reader-settings__theme-opt">
+                                <input type="radio" name="theme" value="${v}">
+                                <span class="reader-settings__theme-swatch" data-theme="${v}"></span>
+                                <span class="reader-settings__theme-label">${label}</span>
+                            </label>`
+                        ).join('')}
+                    </div>
+                </section>
 
-            <fieldset>
-                <legend>宽度 (<span data-bind="contentWidthLabel">720</span> px)</legend>
-                <input type="range" name="contentWidthSlider" min="600" max="900" step="10" value="720">
-            </fieldset>
+                <section class="reader-settings__group">
+                    <h4>字号与行距</h4>
+                    <label class="reader-settings__slider-row">
+                        <span>字号</span>
+                        <input type="range" name="fontSizeSlider" min="12" max="28" step="1" value="16">
+                        <output data-bind="fontSizeLabel">16 px</output>
+                    </label>
+                    <label class="reader-settings__slider-row">
+                        <span>行距</span>
+                        <input type="range" name="lineHeightSlider" min="1.3" max="2.5" step="0.1" value="1.8">
+                        <output data-bind="lineHeightLabel">1.8</output>
+                    </label>
+                    <label class="reader-settings__slider-row">
+                        <span>宽度</span>
+                        <input type="range" name="contentWidthSlider" min="600" max="900" step="10" value="720">
+                        <output data-bind="contentWidthLabel">720 px</output>
+                    </label>
+                </section>
 
-            <fieldset>
-                <legend>段落</legend>
-                <label><input type="checkbox" name="firstLineIndent" checked> 首行缩进</label>
-                <label><input type="checkbox" name="paragraphSpacing"> 段间距</label>
-            </fieldset>
+                <section class="reader-settings__group">
+                    <h4>段落</h4>
+                    <label class="reader-settings__toggle-row">
+                        <span>首行缩进</span>
+                        <input type="checkbox" name="firstLineIndent" checked>
+                    </label>
+                    <label class="reader-settings__toggle-row">
+                        <span>段间距</span>
+                        <input type="checkbox" name="paragraphSpacing">
+                    </label>
+                </section>
 
-            <fieldset>
-                <legend>主题</legend>
-                <div class="reader-settings__theme-grid">
-                    ${[
-                        ['DAY','日间·纸白'],['DAY_BRIGHT','日间·亮白'],['EYE_CARE','护眼·米黄'],
-                        ['PARCHMENT','羊皮纸'],['NIGHT','夜间·深空'],['NIGHT_BLACK','夜间·纯黑'],
-                        ['AUTO','跟随系统'],
-                    ].map(([v,label]) =>
-                        `<label class="reader-settings__theme-opt">
-                            <input type="radio" name="theme" value="${v}">
-                            <span class="reader-settings__theme-swatch" data-theme="${v}"></span>
-                            <span class="reader-settings__theme-label">${label}</span>
-                        </label>`
-                    ).join('')}
-                </div>
-            </fieldset>
+                <section class="reader-settings__group">
+                    <h4>行为</h4>
+                    <label class="reader-settings__toggle-row">
+                        <span>沉浸模式</span>
+                        <input type="checkbox" name="immersiveMode">
+                    </label>
+                    <label class="reader-settings__slider-row">
+                        <span>自动滚动速度</span>
+                        <input type="range" name="autoScrollSpeed" min="1" max="10" value="5">
+                        <output data-bind="speedLabel">5</output>
+                    </label>
+                </section>
 
-            <fieldset>
-                <legend>自动滚动速度 (<span data-bind="speedLabel">5</span>)</legend>
-                <input type="range" name="autoScrollSpeed" min="1" max="10" value="5">
-            </fieldset>
-
-            <menu>
-                <button type="submit">关闭</button>
-            </menu>
+            </div>
         </form>
     `;
     container.appendChild(dialog);
@@ -309,6 +332,8 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (indentToggle) indentToggle.checked = s.firstLineIndent;
         const gapToggle = dialog.querySelector('input[name="paragraphSpacing"]');
         if (gapToggle) gapToggle.checked = s.paragraphSpacing;
+        const immersiveToggle = dialog.querySelector('input[name="immersiveMode"]');
+        if (immersiveToggle) immersiveToggle.checked = s.immersiveMode;
         const themeInput = dialog.querySelector(`input[name="theme"][value="${s.theme}"]`);
         if (themeInput) themeInput.checked = true;
         const speedSlider = dialog.querySelector('input[name="autoScrollSpeed"]');
@@ -338,7 +363,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             readerPrefs.saveSettings({ lineHeight: parseFloat(t.value) });
         } else if (t.name === 'contentWidthSlider') {
             readerPrefs.saveSettings({ contentWidth: parseInt(t.value, 10) });
-        } else if (t.name === 'firstLineIndent' || t.name === 'paragraphSpacing') {
+        } else if (t.name === 'firstLineIndent' || t.name === 'paragraphSpacing' || t.name === 'immersiveMode') {
             readerPrefs.saveSettings({ [t.name]: t.checked });
         } else if (t.name === 'fontFamily') {
             readerPrefs.saveSettings({ fontFamily: t.value });
