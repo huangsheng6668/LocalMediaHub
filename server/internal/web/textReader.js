@@ -542,9 +542,29 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     //
     // Block index replaces the old paragraphIndex so C-phase bookmark scroll
     // (p[data-para-index]) still works — we set both dataset attributes.
-    function renderBlocks(blocks) {
+    function renderBlocks(blocks, chapterTitle) {
         els.content.innerHTML = '';
-        (blocks || []).forEach((block, idx) => {
+
+        // 章节大标题（独立于顶栏面包屑，显示在正文顶部）。
+        if (chapterTitle) {
+            const h = document.createElement('h2');
+            h.className = 'text-reader__chapter-title';
+            h.textContent = chapterTitle;
+            els.content.appendChild(h);
+        }
+
+        const list = blocks || [];
+        // 找首个可应用首字下沉的 text block：value 长度 >= 4 且不以
+        // 纯标点/破折号（—— …… -）或空白开头。spec §6.3 要求遍历直到找到
+        // 首个满足条件的 block，而不是固定 block[0]。
+        const dropCapIdx = list.findIndex(b =>
+            b && b.type === 'text' &&
+            typeof b.value === 'string' &&
+            b.value.trim().length >= 4 &&
+            !/^[—…\-\s]/.test(b.value.trim())
+        );
+
+        list.forEach((block, idx) => {
             if (block && block.type === 'image') {
                 const img = document.createElement('img');
                 img.className = 'text-reader__image';
@@ -572,7 +592,9 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             // Class names map 1:1 to CSS rules in style.css.
             const indent = readerPrefs.getSettings().firstLineIndent ? 'indent-on' : 'indent-off';
             const gap = readerPrefs.getSettings().paragraphSpacing ? 'gap-on' : 'gap-off';
-            p.className = `text-reader__p ${indent} ${gap}`;
+            // Phase 6: 首字下沉仅作用于首个 eligible text block。
+            const dropcap = (idx === dropCapIdx) ? 'text-reader__p--dropcap' : '';
+            p.className = `text-reader__p ${indent} ${gap} ${dropcap}`.trim();
             // Hover bookmark button
             const btn = document.createElement('button');
             btn.className = 'text-reader__para-bookmark';
@@ -593,6 +615,23 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             p.appendChild(btn);
             els.content.appendChild(p);
         });
+
+        // 章节末尾装饰符号 ❖：点击进下一章，已在末章时提示。
+        const end = document.createElement('div');
+        end.className = 'text-reader__chapter-end';
+        end.textContent = '❖';
+        end.title = '下一章';
+        end.addEventListener('click', () => {
+            if (currentIdx < chapterCount - 1) loadChapter(currentIdx + 1);
+            else showToast('已经是最后一章了', 'info');
+        });
+        els.content.appendChild(end);
+
+        // Phase 6: 触发淡入。先移除 class，强制 reflow，再加回 class
+        // 以重新触发 CSS keyframe 动画。
+        els.content.classList.remove('text-reader__content--entering');
+        void els.content.offsetWidth;
+        els.content.classList.add('text-reader__content--entering');
     }
 
     // 7. TOC Tab (目录 / 书签).
@@ -711,7 +750,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             // textContent) and renders inline <img> for image blocks. Falls
             // back to splitting legacy chapter.content on blank lines when the
             // server response does not yet include blocks.
-            renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content));
+            renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content), chapter.title);
             els.progress.textContent = `第 ${idx + 1} / ${chapterCount} 章`;
             els.content.scrollTop = 0;
             saveProgress(path, { chapterIndex: idx, scrollOffset: 0, lastReadAt: Date.now() });

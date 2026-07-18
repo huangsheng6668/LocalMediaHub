@@ -1769,6 +1769,63 @@ body[data-active-tab="read"] .text-reader {
     border-radius: 4px;
 }
 
+/* Phase 6: 章节大标题（正文顶部，独立于顶栏面包屑）。
+   固定 serif，居中，底部短装饰线 (::after)。字号随 --reader-font-size
+   浮动 +6px 与 Android 端对齐。 */
+.text-reader__chapter-title {
+    font-size: calc(var(--reader-font-size, 16px) + 6px);
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-weight: 600;
+    color: var(--reader-fg);
+    text-align: center;
+    margin: 2em 0 1.5em;
+    position: relative;
+}
+.text-reader__chapter-title::after {
+    content: "";
+    display: block;
+    width: 40px;
+    height: 1px;
+    background: var(--reader-border);
+    margin: 12px auto 0;
+}
+
+/* Phase 6: 首字下沉（仅 .text-reader__p--dropcap）。覆盖默认 indent-on。 */
+.text-reader__p--dropcap {
+    text-indent: 0 !important;
+}
+.text-reader__p--dropcap::first-letter {
+    font-size: 3.2em;
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-weight: 600;
+    float: left;
+    line-height: 0.9;
+    margin: 0.05em 0.12em 0 0;
+    color: var(--reader-fg);
+}
+
+/* Phase 6: 章节末尾装饰符号 ❖（点击下一章）。 */
+.text-reader__chapter-end {
+    text-align: center;
+    color: var(--reader-muted);
+    font-size: 20px;
+    padding: 24px 0 16px;
+    cursor: pointer;
+    user-select: none;
+}
+.text-reader__chapter-end:hover {
+    color: var(--reader-fg);
+}
+
+/* Phase 6: 章节切换淡入（120ms 关键帧动画）。 */
+@keyframes reader-chapter-enter {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.text-reader__content--entering {
+    animation: reader-chapter-enter 120ms ease-out;
+}
+
 /* Hover-to-show bookmark button on each paragraph */
 .text-reader__para-bookmark {
     position: absolute;
