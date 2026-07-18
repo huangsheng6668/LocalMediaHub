@@ -8,6 +8,10 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeScope
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
@@ -68,5 +72,34 @@ class TextReaderScreenThemeTest {
         // ReaderTheme.resolveAuto 这个纯函数（Phase 2 Task 2.3 Step 3）。
         assertEquals(ReaderTheme.NIGHT, ReaderTheme.resolveAuto(true))
         assertEquals(ReaderTheme.DAY, ReaderTheme.resolveAuto(false))
+    }
+
+    /**
+     * Phase 3 Task 3.4 smoke test: the (now internal) ParagraphItem renders
+     * with V2 typography — fontFamily, fontSize, lineHeight, TextIndent(2.em)
+     * when firstLineIndent=true. We can't introspect TextIndent from the
+     * Compose tree easily, so this test only verifies the text renders. The
+     * typography plumbing is exercised through the real TextReaderScreen
+     * composition via settings.fontFamily.toFontFamily() etc.
+     */
+    @Test
+    fun paragraph_item_applies_v2_typography() {
+        val settings = ReaderSettings()  // 默认 V2: SYSTEM / 16 / 1.8 / firstLineIndent=true
+        composeRule.setContent {
+            ReaderThemeScope(theme = settings.theme) {
+                ParagraphItem(
+                    text = "测试段落",
+                    fontSizeSp = settings.fontSizeSp.sp,
+                    lineHeightSp = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
+                    fontFamily = settings.fontFamily.toFontFamily(),
+                    firstLineIndent = settings.firstLineIndent,
+                    paragraphGapEm = 1.2f,
+                    onAddBookmark = {},
+                    onCopy = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("测试段落").assertIsDisplayed()
     }
 }
