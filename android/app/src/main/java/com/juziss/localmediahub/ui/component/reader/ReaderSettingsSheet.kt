@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
@@ -23,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
@@ -153,30 +156,45 @@ private fun <T> ChipRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ThemeChipRow(
     selected: ReaderTheme,
     onSelect: (ReaderTheme) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Phase 2 Task 2.4: 7 themes (incl. AUTO) no longer fit on one row on
+    // narrow phones — switch to FlowRow so chips wrap. AUTO's swatch is a
+    // half-light/half-dark gradient (its bg/fg are Transparent placeholders
+    // until resolved by ReaderThemeScope).
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         ReaderTheme.entries.forEach { theme ->
             FilterChip(
                 selected = theme == selected,
                 onClick = { onSelect(theme) },
                 label = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(12.dp)
-                                .clip(CircleShape)
-                                .background(theme.bg)
-                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                        )
+                        ThemeSwatch(theme)
                         Spacer(Modifier.width(6.dp))
                         Text(theme.label)
                     }
                 },
             )
         }
+    }
+}
+
+@Composable
+private fun ThemeSwatch(theme: ReaderTheme) {
+    val base = Modifier
+        .size(12.dp)
+        .clip(CircleShape)
+        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+    if (theme == ReaderTheme.AUTO) {
+        Box(base.background(Brush.linearGradient(listOf(ReaderTheme.DAY.bg, ReaderTheme.NIGHT.bg))))
+    } else {
+        Box(base.background(theme.bg))
     }
 }

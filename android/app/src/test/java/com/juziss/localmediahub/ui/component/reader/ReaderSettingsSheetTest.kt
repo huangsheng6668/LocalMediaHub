@@ -93,4 +93,38 @@ class ReaderSettingsSheetTest {
         assertNotNull(captured)
         assertEquals(ReaderTheme.NIGHT, captured?.theme)
     }
+
+    /**
+     * Phase 2 Task 2.4: settings sheet must render all 7 theme FilterChips,
+     * including AUTO (跟随系统). FlowRow layout means they wrap across rows;
+     * we only assert presence of each label.
+     */
+    @Test
+    fun settings_sheet_renders_all_seven_theme_options_including_auto() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = {},
+            )
+        }
+        composeRule.waitForIdle()
+        ReaderTheme.entries.forEach { theme ->
+            composeRule.onNodeWithText(theme.label).assertExists()
+        }
+    }
+
+    @Test
+    fun clicking_auto_theme_chip_fires_onchange_with_auto() {
+        var captured: ReaderSettings? = null
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = { captured = it },
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText(ReaderTheme.AUTO.label).performClick()
+        assertNotNull(captured)
+        assertEquals(ReaderTheme.AUTO, captured?.theme)
+    }
 }
