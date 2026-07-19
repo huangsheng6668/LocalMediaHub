@@ -280,8 +280,33 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                     label = { Text(ch.title) },
                                     selected = ch.index == idx,
                                     onClick = {
-                                        viewModel.loadChapter(ch.index)
-                                        scope.launch { drawerState.close() }
+                                        scope.launch {
+                                            drawerState.close()
+                                            val targetIdx = ch.index
+                                            if (isScrollMode) {
+                                                val loadedCh = scrollChapters.find { it.chapterIndex == targetIdx }
+                                                if (loadedCh != null) {
+                                                    var itemOffset = 0
+                                                    for (c in scrollChapters) {
+                                                        if (c.chapterIndex == targetIdx) break
+                                                        itemOffset += c.blocks.size + 2
+                                                    }
+                                                    viewModel.updateCurrentIndex(targetIdx)
+                                                    listState.scrollToItem(itemOffset)
+                                                } else {
+                                                    val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
+                                                    if (ok) {
+                                                        viewModel.preloadScrollChapters(3)
+                                                        listState.scrollToItem(0)
+                                                    }
+                                                }
+                                            } else {
+                                                val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
+                                                if (ok) {
+                                                    listState.scrollToItem(0)
+                                                }
+                                            }
+                                        }
                                     },
                                 )
                             }
@@ -292,12 +317,33 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                     bookmark = bm,
                                     chapterTitle = book?.chapters?.getOrNull(bm.chapterIndex)?.title ?: "—",
                                     onClick = {
-                                        viewModel.loadChapter(bm.chapterIndex)
                                         scope.launch {
                                             drawerState.close()
-                                            // 等待新章节渲染完毕再跳转
-                                            delay(200)
-                                            listState.scrollToItem(bm.paragraphIndex.coerceAtLeast(0))
+                                            val targetIdx = bm.chapterIndex
+                                            val paraIdx = bm.paragraphIndex.coerceAtLeast(0)
+                                            if (isScrollMode) {
+                                                val loadedCh = scrollChapters.find { it.chapterIndex == targetIdx }
+                                                if (loadedCh != null) {
+                                                    var itemOffset = 0
+                                                    for (c in scrollChapters) {
+                                                        if (c.chapterIndex == targetIdx) break
+                                                        itemOffset += c.blocks.size + 2
+                                                    }
+                                                    viewModel.updateCurrentIndex(targetIdx)
+                                                    listState.scrollToItem((itemOffset + 1 + paraIdx).coerceAtLeast(0))
+                                                } else {
+                                                    val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
+                                                    if (ok) {
+                                                        viewModel.preloadScrollChapters(3)
+                                                        listState.scrollToItem((1 + paraIdx).coerceAtLeast(0))
+                                                    }
+                                                }
+                                            } else {
+                                                if (idx != targetIdx) {
+                                                    viewModel.loadChapter(targetIdx, resetScroll = true)
+                                                }
+                                                listState.scrollToItem((1 + paraIdx).coerceAtLeast(0))
+                                            }
                                         }
                                     },
                                     onDelete = { viewModel.deleteBookmark(bm) },
@@ -389,8 +435,8 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                         modifier = Modifier.padding(16.dp),
                                     )
                                     Spacer(Modifier.weight(1f))
-                                    TextButton(onClick = { viewModel.prevChapter() }) { Text("上一章") }
-                                    TextButton(onClick = { viewModel.nextChapter() }) { Text("下一章") }
+                                    TextButton(onClick = { viewModel.prevChapter(); scope.launch { listState.scrollToItem(0) } }) { Text("上一章") }
+                                    TextButton(onClick = { viewModel.nextChapter(); scope.launch { listState.scrollToItem(0) } }) { Text("下一章") }
                                 }
                             }
                         }
@@ -510,6 +556,7 @@ private fun ChapterModeContent(
     context: Context,
     viewModel: TextReaderViewModel,
 ) {
+    val scope = rememberCoroutineScope()
     LazyColumn(
         state = listState,
         modifier = Modifier.width(contentDp),
@@ -561,7 +608,7 @@ private fun ChapterModeContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 24.dp)
-                    .clickable { viewModel.nextChapter() },
+                    .clickable { viewModel.nextChapter(); scope.launch { listState.scrollToItem(0) } },
             )
         }
     }

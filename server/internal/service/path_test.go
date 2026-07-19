@@ -40,6 +40,37 @@ func TestIsPathWithinRoots(t *testing.T) {
 	}
 }
 
+func TestIsPathWithinRootsCaseInsensitive(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("skipping Windows case-insensitive test on non-Windows OS")
+	}
+
+	root := t.TempDir()
+	child := filepath.Join(root, "SubFolder", "video.mp4")
+
+	// Test drive letter case difference (e.g. e:\ vs E:\)
+	lowerRoot := strings.ToLower(root[:1]) + root[1:]
+	upperChild := strings.ToUpper(child[:1]) + child[1:]
+
+	ok, err := IsPathWithinRoots(upperChild, []string{lowerRoot})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected %q with upper drive letter to match %q with lower drive letter", upperChild, lowerRoot)
+	}
+
+	// Test folder casing difference
+	lowerChildFolder := filepath.Join(root, "subfolder", "video.mp4")
+	ok, err = IsPathWithinRoots(lowerChildFolder, []string{root})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected %q with lower folder name to match %q", lowerChildFolder, root)
+	}
+}
+
 func TestValidateAccessibleMediaPathAllowsScanRoots(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "poster.jpg")

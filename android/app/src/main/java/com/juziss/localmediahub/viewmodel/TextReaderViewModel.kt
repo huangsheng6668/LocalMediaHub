@@ -139,46 +139,47 @@ class TextReaderViewModel @Inject constructor(
     /**
      * Fetches the chapter at [index] and updates state. Persists progress on
      * success so the next session resumes here. No-op if the book is not
-     * loaded or [index] is out of range.
+     * loaded or [index] is out of range. Returns true on success.
      */
-    fun loadChapter(index: Int, resetScroll: Boolean = false) {
-        val b = _book.value ?: return
-        if (index !in b.chapters.indices) return
-        viewModelScope.launch {
-            _isLoading.value = true
-            _error.value = null
-            when (val r = repo.getBookChapter(b.path, index)) {
-                is NetworkResult.Success -> {
-                    _currentIndex.value = index
-                    _chapterBlocks.value = r.data.blocks
-                    val newCh = com.juziss.localmediahub.data.ScrollModeChapter(
-                        chapterIndex = index,
-                        title = r.data.title,
-                        blocks = r.data.blocks,
-                    )
-                    if (resetScroll || _scrollChapters.value.isEmpty()) {
-                        _scrollChapters.value = listOf(newCh)
-                    } else {
-                        val existing = _scrollChapters.value.find { it.chapterIndex == index }
-                        if (existing == null) {
-                            _scrollChapters.value = (_scrollChapters.value + newCh).sortedBy { it.chapterIndex }
-                        }
+    suspend fun loadChapter(index: Int, resetScroll: Boolean = false): Boolean {
+        val b = _book.value ?: return false
+        if (index !in b.chapters.indices) return false
+        _isLoading.value = true
+        _error.value = null
+        var success = false
+        when (val r = repo.getBookChapter(b.path, index)) {
+            is NetworkResult.Success -> {
+                _currentIndex.value = index
+                _chapterBlocks.value = r.data.blocks
+                val newCh = com.juziss.localmediahub.data.ScrollModeChapter(
+                    chapterIndex = index,
+                    title = r.data.title,
+                    blocks = r.data.blocks,
+                )
+                if (resetScroll || _scrollChapters.value.isEmpty()) {
+                    _scrollChapters.value = listOf(newCh)
+                } else {
+                    val existing = _scrollChapters.value.find { it.chapterIndex == index }
+                    if (existing == null) {
+                        _scrollChapters.value = (_scrollChapters.value + newCh).sortedBy { it.chapterIndex }
                     }
-                    store.saveBookProgress(
-                        BookProgress(
-                            path = b.path,
-                            chapterIndex = index,
-                            scrollOffsetPx = 0,
-                            lastReadAt = System.currentTimeMillis(),
-                        )
-                    )
-                    _isAutoScrolling.value = false
                 }
-                is NetworkResult.Error -> _error.value = r.message ?: "加载失败"
-                NetworkResult.Loading -> Unit
+                store.saveBookProgress(
+                    BookProgress(
+                        path = b.path,
+                        chapterIndex = index,
+                        scrollOffsetPx = 0,
+                        lastReadAt = System.currentTimeMillis(),
+                    )
+                )
+                _isAutoScrolling.value = false
+                success = true
             }
-            _isLoading.value = false
+            is NetworkResult.Error -> _error.value = r.message ?: "加载失败"
+            NetworkResult.Loading -> Unit
         }
+        _isLoading.value = false
+        return success
     }
 
     /**
@@ -314,12 +315,20 @@ class TextReaderViewModel @Inject constructor(
     /** Advances to the next chapter when one exists. */
     fun nextChapter() {
         val b = _book.value ?: return
-        if (_currentIndex.value < b.chapters.lastIndex) loadChapter(_currentIndex.value + 1, resetScroll = true)
+        if (_currentIndex.value < b.chapters.lastIndex) {
+            viewModelScope.launch {
+                loadChapter(_currentIndex.value + 1, resetScroll = true)
+            }
+        }
     }
 
     /** Returns to the previous chapter when not already at the start. */
     fun prevChapter() {
-        if (_currentIndex.value > 0) loadChapter(_currentIndex.value - 1, resetScroll = true)
+        if (_currentIndex.value > 0) {
+            viewModelScope.launch {
+                loadChapter(_currentIndex.value - 1, resetScroll = true)
+            }
+        }
     }
 
     /**
@@ -352,7 +361,9 @@ class TextReaderViewModel @Inject constructor(
         _readerSettings.value = settings
         viewModelScope.launch { store.saveReaderSettings(settings) }
         if (oldMode != settings.readingMode) {
-            loadChapter(_currentIndex.value, resetScroll = true)
+            viewModelScope.launch {
+                loadChapter(_currentIndex.value, resetScroll = true)
+            }
         }
     }
 

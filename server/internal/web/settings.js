@@ -4,6 +4,10 @@ import { showToast } from './toast.js';
 import { apiRequest } from './api.js';
 import { elements } from './dom.js';
 
+function getFolderPaths() {
+    return (state.folders || []).map(f => typeof f === 'string' ? f : (f.path || f.name || '')).filter(Boolean);
+}
+
 // Fetch configs
 export async function loadConfig() {
     try {
@@ -16,7 +20,7 @@ export async function loadConfig() {
         state.enableDelete = (data.system && data.system.enable_delete) || false;
         state.thumbMax = (data.thumbnail && data.thumbnail.max_size) || 300;
 
-        elements.infoScanRoots.textContent = state.folders.join(', ') || '全盘自动检测';
+        elements.infoScanRoots.textContent = getFolderPaths().join(', ') || '全盘自动检测';
     } catch (e) {
         console.error('loadConfig error:', e);
         showToast('无法从后端获取系统配置: ' + e.message, 'error');
@@ -25,7 +29,7 @@ export async function loadConfig() {
 
 // Render Settings View (Tab 4)
 export function renderSettings() {
-    elements.settingsRoots.value = state.folders.join('\n');
+    elements.settingsRoots.value = getFolderPaths().join('\n');
     elements.settingsVideoExts.textContent = state.videoExts.join(', ') || '未配置';
     elements.settingsImageExts.textContent = state.imageExts.join(', ') || '未配置';
     elements.settingsTextExts.textContent = state.textExts.join(', ') || '未配置';

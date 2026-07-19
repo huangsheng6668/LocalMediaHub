@@ -55,11 +55,18 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
     const els = bindEls(container);
 
-    function scrollToParagraph(paraIdx) {
+    function scrollToParagraph(paraIdx, chIdx) {
         let attempts = 0;
         const maxAttempts = 15; // retry up to 1.5 seconds for complete layout reflow
         function tryScroll() {
-            const target = els.content.querySelector(`p[data-para-index="${paraIdx}"]`);
+            let target = null;
+            if (chIdx !== undefined && chIdx !== null) {
+                const sec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${chIdx}"]`);
+                if (sec) target = sec.querySelector(`p[data-para-index="${paraIdx}"]`);
+            }
+            if (!target) {
+                target = els.content.querySelector(`p[data-para-index="${paraIdx}"]`);
+            }
             if (target) {
                 const targetY = Math.max(0, target.offsetTop - 16);
                 els.content.scrollTop = targetY;
@@ -169,23 +176,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             }
         }
     });
-    els.toc.addEventListener('click', () => toggleDrawer(book, els.drawer));
-    els.drawer.addEventListener('chapter-select', (e) => {
-        const targetIdx = e.detail;
-        const s = readerPrefs.getSettings();
-        if (s.readingMode === 'scroll') {
-            const sec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${targetIdx}"]`);
-            if (sec) {
-                sec.scrollIntoView({ behavior: 'smooth' });
-                currentIdx = targetIdx;
-            } else {
-                loadChapter(targetIdx, true);
-            }
-        } else {
-            loadChapter(targetIdx);
-        }
-        closeDrawer();
-    });
+    els.toc.addEventListener('click', () => toggleDrawer(els.drawer));
 
     // ===== Reader settings integration (Task 8) =====
 
@@ -700,6 +691,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     }
 
     // 7. Full-text scroll state & event handlers
+    let minLoadedIdx = startIdx;
     let maxLoadedIdx = startIdx;
 
     async function loadNextScrollChapter() {
@@ -720,11 +712,37 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         }
     }
 
+    async function loadPrevScrollChapter() {
+        if (isLoadingChapter || minLoadedIdx <= 0) return false;
+        isLoadingChapter = true;
+        const prevIdx = minLoadedIdx - 1;
+        try {
+            const chapter = await getBookChapter(path, prevIdx);
+            const sec = renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content), chapter.title, prevIdx);
+
+            const oldScrollHeight = els.content.scrollHeight;
+            const oldScrollTop = els.content.scrollTop;
+
+            els.content.insertBefore(sec, els.content.firstChild);
+
+            const newScrollHeight = els.content.scrollHeight;
+            els.content.scrollTop = oldScrollTop + (newScrollHeight - oldScrollHeight);
+
+            minLoadedIdx = prevIdx;
+            return true;
+        } catch (e) {
+            showToast('加载上一章失败: ' + e.message, 'error');
+            return false;
+        } finally {
+            isLoadingChapter = false;
+        }
+    }
+
     async function checkAndFillScrollBuffer() {
         const s = readerPrefs.getSettings();
         if (s.readingMode !== 'scroll') return;
-        if (isLoadingChapter || maxLoadedIdx >= chapterCount - 1) return;
-        if (els.content.scrollHeight - els.content.clientHeight < 400) {
+        if (isLoadingChapter) return;
+        if (maxLoadedIdx < chapterCount - 1 && els.content.scrollHeight - els.content.clientHeight < 400) {
             const loaded = await loadNextScrollChapter();
             if (loaded) {
                 setTimeout(checkAndFillScrollBuffer, 50);
@@ -773,6 +791,8 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (s.readingMode === 'scroll') {
             if (els.content.scrollTop + els.content.clientHeight >= els.content.scrollHeight - 300) {
                 loadNextScrollChapter().then(() => checkAndFillScrollBuffer());
+            } else if (els.content.scrollTop <= 300 && minLoadedIdx > 0) {
+                loadPrevScrollChapter();
             }
 
             const sections = els.content.querySelectorAll('.text-reader__chapter-section');
@@ -932,10 +952,13 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             const sec = renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content), chapter.title, idx);
             if (s.readingMode === 'scroll' && !resetScroll) {
                 els.content.appendChild(sec);
+                maxLoadedIdx = Math.max(maxLoadedIdx, idx);
+                minLoadedIdx = Math.min(minLoadedIdx, idx);
             } else {
                 els.content.innerHTML = '';
                 els.content.appendChild(sec);
                 els.content.scrollTop = 0;
+                minLoadedIdx = idx;
                 maxLoadedIdx = idx;
                 els.content.classList.remove('text-reader__content--entering');
                 void els.content.offsetWidth;
@@ -951,7 +974,12 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         }
 
         if (readerPrefs.getSettings().readingMode === 'scroll') {
-            setTimeout(checkAndFillScrollBuffer, 50);
+            setTimeout(() => {
+                checkAndFillScrollBuffer();
+                if (minLoadedIdx > 0) {
+                    loadPrevScrollChapter();
+                }
+            }, 50);
         }
     }
 }
@@ -1022,26 +1050,9 @@ function bindEls(root) {
     };
 }
 
-// Lazy-populate the TOC drawer on first open so we don't build N <a> tags up
-// front for very-large books. Subsequent opens just toggle visibility.
-function toggleDrawer(book, drawerEl) {
+// Toggle the visibility of the TOC & bookmarks drawer.
+function toggleDrawer(drawerEl) {
     const willOpen = drawerEl.classList.contains('text-reader__drawer--hidden');
     drawerEl.classList.toggle('text-reader__drawer--hidden');
     drawerEl.setAttribute('aria-hidden', String(!willOpen));
-
-    if (!drawerEl.dataset.populated) {
-        drawerEl.innerHTML = '<h3>目录</h3>';
-        (book.chapters || []).forEach((ch, i) => {
-            const a = document.createElement('a');
-            a.href = '#';
-            a.className = 'text-reader__toc-item';
-            a.textContent = ch.title || `第 ${i + 1} 章`;
-            a.addEventListener('click', (e) => {
-                e.preventDefault();
-                drawerEl.dispatchEvent(new CustomEvent('chapter-select', { detail: i }));
-            });
-            drawerEl.appendChild(a);
-        });
-        drawerEl.dataset.populated = '1';
-    }
 }

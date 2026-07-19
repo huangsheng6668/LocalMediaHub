@@ -11,7 +11,7 @@ import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 
 // Load Root directories in file browser
-export function loadRoots() {
+export async function loadRoots() {
     state.currentPath = '';
     state.pathHistory = [];
     state.isSystemBrowse = false;
@@ -19,8 +19,17 @@ export function loadRoots() {
     // Breadcrumbs
     elements.browserBreadcrumbs.innerHTML = '<span class="crumb active">根目录</span>';
 
+    try {
+        const folders = await apiRequest(`${state.apiBase}/api/v1/folders`);
+        if (Array.isArray(folders)) {
+            state.folders = folders;
+        }
+    } catch (e) {
+        console.error('loadRoots error:', e);
+    }
+
     // Grid list
-    if (state.folders.length === 0) {
+    if (!state.folders || state.folders.length === 0) {
         elements.browserList.innerHTML = `
             <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-muted);">
                 <h3>未配置扫描共享目录</h3>
@@ -32,10 +41,11 @@ export function loadRoots() {
         return;
     }
 
-    elements.browserList.innerHTML = state.folders.map(path => {
-        const name = path.replace(/\\/g, '/').split('/').filter(Boolean).pop() || path;
-        const safePath = escapeHtml(path.replace(/\\/g, '/'));
-        const safeName = escapeHtml(name);
+    elements.browserList.innerHTML = state.folders.map(folder => {
+        const pathStr = typeof folder === 'string' ? folder : (folder.path || '');
+        const nameStr = typeof folder === 'object' && folder.name ? folder.name : (pathStr.replace(/\\/g, '/').split('/').filter(Boolean).pop() || pathStr);
+        const safePath = escapeHtml(pathStr.replace(/\\/g, '/'));
+        const safeName = escapeHtml(nameStr);
         return `
             <div class="media-card" data-action="browse" data-path="${safePath}">
                 <div class="card-preview">

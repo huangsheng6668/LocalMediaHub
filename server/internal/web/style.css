@@ -468,7 +468,7 @@ input:focus, textarea:focus, select:focus {
 .stat-value {
     font-size: 28px;
     font-weight: 700;
-    color: var(--text-white);
+    color: var(--text-primary);
 }
 
 /* Dashboard Widgets & Info Lists */
@@ -709,7 +709,7 @@ input:focus, textarea:focus, select:focus {
 .card-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--text-white);
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

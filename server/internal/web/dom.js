@@ -27,7 +27,7 @@ export const elements = {
     viewReader: document.getElementById('view-reader'),
 
     // Stats
-    statRoots: document.getElementById('stat-roots'),
+    statTexts: document.getElementById('stat-texts'),
     statVideos: document.getElementById('stat-videos'),
     statImages: document.getElementById('stat-images'),
 

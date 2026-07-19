@@ -28,6 +28,14 @@ export async function renderDashboard() {
 
     // 1. Fetch total files
     try {
+        let totalTexts = 0;
+        try {
+            const textsData = await apiRequest(`${state.apiBase}/api/v1/texts?page=1&page_size=1`);
+            totalTexts = textsData.total || 0;
+        } catch (err) {
+            console.error('Fetch text count error:', err);
+        }
+
         let totalVideos = 0;
         try {
             const videosData = await apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=1`);
@@ -44,7 +52,7 @@ export async function renderDashboard() {
             console.error('Fetch image count error:', err);
         }
 
-        elements.statRoots.textContent = state.folders.length || '全盘';
+        elements.statTexts.textContent = totalTexts;
         elements.statVideos.textContent = totalVideos;
         elements.statImages.textContent = totalImages;
 

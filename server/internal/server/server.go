@@ -173,6 +173,9 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	api.GET("/images", h.GetImages)
 	api.GET("/images/*", h.GetImageAsset)
 
+	// Texts
+	api.GET("/texts", h.GetTexts)
+
 	// Search
 	api.GET("/search", h.Search)
 

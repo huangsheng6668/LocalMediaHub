@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -64,7 +65,44 @@ func NormalizePath(pathStr string) (string, error) {
 		return "", fmt.Errorf("invalid path: %w", err)
 	}
 
+	if len(absPath) >= 2 && absPath[1] == ':' {
+		if absPath[0] >= 'a' && absPath[0] <= 'z' {
+			absPath = strings.ToUpper(absPath[:1]) + absPath[1:]
+		}
+	}
+
 	return absPath, nil
+}
+
+// relPathWithin checks whether absPath is within absRoot.
+// On Windows (where filesystems are case-insensitive), path comparisons are done case-insensitively.
+func relPathWithin(absRoot, absPath string) (string, bool) {
+	if runtime.GOOS == "windows" {
+		if strings.EqualFold(absRoot, absPath) {
+			return ".", true
+		}
+		rootWithSep := absRoot
+		if !strings.HasSuffix(rootWithSep, string(filepath.Separator)) {
+			rootWithSep += string(filepath.Separator)
+		}
+		if strings.HasPrefix(strings.ToLower(absPath), strings.ToLower(rootWithSep)) {
+			rel := absPath[len(rootWithSep):]
+			return rel, true
+		}
+		return "", false
+	}
+
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return "", false
+	}
+	if rel == "." {
+		return ".", true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
 }
 
 // IsPathWithinRoots reports whether pathStr is inside any of the provided roots.
@@ -80,15 +118,7 @@ func IsPathWithinRoots(pathStr string, roots []string) (bool, error) {
 			continue
 		}
 
-		rel, err := filepath.Rel(absRoot, absPath)
-		if err != nil {
-			continue
-		}
-
-		if rel == "." {
-			return true, nil
-		}
-		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if _, ok := relPathWithin(absRoot, absPath); ok {
 			return true, nil
 		}
 	}
@@ -246,15 +276,12 @@ func resolveWithin(pathStr string, roots []string) (string, error) {
 		if err != nil || isUNC(absRoot) {
 			continue
 		}
-		rel, err := filepath.Rel(absRoot, absPath)
-		if err != nil {
+		rel, ok := relPathWithin(absRoot, absPath)
+		if !ok {
 			continue
 		}
 		if rel == "." {
 			return absPath, nil // the root itself; operator-configured, allowed
-		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			continue // not within this root
 		}
 		if err := assertNoReparseBelow(absRoot, rel); err != nil {
 			return "", err
