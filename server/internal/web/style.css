@@ -340,6 +340,10 @@ input:focus, textarea:focus, select:focus {
     box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.btn:active {
+    transform: scale(0.98);
+}
+
 .btn-primary {
     background: var(--accent);
     color: var(--text-on-accent);
