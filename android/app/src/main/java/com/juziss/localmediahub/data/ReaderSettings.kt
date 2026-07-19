@@ -9,6 +9,11 @@ import com.juziss.localmediahub.ui.component.reader.ReaderFontFamily
  *
  * 字段语义见 docs/superpowers/specs/2026-07-18-reader-ui-redesign-design.md §数据形状。
  */
+enum class ReadingMode(val label: String) {
+    CHAPTER("分章"),
+    SCROLL("全文滚动"),
+}
+
 data class ReaderSettings(
     val fontFamily: ReaderFontFamily = ReaderFontFamily.SYSTEM,
     val fontSizeSp: Int = 16,
@@ -19,6 +24,7 @@ data class ReaderSettings(
     val theme: ReaderTheme = ReaderTheme.DAY,
     val immersiveMode: Boolean = false,
     val autoScrollSpeed: Int = 5,  // 1..10
+    val readingMode: ReadingMode = ReadingMode.CHAPTER,
 )
 
 /**

@@ -34,6 +34,10 @@ import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
 import kotlin.math.roundToInt
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 /**
  * Modal bottom sheet exposing the V2 reader preferences. Each control fires
@@ -75,7 +79,13 @@ fun ReaderSettingsSheetContent(
     settings: ReaderSettings,
     onChange: (ReaderSettings) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 16.dp)
+            .navigationBarsPadding()
+    ) {
         Text("阅读设置", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.size(12.dp))
 
@@ -124,15 +134,12 @@ fun ReaderSettingsSheetContent(
         )
         Spacer(Modifier.size(8.dp))
 
-        // 行距 Slider 1.3..2.5 step 0.1 (11 steps -> steps param = 11)
-        Text("行距 ${"%.1f".format(settings.lineHeightMultiplier)}", style = MaterialTheme.typography.labelMedium)
+        // 行距 Slider 1.2..2.4 step 0.1 (12 steps -> steps param = 11)
+        Text("行距 ${String.format(java.util.Locale.US, "%.1f", settings.lineHeightMultiplier)}", style = MaterialTheme.typography.labelMedium)
         Slider(
             value = settings.lineHeightMultiplier,
-            onValueChange = {
-                val snapped = ((it * 10).roundToInt() / 10f).coerceIn(1.3f, 2.5f)
-                onChange(settings.copy(lineHeightMultiplier = snapped))
-            },
-            valueRange = 1.3f..2.5f,
+            onValueChange = { onChange(settings.copy(lineHeightMultiplier = it)) },
+            valueRange = 1.2f..2.4f,
             steps = 11,
             modifier = Modifier
                 .fillMaxWidth()
@@ -140,13 +147,13 @@ fun ReaderSettingsSheetContent(
         )
         Spacer(Modifier.size(8.dp))
 
-        // 宽度 Slider 360..720 step 10 (35 steps -> steps param = 35)
+        // 宽度 Slider 360..1400 step 10
         Text("宽度 ${settings.contentWidthDp}", style = MaterialTheme.typography.labelMedium)
         Slider(
             value = settings.contentWidthDp.toFloat(),
-            onValueChange = { onChange(settings.copy(contentWidthDp = it.roundToInt().coerceIn(360, 720))) },
-            valueRange = 360f..720f,
-            steps = 35,
+            onValueChange = { onChange(settings.copy(contentWidthDp = it.roundToInt().coerceIn(360, 1400))) },
+            valueRange = 360f..1400f,
+            steps = 103,
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("contentWidthSlider"),
@@ -175,7 +182,22 @@ fun ReaderSettingsSheetContent(
 
         // ── 行为 ──
         Section("行为")
-        // 沉浸模式 toggle 在 Phase 5 才真正生效，但开关本身在此 Task 加入。
+        Text("阅读模式", style = MaterialTheme.typography.labelMedium)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            com.juziss.localmediahub.data.ReadingMode.entries.forEach { mode ->
+                FilterChip(
+                    selected = settings.readingMode == mode,
+                    onClick = { onChange(settings.copy(readingMode = mode)) },
+                    label = { Text(mode.label) },
+                    colors = FilterChipDefaults.filterChipColors(),
+                )
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("沉浸模式", Modifier.weight(1f))
             Switch(
@@ -185,7 +207,7 @@ fun ReaderSettingsSheetContent(
         }
         Spacer(Modifier.size(8.dp))
 
-        // 自动滚动速度 1..10 step 1 (8 steps -> steps param = 8)
+        // 自动滚动速度 1..10 step 1
         Text("自动滚动速度 ${settings.autoScrollSpeed}", style = MaterialTheme.typography.labelMedium)
         Slider(
             value = settings.autoScrollSpeed.toFloat(),
@@ -196,6 +218,8 @@ fun ReaderSettingsSheetContent(
                 .fillMaxWidth()
                 .testTag("autoScrollSlider"),
         )
+
+        Spacer(Modifier.height(32.dp))
     }
 }
 

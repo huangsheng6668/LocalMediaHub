@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import com.juziss.localmediahub.data.ReaderTheme
+import com.juziss.localmediahub.ui.theme.ProvideNoRippleIndication
 
 /**
  * 把整个阅读器（含 TopAppBar / BottomAppBar / ModalDrawerSheet / BottomSheets）
@@ -39,8 +40,10 @@ fun ReaderThemeScope(
     )
     CompositionLocalProvider(LocalContentColor provides resolved.fg) {
         MaterialTheme(colorScheme = scheme) {
-            Box(Modifier.background(resolved.bg)) {
-                content()
+            ProvideNoRippleIndication {
+                Box(Modifier.background(resolved.bg)) {
+                    content()
+                }
             }
         }
     }
