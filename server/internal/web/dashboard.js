@@ -47,7 +47,6 @@ export async function renderDashboard() {
         elements.statRoots.textContent = state.folders.length || '全盘';
         elements.statVideos.textContent = totalVideos;
         elements.statImages.textContent = totalImages;
-        elements.statTags.textContent = state.tags.length;
 
         // 2. Mock a list of files or load first page of videos/images for recent preview
         try {

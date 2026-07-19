@@ -35,8 +35,9 @@ func (h *Handler) CreateTag(c echo.Context) error {
 }
 
 func (h *Handler) DeleteTag(c echo.Context) error {
-	tagID := c.Param("tag_id")
-	if !h.tags.TagExists(tagID) {
+	tagIdentifier := c.Param("tag_id")
+	tagID, exists := h.tags.ResolveTagID(tagIdentifier)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
 	}
 	if err := h.tags.DeleteTag(tagID); err != nil {
@@ -46,10 +47,11 @@ func (h *Handler) DeleteTag(c echo.Context) error {
 }
 
 func (h *Handler) AssociateTag(c echo.Context) error {
-	tagID := c.Param("tag_id")
+	tagIdentifier := c.Param("tag_id")
 	pathStr := c.Param("*")
 
-	if !h.tags.TagExists(tagID) {
+	tagID, exists := h.tags.ResolveTagID(tagIdentifier)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
 	}
 
@@ -65,8 +67,13 @@ func (h *Handler) AssociateTag(c echo.Context) error {
 }
 
 func (h *Handler) DisassociateTag(c echo.Context) error {
-	tagID := c.Param("tag_id")
+	tagIdentifier := c.Param("tag_id")
 	pathStr := c.Param("*")
+
+	tagID, exists := h.tags.ResolveTagID(tagIdentifier)
+	if !exists {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
+	}
 
 	if err := h.tags.DisassociateFile(tagID, pathStr); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -75,8 +82,9 @@ func (h *Handler) DisassociateTag(c echo.Context) error {
 }
 
 func (h *Handler) GetTaggedFiles(c echo.Context) error {
-	tagID := c.Param("tag_id")
-	if !h.tags.TagExists(tagID) {
+	tagIdentifier := c.Param("tag_id")
+	tagID, exists := h.tags.ResolveTagID(tagIdentifier)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
 	}
 	files := h.tags.GetFilesForTag(tagID)
@@ -88,8 +96,9 @@ func (h *Handler) GetTaggedFiles(c echo.Context) error {
 }
 
 func (h *Handler) GetTaggedMedia(c echo.Context) error {
-	tagID := c.Param("tag_id")
-	if !h.tags.TagExists(tagID) {
+	tagIdentifier := c.Param("tag_id")
+	tagID, exists := h.tags.ResolveTagID(tagIdentifier)
+	if !exists {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
 	}
 
