@@ -29,6 +29,11 @@ scan:
     - ".gif"
     - ".bmp"
     - ".webp"
+  text_extensions:
+    - ".txt"
+    - ".epub"
+    - ".mobi"
+    - ".azw3"
   # OPT-IN auto-detection: when true, server scans all detected drives (A-Z).
   # Convenience feature with elevated risk — any LAN host (or any authenticated
   # client) can browse media on ALL drives. Default false.
