@@ -16,36 +16,80 @@
     font-display: swap;
 }
 
-/* Core Design Tokens & Variables */
-:root {
-    --bg-main: #0a0a0f;
-    --bg-card: rgba(22, 22, 33, 0.6);
-    --bg-sidebar: #0f0f18;
-    --border-color: rgba(255, 255, 255, 0.08);
-    
-    --primary: #7c3aed;
-    --primary-light: #a78bfa;
-    --primary-gradient: linear-gradient(135deg, #7c3aed, #a78bfa);
-    
-    --secondary: #10b981;
-    --secondary-gradient: linear-gradient(135deg, #059669, #34d399);
-    
-    --error: #ef4444;
-    --error-gradient: linear-gradient(135deg, #dc2626, #f87171);
-    
-    --text-main: #f3f4f6;
-    --text-muted: #9ca3af;
-    --text-white: #ffffff;
-    
-    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+/* Core Design Tokens — DAY (default) */
+:root,
+[data-theme="day"] {
+    color-scheme: light;
+
+    /* surfaces (与 readerPrefs.js DAY 对齐) */
+    --surface-app:     #FAF8F3;
+    --surface-card:    #FFFFFF;
+    --surface-sidebar: #F2EFE7;
+    --surface-hover:   rgba(199, 91, 57, 0.08);
+
+    /* text */
+    --text-primary:    #2B2B2B;
+    --text-secondary:  #5A5A57;
+    --text-muted:      #7A7A78;
+    --text-on-accent:  #FFFFFF;
+
+    /* accent — terracotta（唯一强调色） */
+    --accent:          #C75B39;
+    --accent-hover:    #B14E2E;
+    --accent-soft:     rgba(199, 91, 57, 0.12);
+
+    /* borders & shadows */
+    --border-subtle:   #E5E2D8;
+    --shadow-sm:       0 1px 2px rgba(43, 43, 43, 0.04), 0 1px 3px rgba(43, 43, 43, 0.06);
+    --shadow-md:       0 4px 12px rgba(43, 43, 43, 0.08);
+
+    /* shape & rhythm */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+
+    /* 语义别名（向后兼容现有引用） */
+    --bg-main:     var(--surface-app);
+    --bg-card:     var(--surface-card);
+    --bg-sidebar:  var(--surface-sidebar);
+    --primary:     var(--accent);
+    --text-main:   var(--text-primary);
+    --text-white:  var(--text-on-accent);
+    --border-color: var(--border-subtle);
+    --error: #C0392B;
+    --secondary: #4F8A6B;
+    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-quick: all 0.15s ease;
-    
-    --glass-blur: blur(12px);
-    --shadow-premium: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
-    --border-radius-lg: 16px;
-    --border-radius-md: 10px;
-    --border-radius-sm: 6px;
+}
+
+/* Core Design Tokens — NIGHT */
+[data-theme="night"] {
+    color-scheme: dark;
+
+    --surface-app:     #1A1A1F;
+    --surface-card:    #232328;
+    --surface-sidebar: #16161A;
+    --surface-hover:   rgba(199, 91, 57, 0.16);
+
+    --text-primary:    #C9C9CE;
+    --text-secondary:  #A8A8AD;
+    --text-muted:      #84848A;
+    --text-on-accent:  #FFFFFF;
+
+    --accent:          #D97A56;
+    --accent-hover:    #E68B6A;
+    --accent-soft:     rgba(217, 122, 86, 0.16);
+
+    --border-subtle:   #2D2D33;
+    --shadow-sm:       0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md:       0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 /* Reset & Global Styles */
@@ -58,8 +102,8 @@
 }
 
 body {
-    background-color: var(--bg-main);
-    color: var(--text-main);
+    background-color: var(--surface-app);
+    color: var(--text-primary);
     font-family: var(--font-sans);
     overflow: hidden;
     height: 100vh;
