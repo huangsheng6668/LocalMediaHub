@@ -185,7 +185,12 @@ const CHROME_THEME_EVENT = 'chrome-theme-changed';
 
 export function getChromeTheme() {
     const v = localStorage.getItem(CHROME_THEME_KEY);
-    return v === 'night' ? 'night' : 'day';
+    if (v === 'day' || v === 'night') return v;
+    try {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+    } catch (_) {
+        return 'day';
+    }
 }
 
 export function saveChromeTheme(theme) {
