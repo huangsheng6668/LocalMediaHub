@@ -941,12 +941,11 @@ input:focus, textarea:focus, select:focus {
 .modal-backdrop {
     position: absolute;
     inset: 0;
-    background-color: rgba(5, 5, 8, 0.75);
-    backdrop-filter: blur(8px);
+    background-color: rgba(0, 0, 0, 0.5);
 }
 
 .modal-wrapper {
-    background-color: #11111a;
+    background-color: var(--surface-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     width: 90%;
@@ -1021,7 +1020,6 @@ input:focus, textarea:focus, select:focus {
     left: 0;
     right: 0;
     background: rgba(15, 11, 25, 0.65);
-    backdrop-filter: blur(12px) saturate(180%);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     padding: 12px 16px;
     display: flex;
@@ -1325,7 +1323,6 @@ input:focus, textarea:focus, select:focus {
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    backdrop-filter: blur(8px);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
@@ -1419,7 +1416,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .toast {
-    background-color: #12121e;
+    background-color: var(--surface-card);
     color: var(--text-main);
     border: 1px solid var(--border-color);
     border-left: 4px solid var(--primary-light);
@@ -1622,7 +1619,7 @@ input:focus, textarea:focus, select:focus {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: var(--bg-card, #11111a);
+    background: var(--bg-card, var(--surface-card));
     padding: 24px;
     border-radius: var(--radius-lg);
     min-width: 320px;
@@ -1789,7 +1786,7 @@ body[data-active-tab="read"] .text-reader {
     border: none;
     border-radius: 0;
     margin: 0;
-    background-color: var(--reader-bg, var(--surface-app));
+    background-color: var(--reader-bg, var(--bg-main));
     color: var(--reader-fg, var(--text-main));
 }
 
@@ -1851,7 +1848,7 @@ body[data-active-tab="read"] .text-reader {
     flex-grow: 1;
     overflow-y: auto;
     padding: 32px max(24px, calc((100% - var(--reader-content-width, 720px)) / 2));
-    background-color: var(--reader-bg, var(--surface-card));
+    background-color: var(--reader-bg, var(--bg-card));
     color: var(--reader-fg, var(--text-white));
     font-family: var(--reader-font-family, sans-serif);
     font-size: var(--reader-font-size, 16px);
@@ -1896,7 +1893,7 @@ body[data-active-tab="read"] .text-reader {
     color: var(--text-muted);
     font-style: italic;
     text-align: center;
-    background: var(--bg-elevated, var(--surface-card));
+    background: var(--bg-elevated, var(--bg-card));
     border-radius: 4px;
 }
 
@@ -2000,7 +1997,7 @@ body[data-active-tab="read"] .text-reader {
     height: 36px;
     border-radius: var(--radius-md);
     border: 1px solid var(--reader-border, var(--border-color));
-    background: var(--reader-bg, var(--surface-card));
+    background: var(--reader-bg, var(--bg-card));
     color: var(--reader-fg, var(--text-white));
     cursor: pointer;
     transition: var(--transition-quick), color 0.2s ease, border-color 0.2s ease;
@@ -2246,7 +2243,7 @@ body[data-reader-immersive="on"] .text-reader__content {
     width: 280px;
     max-width: 80vw;
     height: 100vh;
-    background-color: var(--reader-bg, var(--surface-card));
+    background-color: var(--reader-bg, var(--bg-card));
     color: var(--reader-fg, var(--text-white));
     border-left: 1px solid var(--reader-border, var(--border-color));
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
