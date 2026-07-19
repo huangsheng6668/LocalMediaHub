@@ -140,18 +140,20 @@
 | `server/internal/web/package.json` | 新增 | devDep `open-props`；scripts 增 `build-tokens` |
 | `server/internal/web/tools/build-tokens.mjs` | 新增 | 从 open-props 抽取 token 到 `tokens.css` |
 | `server/internal/web/tokens.css` | 生成产物 | 约 60 行 token；纳入 embed |
-| `server/internal/web/style.css` | 大改 | 删除紫色 gradient/glass/深色基底；`:root` → `[data-theme]` 两套；重写 sidebar/header/menu-item/btn/card/stat-card/widget-card/server-status |
-| `server/internal/web/index.html` | 小改 | `<html>` 加 `data-theme="day"` 默认值；顶栏右侧加主题切换 button；menu-icon emoji 换成 inline SVG 或加 wrapper span |
-| `server/internal/web/readerPrefs.js` | 小改 | 新增 `CHROME_THEME_KEY`、`getChromeTheme()`、`saveChromeTheme()`，沿用事件机制 |
-| `server/internal/web/app.js` | 小改 | 启动时读 `chrome_theme` 设置 `<html data-theme>`；监听 `reader-prefs-changed` 同步；主题切换按钮 click handler |
-| `server/internal/web/web.go`（embed 列表） | 小改 | 把 `tokens.css` 加入 embed |
+| `server/internal/web/style.css` | 大改 | 删除紫色 gradient/glass/深色基底；`:root` → `[data-theme]` 两套；重写 sidebar/header/menu-item/btn/card/stat-card/widget-card/server-status；全局 `<input>`/`<textarea>` 继承 `--surface-card` 与 `--text-primary` 避免暗色下黑白错乱 |
+| `server/internal/web/index.html` | 小改 | `<html>` 加 `data-theme="day"` 默认值；`<head>` 顶端 `<script src="boot.js"></script>`（在 stylesheet link 之前）防 FOUC；`link` 标签引入 `tokens.css`；顶栏右侧加主题切换 button；menu-icon emoji 换成 inline SVG 或加 wrapper span |
+| `server/internal/web/boot.js` | 新增 | FOUC 防闪外部脚本（约 10 行 IIFE），在 stylesheet 加载前同步设置 `<html data-theme>`。外部文件以规避 CSP `script-src 'self'` 对 inline script 的禁用 |
+| `server/internal/web/readerPrefs.js` | 小改 | 新增 `CHROME_THEME_KEY`、`getChromeTheme()`、`saveChromeTheme()`，广播 `chrome-theme-changed` 独立事件（或在 detail 中带 `type: 'chrome-theme'`）避免与阅读器事件混淆 |
+| `server/internal/web/app.js` | 小改 | 监听主题切换按钮 click handler 及 `chrome-theme-changed` 事件同步 UI 状态 |
+| `server/internal/web/web.go`（embed 列表） | 小改 | 更新为 `//go:embed index.html *.css *.js fonts/*.woff2`，自动包含 `tokens.css` 避免遗漏 |
 
 ## 8. 验收
 
 - 手动验收：
-  - DAY / NIGHT 切换瞬时无闪烁；刷新后保持
+  - DAY / NIGHT 切换瞬时无闪烁；**首次加载/刷新页面无白闪/黑闪（FOUC 校验）**
   - 四个页面（dashboard / browser / bookmarks / settings）颜色与控件风格一致
   - 顶栏主题切换按钮、立即扫描按钮、汉堡按钮交互正常
+  - 输入框（搜索框、设置 textarea）在 DAY/NIGHT 下前景与背景色对比度均正常
   - 模态（视频/图片/auth）外层跟随主题
 - 对比度（DevTools 检查）：
   - `--text-primary` on `--surface-app` ≥ 4.5:1（DAY: #2B2B2B on #FAF8F3 ≈ 13.5:1 ✓；NIGHT: #C9C9CE on #1A1A1F ≈ 11.5:1 ✓）
@@ -165,11 +167,52 @@
 |---|---|
 | Open Props 升级引入破坏性 token 变化 | package-lock 锁定版本；`build-tokens.mjs` 只取显式列出的变量名 |
 | 阅读器主题与 chrome 主题用户期望联动 | 本次明确解耦：两个独立 key；UI 上加一行说明文案（"阅读器主题在阅读器内单独设置"） |
-| 现有 modal/overlay 用了大量硬编码颜色 | 仅替换 `--accent`/`--text-*`/`--surface-*` 引用，不动结构与已生效的覆盖样式 |
+| JS 异步加载导致主题白闪/黑闪 (FOUC) | 在 `index.html` 的 `<head>` 中、`<link rel="stylesheet">` 之前用 `<script src="boot.js"></script>` 同步阻塞加载外部脚本，设置 `documentElement.dataset.theme`。外部文件而非 inline，规避 CSP `script-src 'self'` 对 inline script 的禁用（实施时发现） |
+| 现有 modal/overlay/input 用了大量硬编码颜色 | 仅替换 `--accent`/`--text-*`/`--surface-*` 引用，强化原生 `<input>`/`<textarea>` 规则覆盖，不动结构 |
 | index.html emoji 替换为 SVG 增加体积 | 采用 inline SVG，单图标 < 300 字节；总增量 < 2KB |
 
-## 10. 后续可扩展（不在本次范围）
+## 10. 深度审核修复与建议 (AI 审计补充)
+
+在针对当前代码库与架构进行针对性审计后，补充以下 4 点优化与修复建议：
+
+1. **防闪烁 (FOUC) 执行机制**：
+   - 现 `app.js` 为 ES Module 且含有 `await loadConfig()`，如果把主题初始化放在 `app.js` 初始化阶段，在慢网络/慢磁盘下会导致显著的"默认主题 -> 保存主题"闪烁。
+   - **CSP 约束（实施时发现）**：项目 `server/internal/server/middleware/security_headers.go` 设置 `Content-Security-Policy: ... script-src 'self' ...`，明确禁止 inline script。直接在 `<head>` 写 inline `<script>` 会被浏览器拒绝执行。
+   - **最终方案**：把 FOUC 脚本拆为**外部** `server/internal/web/boot.js`（普通 `<script src>` 而非 ES module），在 `<head>` 中、在 `<link rel="stylesheet">` **之前**用 `<script src="boot.js"></script>` 同步阻塞加载。这样：
+     - 仍满足"在 stylesheet 应用前同步设置 `<html data-theme>`"的 FOUC 防闪目标
+     - 不弱化 CSP（不加 `'unsafe-inline'`、不维护易失的 sha256 hash）
+     - `boot.js` 内容（约 10 行）：
+       ```javascript
+       (function () {
+         try {
+           var t = localStorage.getItem('chrome_theme');
+           if (t !== 'day' && t !== 'night') {
+             t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+           }
+           document.documentElement.dataset.theme = t;
+         } catch (_) {
+           document.documentElement.dataset.theme = 'day';
+         }
+       })();
+       ```
+2. **`web.go` Embed 路径容错**：
+   - 将 `web.go` 嵌入指令调整为 `//go:embed index.html *.css *.js fonts/*.woff2`，利用 `*.css` 通配符自动包含生成的 `tokens.css`，防止后期漏写导致 Go 打包缺少文件。
+3. **事件机制解耦**：
+   - `reader-prefs-changed` 事件目前专用于阅读器内部偏好变更（包含字体、字号、阅读器背景等），建议针对 Chrome 主题使用 `chrome-theme-changed` 或在 `detail.type === 'chrome_theme'` 中进行隔离区分，避免触发不必要的 `textReader.js` 重绘。
+4. **表单控件 (Input/Textarea) 暗色模式透传**：
+   - `settings.html` 与 `browserView` 中包含多处原生的 `<input>` 和 `<textarea>`，在 CSS 重构时需确保设置：
+     ```css
+     input, textarea, select {
+       background-color: var(--surface-card);
+       color: var(--text-primary);
+       border: 1px solid var(--border-subtle);
+     }
+     ```
+     防止在切换到 `night` 主题时，浏览器原生控件保持白底亮色文字导致不可读。
+
+## 11. 后续可扩展（不在本次范围）
 
 - 接入 EYE_CARE / PARCHMENT / DAY_BRIGHT / NIGHT_BLACK（只需新增 `[data-theme="..."]` token 块 + 顶栏下拉）
 - chrome 主题与阅读器主题可选联动开关
 - 侧栏可折叠为图标条
+

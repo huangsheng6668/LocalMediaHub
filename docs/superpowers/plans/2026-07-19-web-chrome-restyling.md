@@ -24,20 +24,23 @@
 
 **Files:**
 - Modify: `server/internal/web/readerPrefs.js`（在文件末尾追加）
-- Modify: `server/internal/web/index.html`（`<head>` 顶部插入同步 script）
-- Test: 浏览器手动（详见步骤 4）
+- Create: `server/internal/web/boot.js`（FOUC 防闪外部脚本）
+- Modify: `server/internal/web/index.html`（`<head>` 顶部插入 `<script src="boot.js">`，在 stylesheet link 之前）
+- Test: 浏览器手动（详见步骤 5）
+
+**CSP 约束（重要）：** 项目 CSP 是 `script-src 'self'`，明确禁止 inline script。**不要**用 inline `<script>` 写 FOUC 逻辑——会被浏览器拒绝。必须用外部 `boot.js` 通过 `<script src="boot.js"></script>` 加载。
 
 **Interfaces:**
 - Produces:
   - `getChromeTheme(): 'day' | 'night'` — 读取 `localStorage['chrome_theme']`，无值时返回 `'day'`
   - `saveChromeTheme(theme: 'day' | 'night'): void` — 写入并 dispatch `window` 上的 `chrome-theme-changed` 事件（`event.detail = { theme }`）
-  - `<html data-theme="day|night">` — 由 index.html 的 FOUC inline script 在 app.js 加载前设置
+  - `<html data-theme="day|night">` — 由 `boot.js` 在 stylesheet 加载前同步设置
 
 **Why this is Task 1:** 后续所有任务（顶栏按钮、CSS 主题块、app.js 监听）都依赖这两个函数和 `<html data-theme>` 已就位。
 
 - [ ] **Step 1: 在 `readerPrefs.js` 末尾追加 chrome theme API**
 
-打开 `server/internal/web/readerPrefs.js`，在文件最末尾（第 179 行 `}` 之后）追加：
+打开 `server/internal/web/readerPrefs.js`，在文件最末尾追加：
 
 ```javascript
 
@@ -63,46 +66,52 @@ export function saveChromeTheme(theme) {
 }
 ```
 
-- [ ] **Step 2: 在 `index.html` 的 `<head>` 顶端插入 FOUC 同步脚本**
+- [ ] **Step 2: 创建 `server/internal/web/boot.js`**
 
-打开 `server/internal/web/index.html`，把第 3-9 行的 `<head>` 块替换为：
+写入 `server/internal/web/boot.js`（约 13 行 IIFE；外部文件以规避 CSP 对 inline script 的禁用）：
+
+```javascript
+// FOUC prevention: set <html data-theme> BEFORE stylesheets apply.
+// Loaded via <script src="boot.js"> in <head>, ahead of <link rel="stylesheet">.
+// Must NOT be inline — project CSP is script-src 'self' (no 'unsafe-inline').
+(function () {
+    try {
+        var t = localStorage.getItem('chrome_theme');
+        if (t !== 'day' && t !== 'night') {
+            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+        }
+        document.documentElement.dataset.theme = t;
+    } catch (_) {
+        document.documentElement.dataset.theme = 'day';
+    }
+})();
+```
+
+- [ ] **Step 3: 在 `index.html` 的 `<head>` 顶端插入 `<script src="boot.js">`**
+
+打开 `server/internal/web/index.html`，在 `<head>` 内、`<link rel="stylesheet">` **之前**插入一行（其他 `<head>` 子元素保留不动）：
 
 ```html
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LocalMediaHub Web 管理器</title>
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico">
-    <script>
-        // FOUC 防闪：在 app.js (ES Module, async) 加载前同步设置主题。
-        // 必须在 <link rel="stylesheet"> 之前执行。
-        (function () {
-            try {
-                var t = localStorage.getItem('chrome_theme');
-                if (t !== 'day' && t !== 'night') {
-                    t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
-                }
-                document.documentElement.dataset.theme = t;
-            } catch (_) {
-                document.documentElement.dataset.theme = 'day';
-            }
-        })();
-    </script>
-    <link rel="stylesheet" href="style.css">
-</head>
+    <script src="boot.js"></script>
 ```
+
+具体定位：找到 `<link rel="icon" ...>` 那一行，紧接其后插入 `<script src="boot.js"></script>`，再后面是原有的 `<link rel="stylesheet" href="style.css">`。
 
 注意：`tokens.css` 的 `<link>` 在 Task 2 加。
 
-- [ ] **Step 3: 启动 server 并打开浏览器**
+- [ ] **Step 4: 确认 `web.go` embed 会包含 boot.js**
+
+`server/internal/web/web.go:6` 当前是 `//go:embed index.html style.css *.js fonts/*.woff2`，`*.js` 通配符已经覆盖 `boot.js`，无需改动。Task 2 会把 `style.css` 也改为 `*.css`。
+
+- [ ] **Step 5: 启动 server 并打开浏览器**
 
 ```bash
-cd server && go run ./cmd/localmediahub 2>&1 | head -20
+cd server && go run ./cmd/server 2>&1 | head -20
 ```
 
-（如果项目入口不是 `cmd/localmediahub`，先在 `server/` 下查 `package main` 的位置；常见入口在 `server/cmd/<binary>/main.go`。打开浏览器访问 `http://localhost:8080` 或 server 启动日志里打印的端口。）
+（项目入口确认在 `server/cmd/server/main.go`。打开浏览器访问 `http://localhost:8000/` 或 server 启动日志里打印的端口。）
 
-- [ ] **Step 4: 手动验证 FOUC + API 工作**
+- [ ] **Step 6: 手动验证 FOUC + API 工作**
 
 打开浏览器 DevTools Console，依次执行：
 
@@ -127,18 +136,19 @@ import('./readerPrefs.js').then(m => {
 localStorage.setItem('chrome_theme', 'day'); location.reload();
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add server/internal/web/readerPrefs.js server/internal/web/index.html
+git add server/internal/web/readerPrefs.js server/internal/web/boot.js server/internal/web/index.html
 git commit -m "$(cat <<'EOF'
-feat(web): chrome theme API + FOUC prevention script
+feat(web): chrome theme API + FOUC prevention (boot.js)
 
 Add getChromeTheme/saveChromeTheme in readerPrefs.js with independent
 'chrome-theme-changed' event (decoupled from reader-prefs-changed to
-avoid triggering textReader repaints). Inline <head> script sets
+avoid triggering textReader repaints). External boot.js sets
 <html data-theme> synchronously before stylesheets load to prevent
-FOUC.
+FOUC; external file (not inline) because project CSP is
+script-src 'self'.
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
