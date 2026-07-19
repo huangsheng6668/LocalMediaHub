@@ -51,6 +51,21 @@
                 </button>
                 <h1 id="page-title">仪表盘</h1>
                 <div class="header-actions">
+                    <button class="btn btn-theme-toggle" id="btn-theme-toggle" aria-label="切换主题" title="切换日/夜主题">
+                        <span class="theme-toggle-icon" data-icon="sun">
+                            <!-- sun icon (DAY visible) -->
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="4"></circle>
+                                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+                            </svg>
+                        </span>
+                        <span class="theme-toggle-icon" data-icon="moon" hidden>
+                            <!-- moon icon (NIGHT visible) -->
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                            </svg>
+                        </span>
+                    </button>
                     <button class="btn btn-primary btn-rescan" id="btn-trigger-scan">
                         <span>🔄</span> 立即扫描媒体
                     </button>

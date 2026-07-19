@@ -9,6 +9,7 @@ import { renderDashboard, setupDashboardListeners } from './dashboard.js';
 import { loadRoots, browsePath, setupBrowserListeners } from './browserView.js';
 import { renderBookmarks } from './bookmarksView.js';
 import { AUTH_REQUIRED_EVENT } from './api.js';
+import { getChromeTheme, saveChromeTheme } from './readerPrefs.js';
 
 // Auth modal — module-scoped so it persists across show/hide.
 let lastFailedUrl = null;
@@ -121,4 +122,26 @@ function setupEventListeners() {
             if (e.key === 'Escape') hideAuthModal();
         });
     }
+
+    // Theme toggle (Task 6)
+    const themeToggle = document.getElementById('btn-theme-toggle');
+    if (themeToggle) {
+        updateThemeToggleIcon(getChromeTheme());
+        themeToggle.addEventListener('click', () => {
+            const next = getChromeTheme() === 'day' ? 'night' : 'day';
+            saveChromeTheme(next);
+        });
+        window.addEventListener('chrome-theme-changed', (e) => {
+            document.documentElement.dataset.theme = e.detail.theme;
+            updateThemeToggleIcon(e.detail.theme);
+        });
+    }
+}
+
+// Update the sun/moon icon visibility based on the current chrome theme.
+// Module-level (referenced by setupEventListeners above).
+function updateThemeToggleIcon(theme) {
+    document.querySelectorAll('.theme-toggle-icon').forEach(el => {
+        el.hidden = (el.dataset.icon !== (theme === 'night' ? 'moon' : 'sun'));
+    });
 }
