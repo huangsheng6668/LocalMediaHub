@@ -2,7 +2,7 @@
 
 GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMediaHub)
 
-将 PC 端的本地媒体资源（视频、图片）通过局域网串流到 Android 手机上浏览和播放。
+把 PC 上散落的视频、图片、小说串流到 Android，在局域网里随时翻看。
 
 ## 系统架构
 
@@ -14,137 +14,52 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 │  - 全盘浏览         │  /api/v1/folders       │  - 文件浏览器         │
 │  - 视频流 (Range)   │  /api/v1/videos/stream │  - ExoPlayer 播放     │
 │  - 缩略图生成       │  /api/v1/images/thumb  │  - Coil 图片加载      │
-│  - mDNS 发现        │  /api/v1/tags          │  - NSD 自动发现       │
-│  - 系统托盘         │  /api/v1/system/*      │  - 收藏/标签/搜索     │
+│  - 小说阅读器       │  /api/v1/books/*       │  - TextReader 阅读器  │
+│  - 标签 + 书签      │  /api/v1/tags          │  - 收藏 / 标签 / 书签 │
+│  - mDNS 发现        │                         │  - NSD 自动发现       │
+│  - 系统托盘         │                         │  - 画中画 (PiP)       │
+│  - Bearer Token     │                         │  - 离线下载          │
 └─────────────────────┘                         └──────────────────────┘
 ```
 
-## 功能概览
+## 核心功能
 
-### Server 端
+### 1. 媒体浏览与播放
 
-| 功能 | 说明 |
-|------|------|
-| 全盘浏览 | 自动检测 Windows 驱动器，浏览任意目录，只显示媒体文件 |
-| REST API | 29 个端点，覆盖目录浏览、媒体列表、搜索、标签、系统浏览、统一媒体访问、管理等 |
-| 视频流 | HTTP Range Requests (206 Partial Content)，基于 `http.ServeContent` + 256KB 缓冲 `BufferedReadSeeker`，原生支持多 Range / 条件请求 |
-| 缩略图 | LANCZOS 缩放，MD5 磁盘缓存，懒加载 |
-| 标签系统 | SQLite 持久化（pure-Go `modernc.org/sqlite`，无 CGO），RWMutex 并发安全，CRUD + 文件关联；首次启动自动从 `tags.json` 迁移 |
-| 搜索 | 按文件名递归搜索，支持限定目录范围 |
-| 文件监听 | `fsnotify` 递归监听扫描根目录，变更即时失效缓存并防抖（2s）触发重扫，新目录自动加入监听 |
-| mDNS 发现 | 局域网服务注册，Android NSD 自动发现 |
-| 双模式运行 | GUI 模式（系统托盘）或 headless 模式（无窗口） |
-| 安全防护 | 路径遍历防护（ValidatePath + isWithinRoots）；系统浏览、系统媒体与统一媒体端点均强制 `system.allowed_roots` 边界（ValidateSystemMediaAccess / ValidateAccessibleMediaPath）；Android 下载解压防 Zip Slip |
-| 媒体过滤 | 仅显示配置文件中指定的视频/图片扩展名文件 |
-| Web 管理器 | 内置基于 Single Page App 的精致 Web UI，提供仪表盘、媒体库浏览、标签增删改查、以及系统设置功能 |
+自动检测 Windows 驱动器，浏览任意目录。视频通过 HTTP Range 流式播放（256KB 缓冲 `BufferedReadSeeker`），缩略图采用 LANCZOS 缩放 + MD5 磁盘缓存。`fsnotify` 实时监听根目录，变更后防抖重扫。
 
-### Android 端
- 
-| 功能 | 说明 |
-|------|------|
-| 深度中文汉化 | 全系统级中文本地化覆盖，告别生硬英文展示，提供极其优雅亲和的中文表述 |
-| 渐变与毛玻璃 | 引入高级的线性色彩渐变头部与半透明高光毛玻璃胶囊（Glassmorphism），视觉层级鲜活灵动 |
-| 微悬浮卡片 | 重构文件夹及媒体资源卡片，支持精致超细线框描边、圆角与动态阻尼回弹按压微悬浮，极具品质感 |
-| 首页层 | 启动后进入首页，聚合媒体共享库、最近打开、继续播放、收藏和标签集合概览 |
-| 库入口 | 将配置的媒体根目录作为共享盘符展示，减少直接面对原始繁琐路径 |
-| 文件浏览器 | 网格/瀑布流视图，支持子目录浏览，拥有精准的滚动位置与上次浏览路径记忆 |
-| 视频播放 | Media3 (ExoPlayer) 全景架构，支持全屏切换、进度双击与音量亮度滑动控制；拖动防抖（500ms 冷启动 + 200ms 节流）+ `CLOSEST_SYNC` 关键帧对齐 + `MediaSession` 媒体控制 |
-| 图片预览 | 全屏查看，左右滑动同目录图片，双指缩放与阻尼惯性缓动；自动预加载相邻原图，打开后立即滑动切换流畅 |
-| 批量选择 | 长按进入选择模式，支持全选/反选、批量删除、批量下载到本地 |
-| 搜索 | 按文件名全局或局部递归快速搜索，限定当前目录 |
-| 排序 | 独立的文件夹与文件排序（按文件名/大小/时间/数字升降序等） |
-| 收藏 | 本地 DataStore 持久化保存，支持一键只看收藏 |
-| 标签与集合 | 长按快捷打标签，首页可直接进入特定标签的主题集合并查看聚合媒体 |
-| 继续播放 | 精准记录视频播放时间戳，从任意入口（浏览、收藏、下载、最近打开等）打开同一视频都自动恢复进度；播放至 95% 时弹窗询问"继续 / 从头开始"，续播时右下角提供 3 秒"从头开始"快捷入口 |
-| 最近项目 | 记录最近打开的媒体与最近浏览位置，一键重回上次上下文 |
-| 自动连接 | 优先尝试上次成功连接的服务端，失败后自动回退到 NSD 局域网自发现 |
-| 后台下载 | WorkManager 前台服务执行，常驻通知栏实时显示进度（百分比/字节数），切到后台或锁屏不受影响；支持单文件与目录 ZIP 流式下载解压 |
-| 画中画 (PiP) | 视频播放支持独立 Activity 的 PiP 浮窗；点击 Home 键自动进入小窗，关闭浮窗自动 `finish()` 释放 ExoPlayer，避免后台音频泄漏 |
-| 原生解码 | Rust 编译的 JPEG/PNG/WebP 原生解码器（cargo-ndk 交叉编译到 arm64-v8a，pure-Rust crates，无 C 依赖），含 EXIF orientation 自动校正；提升大图与多图懒加载性能 |
-| FFmpeg 扩展 | 预编译 libffmpeg.so，原生支持更多罕见和超清视频格式 |
+### 2. 小说阅读器（txt / epub）
+
+服务端章节解析与 epub 图片内联。7 套主题（AUTO + 日间 × 3 + 夜间 × 3），嵌入 LXGW WenKai + Noto Serif SC 字体。V2 设置：字号 / 行距 / 段距 / 首行缩进 / 字体族。支持自动滚动、书签、章节列表、沉浸模式（chrome 自动隐藏）、首字下沉、章节末标记、淡入过渡。
+
+### 3. 续播与上下文恢复
+
+跨入口（浏览 / 收藏 / 下载 / 最近打开）打开同一视频都自动从上次进度恢复。进度 ≥ 95% 时弹窗"继续 / 从头开始"，自动续播时右下角提供 3 秒"从头开始"chip。浏览页记录最近路径与滚动位置，一键重回上次上下文。
+
+### 4. 收藏 / 标签 / 书签
+
+Android 端用 DataStore 持久化收藏。服务端标签走 SQLite（pure-Go `modernc.org/sqlite`，无 CGO），CRUD + 文件关联，首次启动自动从 `tags.json` 迁移。Web 端书签视图（`bookmarksView.js`）。
+
+### 5. 离线下载 / 画中画
+
+WorkManager 前台服务执行下载，常驻通知栏显示进度；支持单文件与目录 ZIP 流式下载解压（含 Zip Slip 防护）。视频 PiP 浮窗使用独立 `VideoPlayerActivity`，关闭浮窗自动 `finish()` 释放 ExoPlayer，避免后台音频泄漏。
+
+### 6. 安全加固
+
+Bearer Token 认证（admin / system / media / books-image 路由组强制）；安全响应头（CSP / X-Frame-Options / nosniff / Referrer-Policy）；Release APK 签名 fail-fast 守卫；libffmpeg SHA256 preBuild 校验；路径遍历防护（ValidatePath + ValidateSystemMediaAccess + ValidateAccessibleMediaPath）。
 
 ## 技术栈
 
-### Server (Go, 当前版本)
+| 层 | 技术 |
+|---|---|
+| Server | Go 1.25+ / Echo v4 / modernc.org/sqlite (pure-Go) / fsnotify / getlantern/systray / hashicorp/mdns |
+| Android | Kotlin / Jetpack Compose / Media3 (ExoPlayer + MediaSession) / Coil 3 / WorkManager / Hilt |
+| Web 管理界面 | 模块化 JS SPA（无构建步骤，CSP 兼容） |
+| 原生解码 | Rust 2021 + cargo-ndk → arm64-v8a（pure-Rust crates）+ 预编译 libffmpeg.so |
 
-- **语言**: Go 1.25+
-- **框架**: Echo v4
-- **依赖**: getlantern/systray (系统托盘), hashicorp/mdns, fsnotify/fsnotify (文件监听), modernc.org/sqlite (pure-Go SQLite), hashicorp/golang-lru/v2
-- **配置**: YAML 文件
-- **运行**: 单文件可执行程序，双击即用
+## 快速上手
 
-### Android Client
-
-- **语言**: Kotlin
-- **UI**: Jetpack Compose
-- **架构**: MVVM (ViewModel + Repository)
-- **网络**: Retrofit + OkHttp
-- **图片**: Coil 3 (含 NativeDecoderFactory)
-- **视频**: Media3 (ExoPlayer + MediaSession) + FFmpeg 扩展
-- **后台任务**: WorkManager (前台服务下载，含进度通知)
-- **存储**: DataStore (偏好设置 + 收藏) + SQLite (服务端标签)
-- **原生**: Rust 2021 + cargo-ndk（交叉编译到 arm64-v8a；pure-Rust crates：jpeg-decoder / image-png / webp / kamadak-exif / fast-image-resize，输出 liblocalmedia_native.so）+ 预编译 libffmpeg.so
-- **导航**: Navigation Compose
-
-## 项目结构
-
-```
-localResourcesToPhone/
-├── server/                    # Go 后端（当前主力版本）
-│   ├── cmd/server/main.go        # 程序入口（--headless 参数）
-│   ├── internal/
-│   │   ├── config/               # 配置加载（YAML）
-│   │   ├── models/               # 数据模型
-│   │   ├── server/               # Echo 路由注册
-│   │   │   ├── handler/          # 29 个 API handler
-│   │   │   └── middleware/       # CORS 中间件
-│   │   ├── service/              # 业务逻辑
-│   │   │   ├── scanner.go        # 文件扫描（TTL 缓存 + fsnotify 递归监听）
-│   │   │   ├── tags.go           # 标签系统（SQLite 持久化 + JSON 迁移）
-│   │   │   ├── streaming.go      # 视频流传输（http.ServeContent + 256KB 缓冲）
-│   │   │   ├── thumbnail.go      # 缩略图生成（MD5 缓存）
-│   │   │   └── path.go           # 路径校验（ValidatePath / ValidateSystemMediaAccess / ValidateAccessibleMediaPath）
-│   │   ├── mdns/                 # mDNS 服务注册
-│   │   ├── systray/              # 系统托盘
-│   │   ├── gui/                  # GUI 模式入口
-│   │   └── web/                  # Web 管理器（SPA 静态资源 + 模块化脚本 + 程序生成 favicon）
-│   ├── config.yaml               # 运行时配置
-│   └── go.mod
-│
-├── android/                      # Android 客户端
-│   ├── app/
-│   │   ├── build.gradle.kts      # 模块构建配置（compileSdk 34, minSdk 26, targetSdk 34）
-│   │   ├── CMakeLists.txt        # NDK 原生编译
-│   │   └── src/main/
-│   │       ├── java/com/juziss/localmediahub/
-│   │       │   ├── LocalMediaHubApplication.kt  # Hilt Application
-│   │       │   ├── MainActivity.kt              # 入口 + NavHost 路由 + 视频续播调度 + POST_NOTIFICATIONS 权限请求
-│   │       │   ├── VideoPlayerActivity.kt       # 独立视频播放 Activity，承载 PiP 浮窗 + 关闭自动 finish
-│   │       │   ├── data/         # Model + Repository + DataStore（收藏、最近活动、播放进度、下载、路由）+ DownloadWorker（WorkManager 前台服务下载）
-│   │       │   ├── di/           # Hilt 模块（CoroutineScopesModule）
-│   │       │   ├── network/      # Retrofit 接口 + OkHttp
-│   │       │   ├── native/       # Kotlin JNI 入口（NativeImageDecoder / NativeExif / NaturalSorter / NativeDecoderFactory for Coil）
-│   │       │   ├── ui/
-│   │       │   │   ├── screen/   # 页面 Composable（Home / Connection / Browse / VideoPlayer / ImagePreview / Downloads）
-│   │       │   │   └── component/# 可复用组件
-│   │       │   │       ├── home/    # 首页卡片（Hero / Library / ContinueWatching / RecentMedia …）
-│   │       │   │       └── browse/  # 浏览子组件（TopBar / Sort / Search / Favorites / Delete 对话框 …）
-│   │       │   ├── util/         # 公共工具（TimeUtil、NetUtil、CacheCleanup）
-│   │       │   └── viewmodel/    # ViewModel 层（Home / Browse 主 VM + Browse delegate：Navigator / Sorter / Search / Tag / Favorites / Download / Delete）
-│   │       ├── rust/             # Rust 原生解码 crate（cargo-ndk 交叉编译到 arm64-v8a）
-│   │       │   ├── Cargo.toml    # crate: localmedia_native（pure-Rust: jpeg-decoder / image-png / webp / kamadak-exif / fast-image-resize）
-│   │       │   └── src/
-│   │       │       ├── lib.rs / bitmap.rs (EXIF orientation 旋转) / exif_reader.rs / jpeg.rs / png.rs / webp.rs / heif.rs / natural_sort.rs
-│   │       │       └── jni_bridge/  # JNI 暴露给 Kotlin native/ 的桥接层
-│   │       └── jniLibs/arm64-v8a/ # 编译产物：liblocalmedia_native.so（Rust 输出）+ libffmpeg.so（预编译 FFmpeg 扩展）
-│   ├── build.gradle.kts          # 含 `buildRustNative` task：preBuild 阶段自动 `cargo ndk build --release`
-│   └── settings.gradle.kts
-└── docs/                         # 文档（含 superpowers/specs 与 superpowers/plans）
-```
-
-## 快速开始
-
-### 1. 启动 Go Server（推荐）
+### 1. 启动 Server
 
 ```bash
 cd server
@@ -153,7 +68,7 @@ go build -o LocalMediaHub.exe ./cmd/server
 ./LocalMediaHub.exe --headless  # 无头模式，无窗口
 ```
 
-Windows 用户直接双击 `LocalMediaHub.exe` 即可启动，托盘图标提供复制 URL 和退出功能。
+Windows 用户直接双击 `LocalMediaHub.exe` 即可启动。
 
 如在中国大陆网络环境下编译：
 
@@ -163,209 +78,53 @@ GOPROXY=https://goproxy.cn,direct go mod tidy
 
 ### 2. 配置
 
-编辑 `server/config.yaml`：
+编辑 `server/config.yaml`（最小示例）：
 
 ```yaml
 server:
   host: "0.0.0.0"
   port: 8000
+  token: "<可选：开启 Bearer Token 后填入>"
 
 scan:
-  video_extensions: [.mp4, .mkv, .avi, .mov, .wmv, .flv, .ts]
-  image_extensions: [.jpg, .jpeg, .png, .gif, .bmp, .webp, .pdf]
+  video_extensions: [.mp4, .mkv, .avi, .mov]
+  image_extensions: [.jpg, .jpeg, .png, .gif, .webp]
+  # roots 留空 + auto_detect_roots: true 会自动检测 Windows 驱动器
+  # 若 roots 与 allowed_roots 均未配置且 auto_detect_roots: false，服务端拒绝启动
 
-thumbnail:
-  cache_dir: ".cache/thumbnails"
-  max_size: 300
-  format: "JPEG"
-
-# 系统浏览根目录（必须显式配置；未配置时 Android 端 system browse 不可用）
 system:
   allowed_roots:
     - "D:/Media"
-    - "E:/Videos"
 ```
 
-`system.allowed_roots` 只影响 `/api/v1/system/*` 这组受限系统浏览接口。
-
-> **标签存储:** 服务端使用 SQLite (`server/.data/tags.db`) 持久化标签。若首次启动检测到旧版 `tags.json`，会自动迁移并备份为 `tags.json.bak`。
-
-常规媒体扫描根目录 `scan.roots` 仍可省略，此时服务端会自动检测 Windows 驱动器。
+`system.allowed_roots` 控制 `/api/v1/system/*` 与 `/api/v1/media/*` 这两组受限端点的访问边界。
 
 ### 3. 编译 Android 客户端
 
 ```bash
 cd android
-./gradlew assembleDebug      # Debug 版本
-./gradlew assembleRelease     # Release 版本
-./gradlew testDebugUnitTest assembleDebug  # 推荐在交付前执行
+./gradlew assembleDebug                          # Debug 版本
+./gradlew assembleRelease                        # Release（默认要求 keystore.properties）
+./gradlew testDebugUnitTest assembleDebug        # 推荐在交付前执行
 ```
+
+Release 构建默认要求有效的 `keystore.properties`，未配置时会**构建失败**（防止误用 debug 签名发布 APK）。仅本地调试可用 `-PallowDebugSigning=true`。
 
 APK 输出位置：`android/app/build/outputs/apk/`
 
-### 3.1 Release 签名（发布前必读）
-
-Release 构建默认要求有效的 `keystore.properties`，未配置时会**构建失败**（防止误用 debug 签名发布 APK，避免供应链攻击）。
-
-**首次配置**：
-
-1. 生成 keystore（一次性）：
-   ```bash
-   keytool -genkeypair -v -keystore localmediahub.keystore -alias localmediahub \
-     -keyalg RSA -keysize 2048 -validity 10000
-   ```
-
-2. 复制示例配置并填入你的签名信息：
-   ```bash
-   cp android/keystore.properties.example android/keystore.properties
-   # 编辑 android/keystore.properties，填入 storeFile/storePassword/keyAlias/keyPassword
-   ```
-
-3. 正常构建：
-   ```bash
-   cd android && ./gradlew assembleRelease
-   ```
-
-**仅本地调试**（不配 keystore，用 debug key）：
-
-```bash
-./gradlew assembleRelease -PallowDebugSigning=true
-```
-
-⚠️ **切勿公开分发 debug 签名的 APK**——任何人都能用相同 debug key 重签名发布"官方" APK（Chain-I 供应链攻击）。
-
 ### 4. 连接
 
-- **自动**: App 会优先尝试上次成功连接的 Server；如果不可用，再通过 NSD 自动发现局域网内的 Server（需同一 WiFi）。
-  *注：Android 端需要 `CHANGE_WIFI_MULTICAST_STATE` 权限以确保发现成功。*
-- **手动**: 在 App 中输入 PC 的局域网 IP（如 `192.168.1.100:8000`）
+- **自动**：App 优先尝试上次成功连接的服务端，失败后通过 NSD 自动发现局域网内的 Server（需同一 WiFi + `CHANGE_WIFI_MULTICAST_STATE` 权限）。
+- **手动**：在 App 中输入 PC 的局域网 IP（如 `192.168.1.100:8000`）。
 
-## 升级迁移 (Phase 3 安全加固)
+如服务端配置了 `token`，Android 与 Web 都会弹输入框。
 
-Round 29 Phase 3 引入配置默认安全：服务端启动时若 `scan.roots` 和 `system.allowed_roots` 均为空且 `scan.auto_detect_roots: false`，将**拒绝启动**。
+## 项目状态
 
-**如果你升级后遇到 `refusing to start` 错误**，选择以下任一方式：
+- 开发阶段；本地改动自动同步推送至 GitHub `master` 分支（个人项目约定）
+- License: MIT
 
-1. 在 `config.yaml` 的 `scan.roots` 下显式列出媒体目录（推荐，最安全）
-2. 配置 `system.allowed_roots`（同时作为 scan roots 的 fallback）
-3. 在 `config.yaml` 设置 `scan.auto_detect_roots: true`（全盘扫描，需评估风险）
-4. 启动时加 `--auto-detect-roots` 命令行 flag（一次性 override）
+## 想了解更多？
 
-详见 `server/config.example.yaml` 的注释。
-
-### 安全响应头
-
-服务端对所有响应（含静态资源 + API + OPTIONS 预检）附加以下安全头：
-
-| 头 | 值 | 缓解 |
-|---|---|---|
-| `X-Frame-Options` | `DENY` | Clickjacking（禁止任何站点 iframe 嵌入本服务） |
-| `X-Content-Type-Options` | `nosniff` | MIME 嗅探攻击 |
-| `Referrer-Policy` | `no-referrer` | 外链泄漏本服务 URL |
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; media-src 'self'; connect-src 'self'` | XSS 数据 exfiltration（纵深防御） |
-
-**CSP 说明**：
-- `script-src 'self'`：JavaScript 全部同源（已外部化，不允许 inline script）。
-- `style-src 'self' 'unsafe-inline'`：当前 Web UI 仍有 inline `style="..."` 属性，暂留 `'unsafe-inline'`。**待未来 Phase 5 Web UI XSS 整改完成后移除**。
-- 不含 `data:` URI 例外（探索阶段确认 Web UI 无使用）。
-
-**未加的头**：
-- `Strict-Transport-Security`（HSTS）：仅 HTTPS 下有效，TLS 留作未来。
-- `Permissions-Policy`：项目不使用相机/麦克风/地理位置等敏感 API。
-
-## API 端点一览
-
-### 目录浏览
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/v1/folders` | 获取根文件夹列表 |
-| GET | `/api/v1/folders/{path}/browse` | 浏览指定目录 |
-
-### 媒体文件
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/v1/videos` | 视频列表（分页） |
-| GET | `/api/v1/images` | 图片列表（分页） |
-| GET | `/api/v1/videos/{path}/stream` | 视频流（支持 Range） |
-| GET | `/api/v1/images/{path}/thumbnail` | 缩略图 |
-| GET | `/api/v1/images/{path}/original` | 原图 |
-
-### 搜索与标签
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/v1/search` | 搜索文件和目录，支持 `path` 限定作用域 |
-| GET | `/api/v1/tags` | 标签列表 |
-| POST | `/api/v1/tags` | 创建标签 |
-| DELETE | `/api/v1/tags/{id}` | 删除标签 |
-| POST | `/api/v1/tags/{id}/files/{path}` | 给文件打标签 |
-| DELETE | `/api/v1/tags/{id}/files/{path}` | 移除文件标签 |
-| GET | `/api/v1/tags/{id}/files` | 获取标签下的文件 |
-| GET | `/api/v1/tags/{id}/media` | 获取标签下的媒体（分页） |
-| GET | `/api/v1/tags/file-tags` | 批量获取文件标签映射 |
-
-### 系统浏览
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/v1/system/drives` | 已配置的 system roots 列表 |
-| GET | `/api/v1/system/browse` | 在 `system.allowed_roots` 范围内浏览目录 |
-| GET | `/api/v1/system/thumbnail` | 系统级缩略图（受 `allowed_roots` 校验） |
-| GET | `/api/v1/system/stream` | 系统级视频流（受 `allowed_roots` 校验） |
-| GET | `/api/v1/system/original` | 系统级原图（受 `allowed_roots` 校验） |
-| POST | `/api/v1/system/delete` | 删除指定文件/目录 |
-
-### 统一媒体访问（绝对路径）
-
-通过查询参数 `?path=<绝对路径>` 访问媒体，统一覆盖扫描根目录与 `system.allowed_roots`，均经 `ValidateAccessibleMediaPath` 校验。
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/v1/media/thumbnail` | 绝对路径缩略图 |
-| GET | `/api/v1/media/original` | 绝对路径原图 |
-| GET | `/api/v1/media/stream` | 绝对路径视频流（支持 Range） |
-| GET | `/api/v1/media/duration` | 媒体时长（供播放器进度条） |
-
-### 管理
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/v1/health` | 健康检查（返回 `{status: ok}`） |
-| GET | `/api/v1/admin/config` | 获取配置 |
-| PUT | `/api/v1/admin/config` | 更新扫描目录 |
-| POST | `/api/v1/admin/scan/trigger` | 触发全量重扫描 |
-
-服务端内置了 Web 管理器界面，可以通过浏览器直接访问服务端地址（如 `http://localhost:8000`），在页面中直观地浏览媒体资源、查看仪表盘统计信息、管理标签以及配置扫描目录。
-
-## 原生库编译
-
-Android 端的图片解码由 Rust crate `localmedia_native`（位于 `android/app/src/main/rust/`）提供，通过 `cargo-ndk` 交叉编译到 `arm64-v8a`。
-
-**正常构建无需手动操作** —— `android/app/build.gradle.kts` 注册了 `buildRustNative` Gradle task，挂在 `preBuild` 阶段，会在 `./gradlew assembleDebug` / `assembleRelease` 之前自动执行：
-
-```bash
-cargo ndk -t arm64-v8a -o jniLibs/ build --release
-```
-
-输出 `liblocalmedia_native.so`，由 Kotlin 的 `native/NativeImageDecoder.kt` / `NativeExif.kt` / `NaturalSorter.kt` 通过 JNI 调用。
-
-**首次环境准备：**
-
-```bash
-rustup target add aarch64-linux-android
-cargo install cargo-ndk
-```
-
-`cargo-ndk` 会自动探测 `ANDROID_NDK_HOME` / `ANDROID_NDK_ROOT`（或 build.gradle.kts 中的 NDK 解析逻辑）。目标架构仅 `arm64-v8a`。
-
-`libffmpeg.so` 为预编译产物，直接放在 `jniLibs/arm64-v8a/` 下，不参与 Rust 构建链。
-
-## 开发与同步
-
-本项目代码在本地修改后，会自动同步推送到 GitHub 仓库 `master` 分支。
-
-## License
-
-MIT
+- **给 AI / 贡献者的工作手册**：[`AGENTS.md`](AGENTS.md) —— 模块地图、编码规则、安全约定、命令清单、提交约定
+- **完整文档索引**：[`docs/INDEX.md`](docs/INDEX.md) —— API 端点表、关键文件指针、历史 spec/plan、迁移与升级指南

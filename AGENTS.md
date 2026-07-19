@@ -1,142 +1,248 @@
-# Claude Code Project Context: LocalMediaHub (C/S System)
+# AGENTS.md — LocalMediaHub 工作手册
 
 GitHub Repo: https://github.com/huangsheng6668/LocalMediaHub
 
-本地媒体资源管理系统。服务端运行在 PC 端，负责扫描和提供媒体流；客户端为原生 Android 应用，用于浏览和播放。
+LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描和提供媒体流，Android 客户端浏览和播放。本文档是 AI agent 与贡献者的工作手册：模块地图让你快速定位代码，编码规则与安全约定让你改对地方，命令清单让你跑得起来。需要查阅 API 端点表、文件结构树或历史 spec 时，跳到 [`docs/INDEX.md`](docs/INDEX.md)。
 
-## 技术栈
-- **Server:** Go 1.25+ / Echo v4 / System Tray / fsnotify / modernc.org/sqlite (pure-Go)
-- **Client:** Android Native / Kotlin / Jetpack Compose / WorkManager / Media3 + MediaSession
-- **通信协议:** HTTP (REST API / Streaming)
+## 模块地图
+
+### Server (Go / Echo v4)
+
+- **入口**：`server/cmd/server/main.go`（`--headless` 切无窗口）
+- **路由**：`server/internal/server/server.go`（`Server` struct 持有所有 service 引用；`Server.Stop` 关闭 scanner + tags DB）
+- **Handler**：`server/internal/server/handler/*.go`（只做参数解析与响应，不写业务逻辑；通过 `Handler` struct 持有 service 依赖，**不使用全局变量**）
+- **Service**：`server/internal/service/*.go`
+  - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + 2s 防抖 + `cacheByDir` 每目录索引）
+  - `tags.go` — 标签系统（SQLite + RWMutex + PRAGMA + index + 批量 IN 查询 + JSON→SQLite 自动迁移，`Close()` 关闭 DB）
+  - `streaming.go` — 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`，原生 Range）
+  - `thumbnail.go` — 缩略图（LANCZOS + MD5 缓存 + sync.Pool + hot path priority）
+  - `book.go` — BookService（章节解析、epub 图片字节读取、相对路径重写为 `/api/v1/books/image`）
+  - `bookparser/` 子包 — `parser.go` / `txt.go` / `epub.go` / `unsupported.go`
+  - `path.go` — 路径校验三件套（见 [安全约定](#安全约定触碰前必读)）
+- **Middleware**：`server/internal/server/middleware/*.go`
+  - `cors.go` — CORS
+  - `auth.go` — Bearer Token（header + query fallback）
+  - `security_headers.go` — CSP / XFO / nosniff / Referrer-Policy（**必须在 CORS 之前挂载**）
+  - `ratelimit.go` — per-route rate limit（挂在 scan trigger + delete）
+- **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）
+- **配置**：`server/config.yaml`（运行时）/ `server/config.example.yaml`（模板）
+
+### Android (Kotlin / Compose)
+
+- **Application**：`android/app/src/main/java/com/juziss/localmediahub/LocalMediaHubApplication.kt`（Hilt `@HiltAndroidApplication`）
+- **Activity**：
+  - `MainActivity.kt`（singleTop + NavHost + 视频续播调度 `checkPlaybackProgress` / `playVideo` / `resumeRequest`；启动请求 `POST_NOTIFICATIONS`）
+  - `VideoPlayerActivity.kt`（独立视频播放 Activity，承载 PiP 浮窗；`exitingFromPip` 标志区分"关闭浮窗"vs"切后台"，关闭浮窗后 `onStop` 自动 `finish()` 释放 ExoPlayer）
+- **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen` / `DownloadsScreen`
+- **Component**（`ui/component/`）：
+  - `home/`（首页卡片：Hero / Library / ContinueWatching / RecentMedia / Favorite）
+  - `browse/`（浏览子组件：TopBar / SortMenu / SearchView / FavoritesView / DeleteConfirmDialog / QuickActionsDialog 等）
+  - `reader/`（`ReaderSettingsSheet` / `ReaderThemeWrapper` / `ReaderFontFamily`）
+  - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`
+- **ViewModel**（`viewmodel/`）：
+  - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel`
+  - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
+- **Data**（`data/`）：
+  - `Models.kt`（`MediaFile` / `Folder` / `Tag` / `FavoriteMediaEntry` / `PlaybackProgressEntry` / `RecentMediaEntry` / `LastBrowseLocation`）
+  - `MediaRepository.kt`（Retrofit 包装）
+  - `RecentActivityStore.kt`（最近活动 + 浏览状态 + 播放进度）
+  - `FavoritesStore.kt`（DataStore 收藏）
+  - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护）
+  - `ServerConfigStore.kt`（含 `authToken`）
+  - `RoutePath.kt`（浏览路径与系统/库模式标记）
+- **Network**（`network/`）：Retrofit 接口 + OkHttp + `AuthInterceptor`（注入 Bearer Token）
+- **Native**（`native/`）：`NativeImageDecoder.kt` / `NativeExif.kt` / `NaturalSorter.kt` / `NativeDecoderFactory.kt`（Coil 集成）
+- **Native libs**：`app/src/main/jniLibs/arm64-v8a/`（`liblocalmedia_native.so` Rust 输出 + `libffmpeg.so` 预编译）
+- **构建**：`app/build.gradle.kts` 注册 `buildRustNative` task（详见 [Rust 原生解码](#rust-原生解码)）
+
+### Web 管理界面
+
+服务端内置 SPA，浏览器访问 server 地址（如 `http://localhost:8000`）即可。
+
+- **公共层**：`server/internal/web/` 下 `app.js` / `router.js` / `state.js` / `dom.js` / `api.js`
+- **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `textReader.js` / `readerPrefs.js` / `bookmarksView.js`（取代旧 `tagsView.js`）/ `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `toast.js` / `utils.js`
+- **Token 集成**：`api.js` 的 `apiRequest()` 自动注入 Bearer header + 401 事件 → `app.js` 弹 token modal；sessionStorage 持久化
+- **CSP 兼容**：无 inline `<script>`；inline `style=` 暂留 `'unsafe-inline'`（待 Phase 5 Web UI XSS 整改）
+- **无构建步骤**，跟随 server 静态服务
+
+### Rust 原生解码
+
+- **crate**：`localmedia_native` @ `android/app/src/main/rust/`
+- **依赖**：pure-Rust（`jpeg-decoder` / `image-png` / `webp` / `kamadak-exif` / `fast-image-resize`），**无 C 依赖**
+- **构建**：`cargo ndk -t arm64-v8a -o jniLibs/ build --release`，由 Gradle `buildRustNative` task 在 `preBuild` 阶段自动调用；**不要手动覆盖 jniLibs 产物**
+- **输出**：`liblocalmedia_native.so`
+- **JNI 桥**：`src/jni_bridge/`（`decoders.rs` / `exif_jni.rs` / `natural_sort_jni.rs`）
+- **通道约定**：Android `ARGB_8888` == NDK `RGBA_8888`，解码器直接 `copy_from_slice`，无需通道重排
+- **`libffmpeg.so`** 为预编译产物（不参与 Rust 构建链），由 Android `preBuild` 校验 `.sha256`
 
 ## 常用命令
 
-### Go Server (推荐)
-- **编译:** `cd server && go build -o LocalMediaHub.exe ./cmd/server`
-- **启动 (GUI 模式):** `./LocalMediaHub.exe`（双击即可，带系统托盘）
-- **启动 (无头模式):** `./LocalMediaHub.exe --headless`
-- **依赖代理:** `GOPROXY=https://goproxy.cn,direct go mod tidy`
+### Server
 
-### Frontend (Android)
-- **Debug:** `cd android && ./gradlew assembleDebug`
-- **Release:** `cd android && ./gradlew assembleRelease`
-- **验证:** `cd android && ./gradlew testDebugUnitTest assembleDebug`
-- **APK 位置:** `android/app/build/outputs/apk/release/app-release.apk`
+```bash
+cd server
+go build -o LocalMediaHub.exe ./cmd/server
+./LocalMediaHub.exe              # GUI + 系统托盘
+./LocalMediaHub.exe --headless   # 无窗口
+GOPROXY=https://goproxy.cn,direct go mod tidy   # 中国大陆代理
+```
 
-## 项目结构规范
-- `/server`: Go 后端（当前主力版本）
-    - `cmd/server/main.go`: 程序入口
-    - `internal/config/`: 配置加载（YAML）
-    - `internal/models/`: 数据模型
-    - `internal/server/`: Echo 路由注册（`Server.Stop` 关闭 scanner + tags DB）
-    - `internal/server/handler/`: 29 个 API handler
-    - `internal/server/middleware/`: CORS 中间件
-    - `internal/service/`: 业务逻辑
-        - `scanner.go`: 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching`，2s 防抖重扫，新目录动态加入）
-        - `tags.go`: 标签系统（SQLite 持久化，JSON→SQLite 自动迁移，`Close()` 关闭 DB）
-        - `streaming.go`: 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`，原生 Range 支持）
-        - `thumbnail.go` / `path.go`: 缩略图生成 / 路径校验
-    - `internal/mdns/`: mDNS 服务注册
-    - `internal/systray/`: 系统托盘（getlantern/systray）
-    - `internal/gui/`: GUI 模式入口
-    - `internal/web/`: Web 管理器前端静态资源与模块化脚本
-    - `config.yaml`: 运行时配置
-- `/android`: Android Studio 项目
-    - `app/src/main/java/.../LocalMediaHubApplication.kt`: Hilt `@HiltAndroidApplication` 入口
-    - `app/src/main/java/.../MainActivity.kt`: `ComponentActivity` (singleTop) + `NavHost` 路由 + 视频续播调度（`checkPlaybackProgress`、`playVideo`、`resumeRequest` 状态）；启动时请求 `POST_NOTIFICATIONS`（Android 13+）
-    - `app/src/main/java/.../VideoPlayerActivity.kt`: 独立视频播放 Activity，承载 PiP 浮窗；`onPictureInPictureModeChanged(false)` + `onStop` 判定关闭浮窗后 `finish()` 释放 ExoPlayer（`exitingFromPip` 标志区分「关闭浮窗」与「切后台」）
-    - `app/src/main/java/.../ui/screen/`: Compose 页面
-        - `HomeScreen.kt`: 首页聚合入口、最近活动、继续播放、收藏、标签集合
-        - `ConnectionScreen.kt`: 自动重连 + NSD 发现连接流
-        - `BrowseScreen.kt`: 媒体浏览、筛选、滚动位置恢复
-        - `VideoPlayerScreen.kt`: Media3 ExoPlayer 全屏播放 + 手势 + 3 秒重启 chip；PlayerView 直连底层 `exoPlayer`（已删除 ForwardingPlayer 防抖层，手势松手后单次即时 seek）；`MediaSession` 暴露系统媒体控制；`SeekParameters.DEFAULT`（PRIOR_APPROACH_SYNC）向前对齐到最近关键帧；OkHttp cache 关闭避免 Range 请求磁盘抖动；`ON_STOP` 强制 pause 防后台音频泄漏
-        - `ImagePreviewScreen.kt`: 图片全屏预览 + 双指缩放 + 同目录左右滑动；`onImageVisible` 回调记录最近活动；Coil 预加载相邻原图
-        - `DownloadsScreen.kt`: 离线下载列表
-    - `app/src/main/java/.../ui/component/`: Compose 可复用组件
-        - `ResumePlaybackDialog.kt`: 视频已看完（≥95%）时的"继续 / 从头开始"对话框 + `VideoOpenAction` sealed class + `ResumePlaybackRequest`
-        - `PlayerGestureDetector.kt`: 播放器手势（亮度/音量/进度）
-        - `BrowseContent.kt`、`GridContainers.kt`、`MediaItems.kt`、`TagComponents.kt`、`VerticalScrollbar.kt`: 浏览/网格/媒体项等通用组件（`MediaItems.kt` / `GridContainers.kt` 的 `VideoCard` / `ImageCard` / `WaterfallImageGrid` 支持 `isSelected` 批量选择高亮覆盖层 + 勾选标记）
-        - `theme/NoRippleIndication.kt`: Compose foundation 1.11.x + material3 1.3.1 版本错配的临时 workaround（material3 1.3.1 的 `PlatformRipple` 未实现 `IndicationNodeFactory`，release R8 构建会崩）；material3 升级到 1.4.x+ 后应删除
-        - `home/HomeComponents.kt`: 首页卡片（Hero / Library / ContinueWatching / RecentMedia / Favorite 等）
-        - `browse/`: 浏览子组件（`BrowseTopBar` / `BrowseSortMenu` / `BrowseSearchView` / `BrowseFavoritesView` / `DeleteConfirmDialog` / `DeleteLoadingDialog` / `QuickActionsDialog` 等）
-    - `app/src/main/java/.../viewmodel/`: ViewModel 层
-        - `HomeViewModel.kt`: 首页推荐与继续播放数据聚合（`filterContinueWatching` 过滤已看完条目；`getSisterImages` 获取同目录图片列表用于图片预览左右滑动）
-        - `BrowseViewModel.kt`: 浏览主 VM，通过 delegate 分发职责；`deletePaths(paths)` 批量删除入口
-        - Browse delegates: `BrowseNavigator`（目录导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` 单条 + `deletePaths` 批量）/ `BrowseSharedState`（共享状态）
-        - `ConnectionViewModel.kt`、`ConnectionDecisions.kt`: 连接决策
-        - `VideoPlayerViewModel.kt`: 提供共享 OkHttpClient
-    - `app/src/main/java/.../network/`: Retrofit 接口 + OkHttp
-    - `app/src/main/java/.../data/`: 模型与仓库层
-        - `Models.kt`: `MediaFile` / `Folder` / `Tag` / `FavoriteMediaEntry` / `PlaybackProgressEntry` / `RecentMediaEntry` / `LastBrowseLocation` 等数据类（`MediaFile` 为 `@Parcelize`）
-        - `MediaRepository.kt`: Retrofit 包装
-        - `RecentActivityStore.kt`: 最近活动 + 浏览状态 + 播放进度持久化；含 `getPlaybackProgress`、`savePlaybackProgress`、`clearPlaybackProgress`、`addRecentMedia`、`saveLastBrowseLocation` 等
-        - `FavoritesStore.kt`: 收藏列表持久化
-        - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`: 离线下载持久化与执行。`DownloadManager` 仅负责入队（构造 `OneTimeWorkRequest` + Gson 序列化参数），真正的下载在 `DownloadWorker`（CoroutineWorker）内以前台服务 + 进度通知执行；`DownloadWorker` 通过 Hilt `@EntryPoint` 获取 `MediaRepository` / `DownloadsStore`，自带 Zip Slip 防护
-        - `ServerConfigStore.kt`: 上次连接的服务端配置
-        - `RoutePath.kt`: 浏览路径与系统/库模式标记
-    - `app/src/main/java/.../di/`: Hilt 模块（`CoroutineScopesModule`）
-    - `app/src/main/java/.../util/`: 公共工具（`TimeUtil.formatTime`、`NetUtil`、`CacheCleanup`）
-    - `app/src/main/java/.../native/`: Rust JNI 入口（Kotlin 侧）
-        - `NativeImageDecoder.kt` / `NativeExif.kt` / `NaturalSorter.kt` / `NativeDecoderFactory.kt`（Coil 集成）
-    - `app/src/main/rust/`: Rust 原生解码 crate（`localmedia_native`，cargo-ndk 交叉编译到 arm64-v8a）
-        - `Cargo.toml`: pure-Rust deps（`jpeg-decoder` / `image-png` / `webp` / `kamadak-exif` / `fast-image-resize`），无 C 依赖
-        - `src/`: `lib.rs`、`bitmap.rs`（EXIF orientation 旋转）、`exif_reader.rs`、`jpeg.rs`、`png.rs`、`webp.rs`、`heif.rs`、`natural_sort.rs`
-        - `src/jni_bridge/`: JNI 桥（`decoders.rs` / `exif_jni.rs` / `natural_sort_jni.rs` / `mod.rs`）
-    - `app/src/main/jniLibs/arm64-v8a/`: 编译产物 —— `liblocalmedia_native.so`（Rust 输出，由 `buildRustNative` Gradle task 在 `preBuild` 阶段自动生成）+ `libffmpeg.so`（预编译 FFmpeg 扩展）
-    - `app/build.gradle.kts`: 注册 `buildRustNative` task（`cargo ndk -t arm64-v8a -o jniLibs/ build --release`），挂载到 `preBuild`
+### Android
+
+```bash
+cd android
+./gradlew assembleDebug                              # Debug
+./gradlew assembleRelease                            # Release（默认要求 keystore.properties）
+./gradlew assembleRelease -PallowDebugSigning=true   # 仅本地调试
+./gradlew testDebugUnitTest assembleDebug            # 交付前推荐组合
+```
+
+### Rust
+
+正常构建无需手动执行（Gradle `buildRustNative` 自动调用）。首次环境准备：
+
+```bash
+rustup target add aarch64-linux-android
+cargo install cargo-ndk
+```
+
+手动重建 / 跑 Rust 单测：
+
+```bash
+cd android/app/src/main/rust
+cargo ndk -t arm64-v8a -o jniLibs/ build --release
+cargo test
+```
+
+### 静态分析（XSS 覆盖率检查）
+
+```bash
+cd tools/xsscheck
+go run . ../server/internal/web
+```
 
 ## 编码规则
 
 ### Go (Server)
-- Handler 层通过 `Handler` struct 持有服务依赖，不使用全局变量。
-- 路径安全：所有文件访问必须经过 `ValidatePath` 或 `isWithinRoots` 校验。
-- **系统/统一媒体端点**：`/api/v1/system/*`（缩略图/原图/流）与 `/api/v1/media/*` 必须经 `ValidateSystemMediaAccess` / `ValidateAccessibleMediaPath`，强制 `system.allowed_roots` 边界，禁止越界读取。
-- **权限控制**: 目录访问受 `config.yaml` 中的 `system.allowed_roots` 限制（若配置）。
-- 列表返回用 `make([]T, 0)` 初始化，避免 JSON 序列化为 `null`。
-- 业务逻辑放在 `internal/service/`，handler 只做参数解析和响应。
+
+- Handler 通过 `Handler` struct 持有 service 依赖，**不使用全局变量**
+- 业务逻辑放 `internal/service/`，handler 只做参数解析与响应
+- 所有文件访问必须经过路径校验三件套（见 [安全约定](#安全约定触碰前必读)）
+- 受限端点（`system/*` 与 `media/*`）必须落在 `system.allowed_roots` 边界内
+- 列表返回用 `make([]T, 0)` 初始化，避免 JSON 序列化为 `null`
 
 ### Kotlin (Android)
-- **UI:** Jetpack Compose，MVVM 架构。
-- **网络:** Retrofit + OkHttp。
-- **图片:** Coil 3（含 NativeDecoderFactory）。
-- **视频:** Media3 (ExoPlayer + MediaSession) + 预编译 libffmpeg.so。
-- **后台任务:** WorkManager + 前台服务（`FOREGROUND_SERVICE_DATA_SYNC`），用于常驻通知栏的离线下载。
-- **原生解码:** Rust crate `localmedia_native`（`android/app/src/main/rust/`），通过 `cargo-ndk` 交叉编译到 `arm64-v8a`，Gradle `buildRustNative` task 在 `preBuild` 阶段自动调用。Kotlin 侧入口在 `native/`（`NativeImageDecoder` / `NativeExif` / `NaturalSorter`）。Rust 侧 `ARGB_8888` == NDK `RGBA_8888`，解码器直接 `copy_from_slice`，无需通道重排。
-- **异步:** Coroutines。
-- **已知 Compose 版本错配:** foundation 1.11.x + material3 1.3.1 的 `clickable` 在 release R8 构建下崩溃，由 `theme/NoRippleIndication.kt` 提供无 ripple 的 `IndicationNodeFactory` 解决。material3 升级到 1.4.x+ 后可移除该 workaround 并恢复 ripple。
 
-## Go Server 架构
+- UI: Jetpack Compose，MVVM（ViewModel + Repository）
+- 网络: Retrofit + OkHttp，`AuthInterceptor` 注入 Bearer Token
+- 图片: Coil 3（含 `NativeDecoderFactory`）
+- 视频: Media3 (ExoPlayer + MediaSession) + 预编译 libffmpeg.so
+- 异步: Coroutines
+- 后台: WorkManager + 前台服务（`FOREGROUND_SERVICE_DATA_SYNC`）用于离线下载
+- DI: Hilt
+- **已知 Compose 版本错配**: foundation 1.11.x + material3 1.3.1 的 `clickable` 在 release R8 构建下崩溃，由 `ui/theme/NoRippleIndication.kt` 提供无 ripple 的 `IndicationNodeFactory` 解决；material3 升级到 1.4.x+ 后可移除
 
-```
-main.go --headless?→ server.New(cfg) → headless 模式
-       └── GUI 模式 → gui.Run(cfg) → server + systray + 信号处理
+### Web (前端 JS)
 
-Server struct 持有:
-  - Scanner   (文件扫描，TTL 缓存 + fsnotify 递归监听)
-  - TagsService (SQLite 持久化，RWMutex)
-  - StreamingService (http.ServeContent + 256KB BufferedReadSeeker)
-  - ThumbnailService (MD5 磁盘缓存，LANCZOS 缩放)
+- 模块化（每个视图一个 `.js` 文件），无构建步骤
+- 零 inline `<script>`（CSP `script-src 'self'`）；`style` 的 `'unsafe-inline'` 待 Phase 5 Web UI XSS 整改后移除
+- 统一通过 `api.js` 的 `apiRequest()` 发请求（自动注入 Bearer header + 401 事件）
+- Token 通过 sessionStorage 持久化
+- 涉及 `innerHTML` 的代码需通过 `tools/xsscheck` 静态分析
 
-Handler struct 接收所有 service 引用，方法挂在 struct 上。
-```
+### Rust
 
-## 核心功能
-1. **全盘浏览:** 自动检测 Windows 驱动器，浏览任意目录，只显示媒体文件
-2. **发现机制:** mDNS 注册 + Android NSD 自动发现
-3. **首页体验:** Android 首页聚合 Libraries、最近活动、继续播放、收藏和标签集合
-4. **视频续播:** 任意入口（浏览 / 收藏 / 下载 / 最近打开等）打开同一视频都自动从上次进度恢复；进度 ≥95% 时弹窗询问"继续 / 从头开始"；自动续播时右下角提供 3 秒"从头开始"快捷入口
-5. **浏览恢复:** 记录最近浏览路径、滚动位置和最近打开媒体，支持一键回到上次上下文
-6. **离线下载:** WorkManager 前台服务 + 进度通知；支持单文件与目录 ZIP 流式下载解压；DownloadsStore 持久化条目，`file://` URL 直接喂给 ExoPlayer/Coil
-7. **媒体处理:** 视频流传输（Range）、缩略图生成、标签系统（SQLite 持久化）、标签下媒体聚合
-8. **实时文件监听:** fsnotify 递归监听扫描根目录，磁盘变更后即时失效缓存并防抖触发重扫
-9. **画中画 (PiP):** 独立 `VideoPlayerActivity` 承载 PiP 浮窗，关闭浮窗自动 `finish()` 释放资源
-10. **批量选择:** 浏览页长按进入选择模式，支持全选/反选、批量删除（调 `deletePaths`）、批量下载
-11. **受限系统浏览:** `/api/v1/system/*` 仅允许访问 `config.yaml` 中 `system.allowed_roots` 范围
-12. **双模式:** GUI（系统托盘）或 headless（无窗口）
-13. **Rust 原生解码:** Rust crate `localmedia_native`（JPEG/PNG/WebP 解码 + EXIF orientation 校正 + 自然排序），pure-Rust 依赖，通过 cargo-ndk 交叉编译到 arm64-v8a，Gradle `buildRustNative` task 在 `preBuild` 阶段自动构建。Kotlin 侧通过 JNI（`native/NativeImageDecoder.kt` 等）调用。Bitmap 写入直接 `copy_from_slice`（Android `ARGB_8888` == NDK `RGBA_8888`，无需通道重排）。
-14. **中文汉化与视觉美观度优化**: 深度汉化原生 Android 界面所有硬编码文案。引入柔和的线性色彩渐变（Linear Gradients）与高阶毛玻璃面板拟态（Glassmorphism）胶囊，为多媒体和文件夹卡片引入精致超细描边及按压阻尼动态立体悬浮效果。
-15. **Web 管理界面**: 内置精致的 Web Single Page App，提供仪表盘、媒体共享库浏览、标签增删改查、以及系统设置功能。
-16. **统一媒体访问**: `/api/v1/media/*` 通过绝对路径 `?path=` 统一提供缩略图、原图、视频流与时长，覆盖扫描根目录与 `system.allowed_roots`，均经路径与边界校验。
+- 仅使用 pure-Rust crates（无 C 依赖，便于交叉编译）
+- JNI 桥统一放 `src/jni_bridge/`
+- Bitmap 写入直接 `copy_from_slice`（通道顺序约定见 [Rust 原生解码](#rust-原生解码)）
+- 编译由 Gradle `buildRustNative` 自动驱动，**不要手动覆盖 jniLibs 产物**
 
-> **同步政策:** 任何本地代码改动将自动同步推送至 GitHub `master` 分支（个人项目约定）。
+## 安全约定（触碰前必读）
 
+### 路径校验三件套
+
+`server/internal/service/path.go`：
+
+- `ValidatePath` —— 常规媒体扫描根目录校验
+- `ValidateSystemMediaAccess` —— `/api/v1/system/*` 端点专用，强制 `system.allowed_roots` 边界
+- `ValidateAccessibleMediaPath` —— `/api/v1/media/*` 统一媒体端点专用，覆盖扫描根目录与 `system.allowed_roots`
+
+任何路径相关改动先确认是否调用上述三者；新增端点必须显式选择其一。
+
+### Bearer Token 认证
+
+`server/internal/server/middleware/auth.go`：
+
+- 挂载路由组：admin / system / media / books-image
+- 接受 header（`Authorization: Bearer <token>`）与 query（`?token=`）双 fallback（query 仅为 `<img src>` 这种无法加 header 的场景）
+- 常量时间比较，防 timing attack
+
+### Config 默认安全（Phase 3）
+
+- `scan.roots` 空 + `system.allowed_roots` 空 + `scan.auto_detect_roots: false` → 服务端**拒绝启动**
+- 一次性 override：启动加 `--auto-detect-roots` flag
+- 详见 [`docs/INDEX.md`](docs/INDEX.md#迁移与升级历史) "迁移与升级历史"
+
+### HTTP 安全响应头
+
+`server/internal/server/middleware/security_headers.go`：
+
+- `X-Frame-Options: DENY`
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: no-referrer`
+- `Content-Security-Policy`: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; media-src 'self'; connect-src 'self'`
+- 中间件**必须在 CORS 之前挂载**
+- 已知 TODO: `style 'unsafe-inline'` 待 Web UI XSS 整改后移除
+
+### APK 签名守卫（Phase 7）
+
+- Release 构建默认 fail-fast：无 `keystore.properties` 即拒
+- `android:allowBackup="false"`（防 adb backup 提取）
+- `-PallowDebugSigning=true` 仅本地调试；**切勿公开分发 debug 签名 APK**（Chain-I 供应链攻击风险）
+
+### libffmpeg SHA256 校验（Phase 2）
+
+- `preBuild` 阶段比对 `jniLibs/arm64-v8a/libffmpeg.so.sha256`
+- 缺失会触发可操作的错误信息
+- SBOM 与 CVE 审计见 `docs/superpowers/specs/2026-07-11-security-phase2-libffmpeg-design.md`
+
+### Zip Slip 防护
+
+`DownloadWorker` 解压前校验每个 entry 路径不越界目标目录。
+
+### Rate Limit（Phase 8）
+
+`server/internal/server/middleware/ratelimit.go` per-route 限流，挂在 scan trigger + delete 路由。
+
+### 触碰安全敏感代码前先看
+
+- `docs/superpowers/specs/2026-07-10-security-audit-design.md`（主审计）
+- `docs/superpowers/specs/2026-07-11-security-phase4-http-hardening-design.md`（HTTP 头）
+- [`docs/INDEX.md`](docs/INDEX.md#安全加固) "安全加固" 主题节
+
+## 测试与验证
+
+**修改后请跑相关子系统的测试**（不要盲跑全部，按改动范围选）：
+
+- 改 `server/`：`cd server && go test ./...`
+- 改 `android/`：`cd android && ./gradlew testDebugUnitTest`
+- 改 Rust crate：`cd android/app/src/main/rust && cargo test`
+- 改 `server/internal/web/`：额外跑 `cd tools/xsscheck && go run . ../server/internal/web`
+- 交付前推荐组合：`cd android && ./gradlew testDebugUnitTest assembleDebug`
+
+## 提交与分支约定
+
+- 主分支：`master`（个人项目，本地改动自动同步推送）
+- Commit 风格：**Conventional Commits**（硬规则）
+  - type：`feat` / `fix` / `docs` / `refactor` / `chore` / `perf` / `test` / `style`
+  - 常用 scope：`reader` / `bookparser` / `web` / `android` / `security` / `server` / `thumbnail` / `scanner` / `tags` / `book`
+  - 多阶段工作：附 `(Phase N)` 或 `(Round N)` 后缀
+  - 示例：`feat(reader): Android immersive mode with chrome auto-hide (Phase 5)`
+- 重大改动流程：
+  1. 先写 spec：`docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
+  2. 再用 writing-plans 技能落 plan：`docs/superpowers/plans/YYYY-MM-DD-<topic>.md`
+  3. 按 plan 实施，每个 task 一个 commit
+
+## 详细文档
+
+完整索引见 [`docs/INDEX.md`](docs/INDEX.md)：API 端点表 / 关键文件指针 / 历史 spec & plan / 安全 Phase 1-8 总览 / 迁移与升级历史。
