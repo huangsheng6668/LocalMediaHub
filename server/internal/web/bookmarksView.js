@@ -48,7 +48,7 @@ export function renderBookmarks() {
     
     if (bookmarks.length === 0) {
         listEl.innerHTML = `
-            <div class="text-reader__empty" style="padding: 48px; text-align: center; background-color: var(--bg-card); border-radius: var(--border-radius-lg); border: 1px solid var(--border-color); color: var(--text-muted); font-size: 14px;">
+            <div class="text-reader__empty" style="padding: 48px; text-align: center; background-color: var(--surface-card); border-radius: var(--radius-lg); border: 1px solid var(--border-color); color: var(--text-muted); font-size: 14px;">
                 暂无书签记录。您可以在媒体共享库中阅读小说，在段落上右侧悬浮并点击 “+” 添加书签。
             </div>
         `;
@@ -67,12 +67,12 @@ export function renderBookmarks() {
         row.style.justifyContent = 'space-between';
         row.style.alignItems = 'center';
         row.style.padding = '16px 20px';
-        row.style.backgroundColor = 'var(--bg-card)';
+        row.style.backgroundColor = 'var(--surface-card)';
         row.style.border = '1px solid var(--border-color)';
-        row.style.borderRadius = 'var(--border-radius-lg)';
+        row.style.borderRadius = 'var(--radius-lg)';
         row.style.cursor = 'pointer';
         row.style.transition = 'all 0.2s ease';
-        row.style.boxShadow = 'var(--shadow-premium)';
+        row.style.boxShadow = 'var(--shadow-md)';
         
         row.addEventListener('mouseenter', () => {
             row.style.borderColor = 'var(--primary)';
