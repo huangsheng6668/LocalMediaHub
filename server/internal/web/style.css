@@ -119,88 +119,120 @@ body {
 
 /* Sidebar Navigation */
 .sidebar {
-    background-color: var(--bg-sidebar);
-    border-right: 1px solid var(--border-color);
+    background-color: var(--surface-sidebar);
+    border-right: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;
-    padding: 24px 16px;
+    padding: var(--space-5) var(--space-4);
     justify-content: space-between;
 }
 
 .sidebar-brand {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px 24px;
-    border-bottom: 1px solid var(--border-color);
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3) var(--space-5);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
-.brand-gradient {
-    font-size: 20px;
+.brand-monogram {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: var(--accent);
+    color: var(--text-on-accent);
     font-weight: 700;
-    background: var(--primary-gradient);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    letter-spacing: -0.5px;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    border-radius: var(--radius-sm);
+}
+
+.brand-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
 }
 
 .brand-version {
     font-size: 11px;
-    background: rgba(255, 255, 255, 0.1);
-    padding: 2px 6px;
-    border-radius: var(--border-radius-sm);
+    background: var(--surface-card);
     color: var(--text-muted);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
     font-weight: 500;
 }
 
 .sidebar-menu {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-top: 24px;
+    gap: var(--space-1);
+    margin-top: var(--space-5);
     flex-grow: 1;
 }
 
 .menu-item {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    color: var(--text-muted);
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    color: var(--text-secondary);
     text-decoration: none;
     font-weight: 500;
     font-size: 14px;
-    border-radius: var(--border-radius-md);
+    border-radius: var(--radius-md);
     transition: var(--transition-quick);
 }
 
 .menu-item:hover {
-    color: var(--text-main);
-    background-color: rgba(255, 255, 255, 0.03);
+    color: var(--text-primary);
+    background-color: var(--surface-hover);
 }
 
 .menu-item.active {
-    color: var(--text-white);
-    background: var(--primary-gradient);
-    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+    color: var(--accent);
+    background-color: var(--accent-soft);
+}
+
+.menu-item.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: var(--accent);
 }
 
 .menu-icon {
     font-size: 16px;
+    display: inline-flex;
+    width: 20px;
+    height: 20px;
+    align-items: center;
+    justify-content: center;
 }
 
 .sidebar-footer {
-    padding-top: 16px;
-    border-top: 1px solid var(--border-color);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-subtle);
 }
 
 .server-status {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
+    gap: var(--space-2);
+    padding: 6px 12px;
     font-size: 13px;
-    color: var(--text-muted);
+    color: var(--text-secondary);
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
 }
 
 .status-indicator {
@@ -210,8 +242,8 @@ body {
 }
 
 .status-indicator.online {
-    background-color: var(--secondary);
-    box-shadow: 0 0 8px var(--secondary);
+    background-color: #4F8A6B;
+    box-shadow: 0 0 0 3px rgba(79, 138, 107, 0.2);
 }
 
 /* Main Content Area */
@@ -220,24 +252,25 @@ body {
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
+    background: var(--surface-app);
 }
 
 .main-header {
-    height: 72px;
-    border-bottom: 1px solid var(--border-color);
-    padding: 0 32px;
+    height: 56px;
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0 var(--space-6);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background-color: rgba(10, 10, 15, 0.8);
-    backdrop-filter: var(--glass-blur);
+    background-color: var(--surface-card);
     z-index: 10;
 }
 
 .main-header h1 {
-    font-size: 22px;
+    font-size: 18px;
     font-weight: 600;
-    letter-spacing: -0.5px;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
 }
 
 .view-container {
