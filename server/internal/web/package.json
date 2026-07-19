@@ -1,0 +1,12 @@
+{
+  "name": "localmediahub-web",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Build-time tooling for the LocalMediaHub web manager.",
+  "scripts": {
+    "build:tokens": "node tools/build-tokens.mjs"
+  },
+  "devDependencies": {
+    "open-props": "1.7.7"
+  }
+}

@@ -12,14 +12,24 @@ function hashParams(hash) {
     return params;
 }
 
-export function handleRoute(elements, renderDashboard, loadRoots, browsePath, renderTagsManager, renderSettings) {
+export function handleRoute(elements, renderDashboard, loadRoots, browsePath, renderBookmarks, renderSettings) {
     const hash = window.location.hash || '#/dashboard';
 
+    // Set active tab on body dataset for view-specific layout overrides
+    let activeTab = '';
+    if (hash.startsWith('#/dashboard')) activeTab = 'dashboard';
+    else if (hash.startsWith('#/browser')) activeTab = 'browser';
+    else if (hash.startsWith('#/bookmarks')) activeTab = 'bookmarks';
+    else if (hash.startsWith('#/settings')) activeTab = 'settings';
+    else if (hash.startsWith('#/read')) activeTab = 'read';
+    else if (hash.startsWith('#/bookshelf')) activeTab = 'bookshelf';
+    document.body.dataset.activeTab = activeTab;
+
     // De-activate all tabs and menu selections
-    [elements.viewDashboard, elements.viewBrowser, elements.viewTags, elements.viewSettings, elements.viewReader].forEach(v => {
+    [elements.viewDashboard, elements.viewBrowser, elements.viewBookmarks, elements.viewSettings, elements.viewReader].forEach(v => {
         if (v) v.classList.remove('active');
     });
-    [elements.menuDashboard, elements.menuBrowser, elements.menuTags, elements.menuSettings].forEach(m => {
+    [elements.menuDashboard, elements.menuBrowser, elements.menuBookmarks, elements.menuSettings].forEach(m => {
         if (m) m.classList.remove('active');
     });
 
@@ -40,12 +50,12 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
         } else {
             browsePath(state.currentPath);
         }
-    } else if (hash.startsWith('#/tags')) {
-        state.activeTab = 'tags';
-        if (elements.pageTitle) elements.pageTitle.textContent = '标签管理';
-        if (elements.menuTags) elements.menuTags.classList.add('active');
-        if (elements.viewTags) elements.viewTags.classList.add('active');
-        renderTagsManager();
+    } else if (hash.startsWith('#/bookmarks')) {
+        state.activeTab = 'bookmarks';
+        if (elements.pageTitle) elements.pageTitle.textContent = '书签管理';
+        if (elements.menuBookmarks) elements.menuBookmarks.classList.add('active');
+        if (elements.viewBookmarks) elements.viewBookmarks.classList.add('active');
+        renderBookmarks();
     } else if (hash.startsWith('#/settings')) {
         state.activeTab = 'settings';
         if (elements.pageTitle) elements.pageTitle.textContent = '系统设置';
@@ -62,7 +72,9 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
             elements.viewReader.classList.add('active');
             const params = hashParams(hash);
             const path = params.get('path') || '';
-            renderTextReader(elements.viewReader, path);
+            const chapter = params.get('chapter');
+            const para = params.get('para');
+            renderTextReader(elements.viewReader, path, chapter, para);
         }
     } else if (hash.startsWith('#/bookshelf')) {
         // Bookshelf view (Task 16): scans localStorage for every book_progress

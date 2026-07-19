@@ -5,30 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LocalMediaHub Web 管理器</title>
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.ico">
+    <script src="boot.js"></script>
+    <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="style.css">
-    <link rel="preload" href="/fonts/LXGWWenKai-Regular.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/fonts/NotoSerifSC-Regular.woff2" as="font" type="font/woff2" crossorigin>
 </head>
 <body>
     <div class="app-container">
         <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="sidebar-brand">
-                <span class="brand-gradient">LocalMediaHub</span>
+                <span class="brand-monogram">LMH</span>
+                <span class="brand-name">LocalMediaHub</span>
                 <span class="brand-version">v0.2.0</span>
             </div>
             <nav class="sidebar-menu">
                 <a href="#/dashboard" class="menu-item active" id="menu-dashboard">
-                    <span class="menu-icon">📊</span> 仪表盘
+                    <span class="menu-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="3" y="3" width="7" height="9"></rect>
+                            <rect x="14" y="3" width="7" height="5"></rect>
+                            <rect x="14" y="12" width="7" height="9"></rect>
+                            <rect x="3" y="16" width="7" height="5"></rect>
+                        </svg>
+                    </span>
+                    仪表盘
                 </a>
                 <a href="#/browser" class="menu-item" id="menu-browser">
-                    <span class="menu-icon">📂</span> 媒体共享库
+                    <span class="menu-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </span>
+                    媒体共享库
                 </a>
-                <a href="#/tags" class="menu-item" id="menu-tags">
-                    <span class="menu-icon">🏷️</span> 标签管理
+                <a href="#/bookmarks" class="menu-item" id="menu-bookmarks">
+                    <span class="menu-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </span>
+                    书签管理
                 </a>
                 <a href="#/settings" class="menu-item" id="menu-settings">
-                    <span class="menu-icon">⚙️</span> 系统设置
+                    <span class="menu-icon">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                    </span>
+                    系统设置
                 </a>
             </nav>
             <div class="sidebar-footer">
@@ -50,6 +75,21 @@
                 </button>
                 <h1 id="page-title">仪表盘</h1>
                 <div class="header-actions">
+                    <button class="btn btn-theme-toggle" id="btn-theme-toggle" aria-label="切换主题" title="切换日/夜主题">
+                        <span class="theme-toggle-icon" data-icon="sun">
+                            <!-- sun icon (DAY visible) -->
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="4"></circle>
+                                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+                            </svg>
+                        </span>
+                        <span class="theme-toggle-icon" data-icon="moon" hidden>
+                            <!-- moon icon (NIGHT visible) -->
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                            </svg>
+                        </span>
+                    </button>
                     <button class="btn btn-primary btn-rescan" id="btn-trigger-scan">
                         <span>🔄</span> 立即扫描媒体
                     </button>
@@ -82,13 +122,7 @@
                                 <p class="stat-value" id="stat-images">0</p>
                             </div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">🏷️</div>
-                            <div class="stat-info">
-                                <h3>管理标签总数</h3>
-                                <p class="stat-value" id="stat-tags">0</p>
-                            </div>
-                        </div>
+
                     </div>
 
                     <div class="dashboard-widgets">
@@ -143,40 +177,17 @@
                     </div>
                 </section>
 
-                <!-- Tags Manager View -->
-                <section id="view-tags" class="view-section">
-                    <div class="tag-manager-container">
-                        <!-- Tag Creator Card -->
-                        <div class="tag-creator-card">
-                            <h2>新建分类标签</h2>
-                            <div class="form-group">
-                                <label for="tag-name">标签名称</label>
-                                <input type="text" id="tag-name" placeholder="请输入名称，如：电影、家庭照...">
-                            </div>
-                            <div class="form-group">
-                                <label for="tag-color">选择颜色</label>
-                                <div class="color-picker-grid">
-                                    <button class="color-dot active" style="background-color: #7c3aed;" data-color="#7c3aed"></button>
-                                    <button class="color-dot" style="background-color: #3b82f6;" data-color="#3b82f6"></button>
-                                    <button class="color-dot" style="background-color: #10b981;" data-color="#10b981"></button>
-                                    <button class="color-dot" style="background-color: #f59e0b;" data-color="#f59e0b"></button>
-                                    <button class="color-dot" style="background-color: #ef4444;" data-color="#ef4444"></button>
-                                    <button class="color-dot" style="background-color: #ec4899;" data-color="#ec4899"></button>
-                                    <button class="color-dot" style="background-color: #6b7280;" data-color="#6b7280"></button>
-                                </div>
-                            </div>
-                            <button class="btn btn-primary" id="btn-create-tag">添加标签</button>
-                        </div>
-
-                        <!-- Tag List -->
-                        <div class="tag-list-card">
-                            <h2>标签列表</h2>
-                            <div class="tags-container" id="tags-manager-list">
-                                <!-- Tags injected here -->
-                            </div>
+                <!-- Bookmarks Manager View -->
+                <section id="view-bookmarks" class="view-section">
+                    <div class="bookmarks-manager-container" style="padding: 24px max(24px, calc((100% - 800px) / 2));">
+                        <h2 style="margin-bottom:20px; font-size:22px; font-weight:600; color:var(--text-white);">我的书签</h2>
+                        <div class="bookmarks-manager-list" id="bookmarks-manager-list">
+                            <!-- Bookmarks injected here -->
                         </div>
                     </div>
                 </section>
+
+
 
                 <!-- System Settings View -->
                 <section id="view-settings" class="view-section">
@@ -193,6 +204,10 @@
                         <div class="form-group">
                             <label>图片匹配后缀名</label>
                             <p class="settings-static" id="settings-image-exts"></p>
+                        </div>
+                        <div class="form-group">
+                            <label>文本匹配后缀名</label>
+                            <p class="settings-static" id="settings-text-exts"></p>
                         </div>
                         <button class="btn btn-primary" id="btn-save-settings">保存路径配置</button>
                     </div>
@@ -282,22 +297,7 @@
         </div>
     </div>
 
-    <!-- Dropdown Menu / Tag Selector Modal for files -->
-    <div class="overlay-modal" id="modal-file-tags">
-        <div class="modal-backdrop"></div>
-        <div class="modal-wrapper tag-selector-wrapper">
-            <div class="modal-header">
-                <span>管理文件分类标签</span>
-                <button class="btn-close" id="btn-close-file-tags-modal">✕</button>
-            </div>
-            <div class="modal-body">
-                <p class="file-path-subtitle" id="tag-modal-file-path">文件：...</p>
-                <div class="tag-selector-list" id="tag-selector-checkboxes">
-                    <!-- File tag list with checkboxes -->
-                </div>
-            </div>
-        </div>
-    </div>
+
 
     <!-- Token Input Modal for Auth -->
     <div id="auth-modal" class="modal hidden" role="dialog" aria-labelledby="auth-modal-title" aria-modal="true">

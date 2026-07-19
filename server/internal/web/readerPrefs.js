@@ -20,7 +20,7 @@ export const FONT_FAMILIES = {
 };
 
 // 内容宽度滑块范围（px）。Android 在屏幕 dp 上有等价 clamp。
-export const CONTENT_WIDTH_RANGE = { MIN: 600, MAX: 900, STEP: 10 };
+export const CONTENT_WIDTH_RANGE = { MIN: 600, MAX: 1400, STEP: 10 };
 
 // 6 个主题预设（spec §1.1 表格逐字一致）。
 // chromeBg/chromeFg/muted 用于顶/底栏/drawer/dialog 的局部主题覆盖。
@@ -48,6 +48,7 @@ export const DEFAULT_SETTINGS = {
     theme: 'DAY',
     immersiveMode: false,
     autoScrollSpeed: 5,
+    readingMode: 'chapter', // 'chapter' | 'scroll'
 };
 
 // migrateV1toV2: 接受任何形状（包括 null/undefined/坏字段），输出 V2 形状。
@@ -88,6 +89,9 @@ export function migrateV1toV2(old) {
     if (typeof old.firstLineIndent === 'boolean') out.firstLineIndent = old.firstLineIndent;
     if (typeof old.paragraphSpacing === 'boolean') out.paragraphSpacing = old.paragraphSpacing;
     if (typeof old.immersiveMode === 'boolean') out.immersiveMode = old.immersiveMode;
+    if (old.readingMode === 'chapter' || old.readingMode === 'scroll') {
+        out.readingMode = old.readingMode;
+    }
 
     return out;
 }
@@ -172,4 +176,30 @@ export function removeBookmark(bookmark) {
 export function subscribe(callback) {
     window.addEventListener(EVENT, callback);
     return () => window.removeEventListener(EVENT, callback);
+}
+
+// ── Chrome theme (web shell, decoupled from reader_settings.theme) ──
+// 独立 key + 独立事件，避免触发 textReader.js 重绘。
+const CHROME_THEME_KEY = 'chrome_theme';
+const CHROME_THEME_EVENT = 'chrome-theme-changed';
+
+export function getChromeTheme() {
+    const v = localStorage.getItem(CHROME_THEME_KEY);
+    if (v === 'day' || v === 'night') return v;
+    try {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+    } catch (_) {
+        return 'day';
+    }
+}
+
+export function saveChromeTheme(theme) {
+    const next = theme === 'night' ? 'night' : 'day';
+    try {
+        localStorage.setItem(CHROME_THEME_KEY, next);
+        window.dispatchEvent(new CustomEvent(CHROME_THEME_EVENT, { detail: { theme: next } }));
+    } catch (e) {
+        console.warn('readerPrefs.saveChromeTheme failed:', e);
+    }
+    return next;
 }

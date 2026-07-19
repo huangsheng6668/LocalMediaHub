@@ -1,17 +1,15 @@
 import { state, setAuthToken } from './state.js';
 import { handleRoute } from './router.js';
 import { loadConfig, renderSettings, setupSettingsListeners } from './settings.js';
-import {
-    loadTags,
-    renderTagsManager,
-    setupTagsListeners
-} from './tagsView.js';
+
 import { elements } from './dom.js';
 import { setupVideoPlayerListeners } from './videoPlayer.js';
 import { setupLightboxListeners } from './lightbox.js';
 import { renderDashboard, setupDashboardListeners } from './dashboard.js';
 import { loadRoots, browsePath, setupBrowserListeners } from './browserView.js';
+import { renderBookmarks } from './bookmarksView.js';
 import { AUTH_REQUIRED_EVENT } from './api.js';
+import { getChromeTheme, saveChromeTheme } from './readerPrefs.js';
 
 // Auth modal — module-scoped so it persists across show/hide.
 let lastFailedUrl = null;
@@ -56,15 +54,15 @@ async function initApp() {
 
     // Load config and initial data
     await loadConfig();
-    await loadTags();
+
 
     // Parse Hash Routing on page load
-    handleRoute(elements, renderDashboard, loadRoots, browsePath, renderTagsManager, renderSettings);
+    handleRoute(elements, renderDashboard, loadRoots, browsePath, renderBookmarks, renderSettings);
 }
 
 // Router
 window.addEventListener('hashchange', () => {
-    handleRoute(elements, renderDashboard, loadRoots, browsePath, renderTagsManager, renderSettings);
+    handleRoute(elements, renderDashboard, loadRoots, browsePath, renderBookmarks, renderSettings);
     // Round 16 C1: 移动端路由切换后关闭 sidebar（桌面端 sidebar 无 .open class，不受影响）
     if (elements.sidebar && elements.sidebar.classList.contains('open')) {
         elements.sidebar.classList.remove('open');
@@ -78,16 +76,7 @@ function setupEventListeners() {
     // Settings module listeners (Scan Trigger + Save Settings)
     setupSettingsListeners(elements);
 
-    // Tags module listeners (Create Tag + Tag Manager + Tag Selector + Close Modal)
-    setupTagsListeners(elements);
 
-    // Tag Color Picker selection
-    elements.colorDots.forEach(dot => {
-        dot.addEventListener('click', () => {
-            elements.colorDots.forEach(d => d.classList.remove('active'));
-            dot.classList.add('active');
-        });
-    });
 
     // Browser-view module listeners (search, grid clicks, breadcrumbs, thumbnail fallback)
     setupBrowserListeners(elements);
@@ -133,4 +122,26 @@ function setupEventListeners() {
             if (e.key === 'Escape') hideAuthModal();
         });
     }
+
+    // Theme toggle (Task 6)
+    const themeToggle = document.getElementById('btn-theme-toggle');
+    if (themeToggle) {
+        updateThemeToggleIcon(getChromeTheme());
+        themeToggle.addEventListener('click', () => {
+            const next = getChromeTheme() === 'day' ? 'night' : 'day';
+            saveChromeTheme(next);
+        });
+        window.addEventListener('chrome-theme-changed', (e) => {
+            document.documentElement.dataset.theme = e.detail.theme;
+            updateThemeToggleIcon(e.detail.theme);
+        });
+    }
+}
+
+// Update the sun/moon icon visibility based on the current chrome theme.
+// Module-level (referenced by setupEventListeners above).
+function updateThemeToggleIcon(theme) {
+    document.querySelectorAll('.theme-toggle-icon').forEach(el => {
+        el.hidden = (el.dataset.icon !== (theme === 'night' ? 'moon' : 'sun'));
+    });
 }

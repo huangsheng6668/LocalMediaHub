@@ -33,11 +33,11 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **Activity**：
   - `MainActivity.kt`（singleTop + NavHost + 视频续播调度 `checkPlaybackProgress` / `playVideo` / `resumeRequest`；启动请求 `POST_NOTIFICATIONS`）
   - `VideoPlayerActivity.kt`（独立视频播放 Activity，承载 PiP 浮窗；`exitingFromPip` 标志区分"关闭浮窗"vs"切后台"，关闭浮窗后 `onStop` 自动 `finish()` 释放 ExoPlayer）
-- **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen` / `DownloadsScreen`
+- **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen`（支持分章/全文滚动模式、实时百分比进度与沉浸/普通双进度条、BackHandler手势退出沉浸模式、左右触控翻页） / `DownloadsScreen`
 - **Component**（`ui/component/`）：
   - `home/`（首页卡片：Hero / Library / ContinueWatching / RecentMedia / Favorite）
   - `browse/`（浏览子组件：TopBar / SortMenu / SearchView / FavoritesView / DeleteConfirmDialog / QuickActionsDialog 等）
-  - `reader/`（`ReaderSettingsSheet` / `ReaderThemeWrapper` / `ReaderFontFamily`）
+  - `reader/`（`ReaderSettingsSheet`（带可滚动与1400dp最大宽度） / `ReaderThemeWrapper` / `ReaderFontFamily`）
   - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`
 - **ViewModel**（`viewmodel/`）：
   - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel`

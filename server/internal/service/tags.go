@@ -301,6 +301,18 @@ func (s *TagsService) TagExists(tagID string) bool {
 	return count > 0
 }
 
+func (s *TagsService) ResolveTagID(tagIdentifier string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var id string
+	err := s.db.QueryRow("SELECT id FROM tags WHERE id = ? OR name = ?", tagIdentifier, tagIdentifier).Scan(&id)
+	if err != nil {
+		return "", false
+	}
+	return id, true
+}
+
 func (s *TagsService) GetTagsForFiles(filePaths []string) map[string][]models.FileTag {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

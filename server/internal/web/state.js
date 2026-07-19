@@ -5,6 +5,7 @@ export const state = {
     allowedRoots: [], // System allowed roots
     videoExts: [],
     imageExts: [],
+    textExts: [],
     
     // Browser variables
     currentPath: '',
@@ -13,17 +14,10 @@ export const state = {
     currentFolders: [], // Current browser view directories
     isSystemBrowse: false,
     
-    // Tags variables
-    tags: [],
-    fileTagsMap: {},
-    
     // Lightbox variables
     lightboxFiles: [],
     lightboxIndex: -1,
     lightboxStitchMode: localStorage.getItem('lightboxStitchMode') === 'true',
-    
-    // Selected file for tag mapping
-    taggingFile: null,
 
     // Dashboard recent media (backing array for index-based click delegation)
     dashboardRecentFiles: [],

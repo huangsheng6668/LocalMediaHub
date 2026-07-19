@@ -3,7 +3,7 @@
 export const elements = {
     menuDashboard: document.getElementById('menu-dashboard'),
     menuBrowser: document.getElementById('menu-browser'),
-    menuTags: document.getElementById('menu-tags'),
+    menuBookmarks: document.getElementById('menu-bookmarks'),
     menuSettings: document.getElementById('menu-settings'),
 
     // Round 16 C1: Responsive sidebar drawer
@@ -19,7 +19,8 @@ export const elements = {
     // Views
     viewDashboard: document.getElementById('view-dashboard'),
     viewBrowser: document.getElementById('view-browser'),
-    viewTags: document.getElementById('view-tags'),
+    viewBookmarks: document.getElementById('view-bookmarks'),
+    bookmarksManagerList: document.getElementById('bookmarks-manager-list'),
     viewSettings: document.getElementById('view-settings'),
     // Reader view (Task 15): hosts textReader render output and is reused as
     // the bookshelf container in Task 16 — single shared off-menu surface.
@@ -29,7 +30,7 @@ export const elements = {
     statRoots: document.getElementById('stat-roots'),
     statVideos: document.getElementById('stat-videos'),
     statImages: document.getElementById('stat-images'),
-    statTags: document.getElementById('stat-tags'),
+
     dashboardRecent: document.getElementById('dashboard-recent'),
     // Bookshelf dashboard embed host (Task 16). Stays empty when no
     // book_progress:* entries exist in localStorage.
@@ -44,16 +45,13 @@ export const elements = {
     btnBrowserSearch: document.getElementById('btn-browser-search'),
     browserList: document.getElementById('browser-list'),
 
-    // Tag creator
-    tagNameInput: document.getElementById('tag-name'),
-    colorDots: document.querySelectorAll('.color-dot'),
-    btnCreateTag: document.getElementById('btn-create-tag'),
-    tagsManagerList: document.getElementById('tags-manager-list'),
+
 
     // Settings inputs
     settingsRoots: document.getElementById('settings-roots'),
     settingsVideoExts: document.getElementById('settings-video-exts'),
     settingsImageExts: document.getElementById('settings-image-exts'),
+    settingsTextExts: document.getElementById('settings-text-exts'),
     settingsAllowedRoots: document.getElementById('settings-allowed-roots'),
     settingsEnableDelete: document.getElementById('settings-enable-delete'),
     settingsThumbMax: document.getElementById('settings-thumb-max'),
@@ -86,10 +84,7 @@ export const elements = {
     lightboxSingleView: document.getElementById('lightbox-single-view'),
     lightboxStitchView: document.getElementById('lightbox-stitch-view'),
 
-    modalFileTags: document.getElementById('modal-file-tags'),
-    tagModalFilePath: document.getElementById('tag-modal-file-path'),
-    tagSelectorCheckboxes: document.getElementById('tag-selector-checkboxes'),
-    btnCloseFileTagsModal: document.getElementById('btn-close-file-tags-modal'),
+
 
     // Auth modal (Round 28 Task 12)
     authModal: document.getElementById('auth-modal'),

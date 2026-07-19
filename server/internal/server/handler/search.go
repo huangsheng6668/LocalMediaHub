@@ -18,6 +18,9 @@ import (
 func (h *Handler) Search(c echo.Context) error {
 	query := strings.TrimSpace(c.QueryParam("q"))
 	if query == "" {
+		query = strings.TrimSpace(c.QueryParam("query"))
+	}
+	if query == "" {
 		return respondError(c, http.StatusBadRequest, "query required")
 	}
 

@@ -11,6 +11,7 @@ export async function loadConfig() {
         state.folders = data.scan.roots || [];
         state.videoExts = data.scan.video_extensions || [];
         state.imageExts = data.scan.image_extensions || [];
+        state.textExts = data.scan.text_extensions || [];
         state.allowedRoots = (data.system && data.system.allowed_roots) || [];
         state.enableDelete = (data.system && data.system.enable_delete) || false;
         state.thumbMax = (data.thumbnail && data.thumbnail.max_size) || 300;
@@ -27,6 +28,7 @@ export function renderSettings() {
     elements.settingsRoots.value = state.folders.join('\n');
     elements.settingsVideoExts.textContent = state.videoExts.join(', ') || '未配置';
     elements.settingsImageExts.textContent = state.imageExts.join(', ') || '未配置';
+    elements.settingsTextExts.textContent = state.textExts.join(', ') || '未配置';
     elements.settingsAllowedRoots.textContent = state.allowedRoots.join(', ') || '未限制/不可浏览系统';
     if (state.enableDelete) {
         elements.settingsEnableDelete.textContent = '⚠️ 已开启 (允许从客户端删除电脑媒体文件)';

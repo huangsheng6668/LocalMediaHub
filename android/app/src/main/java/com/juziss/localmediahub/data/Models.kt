@@ -128,3 +128,13 @@ data class BookChapterContent(
     val title: String,
     val blocks: List<Block> = emptyList(),
 ) : Parcelable
+
+/**
+ * Holds a loaded chapter for scroll-all-chapters reading mode.
+ */
+@Parcelize
+data class ScrollModeChapter(
+    val chapterIndex: Int,
+    val title: String,
+    val blocks: List<Block>,
+) : Parcelable

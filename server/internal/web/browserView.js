@@ -8,7 +8,6 @@ import { apiRequest, escapeHtml } from './api.js';
 import { elements } from './dom.js';
 import { formatSize, encodeRoutePath, safeBtoa } from './utils.js';
 import { openMedia } from './lightbox.js';
-import { openTaggingDialog } from './tagsView.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 
 // Load Root directories in file browser
@@ -140,8 +139,7 @@ function onBrowserListClick(e) {
         }
     } else if (action === 'text-unsupported') {
         showToast('暂不支持该格式（仅支持 .txt / .epub）', 'info');
-    } else if (action === 'tag') {
-        if (state.currentFiles[idx]) openTaggingDialog(state.currentFiles[idx]);
+
     } else if (action === 'delete-folder') {
         if (state.currentFolders[idx]) deleteFolder(state.currentFolders[idx]);
     } else if (action === 'delete-file') {
@@ -208,7 +206,7 @@ export function renderBrowserList() {
                         <span class="card-preview-icon">${docIcon}</span>
                     </div>
                     <div class="card-actions-overlay">
-                        <button class="card-action-btn" title="分类标签" data-action="tag" data-index="${index}">🏷️</button>
+
                         ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">🗑️</button>` : ''}
                     </div>
                     <div class="card-details">
@@ -246,13 +244,7 @@ export function renderBrowserList() {
             previewHtml = `<img src="${escapeHtml(thumbUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}">`;
         }
 
-        const fileTags = state.fileTagsMap[file.path] || [];
-        const isTagged = fileTags.length > 0;
-        const tagDotHtml = fileTags.map(tag => `
-            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:${escapeHtml(tag.color)};" title="${escapeHtml(tag.name)}"></span>
-        `).join('');
-
-        const cardClass = `media-card ${isTagged ? 'tagged' : ''}`;
+        const cardClass = 'media-card';
         const safeName = escapeHtml(file.name);
         const safeExt = escapeHtml(file.extension);
 
@@ -263,17 +255,14 @@ export function renderBrowserList() {
                     ${playOverlay}
                 </div>
                 <div class="card-actions-overlay">
-                    <button class="card-action-btn" title="分类标签" data-action="tag" data-index="${index}">🏷️</button>
+
                     ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">🗑️</button>` : ''}
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>
                     <div class="card-meta">
                         <span class="card-badge">${safeExt.toUpperCase()}</span>
-                        <div style="display:flex; gap:3px; align-items:center;">
-                            ${tagDotHtml}
-                            <span>${formatSize(file.size)}</span>
-                        </div>
+                        <span>${formatSize(file.size)}</span>
                     </div>
                 </div>
             </div>
@@ -333,7 +322,7 @@ async function triggerBrowserSearch() {
     elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">全局模糊匹配检索中...</div>';
 
     try {
-        const url = `${state.apiBase}/api/v1/search?query=${encodeURIComponent(query)}&path=${encodeURIComponent(state.currentPath)}`;
+        const url = `${state.apiBase}/api/v1/search?q=${encodeURIComponent(query)}&path=${encodeURIComponent(state.currentPath)}`;
         const data = await apiRequest(url);
 
         state.currentFolders = data.folders || [];

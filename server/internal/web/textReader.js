@@ -29,6 +29,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
     container.innerHTML = `
         <div class="text-reader">
+            <div class="text-reader__progress-bar"></div>
             <header class="text-reader__header">
                 <button class="text-reader__back" type="button" aria-label="返回">←</button>
                 <span class="text-reader__title">加载中...</span>
@@ -130,12 +131,15 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             els.content.style.cursor = 'default';
             return;
         }
+        const s = readerPrefs.getSettings();
+        if (s.readingMode === 'scroll') {
+            els.content.style.cursor = 'default';
+            return;
+        }
         const rect = els.content.getBoundingClientRect();
         const ratio = (e.clientX - rect.left) / rect.width;
         if (ratio < 0.20 || ratio > 0.80) {
             els.content.style.cursor = 'pointer';  // 翻章热区
-        } else if (readerPrefs.getSettings().immersiveMode) {
-            els.content.style.cursor = 'pointer';  // 可切换沉浸
         } else {
             els.content.style.cursor = 'default';
         }
@@ -144,6 +148,9 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     els.content.addEventListener('click', (e) => {
         if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) return;
         if (window.getSelection() && window.getSelection().toString().trim() !== '') return;
+
+        const s = readerPrefs.getSettings();
+        if (s.readingMode === 'scroll') return;
 
         const rect = els.content.getBoundingClientRect();
         const ratio = (e.clientX - rect.left) / rect.width;
@@ -160,16 +167,23 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             } else {
                 showToast('已经是最后一章了', 'info');
             }
-        } else {
-            // 中区域：仅在用户启用沉浸模式时切换
-            if (readerPrefs.getSettings().immersiveMode) {
-                if (isImmersive) exitImmersive(); else enterImmersive();
-            }
         }
     });
     els.toc.addEventListener('click', () => toggleDrawer(book, els.drawer));
     els.drawer.addEventListener('chapter-select', (e) => {
-        loadChapter(e.detail);
+        const targetIdx = e.detail;
+        const s = readerPrefs.getSettings();
+        if (s.readingMode === 'scroll') {
+            const sec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${targetIdx}"]`);
+            if (sec) {
+                sec.scrollIntoView({ behavior: 'smooth' });
+                currentIdx = targetIdx;
+            } else {
+                loadChapter(targetIdx, true);
+            }
+        } else {
+            loadChapter(targetIdx);
+        }
         closeDrawer();
     });
 
@@ -227,7 +241,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                     </label>
                     <label class="reader-settings__slider-row">
                         <span>宽度</span>
-                        <input type="range" name="contentWidthSlider" min="600" max="900" step="10" value="720">
+                        <input type="range" name="contentWidthSlider" min="600" max="1400" step="10" value="720">
                         <output data-bind="contentWidthLabel">720 px</output>
                     </label>
                 </section>
@@ -246,6 +260,13 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
                 <section class="reader-settings__group">
                     <h4>行为</h4>
+                    <div class="reader-settings__row" style="margin-bottom: 8px;">
+                        <span>阅读模式</span>
+                        <div class="reader-settings__font-row">
+                            <label><input type="radio" name="readingMode" value="chapter"> 分章</label>
+                            <label><input type="radio" name="readingMode" value="scroll"> 全文滚动</label>
+                        </div>
+                    </div>
                     <label class="reader-settings__toggle-row">
                         <span>沉浸模式</span>
                         <input type="checkbox" name="immersiveMode">
@@ -338,6 +359,8 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (indentToggle) indentToggle.checked = s.firstLineIndent;
         const gapToggle = dialog.querySelector('input[name="paragraphSpacing"]');
         if (gapToggle) gapToggle.checked = s.paragraphSpacing;
+        const rmInput = dialog.querySelector(`input[name="readingMode"][value="${s.readingMode}"]`);
+        if (rmInput) rmInput.checked = true;
         const immersiveToggle = dialog.querySelector('input[name="immersiveMode"]');
         if (immersiveToggle) immersiveToggle.checked = s.immersiveMode;
         const themeInput = dialog.querySelector(`input[name="theme"][value="${s.theme}"]`);
@@ -362,11 +385,31 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     function enterImmersive() {
         isImmersive = true;
         document.body.dataset.readerImmersive = 'on';
+        if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+        }
+        if (!readerPrefs.getSettings().immersiveMode) {
+            readerPrefs.saveSettings({ immersiveMode: true });
+        }
     }
     function exitImmersive() {
+        if (!isImmersive && !document.body.dataset.readerImmersive) return;
         isImmersive = false;
         delete document.body.dataset.readerImmersive;
+        if (document.fullscreenElement && document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+        }
+        if (readerPrefs.getSettings().immersiveMode) {
+            readerPrefs.saveSettings({ immersiveMode: false });
+        }
     }
+
+    function onFullscreenChange() {
+        if (!document.fullscreenElement && isImmersive) {
+            exitImmersive();
+        }
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange);
 
     let immersiveEntryTimer = null;
     function scheduleImmersiveEntry() {
@@ -408,10 +451,21 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             readerPrefs.saveSettings({ contentWidth: parseInt(t.value, 10) });
         } else if (t.name === 'firstLineIndent' || t.name === 'paragraphSpacing' || t.name === 'immersiveMode') {
             readerPrefs.saveSettings({ [t.name]: t.checked });
+            if (t.name === 'immersiveMode') {
+                if (t.checked) {
+                    enterImmersive();
+                } else {
+                    exitImmersive();
+                }
+            }
         } else if (t.name === 'fontFamily') {
             readerPrefs.saveSettings({ fontFamily: t.value });
         } else if (t.name === 'autoScrollSpeed') {
             readerPrefs.saveSettings({ autoScrollSpeed: parseInt(t.value, 10) });
+        } else if (t.name === 'readingMode') {
+            readerPrefs.saveSettings({ readingMode: t.value });
+            updateReadingModeUI(t.value);
+            loadChapter(currentIdx, true);
         } else if (t.name) {
             readerPrefs.saveSettings({ [t.name]: t.value });
         }
@@ -455,23 +509,32 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             currentScrollTop = els.content.scrollTop;
         }
 
-        // Check if reached bottom of current chapter
+        // Check if reached bottom of current loaded content
         if (els.content.scrollTop + els.content.clientHeight >= els.content.scrollHeight - 5) {
-            stopAutoScroll();
-            showToast('已到达本章底部，即将载入下一章...', 'info');
-            autoNextChapterTimer = setTimeout(() => {
-                if (currentIdx < chapterCount - 1) {
-                    loadChapter(currentIdx + 1);
-                    currentScrollTop = 0;
-                    els.content.scrollTop = 0;
-                    isScrolling = true;
-                    scrollBtn.textContent = '⏸';
-                    if (els.autoscrollPlay) els.autoscrollPlay.textContent = '⏸';
-                    startAutoScroll();
+            if (readerPrefs.getSettings().readingMode === 'scroll') {
+                if (maxLoadedIdx < chapterCount - 1) {
+                    loadNextScrollChapter();
                 } else {
+                    stopAutoScroll();
                     showToast('已读完本书最后一章', 'success');
                 }
-            }, 2000);
+            } else {
+                stopAutoScroll();
+                showToast('已到达本章底部，即将载入下一章...', 'info');
+                autoNextChapterTimer = setTimeout(() => {
+                    if (currentIdx < chapterCount - 1) {
+                        loadChapter(currentIdx + 1);
+                        currentScrollTop = 0;
+                        els.content.scrollTop = 0;
+                        isScrolling = true;
+                        scrollBtn.textContent = '⏸';
+                        if (els.autoscrollPlay) els.autoscrollPlay.textContent = '⏸';
+                        startAutoScroll();
+                    } else {
+                        showToast('已读完本书最后一章', 'success');
+                    }
+                }, 2000);
+            }
             return;
         }
 
@@ -531,32 +594,36 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
 
-    // 6. Render chapter content block-by-block. Each block is either:
-    //   - {type:'text',  value:string}  → <p> with textContent (XSS safe) +
-    //                                     hover-to-add-bookmark button.
-    //   - {type:'image', src:string}    → <img loading='lazy'> with the token
-    //                                     appended as a query param (browsers
-    //                                     cannot set Authorization headers on
-    //                                     <img src> requests). A missing src
-    //                                     renders an alt-text placeholder.
-    //
-    // Block index replaces the old paragraphIndex so C-phase bookmark scroll
-    // (p[data-para-index]) still works — we set both dataset attributes.
-    function renderBlocks(blocks, chapterTitle) {
-        els.content.innerHTML = '';
+    function updateReadingModeUI(mode) {
+        if (mode === 'scroll') {
+            els.prev.style.display = 'none';
+            els.next.style.display = 'none';
+        } else {
+            els.prev.style.display = '';
+            els.next.style.display = '';
+        }
+    }
 
-        // 章节大标题（独立于顶栏面包屑，显示在正文顶部）。
+    // 6. Render chapter content block-by-block into a chapter section.
+    function renderBlocks(blocks, chapterTitle, chIdx) {
+        const section = document.createElement('section');
+        section.className = 'text-reader__chapter-section';
+        section.dataset.chapterIndex = String(chIdx);
+
+        if (chIdx > 0 && readerPrefs.getSettings().readingMode === 'scroll') {
+            const hr = document.createElement('hr');
+            hr.className = 'text-reader__chapter-divider';
+            section.appendChild(hr);
+        }
+
         if (chapterTitle) {
             const h = document.createElement('h2');
             h.className = 'text-reader__chapter-title';
             h.textContent = chapterTitle;
-            els.content.appendChild(h);
+            section.appendChild(h);
         }
 
         const list = blocks || [];
-        // 找首个可应用首字下沉的 text block：value 长度 >= 4 且不以
-        // 纯标点/破折号（—— …… -）或空白开头。spec §6.3 要求遍历直到找到
-        // 首个满足条件的 block，而不是固定 block[0]。
         const dropCapIdx = list.findIndex(b =>
             b && b.type === 'text' &&
             typeof b.value === 'string' &&
@@ -570,32 +637,22 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 img.className = 'text-reader__image';
                 img.loading = 'lazy';
                 if (block.src) {
-                    // src is server-controlled (already URL-encoded by the
-                    // service) and points at our own /api/v1/books/image —
-                    // safe to assign directly.
                     img.src = appendTokenQueryParam(block.src);
                 } else {
                     img.alt = '[本图片无法显示]';
                 }
-                els.content.appendChild(img);
+                section.appendChild(img);
                 return;
             }
-            // Default / text block (also tolerates unknown types by treating
-            // their .value as text so a future server addition never injects
-            // untrusted HTML).
             const text = (block && typeof block.value === 'string') ? block.value : '';
             const p = document.createElement('p');
-            p.textContent = text;  // XSS safe
+            p.textContent = text;
             p.dataset.blockIndex = String(idx);
-            p.dataset.paraIndex = String(idx);  // C-phase bookmark scroll compat
-            // Phase 3: per-paragraph indent/gap classes driven by V2 toggles.
-            // Class names map 1:1 to CSS rules in style.css.
+            p.dataset.paraIndex = String(idx);
             const indent = readerPrefs.getSettings().firstLineIndent ? 'indent-on' : 'indent-off';
             const gap = readerPrefs.getSettings().paragraphSpacing ? 'gap-on' : 'gap-off';
-            // Phase 6: 首字下沉仅作用于首个 eligible text block。
             const dropcap = (idx === dropCapIdx) ? 'text-reader__p--dropcap' : '';
             p.className = `text-reader__p ${indent} ${gap} ${dropcap}`.trim();
-            // Hover bookmark button
             const btn = document.createElement('button');
             btn.className = 'text-reader__para-bookmark';
             btn.type = 'button';
@@ -605,7 +662,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 e.stopPropagation();
                 const ok = readerPrefs.addBookmark({
                     bookPath: path,
-                    chapterIndex: currentIdx,
+                    chapterIndex: chIdx,
                     paragraphIndex: idx,
                     preview: text.slice(0, 30),
                     createdAt: Date.now(),
@@ -613,28 +670,133 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 showToast(ok ? '已添加书签' : '已存在书签', ok ? 'success' : 'info');
             });
             p.appendChild(btn);
-            els.content.appendChild(p);
+            section.appendChild(p);
         });
 
-        // 章节末尾装饰符号 ❖：点击进下一章，已在末章时提示。
         const end = document.createElement('div');
         end.className = 'text-reader__chapter-end';
         end.textContent = '❖';
         end.title = '下一章';
         end.addEventListener('click', () => {
-            if (currentIdx < chapterCount - 1) loadChapter(currentIdx + 1);
-            else showToast('已经是最后一章了', 'info');
+            if (readerPrefs.getSettings().readingMode === 'scroll') {
+                if (chIdx < chapterCount - 1) {
+                    const nextSec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${chIdx + 1}"]`);
+                    if (nextSec) {
+                        nextSec.scrollIntoView({ behavior: 'smooth' });
+                    } else {
+                        loadNextScrollChapter();
+                    }
+                } else {
+                    showToast('已经是最后一章了', 'info');
+                }
+            } else {
+                if (currentIdx < chapterCount - 1) loadChapter(currentIdx + 1);
+                else showToast('已经是最后一章了', 'info');
+            }
         });
-        els.content.appendChild(end);
+        section.appendChild(end);
 
-        // Phase 6: 触发淡入。先移除 class，强制 reflow，再加回 class
-        // 以重新触发 CSS keyframe 动画。
-        els.content.classList.remove('text-reader__content--entering');
-        void els.content.offsetWidth;
-        els.content.classList.add('text-reader__content--entering');
+        return section;
     }
 
-    // 7. TOC Tab (目录 / 书签).
+    // 7. Full-text scroll state & event handlers
+    let maxLoadedIdx = startIdx;
+
+    async function loadNextScrollChapter() {
+        if (isLoadingChapter || maxLoadedIdx >= chapterCount - 1) return false;
+        isLoadingChapter = true;
+        const nextIdx = maxLoadedIdx + 1;
+        try {
+            const chapter = await getBookChapter(path, nextIdx);
+            const sec = renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content), chapter.title, nextIdx);
+            els.content.appendChild(sec);
+            maxLoadedIdx = nextIdx;
+            return true;
+        } catch (e) {
+            showToast('加载下一章失败: ' + e.message, 'error');
+            return false;
+        } finally {
+            isLoadingChapter = false;
+        }
+    }
+
+    async function checkAndFillScrollBuffer() {
+        const s = readerPrefs.getSettings();
+        if (s.readingMode !== 'scroll') return;
+        if (isLoadingChapter || maxLoadedIdx >= chapterCount - 1) return;
+        if (els.content.scrollHeight - els.content.clientHeight < 400) {
+            const loaded = await loadNextScrollChapter();
+            if (loaded) {
+                setTimeout(checkAndFillScrollBuffer, 50);
+            }
+        }
+    }
+
+    // 计算并实时更新阅读进度（含百分比与顶部进度条）
+    function updateProgressUI() {
+        if (!book || !book.chapters || book.chapters.length === 0) return;
+
+        const prefs = readerPrefs.getSettings();
+        const isScrollMode = (prefs.readingMode === 'scroll');
+
+        let percent = 0;
+
+        if (isScrollMode) {
+            // 全文滚动模式：结合当前章节 index 与当前章节 DOM 块内的滚动高度计算整本书真实的阅读百分比
+            const activeSec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${currentIdx}"]`);
+            let chapterFraction = 0;
+            if (activeSec) {
+                const rect = activeSec.getBoundingClientRect();
+                const containerTop = els.content.getBoundingClientRect().top;
+                const secHeight = Math.max(1, rect.height);
+                const readTop = containerTop - rect.top;
+                chapterFraction = Math.min(1, Math.max(0, readTop / secHeight));
+            }
+            const overallFraction = (currentIdx + chapterFraction) / chapterCount;
+            percent = Math.min(100, Math.max(0, Math.round(overallFraction * 100)));
+            els.progress.textContent = `全书进度 ${percent}% · 第 ${currentIdx + 1} / ${chapterCount} 章`;
+        } else {
+            // 分章模式：计算当前章节内的百分比进度
+            const scrollTop = els.content.scrollTop;
+            const maxScroll = Math.max(1, els.content.scrollHeight - els.content.clientHeight);
+            percent = Math.min(100, Math.max(0, Math.round((scrollTop / maxScroll) * 100)));
+            els.progress.textContent = `第 ${currentIdx + 1} / ${chapterCount} 章 (${percent}%)`;
+        }
+
+        if (els.progressBar) {
+            els.progressBar.style.width = `${percent}%`;
+        }
+    }
+
+    function onContentScroll() {
+        const s = readerPrefs.getSettings();
+        if (s.readingMode === 'scroll') {
+            if (els.content.scrollTop + els.content.clientHeight >= els.content.scrollHeight - 300) {
+                loadNextScrollChapter().then(() => checkAndFillScrollBuffer());
+            }
+
+            const sections = els.content.querySelectorAll('.text-reader__chapter-section');
+            let activeIdx = currentIdx;
+            const containerTop = els.content.getBoundingClientRect().top;
+            sections.forEach(sec => {
+                const rect = sec.getBoundingClientRect();
+                if (rect.top - containerTop <= 100 && rect.bottom - containerTop > 50) {
+                    activeIdx = parseInt(sec.dataset.chapterIndex, 10);
+                }
+            });
+
+            if (activeIdx !== currentIdx) {
+                currentIdx = activeIdx;
+                const chapterTitle = (book.chapters && book.chapters[currentIdx]) ? book.chapters[currentIdx].title : '';
+                els.title.textContent = `${chapterTitle || ''} — ${book.title || ''}`;
+                saveProgress(path, { chapterIndex: currentIdx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
+            }
+        }
+        updateProgressUI();
+    }
+    els.content.addEventListener('scroll', onContentScroll);
+
+    // 8. TOC Tab (目录 / 书签).
     function renderDrawerTabs() {
         const tabs = document.createElement('div');
         tabs.className = 'text-reader__tabs';
@@ -655,7 +817,18 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                     btn.className = 'text-reader__drawer-item';
                     btn.textContent = ch.title || `第 ${i + 1} 章`;
                     btn.addEventListener('click', () => {
-                        loadChapter(i);
+                        const s = readerPrefs.getSettings();
+                        if (s.readingMode === 'scroll') {
+                            const sec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${i}"]`);
+                            if (sec) {
+                                sec.scrollIntoView({ behavior: 'smooth' });
+                                currentIdx = i;
+                            } else {
+                                loadChapter(i, true);
+                            }
+                        } else {
+                            loadChapter(i);
+                        }
                         closeDrawer();
                     });
                     panel.appendChild(btn);
@@ -683,10 +856,19 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                     row.appendChild(title);
                     row.appendChild(del);
                     row.addEventListener('click', async () => {
-                        if (currentIdx !== bm.chapterIndex) {
-                            await loadChapter(bm.chapterIndex);
+                        const s = readerPrefs.getSettings();
+                        if (s.readingMode === 'scroll') {
+                            let sec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${bm.chapterIndex}"]`);
+                            if (!sec) {
+                                await loadChapter(bm.chapterIndex, true);
+                            }
+                            scrollToParagraph(bm.paragraphIndex, bm.chapterIndex);
+                        } else {
+                            if (currentIdx !== bm.chapterIndex) {
+                                await loadChapter(bm.chapterIndex);
+                            }
+                            scrollToParagraph(bm.paragraphIndex);
                         }
-                        scrollToParagraph(bm.paragraphIndex);
                         closeDrawer();
                     });
                     panel.appendChild(row);
@@ -704,7 +886,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         return { refresh };
     }
 
-    // 8. Re-render bookmarks tab when prefs change.
+    // 9. Re-render bookmarks tab when prefs change.
     const drawer = renderDrawerTabs();
     const unsubBms = readerPrefs.subscribe((e) => {
         if (e.detail?.type === 'bookmarks') {
@@ -713,13 +895,14 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         }
     });
 
-    // Cleanup on re-render: container.innerHTML gets cleared next time, so we
-    // stash subscribers + rAF cancellation on the container node.
+    // Cleanup on re-render
     container._cleanupReader = () => {
         unsubPrefs();
         unsubBms();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         document.removeEventListener('keydown', onKeyDown);
+        document.removeEventListener('fullscreenchange', onFullscreenChange);
+        els.content.removeEventListener('scroll', onContentScroll);
         mediaDark.removeEventListener('change', onSystemColorSchemeChange);
         delete document.body.dataset.readerTheme;
         if (immersiveEntryTimer) clearTimeout(immersiveEntryTimer);
@@ -728,17 +911,16 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (autoNextChapterTimer) clearTimeout(autoNextChapterTimer);
     };
 
-    await loadChapter(startIdx);
+    updateReadingModeUI(readerPrefs.getSettings().readingMode);
+    await loadChapter(startIdx, true);
 
     // If an initial paragraph bookmark parameter is specified in the URL, scroll to it
     if (paraParam !== undefined && paraParam !== null) {
-        scrollToParagraph(parseInt(paraParam, 10));
+        scrollToParagraph(parseInt(paraParam, 10), startIdx);
     }
 
     // loadChapter: fetch one chapter by zero-based index and update the view.
-    // Guarded by isLoadingChapter so rapid prev/next clicks do not race and
-    // render a stale chapter over a newer one.
-    async function loadChapter(idx) {
+    async function loadChapter(idx, resetScroll = false) {
         if (isLoadingChapter) return;
         if (idx < 0 || idx >= chapterCount) return;
         isLoadingChapter = true;
@@ -746,19 +928,30 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         try {
             const chapter = await getBookChapter(path, idx);
             els.title.textContent = `${chapter.title || ''} — ${book.title || ''}`;
-            // Per-block rendering preserves XSS safety (each <p> uses
-            // textContent) and renders inline <img> for image blocks. Falls
-            // back to splitting legacy chapter.content on blank lines when the
-            // server response does not yet include blocks.
-            renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content), chapter.title);
-            els.progress.textContent = `第 ${idx + 1} / ${chapterCount} 章`;
-            els.content.scrollTop = 0;
-            saveProgress(path, { chapterIndex: idx, scrollOffset: 0, lastReadAt: Date.now() });
+            const s = readerPrefs.getSettings();
+            const sec = renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content), chapter.title, idx);
+            if (s.readingMode === 'scroll' && !resetScroll) {
+                els.content.appendChild(sec);
+            } else {
+                els.content.innerHTML = '';
+                els.content.appendChild(sec);
+                els.content.scrollTop = 0;
+                maxLoadedIdx = idx;
+                els.content.classList.remove('text-reader__content--entering');
+                void els.content.offsetWidth;
+                els.content.classList.add('text-reader__content--entering');
+            }
+            updateProgressUI();
+            saveProgress(path, { chapterIndex: idx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
         } catch (e) {
             els.content.textContent = '加载章节失败: ' + e.message;
             showToast('加载章节失败: ' + e.message, 'error');
         } finally {
             isLoadingChapter = false;
+        }
+
+        if (readerPrefs.getSettings().readingMode === 'scroll') {
+            setTimeout(checkAndFillScrollBuffer, 50);
         }
     }
 }
@@ -819,6 +1012,7 @@ function bindEls(root) {
         next: root.querySelector('.text-reader__next'),
         toc: root.querySelector('.text-reader__toc'),
         progress: root.querySelector('.text-reader__progress'),
+        progressBar: root.querySelector('.text-reader__progress-bar'),
         drawer: root.querySelector('.text-reader__drawer'),
         autoscrollPanel: root.querySelector('#autoscroll-panel'),
         autoscrollPlay: root.querySelector('#autoscroll-panel-play'),
