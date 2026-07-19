@@ -177,3 +177,24 @@ export function subscribe(callback) {
     window.addEventListener(EVENT, callback);
     return () => window.removeEventListener(EVENT, callback);
 }
+
+// ── Chrome theme (web shell, decoupled from reader_settings.theme) ──
+// 独立 key + 独立事件，避免触发 textReader.js 重绘。
+const CHROME_THEME_KEY = 'chrome_theme';
+const CHROME_THEME_EVENT = 'chrome-theme-changed';
+
+export function getChromeTheme() {
+    const v = localStorage.getItem(CHROME_THEME_KEY);
+    return v === 'night' ? 'night' : 'day';
+}
+
+export function saveChromeTheme(theme) {
+    const next = theme === 'night' ? 'night' : 'day';
+    try {
+        localStorage.setItem(CHROME_THEME_KEY, next);
+        window.dispatchEvent(new CustomEvent(CHROME_THEME_EVENT, { detail: { theme: next } }));
+    } catch (e) {
+        console.warn('readerPrefs.saveChromeTheme failed:', e);
+    }
+    return next;
+}
