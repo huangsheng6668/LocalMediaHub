@@ -159,7 +159,8 @@ fun LocalMediaHubApp() {
                         entry = entry,
                         homeViewModel = homeViewModel,
                         onVideoReady = { file, url, positionMs, isSystemBrowse ->
-                            playVideo(file, url, positionMs, isSystemBrowse)
+                            val finalUrl = resolveStreamUrl(file, url, downloadedEntries)
+                            playVideo(file, finalUrl, positionMs, isSystemBrowse)
                         },
                     )
                 },
@@ -170,9 +171,13 @@ fun LocalMediaHubApp() {
                             homeViewModel = homeViewModel,
                             recentActivityStore = recentActivityStore,
                             onVideoReady = { file, url, positionMs ->
-                                playVideo(file, url, positionMs, entry.isSystemBrowse)
+                                val finalUrl = resolveStreamUrl(file, url, downloadedEntries)
+                                playVideo(file, finalUrl, positionMs, entry.isSystemBrowse)
                             },
-                            onShowResumeDialog = { req -> resumeRequest = req },
+                            onShowResumeDialog = { req ->
+                                val finalUrl = resolveStreamUrl(req.file, req.streamUrl, downloadedEntries)
+                                resumeRequest = req.copy(streamUrl = finalUrl)
+                            },
                             onImageReady = { file, images ->
                                 currentImageFile = file
                                 imageList = images
@@ -182,7 +187,8 @@ fun LocalMediaHubApp() {
                             navigateToVideoPlayer = { },
                             navigateToImagePreview = { navController.navigate("imagePreview") },
                             onTextReady = { file ->
-                                openTextFile(context, file, isLocal = false)
+                                val isDownloaded = isFileDownloaded(file, downloadedEntries)
+                                openTextFile(context, file, isLocal = isDownloaded)
                             },
                         )
                     }
@@ -192,7 +198,8 @@ fun LocalMediaHubApp() {
                         "video" -> {
                             appScope.launch {
                                 val isSystemBrowse = homeViewModel.isFavoriteSystemBrowse(file)
-                                val streamUrl = homeViewModel.getFavoriteStreamUrl(file)
+                                val rawUrl = homeViewModel.getFavoriteStreamUrl(file)
+                                val streamUrl = resolveStreamUrl(file, rawUrl, downloadedEntries)
                                 when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
                                     is VideoOpenAction.PlayDirectly ->
                                         playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
@@ -222,7 +229,10 @@ fun LocalMediaHubApp() {
                                 navController.navigate("imagePreview")
                             }
                         }
-                        "text" -> openTextFile(context, file, isLocal = false)
+                        "text" -> {
+                            val isDownloaded = isFileDownloaded(file, downloadedEntries)
+                            openTextFile(context, file, isLocal = isDownloaded)
+                        }
                     }
                 },
                 onDisconnect = {
@@ -274,7 +284,8 @@ fun LocalMediaHubApp() {
                 onVideoClick = { file ->
                     appScope.launch {
                         val isSystemBrowse = browseViewModel.isSystemBrowseMode()
-                        val streamUrl = browseViewModel.getVideoStreamUrl(file)
+                        val rawUrl = browseViewModel.getVideoStreamUrl(file)
+                        val streamUrl = resolveStreamUrl(file, rawUrl, downloadedEntries)
                         when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
                             is VideoOpenAction.PlayDirectly ->
                                 playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
@@ -303,11 +314,13 @@ fun LocalMediaHubApp() {
                     navController.navigate("imagePreview")
                 },
                 onTextClick = { file ->
-                    openTextFile(context, file, isLocal = false)
+                    val isDownloaded = isFileDownloaded(file, downloadedEntries)
+                    openTextFile(context, file, isLocal = isDownloaded)
                 },
                 onFavoriteVideoClick = { file, isSystemBrowse ->
                     appScope.launch {
-                        val streamUrl = browseViewModel.getFavoriteVideoStreamUrl(file)
+                        val rawUrl = browseViewModel.getFavoriteVideoStreamUrl(file)
+                        val streamUrl = resolveStreamUrl(file, rawUrl, downloadedEntries)
                         when (val action = checkPlaybackProgress(file, isSystemBrowse, recentActivityStore)) {
                             is VideoOpenAction.PlayDirectly ->
                                 playVideo(file, streamUrl, action.positionMs, isSystemBrowse)
@@ -526,3 +539,28 @@ private fun openTextFile(
         Toast.makeText(context, "暂不支持该格式", Toast.LENGTH_SHORT).show()
     }
 }
+
+private fun isFileDownloaded(
+    file: MediaFile,
+    downloadedEntries: List<com.juziss.localmediahub.data.DownloadEntry>
+): Boolean {
+    val localEntry = downloadedEntries.find {
+        it.file.relativePath == file.relativePath || it.file.path == file.path
+    }
+    return localEntry != null && java.io.File(localEntry.localPath).exists()
+}
+
+private fun resolveStreamUrl(
+    file: MediaFile,
+    rawUrl: String,
+    downloadedEntries: List<com.juziss.localmediahub.data.DownloadEntry>
+): String {
+    val localEntry = downloadedEntries.find {
+        it.file.relativePath == file.relativePath || it.file.path == file.path
+    }
+    if (localEntry != null && java.io.File(localEntry.localPath).exists()) {
+        return "file://${localEntry.localPath}"
+    }
+    return rawUrl
+}
+

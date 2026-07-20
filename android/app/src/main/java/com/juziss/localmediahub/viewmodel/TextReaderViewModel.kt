@@ -10,6 +10,10 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.network.NetworkResult
+import com.juziss.localmediahub.data.DownloadsStore
+import com.juziss.localmediahub.data.LocalBookRepository
+import com.juziss.localmediahub.data.BookChapterContent
+import kotlinx.coroutines.flow.firstOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.delay
@@ -18,23 +22,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/**
- * Hilt ViewModel backing [com.juziss.localmediahub.TextReaderActivity].
- *
- * Exposes the current [Book], chapter index, chapter text and loading/error
- * state as cold [StateFlow]s for Compose collection. On every successful
- * chapter load, persists progress via [RecentActivityStore.saveBookProgress]
- * so the next session can resume at the same chapter.
- *
- * The chapter content is fetched on demand from the server (Round 31 books
- * API, see `server/internal/server/handler/handler.go`); only metadata is
- * preloaded via [MediaRepository.getBookInfo].
- */
 @HiltViewModel
 class TextReaderViewModel @Inject constructor(
     private val repo: MediaRepository,
     private val store: RecentActivityStore,
+    private val localBookRepo: LocalBookRepository,
+    private val downloadsStore: DownloadsStore,
 ) : ViewModel() {
+
+    private var isLocalMode = false
+    private var activeLocalPath: String? = null
 
     private val _book = MutableStateFlow<Book?>(null)
     val book: StateFlow<Book?> = _book.asStateFlow()
@@ -90,40 +87,42 @@ class TextReaderViewModel @Inject constructor(
 
     /**
      * Loads book metadata for [path] and resumes at the last saved chapter
-     * (or chapter 0 if no progress record exists). Sets [error] when the
-     * server returns an unsupported format.
+     * (or chapter 0 if no progress record exists).
      */
-    fun loadBook(path: String) {
+    fun loadBook(path: String, isLocal: Boolean = false) {
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
+
+            val downloads = downloadsStore.downloadedFiles.firstOrNull() ?: emptyList()
+            val entry = downloads.find { it.file.relativePath == path || it.file.path == path || it.localPath == path }
+            val resolvedLocalPath = entry?.localPath ?: if (java.io.File(path).exists()) path else null
+
+            activeLocalPath = resolvedLocalPath
+            isLocalMode = isLocal || (resolvedLocalPath != null && java.io.File(resolvedLocalPath).exists())
+
+            if (isLocalMode && resolvedLocalPath != null) {
+                val localResult = localBookRepo.getLocalBookInfo(resolvedLocalPath, path)
+                if (localResult is NetworkResult.Success<Book>) {
+                    processBookLoaded(localResult.data, path)
+                    return@launch
+                }
+            }
+
             when (val r = repo.getBookInfo(path)) {
-                is NetworkResult.Success -> {
-                    val b = r.data
-                    _book.value = b
-                    if (b.format == "unsupported") {
-                        _error.value = "暂不支持该格式"
-                        _isLoading.value = false
-                        return@launch
-                    }
-                    val saved = store.getBookProgress(path)
-                    val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
-                    val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
-                    loadChapter(idx)
-                    // Phase 5: 进入阅读器时栏先显示 1.5s 作为视觉锚点，再在用户
-                    // 启用沉浸模式时隐藏。launch 一个独立协程等待 delay，避免
-                    // 阻塞 loadBook 的其他分支；loadBook 重入由上层导航保证
-                    // 单实例（Activity 一次只持有一个 ViewModel）。
-                    _chromeVisible.value = true
-                    if (_readerSettings.value.immersiveMode) {
-                        viewModelScope.launch {
-                            delay(1500)
-                            _chromeVisible.value = false
-                        }
-                    }
+                is NetworkResult.Success<Book> -> {
+                    processBookLoaded(r.data, path)
                 }
                 is NetworkResult.Error -> {
-                    _error.value = r.message ?: "加载失败"
+                    if (resolvedLocalPath != null) {
+                        val localResult = localBookRepo.getLocalBookInfo(resolvedLocalPath, path)
+                        if (localResult is NetworkResult.Success<Book>) {
+                            isLocalMode = true
+                            processBookLoaded(localResult.data, path)
+                            return@launch
+                        }
+                    }
+                    _error.value = r.message
                     _isLoading.value = false
                 }
                 NetworkResult.Loading -> Unit
@@ -131,15 +130,51 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
+    private suspend fun processBookLoaded(b: Book, path: String) {
+        _book.value = b
+        if (b.format == "unsupported") {
+            _error.value = "暂不支持该格式"
+            _isLoading.value = false
+            return
+        }
+        val saved = store.getBookProgress(path)
+        val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
+        val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
+        loadChapter(idx)
+        _chromeVisible.value = true
+        if (_readerSettings.value.immersiveMode) {
+            viewModelScope.launch {
+                delay(1500)
+                _chromeVisible.value = false
+            }
+        }
+    }
+
+    private suspend fun fetchBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> {
+        val b = _book.value
+        val localPath = activeLocalPath
+        if (isLocalMode || localPath != null) {
+            val targetPath = localPath ?: path
+            if (b != null) {
+                val localRes = localBookRepo.getLocalBookChapter(targetPath, b, index)
+                if (localRes is NetworkResult.Success<BookChapterContent> || isLocalMode) {
+                    return localRes
+                }
+            }
+        }
+        val r = repo.getBookChapter(path, index)
+        if (r is NetworkResult.Error && localPath != null && b != null) {
+            val localRes = localBookRepo.getLocalBookChapter(localPath, b, index)
+            if (localRes is NetworkResult.Success<BookChapterContent>) {
+                return localRes
+            }
+        }
+        return r
+    }
+
     /**
      * Fetches the chapter at [index] and updates state. Persists progress on
-     * success so the next session resumes here. No-op if the book is not
-     * loaded or [index] is out of range.
-     */
-    /**
-     * Fetches the chapter at [index] and updates state. Persists progress on
-     * success so the next session resumes here. No-op if the book is not
-     * loaded or [index] is out of range. Returns true on success.
+     * success so the next session resumes here. Returns true on success.
      */
     suspend fun loadChapter(index: Int, resetScroll: Boolean = false): Boolean {
         val b = _book.value ?: return false
@@ -147,8 +182,8 @@ class TextReaderViewModel @Inject constructor(
         _isLoading.value = true
         _error.value = null
         var success = false
-        when (val r = repo.getBookChapter(b.path, index)) {
-            is NetworkResult.Success -> {
+        when (val r = fetchBookChapter(b.path, index)) {
+            is NetworkResult.Success<BookChapterContent> -> {
                 _currentIndex.value = index
                 _chapterBlocks.value = r.data.blocks
                 val newCh = com.juziss.localmediahub.data.ScrollModeChapter(
@@ -175,7 +210,7 @@ class TextReaderViewModel @Inject constructor(
                 _isAutoScrolling.value = false
                 success = true
             }
-            is NetworkResult.Error -> _error.value = r.message ?: "加载失败"
+            is NetworkResult.Error -> _error.value = r.message
             NetworkResult.Loading -> Unit
         }
         _isLoading.value = false
@@ -184,7 +219,6 @@ class TextReaderViewModel @Inject constructor(
 
     /**
      * 将 [_scrollChapters] 中尚未包含的下一章追加进来（滚动模式尾部选管用）。
-     * 内部加锁防重入，已加载过的章节不重复请求。
      */
     fun loadNextChapterForScroll() {
         val b = _book.value ?: return
@@ -195,14 +229,13 @@ class TextReaderViewModel @Inject constructor(
 
         viewModelScope.launch {
             _isScrollLoadingMore.value = true
-            when (val r = repo.getBookChapter(b.path, nextIdx)) {
-                is NetworkResult.Success -> {
+            when (val r = fetchBookChapter(b.path, nextIdx)) {
+                is NetworkResult.Success<BookChapterContent> -> {
                     val newCh = com.juziss.localmediahub.data.ScrollModeChapter(
                         chapterIndex = nextIdx,
                         title = r.data.title,
                         blocks = r.data.blocks,
                     )
-                    // 取最新的列表，防止并发覆盖
                     _scrollChapters.value = (_scrollChapters.value + newCh).sortedBy { it.chapterIndex }
                 }
                 is NetworkResult.Error -> Unit
@@ -213,9 +246,7 @@ class TextReaderViewModel @Inject constructor(
     }
 
     /**
-     * 滚动模式初始化：顶多预加载 [preloadCount] 章，按顺序串行请求避免并发竞争。
-     * 与 [loadNextChapterForScroll] 的区别：这里不依赖 _isScrollLoadingMore 锁，
-     * 而是直接将 [preloadCount] 章串行加载完成。
+     * 滚动模式初始化：顶多预加载 [preloadCount] 章。
      */
     fun preloadScrollChapters(preloadCount: Int) {
         val b = _book.value ?: return
@@ -225,8 +256,8 @@ class TextReaderViewModel @Inject constructor(
                 val lastIdx = currentList.maxOfOrNull { it.chapterIndex } ?: _currentIndex.value
                 val nextIdx = lastIdx + 1
                 if (nextIdx !in b.chapters.indices) return@launch
-                when (val r = repo.getBookChapter(b.path, nextIdx)) {
-                    is NetworkResult.Success -> {
+                when (val r = fetchBookChapter(b.path, nextIdx)) {
+                    is NetworkResult.Success<BookChapterContent> -> {
                         val newCh = com.juziss.localmediahub.data.ScrollModeChapter(
                             chapterIndex = nextIdx,
                             title = r.data.title,
@@ -242,8 +273,7 @@ class TextReaderViewModel @Inject constructor(
     }
 
     /**
-     * 向前预加载 [preloadCount] 章（比当前列表最小章节索引更靠前），串行执行。
-     * 返回本次实际新增的 item 总数，供 UI 层补偿滚动位置。
+     * 向前预加载 [preloadCount] 章。
      */
     suspend fun preloadPreviousScrollChapters(preloadCount: Int): Int {
         val b = _book.value ?: return 0
@@ -253,15 +283,14 @@ class TextReaderViewModel @Inject constructor(
             val firstIdx = currentList.minOfOrNull { it.chapterIndex } ?: _currentIndex.value
             val prevIdx = firstIdx - 1
             if (prevIdx < 0) return@repeat
-            when (val r = repo.getBookChapter(b.path, prevIdx)) {
-                is NetworkResult.Success -> {
+            when (val r = fetchBookChapter(b.path, prevIdx)) {
+                is NetworkResult.Success<BookChapterContent> -> {
                     val newCh = com.juziss.localmediahub.data.ScrollModeChapter(
                         chapterIndex = prevIdx,
                         title = r.data.title,
                         blocks = r.data.blocks,
                     )
                     _scrollChapters.value = (_scrollChapters.value + newCh).sortedBy { it.chapterIndex }
-                    // 每章新增 item = 1标题 + blocks数量 + 1分隔符
                     totalNewItems += newCh.blocks.size + 2
                 }
                 is NetworkResult.Error -> return@repeat
@@ -272,7 +301,7 @@ class TextReaderViewModel @Inject constructor(
     }
 
     /**
-     * 向前加载单章（顶部触发用），返回新增的 item 数量供 UI 补偿滚动。
+     * 向前加载单章（顶部触发用）。
      */
     suspend fun loadPreviousChapterForScroll(): Int {
         val b = _book.value ?: return 0
@@ -280,8 +309,8 @@ class TextReaderViewModel @Inject constructor(
         val firstIdx = currentList.minOfOrNull { it.chapterIndex } ?: _currentIndex.value
         val prevIdx = firstIdx - 1
         if (prevIdx < 0) return 0
-        return when (val r = repo.getBookChapter(b.path, prevIdx)) {
-            is NetworkResult.Success -> {
+        return when (val r = fetchBookChapter(b.path, prevIdx)) {
+            is NetworkResult.Success<BookChapterContent> -> {
                 val newCh = com.juziss.localmediahub.data.ScrollModeChapter(
                     chapterIndex = prevIdx,
                     title = r.data.title,

@@ -8,6 +8,8 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
+import com.juziss.localmediahub.data.DownloadsStore
+import com.juziss.localmediahub.data.LocalBookRepository
 import com.juziss.localmediahub.network.NetworkResult
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -26,25 +28,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * Unit tests for the Task 5 TextReaderViewModel extensions: reader settings
- * persistence, auto-scroll state, and bookmark management.
- *
- * Project test conventions:
- *  - JUnit asserts (no Truth; truth is not on the testImplementation classpath).
- *  - StandardTestDispatcher as the coroutine Main dispatcher.
- *  - mockk for [RecentActivityStore] / [MediaRepository] stand-ins (added to
- *    testImplementation alongside this test in Task 5).
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TextReaderViewModelReaderTest {
 
     private val dispatcher = StandardTestDispatcher()
+    private val localBookRepo = LocalBookRepository()
+    private val downloadsStore = mockk<DownloadsStore>(relaxed = true)
 
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
+        coEvery { downloadsStore.downloadedFiles } returns flowOf(emptyList())
     }
+
+    private fun createVm(repo: MediaRepository, store: RecentActivityStore) =
+        TextReaderViewModel(repo, store, localBookRepo, downloadsStore)
 
     @After
     fun tearDown() {
@@ -70,7 +68,7 @@ class TextReaderViewModelReaderTest {
         coEvery { repo.getBookChapter(any(), any()) } returns
             NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
 
-        val vm = TextReaderViewModel(repo, store)
+        val vm = createVm(repo, store)
         // Drain the init { store.readerSettingsFlow.collect { ... } } so its
         // single default-ReaderSettings emission lands before updateSettings
         // sets the new value (otherwise the collector overwrites the update).
@@ -90,7 +88,7 @@ class TextReaderViewModelReaderTest {
         val store = mockk<RecentActivityStore>(relaxed = true)
         coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
         val repo = mockk<MediaRepository>(relaxed = true)
-        val vm = TextReaderViewModel(repo, store)
+        val vm = createVm(repo, store)
         assertFalse(vm.isAutoScrolling.value)
         vm.toggleAutoScroll()
         assertTrue(vm.isAutoScrolling.value)
@@ -103,7 +101,7 @@ class TextReaderViewModelReaderTest {
         val store = mockk<RecentActivityStore>(relaxed = true)
         coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
         val repo = mockk<MediaRepository>(relaxed = true)
-        val vm = TextReaderViewModel(repo, store)
+        val vm = createVm(repo, store)
         vm.toggleAutoScroll()
         vm.stopAutoScroll()
         assertFalse(vm.isAutoScrolling.value)
@@ -121,7 +119,7 @@ class TextReaderViewModelReaderTest {
             NetworkResult.Success(
                 BookChapterContent("C0", listOf(Block(type = "text", value = "preview")))
             )
-        val vm = TextReaderViewModel(repo, store)
+        val vm = createVm(repo, store)
         vm.loadBook("/b.txt") // sets _book
         dispatcher.scheduler.advanceUntilIdle()
         // _book now populated; bookmarks flow is per-path, must be reloaded
@@ -148,7 +146,7 @@ class TextReaderViewModelReaderTest {
         coEvery { repo.getBookInfo(any()) } returns NetworkResult.Success(fakeBook())
         coEvery { repo.getBookChapter(any(), any()) } returns
             NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "p"))))
-        val vm = TextReaderViewModel(repo, store)
+        val vm = createVm(repo, store)
         vm.loadBook("/b.txt")
         dispatcher.scheduler.advanceUntilIdle()
         vm.loadBookmarksFor("/b.txt")
@@ -178,7 +176,7 @@ class TextReaderViewModelReaderTest {
                     listOf(Block(type = "image", src = "http://example.com/x.png")),
                 )
             )
-        val vm = TextReaderViewModel(repo, store)
+        val vm = createVm(repo, store)
         vm.loadBook("/b.txt")
         dispatcher.scheduler.advanceUntilIdle()
         vm.loadBookmarksFor("/b.txt")
@@ -203,7 +201,7 @@ class TextReaderViewModelReaderTest {
         coEvery { repo.getBookChapter(any(), any()) } returns
             NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
 
-        val vm = TextReaderViewModel(repo, store)
+        val vm = createVm(repo, store)
         // Drain the init { readerSettingsFlow.collect } so immersiveMode=true is
         // populated before loadBook's delay-branch checks _readerSettings.
         dispatcher.scheduler.advanceUntilIdle()
@@ -229,7 +227,7 @@ class TextReaderViewModelReaderTest {
         val store = mockk<RecentActivityStore>(relaxed = true)
         coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings(immersiveMode = false))
         val repo = mockk<MediaRepository>(relaxed = true)
-        val vm = TextReaderViewModel(repo, store)
+        val vm = createVm(repo, store)
         dispatcher.scheduler.advanceUntilIdle()
         // immersiveMode off → toggleChrome is a no-op.
         assertTrue(vm.chromeVisible.value)
