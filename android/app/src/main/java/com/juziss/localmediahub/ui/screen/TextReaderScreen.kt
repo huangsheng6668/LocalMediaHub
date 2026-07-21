@@ -532,6 +532,11 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
         }
     }
 
+    // 设置面板显示期间强制 chrome/systemBars 可见；面板关闭后若仍处于沉浸模式则重新隐藏
+    LaunchedEffect(showSettings) {
+        if (showSettings) viewModel.showChrome() else viewModel.hideChrome()
+    }
+
     if (showSettings) {
         ReaderSettingsSheet(
             settings = settings,

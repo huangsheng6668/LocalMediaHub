@@ -81,7 +81,15 @@ class TextReaderViewModel @Inject constructor(
         // Bootstrap reader settings from DataStore so the UI starts with the
         // persisted font/line-height/theme instead of the default on every cold start.
         viewModelScope.launch {
-            store.readerSettingsFlow.collect { _readerSettings.value = it }
+            store.readerSettingsFlow.collect { incoming ->
+                val previous = _readerSettings.value
+                _readerSettings.value = incoming
+                // 设置首次从 DataStore 加载完成（从默认 false 变为持久化的 true）时，
+                // 若当前书已加载但 chrome 仍为可见，立即同步隐藏，避免用户需要再操作开关。
+                if (!previous.immersiveMode && incoming.immersiveMode && _book.value != null) {
+                    _chromeVisible.value = false
+                }
+            }
         }
     }
 
@@ -141,13 +149,9 @@ class TextReaderViewModel @Inject constructor(
         val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
         val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
         loadChapter(idx)
-        _chromeVisible.value = true
-        if (_readerSettings.value.immersiveMode) {
-            viewModelScope.launch {
-                delay(1500)
-                _chromeVisible.value = false
-            }
-        }
+        // 若全局已启用沉浸模式，打开书即立即隐藏 chrome（Activity 据此同步隐藏系统栏）；
+        // 否则保持 chrome 可见。去掉旧的 1.5s 延迟，避免打开时短暂闪现顶/底栏。
+        _chromeVisible.value = !_readerSettings.value.immersiveMode
     }
 
     private suspend fun fetchBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> {
@@ -387,12 +391,19 @@ class TextReaderViewModel @Inject constructor(
     /** Updates and persists reader settings. */
     fun updateSettings(settings: ReaderSettings) {
         val oldMode = _readerSettings.value.readingMode
+        val oldImmersive = _readerSettings.value.immersiveMode
         _readerSettings.value = settings
         viewModelScope.launch { store.saveReaderSettings(settings) }
         if (oldMode != settings.readingMode) {
             viewModelScope.launch {
                 loadChapter(_currentIndex.value, resetScroll = true)
             }
+        }
+        // 沉浸开关切换时立即同步 chrome 可见性：
+        // - 开启：立即隐藏 chrome（Activity 据此隐藏 systemBars），用户进入沉浸
+        // - 关闭：立即还原 chrome，让顶/底栏重新可用
+        if (oldImmersive != settings.immersiveMode) {
+            _chromeVisible.value = !settings.immersiveMode
         }
     }
 

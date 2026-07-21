@@ -8,6 +8,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.juziss.localmediahub.ui.screen.TextReaderScreen
 import com.juziss.localmediahub.ui.theme.LocalMediaHubTheme
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
@@ -23,6 +28,10 @@ import dagger.hilt.android.AndroidEntryPoint
  *
  * Path is read from [EXTRA_PATH]; [EXTRA_IS_LOCAL] is reserved for the
  * offline sidecar Task (T14) and is currently informational only.
+ *
+ * 沉浸模式：当 [TextReaderViewModel.readerSettings] 的 `immersiveMode` 为 true
+ * 且 chrome 不可见时，隐藏系统状态栏与导航栏（下滑可临时唤出），实现真正的
+ * 全屏沉浸阅读。chrome 被唤出或关闭沉浸模式后，systemBars 自动还原。
  */
 @AndroidEntryPoint
 class TextReaderActivity : ComponentActivity() {
@@ -37,6 +46,22 @@ class TextReaderActivity : ComponentActivity() {
         setContent {
             LocalMediaHubTheme {
                 LaunchedEffect(path, isLocal) { viewModel.loadBook(path, isLocal) }
+
+                // 沉浸模式：根据 settings.immersiveMode 与 chromeVisible 切换系统 systemBars 显隐
+                val settings by viewModel.readerSettings.collectAsState()
+                val chromeVisible by viewModel.chromeVisible.collectAsState()
+                LaunchedEffect(settings.immersiveMode, chromeVisible) {
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    val hideSystemBars = settings.immersiveMode && !chromeVisible
+                    if (hideSystemBars) {
+                        controller.systemBarsBehavior =
+                            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                        controller.hide(WindowInsetsCompat.Type.systemBars())
+                    } else {
+                        controller.show(WindowInsetsCompat.Type.systemBars())
+                    }
+                }
+
                 TextReaderScreen(viewModel = viewModel, onBack = { finish() })
             }
         }
