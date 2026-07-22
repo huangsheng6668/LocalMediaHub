@@ -26,6 +26,7 @@ export async function loadRoots() {
         }
     } catch (e) {
         console.error('loadRoots error:', e);
+        state.folders = [];
     }
 
     // Grid list
@@ -157,8 +158,41 @@ function onBrowserListClick(e) {
     }
 }
 
+function sortMediaItems(items, field, order, isFolder = false) {
+    if (!Array.isArray(items)) return [];
+    const mult = order === 'desc' ? -1 : 1;
+    return [...items].sort((a, b) => {
+        let cmp = 0;
+        if (field === 'modified_time') {
+            const timeA = a.modified_time ? new Date(a.modified_time).getTime() : 0;
+            const timeB = b.modified_time ? new Date(b.modified_time).getTime() : 0;
+            cmp = timeA - timeB;
+        } else if (field === 'size') {
+            const sizeA = isFolder ? 0 : (a.size || 0);
+            const sizeB = isFolder ? 0 : (b.size || 0);
+            cmp = sizeA - sizeB;
+        } else if (field === 'extension') {
+            const extA = isFolder ? '' : (a.extension || '').toLowerCase();
+            const extB = isFolder ? '' : (b.extension || '').toLowerCase();
+            cmp = extA.localeCompare(extB);
+        }
+
+        if (cmp === 0 || field === 'name') {
+            const nameA = a.name || '';
+            const nameB = b.name || '';
+            const nameCmp = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+            return mult * (field === 'name' ? nameCmp : (cmp !== 0 ? cmp : nameCmp));
+        }
+
+        return mult * cmp;
+    });
+}
+
 // Render folder & file cards in browser grid
 export function renderBrowserList() {
+    state.currentFolders = sortMediaItems(state.currentFolders, state.sortField, state.sortOrder, true);
+    state.currentFiles = sortMediaItems(state.currentFiles, state.sortField, state.sortOrder, false);
+
     if (state.currentFolders.length === 0 && state.currentFiles.length === 0) {
         elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px; color: var(--text-muted);">📁 当前目录为空（无媒体文件）</div>';
         return;
@@ -350,6 +384,28 @@ async function triggerBrowserSearch() {
 
 // Set up browser-view event listeners
 export function setupBrowserListeners(elements) {
+    // Sort controls listener & initial UI sync
+    if (elements.browserSortSelect) {
+        elements.browserSortSelect.value = state.sortField;
+        elements.browserSortSelect.addEventListener('change', (e) => {
+            state.sortField = e.target.value;
+            localStorage.setItem('lmh_browser_sort_field', state.sortField);
+            renderBrowserList();
+        });
+    }
+
+    if (elements.btnBrowserSortOrder && elements.sortOrderIcon) {
+        elements.sortOrderIcon.textContent = state.sortOrder === 'desc' ? '↓' : '↑';
+        elements.btnBrowserSortOrder.setAttribute('title', state.sortOrder === 'desc' ? '降序' : '升序');
+        elements.btnBrowserSortOrder.addEventListener('click', () => {
+            state.sortOrder = state.sortOrder === 'asc' ? 'desc' : 'asc';
+            localStorage.setItem('lmh_browser_sort_order', state.sortOrder);
+            elements.sortOrderIcon.textContent = state.sortOrder === 'desc' ? '↓' : '↑';
+            elements.btnBrowserSortOrder.setAttribute('title', state.sortOrder === 'desc' ? '降序' : '升序');
+            renderBrowserList();
+        });
+    }
+
     // Search Box Listener
     elements.btnBrowserSearch.addEventListener('click', triggerBrowserSearch);
     elements.browserSearchInput.addEventListener('keydown', (e) => {

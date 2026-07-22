@@ -9,10 +9,31 @@ import { renderDashboard, setupDashboardListeners } from './dashboard.js';
 import { loadRoots, browsePath, setupBrowserListeners } from './browserView.js';
 import { renderBookmarks } from './bookmarksView.js';
 import { AUTH_REQUIRED_EVENT } from './api.js';
-import { getChromeTheme, saveChromeTheme } from './readerPrefs.js';
+import * as readerPrefs from './readerPrefs.js';
 
 // Auth modal — module-scoped so it persists across show/hide.
 let lastFailedUrl = null;
+
+export function applyGlobalAppTheme() {
+    const s = readerPrefs.getSettings();
+    let themeKey = s.theme || 'DAY';
+    if (themeKey === 'AUTO') {
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        themeKey = isDark ? 'NIGHT' : 'DAY';
+    }
+    const themeMap = {
+        'DAY': 'day',
+        'DAY_BRIGHT': 'day_bright',
+        'EYE_CARE': 'eye_care',
+        'EYE_CARE_GREEN': 'eye_care_green',
+        'PARCHMENT': 'parchment',
+        'NIGHT': 'night',
+        'NIGHT_BLACK': 'night_black'
+    };
+    const cssTheme = themeMap[themeKey] || 'day';
+    document.documentElement.dataset.theme = cssTheme;
+    document.body.dataset.readerTheme = themeKey;
+}
 
 function showAuthModal(url) {
     lastFailedUrl = url;
@@ -44,6 +65,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Initialize Application
 async function initApp() {
+    // Apply global app theme
+    applyGlobalAppTheme();
+
     // Determine internal host IP from current window location
     const protocol = window.location.protocol;
     const host = window.location.host;
@@ -54,7 +78,6 @@ async function initApp() {
 
     // Load config and initial data
     await loadConfig();
-
 
     // Parse Hash Routing on page load
     handleRoute(elements, renderDashboard, loadRoots, browsePath, renderBookmarks, renderSettings);
@@ -123,19 +146,9 @@ function setupEventListeners() {
         });
     }
 
-    // Theme toggle (Task 6)
-    const themeToggle = document.getElementById('btn-theme-toggle');
-    if (themeToggle) {
-        updateThemeToggleIcon(getChromeTheme());
-        themeToggle.addEventListener('click', () => {
-            const next = getChromeTheme() === 'day' ? 'night' : 'day';
-            saveChromeTheme(next);
-        });
-        window.addEventListener('chrome-theme-changed', (e) => {
-            document.documentElement.dataset.theme = e.detail.theme;
-            updateThemeToggleIcon(e.detail.theme);
-        });
-    }
+    // Global App Theme synchronization
+    window.addEventListener('reader-prefs-changed', applyGlobalAppTheme);
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyGlobalAppTheme);
 }
 
 // Update the sun/moon icon visibility based on the current chrome theme.

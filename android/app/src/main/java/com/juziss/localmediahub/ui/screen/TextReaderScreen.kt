@@ -256,7 +256,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
             }
     }
 
-    ReaderThemeWrapper(theme = settings.theme) {
+    ReaderThemeWrapper(theme = settings.theme, bgImageUri = settings.bgImageUri) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
@@ -386,6 +386,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
             }
 
             Scaffold(
+                containerColor = if (!settings.bgImageUri.isNullOrBlank()) androidx.compose.ui.graphics.Color.Transparent else MaterialTheme.colorScheme.background,
                 topBar = {
                     AnimatedVisibility(visible = chromeVisible, enter = fadeIn(), exit = fadeOut()) {
                         TopAppBar(

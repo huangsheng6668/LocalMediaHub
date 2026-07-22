@@ -13,6 +13,8 @@ export const state = {
     currentFiles: [], // Current browser view media files
     currentFolders: [], // Current browser view directories
     isSystemBrowse: false,
+    sortField: localStorage.getItem('lmh_browser_sort_field') || 'name', // 'name' | 'modified_time' | 'size' | 'extension'
+    sortOrder: localStorage.getItem('lmh_browser_sort_order') || 'asc',   // 'asc' | 'desc'
     
     // Lightbox variables
     lightboxFiles: [],

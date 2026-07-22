@@ -61,15 +61,15 @@ pub extern "system" fn Java_com_juziss_localmediahub_native_NativeExif_nativePar
         // materialises a `JString` wrapping null, which JNI marshals to
         // Kotlin `String? = null` for the absent case.
         let dt: JString = match &info.date_time_original {
-            Some(s) => env.new_string(s).ok()?,
+            Some(s) => env.new_string(s).unwrap_or_else(|_| JObject::null().into()),
             None => JObject::null().into(),
         };
         let make: JString = match &info.make {
-            Some(s) => env.new_string(s).ok()?,
+            Some(s) => env.new_string(s).unwrap_or_else(|_| JObject::null().into()),
             None => JObject::null().into(),
         };
         let model: JString = match &info.model {
-            Some(s) => env.new_string(s).ok()?,
+            Some(s) => env.new_string(s).unwrap_or_else(|_| JObject::null().into()),
             None => JObject::null().into(),
         };
 

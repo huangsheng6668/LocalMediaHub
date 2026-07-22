@@ -165,9 +165,23 @@
                         <div class="breadcrumbs" id="browser-breadcrumbs">
                             <span class="crumb active">根目录</span>
                         </div>
-                        <div class="search-box">
-                            <input type="text" id="browser-search-input" placeholder="在当前目录下搜索...">
-                            <button class="btn btn-search" id="btn-browser-search">🔍</button>
+                        <div class="browser-controls">
+                            <div class="sort-box">
+                                <span class="sort-label">排序:</span>
+                                <select id="browser-sort-select" class="sort-select" aria-label="选择排序方式">
+                                    <option value="name">按名称</option>
+                                    <option value="modified_time">按修改时间</option>
+                                    <option value="size">按文件大小</option>
+                                    <option value="extension">按格式</option>
+                                </select>
+                                <button class="btn btn-sort-order" id="btn-browser-sort-order" title="切换升降序" aria-label="切换升降序">
+                                    <span id="sort-order-icon">↑</span>
+                                </button>
+                            </div>
+                            <div class="search-box">
+                                <input type="text" id="browser-search-input" placeholder="在当前目录下搜索...">
+                                <button class="btn btn-search" id="btn-browser-search">🔍</button>
+                            </div>
                         </div>
                     </div>
 
@@ -191,6 +205,16 @@
 
                 <!-- System Settings View -->
                 <section id="view-settings" class="view-section">
+                    <div class="settings-card">
+                        <h2>外观与主题</h2>
+                        <div class="form-group">
+                            <label>应用全局主题</label>
+                            <div class="reader-settings__theme-grid" id="settings-global-theme-grid" style="grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); margin-top: 10px;">
+                                <!-- Theme Swatches injected by settings.js -->
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="settings-card">
                         <h2>扫描配置</h2>
                         <div class="form-group">

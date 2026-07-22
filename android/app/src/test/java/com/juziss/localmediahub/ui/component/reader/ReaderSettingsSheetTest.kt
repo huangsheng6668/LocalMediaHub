@@ -163,6 +163,7 @@ class ReaderSettingsSheetTest {
             ReaderTheme.DAY,
             ReaderTheme.DAY_BRIGHT,
             ReaderTheme.EYE_CARE,
+            ReaderTheme.EYE_CARE_GREEN,
             ReaderTheme.PARCHMENT,
             ReaderTheme.NIGHT,
             ReaderTheme.NIGHT_BLACK,

@@ -31,6 +31,7 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
         private val KEY_SERVER_PORT = stringPreferencesKey("server_port")
         private val KEY_KNOWN_SERVERS = stringPreferencesKey("known_servers")
         private val KEY_AUTH_TOKEN = stringPreferencesKey("auth_token")
+        private val KEY_APP_THEME = stringPreferencesKey("app_theme")
     }
 
     private val gson = Gson()
@@ -51,8 +52,18 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
         prefs[KEY_AUTH_TOKEN] ?: ""
     }
 
+    val appTheme: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_APP_THEME] ?: "AUTO"
+    }
+
     val knownServers: Flow<List<KnownServer>> = context.dataStore.data.map { prefs ->
         decodeKnownServers(prefs[KEY_KNOWN_SERVERS])
+    }
+
+    suspend fun saveAppTheme(theme: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_APP_THEME] = theme
+        }
     }
 
     suspend fun saveServerConfig(ip: String, port: String) {

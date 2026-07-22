@@ -191,7 +191,7 @@ class TextReaderViewModelReaderTest {
     // ---- Phase 5: 沉浸模式 chrome 可见性 --------------------------------
 
     @Test
-    fun immersive_mode_hides_chrome_after_1500ms() = runTest(dispatcher) {
+    fun immersive_mode_hides_chrome_on_load() = runTest(dispatcher) {
         val store = mockk<RecentActivityStore>(relaxed = true)
         coEvery { store.getBookProgress(any()) } returns null
         coEvery { store.readerSettingsFlow } returns
@@ -202,23 +202,10 @@ class TextReaderViewModelReaderTest {
             NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
 
         val vm = createVm(repo, store)
-        // Drain the init { readerSettingsFlow.collect } so immersiveMode=true is
-        // populated before loadBook's delay-branch checks _readerSettings.
         dispatcher.scheduler.advanceUntilIdle()
         vm.loadBook("/b.txt")
-        // Run the synchronous portion of loadBook (getBookInfo is mocked as
-        // Success, NetworkResult dispatch is synchronous in mockk relaxed mode)
-        // WITHOUT advancing the dispatcher clock — otherwise advanceUntilIdle
-        // would race past the inner delay(1500) and hide chrome before we get
-        // to assert the immediate-visible anchor state.
-        dispatcher.scheduler.advanceTimeBy(0)
-        dispatcher.scheduler.runCurrent()
-        // Chrome is shown as a visual anchor immediately after load.
-        assertTrue(vm.chromeVisible.value)
-        // Wait the 1.5s anchor window — the launched coroutine should now have
-        // hidden chrome (immersiveMode is on).
-        dispatcher.scheduler.advanceTimeBy(1500)
-        dispatcher.scheduler.runCurrent()
+        dispatcher.scheduler.advanceUntilIdle()
+        // When immersiveMode is enabled, chrome is hidden upon loading the book.
         assertFalse(vm.chromeVisible.value)
     }
 
@@ -234,12 +221,13 @@ class TextReaderViewModelReaderTest {
         vm.toggleChrome()
         assertTrue(vm.chromeVisible.value)
 
-        // immersiveMode on → toggleChrome flips state.
+        // immersiveMode on → updateSettings hides chrome, toggleChrome flips state.
         vm.updateSettings(ReaderSettings(immersiveMode = true))
         dispatcher.scheduler.advanceUntilIdle()
-        vm.toggleChrome()
         assertFalse(vm.chromeVisible.value)
         vm.toggleChrome()
         assertTrue(vm.chromeVisible.value)
+        vm.toggleChrome()
+        assertFalse(vm.chromeVisible.value)
     }
 }

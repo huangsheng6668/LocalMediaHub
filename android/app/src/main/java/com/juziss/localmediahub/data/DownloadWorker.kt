@@ -49,7 +49,7 @@ class DownloadWorker(
             val file = gson.fromJson(fileJson, MediaFile::class.java)
             val url = inputData.getString("url") ?: return@withContext Result.failure()
 
-            val notificationId = file.relativePath.hashCode()
+            val notificationId = file.relativePath.hashCode().let { if (it == 0) 1 else it }
             val foregroundInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ForegroundInfo(
                     notificationId,
@@ -144,7 +144,7 @@ class DownloadWorker(
             val folderJson = inputData.getString("folder_json") ?: return@withContext Result.failure()
             val folder = gson.fromJson(folderJson, Folder::class.java)
 
-            val notificationId = folder.relativePath.hashCode()
+            val notificationId = folder.relativePath.hashCode().let { if (it == 0) 1 else it }
             val foregroundInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ForegroundInfo(
                     notificationId,

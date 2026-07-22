@@ -41,6 +41,9 @@ export const elements = {
 
     // Browser
     browserBreadcrumbs: document.getElementById('browser-breadcrumbs'),
+    browserSortSelect: document.getElementById('browser-sort-select'),
+    btnBrowserSortOrder: document.getElementById('btn-browser-sort-order'),
+    sortOrderIcon: document.getElementById('sort-order-icon'),
     browserSearchInput: document.getElementById('browser-search-input'),
     btnBrowserSearch: document.getElementById('btn-browser-search'),
     browserList: document.getElementById('browser-list'),

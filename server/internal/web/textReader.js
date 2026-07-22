@@ -206,8 +206,8 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                     <div class="reader-settings__theme-grid">
                         ${[
                             ['DAY','日间·纸白'],['DAY_BRIGHT','日间·亮白'],['EYE_CARE','护眼·米黄'],
-                            ['PARCHMENT','羊皮纸'],['NIGHT','夜间·深空'],['NIGHT_BLACK','夜间·纯黑'],
-                            ['AUTO','跟随系统'],
+                            ['EYE_CARE_GREEN','护眼·豆沙绿'],['PARCHMENT','羊皮纸'],['NIGHT','夜间·深空'],
+                            ['NIGHT_BLACK','夜间·纯黑'],['AUTO','跟随系统'],
                         ].map(([v,label]) =>
                             `<label class="reader-settings__theme-opt">
                                 <input type="radio" name="theme" value="${v}">
@@ -321,11 +321,14 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         root.style.setProperty('--reader-line-height', String(s.lineHeight));
         root.style.setProperty('--reader-font-family', readerPrefs.FONT_FAMILIES[s.fontFamily] || readerPrefs.FONT_FAMILIES.SYSTEM);
         root.style.setProperty('--reader-content-width', s.contentWidth + 'px');
-
         // Overall App-variable override driven by data-reader-theme attribute
         document.body.dataset.readerTheme = themeKey;
 
         // Reflect into dialog controls (V2 sliders + font radio + toggles).
+        const clearBgBtn = dialog.querySelector('#btn-clear-bg-image');
+        if (clearBgBtn) {
+            clearBgBtn.style.display = s.bgImage ? 'inline-block' : 'none';
+        }
         const ffInput = dialog.querySelector(`input[name="fontFamily"][value="${s.fontFamily}"]`);
         if (ffInput) ffInput.checked = true;
         const fontSizeSlider = dialog.querySelector('input[name="fontSizeSlider"]');
@@ -1005,6 +1008,18 @@ function saveProgress(path, p) {
 
 function clamp(n, lo, hi) {
     return Math.max(lo, Math.min(hi, n));
+}
+
+function hexToRgba(hex, alpha) {
+    if (!hex || typeof hex !== 'string') return `rgba(255, 255, 255, ${alpha})`;
+    let c = hex.replace('#', '').trim();
+    if (c.length === 3) c = c.split('').map(x => x + x).join('');
+    const num = parseInt(c, 16);
+    if (isNaN(num)) return `rgba(255, 255, 255, ${alpha})`;
+    const r = (num >> 16) & 255;
+    const g = (num >> 8) & 255;
+    const b = num & 255;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 // blocksFromLegacyContent converts an old-style chapter.content string into

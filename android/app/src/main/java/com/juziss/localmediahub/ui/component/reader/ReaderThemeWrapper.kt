@@ -3,11 +3,14 @@ package com.juziss.localmediahub.ui.component.reader
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import com.juziss.localmediahub.data.ReaderTheme
 import com.juziss.localmediahub.ui.theme.ProvideNoRippleIndication
 
@@ -24,6 +27,7 @@ import com.juziss.localmediahub.ui.theme.ProvideNoRippleIndication
 @Composable
 fun ReaderThemeScope(
     theme: ReaderTheme,
+    bgImageUri: String? = null,
     content: @Composable () -> Unit,
 ) {
     val resolved = when (theme) {
@@ -42,6 +46,19 @@ fun ReaderThemeScope(
         MaterialTheme(colorScheme = scheme) {
             ProvideNoRippleIndication {
                 Box(Modifier.background(resolved.bg)) {
+                    if (!bgImageUri.isNullOrBlank()) {
+                        AsyncImage(
+                            model = bgImageUri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(resolved.bg.copy(alpha = 0.70f))
+                        )
+                    }
                     content()
                 }
             }
@@ -51,5 +68,9 @@ fun ReaderThemeScope(
 
 /** 旧名兼容别名；新代码请使用 [ReaderThemeScope]。 */
 @Composable
-fun ReaderThemeWrapper(theme: ReaderTheme, content: @Composable () -> Unit) =
-    ReaderThemeScope(theme = theme, content = content)
+fun ReaderThemeWrapper(
+    theme: ReaderTheme,
+    bgImageUri: String? = null,
+    content: @Composable () -> Unit,
+) = ReaderThemeScope(theme = theme, bgImageUri = bgImageUri, content = content)
+

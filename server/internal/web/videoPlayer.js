@@ -169,8 +169,7 @@ export function setupVideoPlayerListeners(elements) {
             // Seek native player after loadedmetadata
             elements.videoPlayer.addEventListener('loadedmetadata', function seekOnLoad() {
                 elements.videoPlayer.currentTime = absolutePos;
-                elements.videoPlayer.removeEventListener('loadedmetadata', seekOnLoad);
-            });
+            }, { once: true });
         }
 
         elements.videoPlayer.play();

@@ -25,6 +25,7 @@ data class ReaderSettings(
     val immersiveMode: Boolean = false,
     val autoScrollSpeed: Int = 5,  // 1..10
     val readingMode: ReadingMode = ReadingMode.CHAPTER,
+    val bgImageUri: String? = null,
 )
 
 /**
@@ -57,6 +58,12 @@ enum class ReaderTheme(
         chromeBg = Color(0xFFEDE3CC), chromeFg = Color(0xFF6B5644),
         muted = Color(0xFF9C8870), border = Color(0xFFD8CBAF),
         label = "护眼·米黄",
+    ),
+    EYE_CARE_GREEN(
+        bg = Color(0xFFB9C7B6), fg = Color(0xFF1F2E20),
+        chromeBg = Color(0xFFACBCAB), chromeFg = Color(0xFF1A271B),
+        muted = Color(0xFF4D5E4F), border = Color(0xFF9BB098),
+        label = "护眼·豆沙绿",
     ),
     PARCHMENT(
         bg = Color(0xFFEFE6D2), fg = Color(0xFF3D3327),

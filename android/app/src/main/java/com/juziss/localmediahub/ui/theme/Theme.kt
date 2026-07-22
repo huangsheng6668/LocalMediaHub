@@ -102,16 +102,85 @@ private val AppTypography = Typography(
     ),
 )
 
+private val EyeCareGreenColorScheme = lightColorScheme(
+    primary = Color(0xFF2C5030),
+    secondary = Color(0xFF384C3A),
+    tertiary = Color(0xFF4D5E4F),
+    background = Color(0xFFB9C7B6),
+    surface = Color(0xFFACBCAB),
+    surfaceVariant = Color(0xFF9BB098),
+    primaryContainer = Color(0xFFC3D0C2),
+    onPrimary = Color.White,
+    onSecondary = Color.White,
+    onBackground = Color(0xFF1F2E20),
+    onSurface = Color(0xFF1F2E20),
+    onSurfaceVariant = Color(0xFF384C3A),
+    outline = Color(0xFF9BB098),
+)
+
+private val EyeCareColorScheme = lightColorScheme(
+    primary = Color(0xFF8C6239),
+    secondary = Color(0xFF734F2D),
+    tertiary = Color(0xFF7A6654),
+    background = Color(0xFFF5EBDC),
+    surface = Color(0xFFEBDCC8),
+    surfaceVariant = Color(0xFFD9C8B2),
+    primaryContainer = Color(0xFFFAF3E8),
+    onPrimary = Color.White,
+    onSecondary = Color.White,
+    onBackground = Color(0xFF3D3126),
+    onSurface = Color(0xFF3D3126),
+    onSurfaceVariant = Color(0xFF5C4B3D),
+    outline = Color(0xFFD9C8B2),
+)
+
+private val ParchmentColorScheme = lightColorScheme(
+    primary = Color(0xFF6B4C2A),
+    secondary = Color(0xFF543B20),
+    tertiary = Color(0xFF756750),
+    background = Color(0xFFF4ECD8),
+    surface = Color(0xFFE8DFC9),
+    surfaceVariant = Color(0xFFD6CBAE),
+    primaryContainer = Color(0xFFFBF6E9),
+    onPrimary = Color.White,
+    onSecondary = Color.White,
+    onBackground = Color(0xFF3B3224),
+    onSurface = Color(0xFF3B3224),
+    onSurfaceVariant = Color(0xFF574B38),
+    outline = Color(0xFFD6CBAE),
+)
+
+private val NightBlackColorScheme = darkColorScheme(
+    primary = Color(0xFFE0E0E0),
+    secondary = Color(0xFFAAAAAA),
+    tertiary = Color(0xFF777777),
+    background = Color.Black,
+    surface = Color(0xFF121212),
+    surfaceVariant = Color(0xFF1A1A1A),
+    primaryContainer = Color(0xFF222222),
+    onPrimary = Color.Black,
+    onSecondary = Color.Black,
+    onBackground = Color(0xFFE0E0E0),
+    onSurface = Color(0xFFE0E0E0),
+    onSurfaceVariant = Color(0xFFAAAAAA),
+    outline = Color(0xFF333333),
+)
+
 @Composable
 fun LocalMediaHubTheme(
+    themeKey: String = "AUTO",
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> LightColorScheme
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+    val colorScheme = when (themeKey.uppercase()) {
+        "EYE_CARE_GREEN" -> EyeCareGreenColorScheme
+        "EYE_CARE" -> EyeCareColorScheme
+        "PARCHMENT" -> ParchmentColorScheme
+        "NIGHT_BLACK" -> NightBlackColorScheme
+        "NIGHT" -> DarkColorScheme
+        "DAY", "DAY_BRIGHT" -> LightColorScheme
+        else -> if (darkTheme) DarkColorScheme else LightColorScheme
     }
 
     MaterialTheme(

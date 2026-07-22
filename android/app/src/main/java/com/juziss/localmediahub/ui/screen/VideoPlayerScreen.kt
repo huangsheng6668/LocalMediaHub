@@ -106,7 +106,8 @@ fun VideoPlayerScreen(
     val activity = context as? VideoPlayerActivity
     // Read PiP mode defensively: the screen might be hosted by a non-MainActivity
     // context in tests — fall back to a MutableStateFlow(false) then.
-    val isInPipMode by (activity?.isInPipMode ?: MutableStateFlow(false))
+    val fallbackPipState = remember { MutableStateFlow(false) }
+    val isInPipMode by (activity?.isInPipMode ?: fallbackPipState)
         .collectAsState()
     // Captured from ExoPlayer.onVideoSizeChanged so enterPipMode can build the
     // correct aspect-ratio params. Defaults to 0 (PipController falls back to
@@ -237,7 +238,7 @@ fun VideoPlayerScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(exoPlayer) {
         // 让 PipActionReceiver 能拿到 ExoPlayer 实例
         PipControllerStore.bind(exoPlayer)
         onDispose {

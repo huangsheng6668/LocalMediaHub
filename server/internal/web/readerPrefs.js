@@ -25,14 +25,15 @@ export const CONTENT_WIDTH_RANGE = { MIN: 600, MAX: 1400, STEP: 10 };
 // 6 个主题预设（spec §1.1 表格逐字一致）。
 // chromeBg/chromeFg/muted 用于顶/底栏/drawer/dialog 的局部主题覆盖。
 export const THEME_PRESETS = {
-    DAY:        { bg: '#FAF8F3', fg: '#2B2B2B', chromeBg: '#F2EFE7', chromeFg: '#3D3D3D', muted: '#7A7A78', border: '#E5E2D8' },
-    DAY_BRIGHT: { bg: '#FFFFFF', fg: '#212121', chromeBg: '#F5F5F5', chromeFg: '#333333', muted: '#7A7A7A', border: '#E0E0E0' },
-    EYE_CARE:   { bg: '#F4ECD8', fg: '#5B4636', chromeBg: '#EDE3CC', chromeFg: '#6B5644', muted: '#9C8870', border: '#D8CBAF' },
-    PARCHMENT:  { bg: '#EFE6D2', fg: '#3D3327', chromeBg: '#E5D9BF', chromeFg: '#4D4034', muted: '#8C7E66', border: '#D3C7AB' },
-    NIGHT:      { bg: '#1A1A1F', fg: '#C9C9CE', chromeBg: '#232328', chromeFg: '#B0B0B5', muted: '#84848A', border: '#2D2D33' },
-    NIGHT_BLACK:{ bg: '#000000', fg: '#BFBFBF', chromeBg: '#0A0A0A', chromeFg: '#A8A8A8', muted: '#787878', border: '#1C1C1C' },
+    DAY:            { bg: '#FAF8F3', fg: '#2B2B2B', chromeBg: '#F2EFE7', chromeFg: '#3D3D3D', muted: '#7A7A78', border: '#E5E2D8' },
+    DAY_BRIGHT:     { bg: '#FFFFFF', fg: '#212121', chromeBg: '#F5F5F5', chromeFg: '#333333', muted: '#7A7A7A', border: '#E0E0E0' },
+    EYE_CARE:       { bg: '#F4ECD8', fg: '#5B4636', chromeBg: '#EDE3CC', chromeFg: '#6B5644', muted: '#9C8870', border: '#D8CBAF' },
+    EYE_CARE_GREEN: { bg: '#B9C7B6', fg: '#1F2E20', chromeBg: '#ACBCAB', chromeFg: '#1A271B', muted: '#4D5E4F', border: '#9BB098' },
+    PARCHMENT:      { bg: '#EFE6D2', fg: '#3D3327', chromeBg: '#E5D9BF', chromeFg: '#4D4034', muted: '#8C7E66', border: '#D3C7AB' },
+    NIGHT:          { bg: '#1A1A1F', fg: '#C9C9CE', chromeBg: '#232328', chromeFg: '#B0B0B5', muted: '#84848A', border: '#2D2D33' },
+    NIGHT_BLACK:    { bg: '#000000', fg: '#BFBFBF', chromeBg: '#0A0A0A', chromeFg: '#A8A8A8', muted: '#787878', border: '#1C1C1C' },
     // AUTO 不是预设颜色，而是"跟随系统"标记。getSettings 调用方解析为 DAY/NIGHT。
-    AUTO:       null,
+    AUTO:           null,
 };
 
 export const FONT_SIZE_RANGE = { MIN: 12, MAX: 28, STEP: 1 };
@@ -116,11 +117,11 @@ export function saveSettings(partial) {
     const merged = { ...getSettings(), ...partial };
     try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
-        window.dispatchEvent(new CustomEvent(EVENT, { detail: { type: 'settings' } }));
     } catch (e) {
         // Quota exceeded or other localStorage failure — warn, don't throw.
-        console.warn('readerPrefs.saveSettings failed:', e);
+        console.warn('readerPrefs.saveSettings failed to write localStorage:', e);
     }
+    window.dispatchEvent(new CustomEvent(EVENT, { detail: { type: 'settings' } }));
     return merged;
 }
 

@@ -4,6 +4,8 @@ import { showToast } from './toast.js';
 import { apiRequest } from './api.js';
 import { elements } from './dom.js';
 
+import * as readerPrefs from './readerPrefs.js';
+
 function getFolderPaths() {
     return (state.folders || []).map(f => typeof f === 'string' ? f : (f.path || f.name || '')).filter(Boolean);
 }
@@ -44,11 +46,40 @@ export function renderSettings() {
         elements.settingsEnableDelete.style.fontWeight = '';
     }
     elements.settingsThumbMax.textContent = `${state.thumbMax} px`;
+    renderThemeGrid();
+}
+
+function renderThemeGrid() {
+    const grid = document.getElementById('settings-global-theme-grid');
+    if (!grid) return;
+    const currentTheme = readerPrefs.getSettings().theme || 'DAY';
+    grid.innerHTML = Object.entries(readerPrefs.THEME_LABELS).map(([key, label]) => {
+        const isChecked = currentTheme === key ? 'checked' : '';
+        return `
+            <label class="reader-settings__theme-card">
+                <input type="radio" name="globalTheme" value="${key}" ${isChecked}>
+                <span class="reader-settings__theme-swatch" data-theme="${key}"></span>
+                <span class="reader-settings__theme-label">${label}</span>
+            </label>
+        `;
+    }).join('');
 }
 
 // Set up Settings-related event listeners (btnTriggerScan + btnSaveSettings).
 // `elements` is the shared DOM element map from app.js.
 export function setupSettingsListeners(elements) {
+    const grid = document.getElementById('settings-global-theme-grid');
+    if (grid) {
+        grid.addEventListener('change', (e) => {
+            if (e.target && e.target.name === 'globalTheme') {
+                const newTheme = e.target.value;
+                readerPrefs.saveSettings({ theme: newTheme });
+                const label = readerPrefs.THEME_LABELS[newTheme] || newTheme;
+                showToast(`🎨 应用全局主题已切换为：${label}`, 'success');
+            }
+        });
+    }
+
     // Scan Trigger
     elements.btnTriggerScan.addEventListener('click', async () => {
         try {

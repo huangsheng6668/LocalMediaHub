@@ -64,7 +64,16 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            LocalMediaHubTheme {
+            val context = LocalContext.current
+            val entryPoint = remember(context) {
+                EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    AppStoresEntryPoint::class.java,
+                )
+            }
+            val appTheme by entryPoint.serverConfig().appTheme.collectAsState(initial = "AUTO")
+
+            LocalMediaHubTheme(themeKey = appTheme) {
                 LocalMediaHubApp()
             }
         }
@@ -240,7 +249,7 @@ fun LocalMediaHubApp() {
                         serverConfig.clearConfig()
                     }
                     navController.navigate("connection") {
-                        popUpTo(0) { inclusive = true }
+                        popUpTo(navController.graph.id) { inclusive = true }
                     }
                 },
                 downloadedEntries = downloadedEntries,

@@ -115,6 +115,51 @@ fun ReaderSettingsSheetContent(
             selected = settings.theme,
             onSelect = { onChange(settings.copy(theme = it)) },
         )
+        Spacer(Modifier.size(8.dp))
+
+        // 背景图片
+        val context = androidx.compose.ui.platform.LocalContext.current
+        Text("背景图片", style = MaterialTheme.typography.labelMedium)
+        val imagePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+            contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+        ) { uri ->
+            uri?.let { inputUri ->
+                try {
+                    val bgFile = java.io.File(context.filesDir, "reader_background.jpg")
+                    context.contentResolver.openInputStream(inputUri)?.use { input ->
+                        java.io.FileOutputStream(bgFile).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    onChange(settings.copy(bgImageUri = bgFile.toURI().toString()))
+                } catch (_: Exception) {
+                    onChange(settings.copy(bgImageUri = inputUri.toString()))
+                }
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.OutlinedButton(
+                onClick = { imagePickerLauncher.launch("image/*") }
+            ) {
+                Text(if (settings.bgImageUri.isNullOrBlank()) "选择图片" else "更换图片")
+            }
+            if (!settings.bgImageUri.isNullOrBlank()) {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        try {
+                            val bgFile = java.io.File(context.filesDir, "reader_background.jpg")
+                            if (bgFile.exists()) bgFile.delete()
+                        } catch (_: Exception) {}
+                        onChange(settings.copy(bgImageUri = null))
+                    }
+                ) {
+                    Text("清除背景图")
+                }
+            }
+        }
 
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
 
