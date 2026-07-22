@@ -351,10 +351,13 @@ func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType
 	if err != nil {
 		return nil, err
 	}
-	// Scan 刚填充了 cache[mediaType]；读回请求的类型切片。
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.cache[mediaType], nil
+	if files, ok := s.cache[mediaType]; ok {
+		return files, nil
+	}
+	return make([]models.MediaFile, 0), nil
 }
 
 // GetCachedByDir 返回指定目录直接子文件列表（不含子目录的文件）。

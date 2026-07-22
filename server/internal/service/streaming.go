@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"os"
@@ -43,7 +44,11 @@ func (b *BufferedReadSeeker) Read(p []byte) (int, error) {
 }
 
 func (b *BufferedReadSeeker) Seek(offset int64, whence int) (int64, error) {
-	pos, err := b.file.Seek(offset, whence)
+	realOffset := offset
+	if whence == io.SeekCurrent {
+		realOffset -= int64(b.reader.Buffered())
+	}
+	pos, err := b.file.Seek(realOffset, whence)
 	if err != nil {
 		return pos, err
 	}
@@ -222,6 +227,7 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 		if n > 0 {
 			if _, wErr := w.Write(buf[:n]); wErr != nil {
 				killCmd()
+				_ = cmd.Wait()
 				return nil
 			}
 			if flusher != nil {
