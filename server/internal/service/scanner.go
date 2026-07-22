@@ -132,6 +132,10 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	// Use errgroup for concurrent scanning. Bind to ctx so cancellation
 	// propagates to every walk goroutine.
 	g, gctx := errgroup.WithContext(ctx)
+	// Cap per-root concurrency so a scan across many roots doesn't fan out to
+	// an unbounded number of walk goroutines. Limited to min(len(roots), NumCPU)
+	// because each walk is primarily I/O-bound filesystem traversal.
+	g.SetLimit(min(len(roots), runtime.NumCPU()))
 
 	// 共享 dirMap：walk goroutine 收集祖先目录，mutex 保护。
 	// 目录数远少于文件数，锁竞争可忽略。
@@ -260,6 +264,15 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 			}
 		}
 	}
+
+	// Deterministic ordering: walks complete in goroutine-scheduled order, so
+	// allFiles/videoFiles/imageFiles/textFiles are non-deterministic across
+	// runs. Sort by Path so downstream consumers (cache, callbacks, tests)
+	// see a stable sequence. Per-media-type slices are ordered identically.
+	sort.Slice(allFiles, func(i, j int) bool { return allFiles[i].Path < allFiles[j].Path })
+	sort.Slice(videoFiles, func(i, j int) bool { return videoFiles[i].Path < videoFiles[j].Path })
+	sort.Slice(imageFiles, func(i, j int) bool { return imageFiles[i].Path < imageFiles[j].Path })
+	sort.Slice(textFiles, func(i, j int) bool { return textFiles[i].Path < textFiles[j].Path })
 
 	// 把 dirMap 转为排序切片 + 映射
 	cacheDirs := make([]string, 0, len(dirMap))

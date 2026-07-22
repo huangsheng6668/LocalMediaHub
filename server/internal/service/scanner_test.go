@@ -676,3 +676,64 @@ func TestScanTextOnScanCompleteFilter(t *testing.T) {
 	require.Len(t, got, 1, "OnScanComplete should receive only non-text files")
 	assert.Equal(t, "video", got[0].MediaType)
 }
+
+// TestScannerOutputIsSorted 验证 Scan 返回的 allFiles 切片按 Path 字典序升序排列。
+// 两个 root 各 50 个混合扩展名的文件：goroutine 调度顺序不可控，但结果必须稳定有序。
+func TestScannerOutputIsSorted(t *testing.T) {
+	root1 := t.TempDir()
+	root2 := t.TempDir()
+	exts := []string{".mp4", ".jpg", ".txt"}
+	for _, root := range []string{root1, root2} {
+		// 创建 3 个子目录使路径多样化（覆盖 root 内 walk 顺序）
+		for _, sub := range []string{"subA", "subB", "subC"} {
+			require.NoError(t, os.MkdirAll(filepath.Join(root, sub), 0755))
+		}
+		for i := 0; i < 50; i++ {
+			sub := []string{"subA", "subB", "subC"}[i%3]
+			ext := exts[i%len(exts)]
+			name := fmt.Sprintf("file_%04d%s", i, ext)
+			require.NoError(t, os.WriteFile(filepath.Join(root, sub, name), []byte("x"), 0644))
+		}
+	}
+
+	scanner := NewScanner([]string{".mp4"}, []string{".jpg"}, []string{".txt"})
+	// 多个 root 强制 errgroup 跨 root 并发；结果合并后必须仍有序
+	files, err := scanner.Scan(context.Background(), []string{root1, root2})
+	require.NoError(t, err)
+	require.Len(t, files, 100)
+
+	for i := 1; i < len(files); i++ {
+		if files[i-1].Path > files[i].Path {
+			t.Fatalf("allFiles not sorted by Path: index %d %q > index %d %q",
+				i-1, files[i-1].Path, i, files[i].Path)
+		}
+	}
+}
+
+// TestScannerContextCancelExitsQuickly 验证传入已取消的 ctx 时 Scan 迅速返回，
+// 不会跑完整个 500 文件的目录树。1s 上限远大于 errgroup 中止 goroutine 的耗时。
+func TestScannerContextCancelExitsQuickly(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 500; i++ {
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, fmt.Sprintf("f%04d.mp4", i)),
+			[]byte("x"), 0644))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 立即取消
+
+	scanner := NewScanner([]string{".mp4"}, nil, nil)
+	start := time.Now()
+	_, err := scanner.Scan(ctx, []string{root})
+	elapsed := time.Since(start)
+
+	// ctx 已取消，errgroup 的 gctx 立即 done，walk 回调 return gctx.Err()
+	require.Error(t, err)
+	assert.Equal(t, context.Canceled, err)
+	if elapsed >= time.Second {
+		t.Fatalf("Scan took %v with already-cancelled ctx; want < 1s", elapsed)
+	}
+	t.Logf("Scan with cancelled ctx returned in %v", elapsed)
+}
+
