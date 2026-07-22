@@ -39,7 +39,8 @@ func NewTagsService(dataDir string) (*TagsService, error) {
 		dbExists = true
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	dsn := dbPath + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
