@@ -663,17 +663,16 @@ func makeJPEGAt(t *testing.T, path string) {
 	}
 }
 
-// TestPreGenerateThumbnails_HotPathFirst 验证：当 hotPaths 标记某个文件为热点时，
+// TestPreGenerateThumbnails_HotPathFirst 验证：当 hotDirs 标记某文件所在目录为热点时，
 // 该文件的缩略图会在冷文件之前被生成。
 //
-// 测试策略（Option B，真实 JPEG fixtures + 并发观测）：
-//   - 1 个 hot 文件 + 200 个 cold 文件
-//   - 利用 B1.2 的 100ms 退让（每 5 文件/worker）：200 cold / numWorkers(≤ NumCPU/4)
-//     即使 4 workers，每个处理 ~50 cold = 10 次 yield × 100ms = 1000ms，远超观测窗口
-//   - 在独立 goroutine 启动 PreGen，主 goroutine sleep 200ms 后检查磁盘状态
-//   - 断言：hot 缩略图存在（channel 头部，worker 必先取到），且至少一个 cold 未生成
+// Round 32 Task 6 改造后，hot 判定基于目录而非文件 path：hotDir 包含 hot 文件
+// 所在目录时，hot 文件入 Tier 1 队列并被优先处理。
 //
-// 这个测试利用 B1.2 的退让行为制造可观测的时间窗口，证明 hot-first 排序。
+// 测试策略（Option B，真实 JPEG fixtures + 并发观测）：
+//   - 1 个 hot 文件（位于 hotDir 目录）+ 200 个 cold 文件（位于 coldDir 目录）
+//   - hotDirs = {hotDir}，coldDir 不在其中 → cold 文件全部 Tier 3，被 PreGen 跳过
+//   - PreGen 完成后断言：hot 缩略图存在；cold 缩略图全部不存在（Tier 3 跳过）
 func TestPreGenerateThumbnails_HotPathFirst(t *testing.T) {
 	tempDir := t.TempDir()
 	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
@@ -682,17 +681,18 @@ func TestPreGenerateThumbnails_HotPathFirst(t *testing.T) {
 	}
 	defer svc.Shutdown()
 
-	// 1 hot + 200 cold。200 个 cold 在 B1.2 的退让下需要 > 1s 才能处理完，
-	// 给主 goroutine 充足的 200ms 观测窗口。
+	// hot 文件与 cold 文件放在不同子目录，便于按目录分层。
+	hotDir := filepath.Join(tempDir, "hotdir")
+	coldDir := filepath.Join(tempDir, "colddir")
 	const numCold = 200
-	hotPath := filepath.Join(tempDir, "hot.jpg")
+	hotPath := filepath.Join(hotDir, "hot.jpg")
 	makeJPEGAt(t, hotPath)
 
 	files := []models.MediaFile{
 		{Name: "hot.jpg", Path: hotPath, MediaType: "image"},
 	}
 	for i := 0; i < numCold; i++ {
-		coldPath := filepath.Join(tempDir, fmt.Sprintf("cold_%03d.jpg", i))
+		coldPath := filepath.Join(coldDir, fmt.Sprintf("cold_%03d.jpg", i))
 		makeJPEGAt(t, coldPath)
 		files = append(files, models.MediaFile{
 			Name:      fmt.Sprintf("cold_%03d.jpg", i),
@@ -701,49 +701,40 @@ func TestPreGenerateThumbnails_HotPathFirst(t *testing.T) {
 		})
 	}
 
-	hotPaths := map[string]struct{}{hotPath: {}}
+	// hotDirs 用 Clean 后的目录路径（PreGen 内部也会 Clean 比对）。
+	hotDirs := map[string]struct{}{filepath.Clean(hotDir): {}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 在 goroutine 中启动 PreGen（会阻塞直到完成或取消）
+	// PreGen 在 Tier 1 完成后立即返回（cold 全部 Tier 3 跳过，不会阻塞）。
 	preGenDone := make(chan struct{})
 	go func() {
-		svc.PreGenerateThumbnails(files, ctx, hotPaths)
+		svc.PreGenerateThumbnails(files, ctx, hotDirs, nil)
 		close(preGenDone)
 	}()
+	<-preGenDone
 
-	// 等待 200ms：hot 在 channel 头部，worker 几乎瞬间处理完（< 1ms）。
-	// 而 200 个 cold 受 B1.2 退让限制，200ms 内绝对处理不完。
-	time.Sleep(200 * time.Millisecond)
-
-	// hot 缩略图必须存在 —— 它在 channel 头部，worker 一定先拿到它。
+	// hot 缩略图必须存在 —— hot 文件在 Tier 1，PreGen 必然处理它。
 	hotFi, err := os.Stat(hotPath)
 	require.NoError(t, err, "hot source must still exist")
 	hotCache := svc.GetThumbnailPath(hotPath, hotFi.ModTime())
 	_, err = os.Stat(hotCache)
-	assert.NoError(t, err, "hot thumbnail must be generated within 200ms (it's first in queue)")
+	assert.NoError(t, err, "hot thumbnail must be generated (Tier 1 directory)")
 
-	// 取消以释放 goroutine
-	cancel()
-	<-preGenDone
-
-	// 至少一个 cold 缩略图不存在 —— 证明 200ms 不够处理完所有 cold（退让生效）。
-	// 这间接验证了排序的"意义"：如果没有 hot-first，hot 会被淹没在 cold 中。
-	coldGenerated := 0
+	// cold 缩略图全部不存在 —— cold 目录不在 hotDirs，也不是 scanRoots 直接子文件，
+	// 因此被归入 Tier 3，PreGen 主动跳过。
 	for i := 0; i < numCold; i++ {
-		coldPath := filepath.Join(tempDir, fmt.Sprintf("cold_%03d.jpg", i))
+		coldPath := filepath.Join(coldDir, fmt.Sprintf("cold_%03d.jpg", i))
 		fi, err := os.Stat(coldPath)
 		if err != nil {
 			continue
 		}
 		cachePath := svc.GetThumbnailPath(coldPath, fi.ModTime())
-		if _, err := os.Stat(cachePath); err == nil {
-			coldGenerated++
-		}
+		_, err = os.Stat(cachePath)
+		assert.True(t, os.IsNotExist(err),
+			"cold thumbnail %d should NOT be generated (Tier 3 lazy)", i)
 	}
-	assert.Less(t, coldGenerated, numCold,
-		"at least one cold thumbnail should NOT be generated within 200ms (B1.2 yield throttles cold processing)")
 }
 
 // TestPreGenerateThumbnails_SkipsCached 验证：已缓存的文件在入队阶段被跳过，
@@ -777,15 +768,15 @@ func TestPreGenerateThumbnails_SkipsCached(t *testing.T) {
 	require.NoError(t, err, "cache file must exist after GenerateThumbnail")
 	mtimeBefore := cacheFiBefore.ModTime()
 
-	// 步骤 3：调 PreGen。文件在 hotPaths 中也应被跳过（缓存命中）。
+	// 步骤 3：调 PreGen。文件所在目录在 hotDirs 中也应被跳过（缓存命中）。
 	files := []models.MediaFile{
 		{Name: "cached.jpg", Path: srcPath, MediaType: "image"},
 	}
-	hotPaths := map[string]struct{}{srcPath: {}}
+	hotDirs := map[string]struct{}{filepath.Dir(srcPath): {}}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	svc.PreGenerateThumbnails(files, ctx, hotPaths)
+	svc.PreGenerateThumbnails(files, ctx, hotDirs, nil)
 
 	// 步骤 4：缓存 mtime 不应变（证明未被重写）
 	cacheFiAfter, err := os.Stat(cachePath)
@@ -794,9 +785,9 @@ func TestPreGenerateThumbnails_SkipsCached(t *testing.T) {
 		"cached thumbnail should not be rewritten by PreGen")
 }
 
-// TestPreGenerateThumbnails_NilHotPaths 验证：hotPaths 为 nil map 时不会 panic，
-// 所有文件都被当作 cold 处理（功能正确性 regression guard）。
-func TestPreGenerateThumbnails_NilHotPaths(t *testing.T) {
+// TestPreGenerateThumbnails_NilHotDirs 验证：hotDirs 为 nil map 时不会 panic；
+// 当 scanRoots 覆盖文件所在目录时（Tier 2），文件仍能被处理（功能正确性 regression guard）。
+func TestPreGenerateThumbnails_NilHotDirs(t *testing.T) {
 	tempDir := t.TempDir()
 	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
 	if err != nil {
@@ -810,21 +801,23 @@ func TestPreGenerateThumbnails_NilHotPaths(t *testing.T) {
 	files := []models.MediaFile{
 		{Name: "regular.jpg", Path: srcPath, MediaType: "image"},
 	}
+	// 让 tempDir 作为 scanRoot，使该文件符合 Tier 2（scanRoot 直接子文件）。
+	scanRoots := []string{tempDir}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	// 不应 panic
 	assert.NotPanics(t, func() {
-		svc.PreGenerateThumbnails(files, ctx, nil)
+		svc.PreGenerateThumbnails(files, ctx, nil, scanRoots)
 	})
 
-	// 缩略图应被生成
+	// 缩略图应被生成（Tier 2 命中）
 	srcFi, err := os.Stat(srcPath)
 	require.NoError(t, err)
 	cachePath := svc.GetThumbnailPath(srcPath, srcFi.ModTime())
 	_, err = os.Stat(cachePath)
-	assert.NoError(t, err, "thumbnail should be generated with nil hotPaths")
+	assert.NoError(t, err, "thumbnail should be generated for Tier 2 file with nil hotDirs")
 }
 
 // TestPreGenerateThumbnails_SkipsUnknownMediaType 验证：非 image/video 的
@@ -847,7 +840,7 @@ func TestPreGenerateThumbnails_SkipsUnknownMediaType(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	svc.PreGenerateThumbnails(files, ctx, nil)
+	svc.PreGenerateThumbnails(files, ctx, nil, nil)
 
 	// 不应生成缩略图（MediaType 被过滤）
 	srcFi, err := os.Stat(srcPath)
@@ -885,8 +878,12 @@ func TestPreGenerateThumbnails_RespectsContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 先取消
 
+	// 让 tempDir 作为 scanRoot，使所有文件符合 Tier 2（否则会被 Tier 3 跳过，
+	// 无法验证取消语义）。
+	scanRoots := []string{tempDir}
+
 	start := time.Now()
-	svc.PreGenerateThumbnails(files, ctx, nil)
+	svc.PreGenerateThumbnails(files, ctx, nil, scanRoots)
 	elapsed := time.Since(start)
 
 	// 应该很快返回（不处理所有 50 个文件）。
@@ -912,10 +909,10 @@ func TestPreGenerateThumbnails_RespectsContextCancellation(t *testing.T) {
 		"cancelled context should prevent all files from being processed")
 }
 
-// BenchmarkPreGenerateThumbnails_EnqueueStage 度量入队阶段的过滤 + 排序开销。
+// BenchmarkPreGenerateThumbnails_EnqueueStage 度量入队阶段的过滤 + Tier 决策开销。
 // 4.3-B 合规：这是 PreGen 端到端中唯一有意义且可隔离的微基准。
 // 用合成的 files 切片（无真实磁盘 IO），立即取消 context 使 worker 退出。
-// os.Stat 对 fake path 失败 → 所有文件被跳过，仅测量入队 + 过滤成本。
+// os.Stat 对 fake path 失败 → 所有文件被跳过，仅测量入队 + 过滤 + Tier 判定成本。
 func BenchmarkPreGenerateThumbnails_EnqueueStage(b *testing.B) {
 	files := make([]models.MediaFile, 1000)
 	for i := range files {
@@ -925,11 +922,11 @@ func BenchmarkPreGenerateThumbnails_EnqueueStage(b *testing.B) {
 			MediaType: "image",
 		}
 	}
-	hotPaths := map[string]struct{}{
-		"/fake/dir/file_0005.jpg": {},
-		"/fake/dir/file_0010.jpg": {},
-		"/fake/dir/file_0050.jpg": {},
+	// Round 32 Task 6: hotDirs 现在是目录集合而非文件 path 集合。
+	hotDirs := map[string]struct{}{
+		"/fake/dir": {},
 	}
+	scanRoots := []string{"/fake"}
 
 	tempDir := b.TempDir()
 	svc, err := NewThumbnailService(tempDir, 300, "JPEG", "")
@@ -944,7 +941,7 @@ func BenchmarkPreGenerateThumbnails_EnqueueStage(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		svc.PreGenerateThumbnails(files, ctx, hotPaths)
+		svc.PreGenerateThumbnails(files, ctx, hotDirs, scanRoots)
 	}
 }
 

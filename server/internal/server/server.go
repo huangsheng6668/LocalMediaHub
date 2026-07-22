@@ -87,14 +87,15 @@ func New(cfg *config.Config) (*Server, error) {
 		ctx, s.preGenCancel = context.WithCancel(context.Background())
 		s.preGenMu.Unlock()
 
-		// B1.2: 收集 hot paths 作为预热优先级来源。
-		// HotTracker().Keys() 内部加锁（golang-lru/v2 自带 sync），无需外部锁。
-		hotPaths := make(map[string]struct{})
-		for _, key := range s.Thumbnail.HotTracker().Keys() {
-			hotPaths[key] = struct{}{}
-		}
+		// Round 32 Task 6: 分层预热。
+		// Tier 1 来源：HotDirs(64) 返回 per-directory 访问计数 Top-64 的集合
+		//   （来自 hotDirTracker，聚合自所有交互请求路径，5min+Shutdown 持久化）。
+		// Tier 2 来源：cfg.Scan.GetRoots() 的根目录下直接文件，作为浏览入口。
+		// Tier 3（其他深层文件）由 PreGen 跳过，依赖懒生成。
+		hotDirs := s.Thumbnail.HotDirs(64)
+		scanRoots := cfg.Scan.GetRoots()
 
-		s.Thumbnail.PreGenerateThumbnails(files, ctx, hotPaths)
+		s.Thumbnail.PreGenerateThumbnails(files, ctx, hotDirs, scanRoots)
 	}
 
 	// books: BookService wired in Task 8 — drives /api/v1/books/info|chapter.

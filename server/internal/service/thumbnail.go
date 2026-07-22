@@ -63,7 +63,19 @@ type ThumbnailService struct {
 	// 放在 generateBytesVia（仅交互请求路径）而非 GenerateThumbnail 中是有意设计：
 	// PreGenerateThumbnails 调 GenerateThumbnail 不经过 generateBytesVia，
 	// 因此 hotTracker 只追踪真实用户交互请求。
+	//
+	// 注意：hotTracker 与下面的 hotDirs 是两个不同维度的追踪器，不要合并：
+	//   - hotTracker：per-file path LRU（200 entries），仅用于排序，已被
+	//     Round 32 Task 6 的 hotDirs 取代为 PreGen 的主要优先级来源。
+	//   - hotDirs：per-directory access-count 聚合（256 entries），持久化到
+	//     hot_directories.json，驱动分层预热（Tier 1）。
 	hotTracker *lru.Cache[string, struct{}]
+
+	// hotDirs 跟踪 per-directory 访问计数（带 LRU 上限），用于冷启动分层
+	// 预热：Tier 1（hotDirs 中的目录）优先排产，Tier 2（scanRoots 根目录下
+	// 直接文件）次之，Tier 3（其他）跳过预热改为懒生成。5min + Shutdown
+	// 同步落盘到 hot_directories.json。
+	hotDirs *hotDirTracker
 
 	// durations.json 持久化缓存：避免视频缩略图 miss 时每次都 fork ffprobe。
 	// 也通过 VideoDuration 导出方法共享给 /api/v1/media/duration handler。
@@ -95,9 +107,13 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 		ffmpegPath: ffmpegPath,
 		memCache:   memCache,
 		hotTracker: hotTracker,
-		durCache:   make(map[string]durationEntry),
-		ctx:        ctx,
-		durCancel:  cancel,
+		// hotDirs 在 NewThumbnailService 中先于 loadDurationCache 初始化：
+		// 它会种子自 hot_directories.json，并启动 flushLoop。两者的 cacheDir
+		// 相同但写入不同文件，互不干扰。
+		hotDirs:   newHotDirTracker(cacheDir, 256),
+		durCache:  make(map[string]durationEntry),
+		ctx:       ctx,
+		durCancel: cancel,
 	}
 	s.loadDurationCache()
 	return s, nil
@@ -382,25 +398,41 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 	return s.generateThumbnailFromFile(sourcePath, cachePath)
 }
 
-// PreGenerateThumbnails 后台预热缩略图。
-// hotPaths 是用户最近可能访问的文件路径集合（来自 HotTracker().Keys()），
-// 会被排在队列前面优先处理。nil 等价于空 map（全部当作 cold）。
-// 已缓存的文件（disk cache 命中）会在入队阶段被跳过。
+// PreGenerateThumbnails 后台预热缩略图，采用 Round 32 Task 6 的分层策略：
+//   - Tier 1 (hotDirs 中的目录)：最高优先级，优先入队。
+//   - Tier 2 (scanRoots 根目录的直接文件)：浏览入口，其次入队。
+//   - Tier 3 (其他)：跳过预热，依赖懒生成（首次访问时 generateBytesVia 触发）。
 //
-// B1.2 相比原实现的改动：
-//  1. 加 hotPaths 参数：hot 优先 cold 排序
-//  2. 跳过已缓存从 worker 内部前移到入队阶段（减少 goroutine 调度 + 缩小 jobs channel buffer）
-//  3. numWorkers 从 NumCPU/2 降到 NumCPU/4，保留 CPU 给交互请求
-//  4. 每 5 个文件退让 100ms，让出 sem 给交互请求
+// hotDirs 是 hotDirs.Top(N) 返回的目录集合（来自 hotDirTracker，per-directory
+// 聚合）。scanRoots 是配置的扫描根列表（cfg.Scan.GetRoots()）；只有恰好位于
+// 某个根目录下的直接文件（filepath.Dir(f.Path) == filepath.Clean(root)）才算
+// Tier 2，深层路径仍走 Tier 3。
+//
+// 已缓存的文件（disk cache 命中）依然在入队阶段被跳过。
+//
+// 保留 B1.2 的 CPU 友好特性：
+//  1. numWorkers = NumCPU/4，保留 CPU 给交互请求
+//  2. 每 5 个文件退让 100ms，让出 sem 给交互请求
 func (s *ThumbnailService) PreGenerateThumbnails(
 	files []models.MediaFile,
 	ctx context.Context,
-	hotPaths map[string]struct{},
+	hotDirs map[string]struct{},
+	scanRoots []string,
 ) {
 	hasFFmpeg := s.HasFFmpeg()
 
-	// 入队阶段：过滤 MediaType + 跳过已缓存 + 拆分 hot/cold 两个队列
-	var hotQueue, coldQueue []models.MediaFile
+	// 预先把 scanRoots 归一化为 filepath.Clean 形式，避免每个文件都重复 Clean。
+	cleanRoots := make([]string, 0, len(scanRoots))
+	for _, r := range scanRoots {
+		if r == "" {
+			continue
+		}
+		cleanRoots = append(cleanRoots, filepath.Clean(r))
+	}
+
+	// 入队阶段：过滤 MediaType + 跳过已缓存 + 按 Tier 决定是否入队。
+	// Tier 3 不再追加到任何队列 —— 这是冷启动加速的核心。
+	var queue []models.MediaFile
 	for _, f := range files {
 		switch f.MediaType {
 		case "image":
@@ -423,15 +455,23 @@ func (s *ThumbnailService) PreGenerateThumbnails(
 			continue
 		}
 
-		if _, isHot := hotPaths[f.Path]; isHot {
-			hotQueue = append(hotQueue, f)
-		} else {
-			coldQueue = append(coldQueue, f)
+		dir := filepath.Dir(f.Path)
+		_, isHot := hotDirs[dir]
+		isTier2 := false
+		for _, root := range cleanRoots {
+			if dir == root {
+				isTier2 = true
+				break
+			}
+		}
+
+		// Tier 1 (hot) 与 Tier 2 (scanRoots 直接子文件) 入队；
+		// Tier 3 (其他) continue，留给懒生成。
+		if isHot || isTier2 {
+			queue = append(queue, f)
 		}
 	}
 
-	// hot 优先 cold 拼接成最终处理队列
-	queue := append(hotQueue, coldQueue...)
 	if len(queue) == 0 {
 		return
 	}
@@ -498,6 +538,10 @@ func (s *ThumbnailService) generateBytesVia(
 	// 仅 generateBytesVia 调用此处 → PreGen 走 GenerateThumbnail 不经过这里，
 	// 因此 pre-generation 不会污染 hot set。
 	s.hotTracker.Add(sourcePath, struct{}{})
+	// Round 32 Task 6: 同步记录所属目录到 hotDirs，驱动分层预热的 Tier 1。
+	// 同样只在交互路径调用，PreGen 自身的 GenerateThumbnail 不经过此处，
+	// 避免预生成把所有目录都标为 hot。
+	s.hotDirs.Record(filepath.Dir(sourcePath))
 
 	fi, err := os.Stat(sourcePath)
 	if err != nil {
@@ -668,8 +712,10 @@ func (s *ThumbnailService) persistDurationCache() {
 }
 
 // Shutdown 取消防抖协程并同步落盘。由 Server.Stop() 调用。
-// 幂等：多次调用安全（durCancel 可重入，persistDurationCache 自带 dirty 守卫）。
+// 幂等：多次调用安全（durCancel 可重入，persistDurationCache 自带 dirty 守卫，
+// hotDirs.Shutdown 也是幂等的）。
 func (s *ThumbnailService) Shutdown() {
+	s.hotDirs.Shutdown()
 	s.durCancel()
 	s.persistDurationCache()
 }
@@ -677,6 +723,23 @@ func (s *ThumbnailService) Shutdown() {
 // HotTracker 导出 hotTracker 给 server.go::OnScanComplete 读取热点 key 列表，
 // 供 PreGenerateThumbnails（B1.2）按热度排序后台预生成任务。
 // 只读访问（Keys/Len/Contains）；不导出字段本身，避免外部包误操作 LRU 内部状态。
+//
+// 注：Round 32 Task 6 起，PreGen 的主要优先级来源已切换到 HotDirs()（per-directory
+// 聚合）。HotTracker() 保留作为 per-file 维度的辅助查询，未被删除。
 func (s *ThumbnailService) HotTracker() *lru.Cache[string, struct{}] {
 	return s.hotTracker
+}
+
+// HotDirs 导出 hotDirs 的 Top-N 目录集合，供 server.go::OnScanComplete 作为
+// PreGenerateThumbnails 的 Tier 1 优先级来源。返回的 map 是 Top(N) 的快照副本，
+// caller 可安全持有或修改。
+func (s *ThumbnailService) HotDirs(n int) map[string]struct{} {
+	return s.hotDirs.Top(n)
+}
+
+// RecordHotAccess 是 hotDirs.Record 的导出包装，主要供测试在不依赖
+// generateBytesVia 的情况下直接注入访问记录。生产路径通过
+// GenerateThumbnailBytes / GenerateSystemThumbnailBytes 自动记录。
+func (s *ThumbnailService) RecordHotAccess(dirPath string) {
+	s.hotDirs.Record(dirPath)
 }
