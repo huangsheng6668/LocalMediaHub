@@ -200,7 +200,9 @@ func TestRegisterRoutesJsonCacheControl(t *testing.T) {
 }
 
 func TestPprofRoute_RegisteredUnderDebugPrefix(t *testing.T) {
-	// Verify the route is wired up. Auth coverage lives in
+	// Verify the route is wired up when Debug.Pprof=true. Round 32 S3 made
+	// pprof opt-in, so this test now flips the flag on. Default-off coverage
+	// lives in TestPprofDisabledByDefault. Auth coverage lives in
 	// middleware.PrivateNetOnly tests.
 	cacheDir := filepath.Join(t.TempDir(), "thumb")
 	cfg := &config.Config{
@@ -210,6 +212,7 @@ func TestPprofRoute_RegisteredUnderDebugPrefix(t *testing.T) {
 			CacheDir: cacheDir, MaxSize: 64, Format: "jpeg",
 		},
 	}
+	cfg.Debug.Pprof = true
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -494,5 +497,66 @@ func BenchmarkGzipMiddleware_JSON(b *testing.B) {
 		if rec.Code != http.StatusOK {
 			b.Fatalf("status = %d, want 200", rec.Code)
 		}
+	}
+}
+
+// TestPprofDisabledByDefault verifies that /debug/pprof/ returns 404 when
+// Debug.Pprof is false (the default). Round 32 S3: pprof routes are no longer
+// registered unconditionally — operator must opt in via config.debug.pprof=true
+// OR --debug-pprof flag.
+func TestPprofDisabledByDefault(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "thumb-cache")
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{t.TempDir()},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: cacheDir, MaxSize: 256, Format: "jpeg",
+		},
+	}
+	cfg.Debug.Pprof = false
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	rec := httptest.NewRecorder()
+	srv.Echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("got status %d, want 404", rec.Code)
+	}
+}
+
+// TestPprofEnabledViaConfig verifies that /debug/pprof/ returns 200 when
+// Debug.Pprof=true, gated by PrivateNetOnly (request comes from loopback).
+func TestPprofEnabledViaConfig(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "thumb-cache")
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{t.TempDir()},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: cacheDir, MaxSize: 256, Format: "jpeg",
+		},
+	}
+	cfg.Debug.Pprof = true
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	srv.Echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want 200", rec.Code)
 	}
 }

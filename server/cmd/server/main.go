@@ -15,6 +15,7 @@ import (
 var (
 	headless        bool
 	autoDetectRoots bool
+	debugPprof      bool
 )
 
 func main() {
@@ -22,11 +23,21 @@ func main() {
 	flag.BoolVar(&autoDetectRoots, "auto-detect-roots", false,
 		"Force-enable auto-detection of all drives as scan roots (one-shot override; "+
 			"also achievable via scan.auto_detect_roots in config.yaml)")
+	flag.BoolVar(&debugPprof, "debug-pprof", false,
+		"enable /debug/pprof/* routes (overrides config.debug.pprof)")
 	flag.Parse()
 
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
 		slog.Error("Failed to load config", "error", err); os.Exit(1)
+	}
+
+	// Round 32 S3: --debug-pprof flag overrides config.debug.pprof. The flag
+	// is OR-ed into the config field so server.New sees a single source of
+	// truth. Without this, /debug/pprof/* routes are not registered at all
+	// (defense-in-depth: off by default, opt-in only).
+	if debugPprof {
+		cfg.Debug.Pprof = true
 	}
 
 	// Phase 3: validate config after Load, incorporating CLI override flags.

@@ -143,10 +143,15 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// endpoints). See allowedCORSOrigins for details.
 	s.Echo.Use(middleware.CORS(allowedCORSOrigins(s.Config.Server.Port)))
 
-	// pprof endpoints for live profiling. Restricted to private/loopback
-	// IPs to avoid leaking heap/goroutine data on accidental public exposure.
-	pprofGroup := s.Echo.Group("/debug/pprof", middleware.PrivateNetOnly())
-	pprofGroup.Any("/*", echo.WrapHandler(http.DefaultServeMux))
+	// pprof endpoints for live profiling. Round 32 S3: routes are OFF by
+	// default and only registered when the operator explicitly opts in via
+	// config.debug.pprof=true OR the --debug-pprof CLI flag (flag wins).
+	// PrivateNetOnly is retained as defense-in-depth so even when enabled,
+	// heap/goroutine data is only reachable from private/loopback IPs.
+	if s.Config.Debug.Pprof {
+		pprofGroup := s.Echo.Group("/debug/pprof", middleware.PrivateNetOnly())
+		pprofGroup.Any("/*", echo.WrapHandler(http.DefaultServeMux))
+	}
 
 	// Static Web UI Assets
 	s.Echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(web.Assets))))

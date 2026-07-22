@@ -53,3 +53,11 @@ system:
   enable_delete: true
   allowed_roots: []
     # - "D:/Media"
+
+# Debug features. All off by default; opt in explicitly only when needed.
+# Round 32 S3: pprof was previously registered unconditionally — now requires
+# debug.pprof=true here OR the --debug-pprof CLI flag (flag overrides config).
+# Even when enabled, /debug/pprof/* is gated by the PrivateNetOnly middleware
+# (loopback / RFC1918 LAN IPs only) as defense-in-depth.
+debug:
+  pprof: false

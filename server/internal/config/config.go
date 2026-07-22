@@ -18,6 +18,16 @@ type Config struct {
 	Scan      ScanConfig      `yaml:"scan" json:"scan"`
 	Thumbnail ThumbnailConfig `yaml:"thumbnail" json:"thumbnail"`
 	System    SystemConfig    `yaml:"system,omitempty" json:"system,omitempty"`
+	Debug     DebugConfig     `yaml:"debug,omitempty" json:"debug,omitempty"`
+}
+
+// DebugConfig holds optional debug-only features. All fields default to off and
+// must be explicitly enabled by the operator (config.debug.* in config.yaml or
+// the matching --debug-* CLI flag). Round 32 S3 introduced Pprof to gate the
+// /debug/pprof/* routes — they were previously registered unconditionally,
+// exposing heap/goroutine data to any LAN host that passed PrivateNetOnly.
+type DebugConfig struct {
+	Pprof bool `yaml:"pprof,omitempty" json:"pprof,omitempty"`
 }
 
 type ServerConfig struct {
