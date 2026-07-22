@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"net/http"
 	"strings"
@@ -10,8 +11,8 @@ import (
 
 // BearerToken returns an Echo middleware that gates requests on an
 // `Authorization: Bearer <token>` header. Comparison uses
-// `crypto/subtle.ConstantTimeCompare` to prevent timing attacks that could
-// otherwise leak the configured token byte-by-byte.
+// `crypto/subtle.ConstantTimeCompare` over SHA-256 hashes to prevent
+// timing attacks and length leakage.
 //
 // When `token` is empty, the middleware is a no-op (passthrough). This keeps
 // existing deployments working until the operator explicitly sets a token.
@@ -34,7 +35,9 @@ func BearerToken(token string) echo.MiddlewareFunc {
 				// existing client.
 				provided = c.QueryParam("token")
 			}
-			if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+			providedHash := sha256.Sum256([]byte(provided))
+			tokenHash := sha256.Sum256([]byte(token))
+			if subtle.ConstantTimeCompare(providedHash[:], tokenHash[:]) != 1 {
 				return c.JSON(
 					http.StatusUnauthorized,
 					map[string]string{"error": "Unauthorized"},

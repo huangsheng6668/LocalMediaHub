@@ -31,7 +31,7 @@ func SecurityHeaders() echo.MiddlewareFunc {
 				"default-src 'self'; "+
 					"script-src 'self'; "+
 					"style-src 'self' 'unsafe-inline'; "+
-					"img-src 'self'; "+
+					"img-src 'self' data:; "+
 					"media-src 'self'; "+
 					"connect-src 'self'")
 			return next(c)
