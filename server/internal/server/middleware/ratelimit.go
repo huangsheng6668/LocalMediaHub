@@ -33,21 +33,31 @@ func RateLimit(max int, window time.Duration) echo.MiddlewareFunc {
 }
 
 // RateLimitWithConfig is like RateLimit but allows the caller to configure the
-// maximum number of tracked client IP buckets. When the cap is reached, the
-// bucket with the oldest lastSeen timestamp is evicted before inserting a new
-// entry. If maxBuckets < 1 it is clamped to 1.
+// maximum number of tracked client IP buckets. When the cap is reached, a
+// deterministic eviction policy picks the victim bucket:
+//  1. Expired buckets (window elapsed) are preferred victims — they are useless.
+//  2. Among buckets with the same expiry status, the one with the oldest
+//     lastSeen is evicted.
+//  3. When lastSeen also ties (common under sub-millisecond clustering or
+//     concurrent access), a monotonically increasing insertion counter (`seq`)
+//     breaks the tie so eviction is stable regardless of Go's randomized map
+//     iteration order.
+//
+// If maxBuckets < 1 it is clamped to 1.
 func RateLimitWithConfig(max int, window time.Duration, maxBuckets int) echo.MiddlewareFunc {
 	if maxBuckets < 1 {
 		maxBuckets = 1
 	}
 	type bucket struct {
-		count   int
-		resetAt time.Time
+		count    int
+		resetAt  time.Time
 		lastSeen time.Time
+		seq      uint64
 	}
 	var (
 		mu      sync.Mutex
 		buckets = make(map[string]*bucket)
+		nextSeq uint64
 	)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -67,20 +77,41 @@ func RateLimitWithConfig(max int, window time.Duration, maxBuckets int) echo.Mid
 			}
 			// Need to insert a new (or reset) bucket. Enforce capacity first.
 			if _, exists := buckets[ip]; !exists && len(buckets) >= maxBuckets {
-				// Evict the least-recently-used bucket (oldest lastSeen).
-				var oldestKey string
-				var oldestSeen time.Time
+				// Deterministic eviction:
+				//   1) prefer expired buckets;
+				//   2) among same expiry status, oldest lastSeen;
+				//   3) on lastSeen tie, oldest seq (insertion order).
+				var (
+					evictKey   string
+					evictReset time.Time
+					evictSeen  time.Time
+					evictSeq   uint64
+				)
 				first := true
 				for k, b := range buckets {
-					if first || b.lastSeen.Before(oldestSeen) {
-						oldestKey = k
-						oldestSeen = b.lastSeen
+					if first {
+						evictKey, evictReset, evictSeen, evictSeq = k, b.resetAt, b.lastSeen, b.seq
 						first = false
+						continue
+					}
+					curExpired := now.After(evictReset)
+					candExpired := now.After(b.resetAt)
+					switch {
+					case candExpired && !curExpired:
+						// Candidate is expired, current pick is not — candidate wins.
+						evictKey, evictReset, evictSeen, evictSeq = k, b.resetAt, b.lastSeen, b.seq
+					case !candExpired && curExpired:
+						// Current pick is expired, candidate is not — keep current.
+					case b.lastSeen.Before(evictSeen):
+						evictKey, evictReset, evictSeen, evictSeq = k, b.resetAt, b.lastSeen, b.seq
+					case b.lastSeen.Equal(evictSeen) && b.seq < evictSeq:
+						evictKey, evictReset, evictSeen, evictSeq = k, b.resetAt, b.lastSeen, b.seq
 					}
 				}
-				delete(buckets, oldestKey)
+				delete(buckets, evictKey)
 			}
-			buckets[ip] = &bucket{count: 1, resetAt: now.Add(window), lastSeen: now}
+			nextSeq++
+			buckets[ip] = &bucket{count: 1, resetAt: now.Add(window), lastSeen: now, seq: nextSeq}
 			mu.Unlock()
 			return next(c)
 		}
