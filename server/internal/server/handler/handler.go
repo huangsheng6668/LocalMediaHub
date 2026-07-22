@@ -18,19 +18,24 @@ import (
 // actual BookService and Task 8 wires it into the /api/v1/books/* endpoints.
 // Until then no code path dereferences h.books, keeping the build green even
 // though every current caller passes nil.
+//
+// bookSigner (added in Round 32 Task 5) signs rewritten <img> src URLs so the
+// /books/image endpoint can authenticate without inlining the Bearer token
+// in the URL. May be nil in tests that do not exercise the signing path.
 type Handler struct {
-	cfg       *config.Config
-	scanner   *service.Scanner
-	tags      *service.TagsService
-	streaming *service.StreamingService
-	thumbnail *service.ThumbnailService
-	books     *service.BookService
+	cfg        *config.Config
+	scanner    *service.Scanner
+	tags       *service.TagsService
+	streaming  *service.StreamingService
+	thumbnail  *service.ThumbnailService
+	books      *service.BookService
+	bookSigner *service.BookSigner
 }
 
 // New creates a Handler with all required service dependencies.
 //
-// The books parameter is the 6th and last argument; production wiring lands in
-// Task 8. Until then all callers (production server.go + every test) pass nil.
+// bookSigner is the 7th and last argument; production wiring lives in
+// server.New. Tests that don't exercise the signed-image path may pass nil.
 func New(
 	cfg *config.Config,
 	scanner *service.Scanner,
@@ -38,14 +43,16 @@ func New(
 	streaming *service.StreamingService,
 	thumbnail *service.ThumbnailService,
 	books *service.BookService,
+	bookSigner *service.BookSigner,
 ) *Handler {
 	return &Handler{
-		cfg:       cfg,
-		scanner:   scanner,
-		tags:      tags,
-		streaming: streaming,
-		thumbnail: thumbnail,
-		books:     books,
+		cfg:        cfg,
+		scanner:    scanner,
+		tags:       tags,
+		streaming:  streaming,
+		thumbnail:  thumbnail,
+		books:      books,
+		bookSigner: bookSigner,
 	}
 }
 

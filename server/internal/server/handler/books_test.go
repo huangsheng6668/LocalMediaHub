@@ -28,7 +28,7 @@ func newBooksHandler(t *testing.T) (*Handler, string) {
 	cfg.Scan.Roots = []string{dir}
 	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
 	books := service.NewBookService()
-	h := New(cfg, scanner, nil, nil, nil, books)
+	h := New(cfg, scanner, nil, nil, nil, books, nil)
 	return h, dir
 }
 

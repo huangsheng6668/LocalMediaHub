@@ -13,6 +13,7 @@ package service
 
 import (
 	"archive/zip"
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -29,14 +30,24 @@ import (
 // BookService parses books and caches the result keyed by (path, mtime).
 // The zero value is not usable — construct via NewBookService.
 type BookService struct {
-	mu    sync.RWMutex
-	cache map[string]*bookparser.Book
-	sf    singleflight.Group
+	mu     sync.RWMutex
+	cache  map[string]*bookparser.Book
+	sf     singleflight.Group
+	signer *BookSigner
 }
 
 // NewBookService returns a BookService ready to serve GetBook calls.
 func NewBookService() *BookService {
 	return &BookService{cache: make(map[string]*bookparser.Book)}
+}
+
+// SetSigner injects the per-process BookSigner used to sign rewritten
+// <img> src URLs. When nil (open mode, no token configured) GetChapterBlocks
+// produces the legacy unsigned URL and the /books/image endpoint falls back
+// to the deprecated ?token= query parameter. Production wiring lives in
+// server.New; tests that don't care about signing can leave it unset.
+func (s *BookService) SetSigner(signer *BookSigner) {
+	s.signer = signer
 }
 
 // GetBook returns the parsed *Book for path. On a cache hit (same path AND
@@ -86,9 +97,19 @@ func (s *BookService) GetBook(path string) (*bookparser.Book, error) {
 // unchanged. If no manifest entry matches the Src, the Src is set to "" so
 // clients can render a placeholder (e.g. "[本图片无法显示]").
 //
-// The returned slice is a fresh copy; callers may mutate it. The underlying
-// *Book remains shared and must not be mutated.
-func (s *BookService) GetChapterBlocks(path string, idx int) ([]bookparser.Block, error) {
+// When a BookSigner has been injected via SetSigner (production), the
+// rewritten URL also carries &sig=<hmac> bound to (clientIP, path,
+// manifestID); the /books/image endpoint verifies this signature instead of
+// reading the Bearer token from the query string. When the signer is nil
+// (open mode), the legacy unsigned URL is produced and the endpoint falls
+// back to the deprecated ?token= query parameter.
+//
+// ctx is accepted for future cancellation propagation (GetBook + the parser
+// are currently synchronous); clientIP is the requester's IP used for HMAC
+// binding. The returned slice is a fresh copy; callers may mutate it. The
+// underlying *Book remains shared and must not be mutated.
+func (s *BookService) GetChapterBlocks(ctx context.Context, path string, idx int, clientIP string) ([]bookparser.Block, error) {
+	_ = ctx // reserved for future cancellation; GetBook/ChapterBlocks are synchronous today
 	b, err := s.GetBook(path)
 	if err != nil {
 		return nil, err
@@ -118,8 +139,13 @@ func (s *BookService) GetChapterBlocks(path string, idx int) ([]bookparser.Block
 			out[i].Src = ""
 			continue
 		}
-		out[i].Src = fmt.Sprintf("/api/v1/books/image?path=%s&manifest=%s",
+		base := fmt.Sprintf("/api/v1/books/image?path=%s&manifest=%s",
 			url.QueryEscape(path), url.QueryEscape(manifestID))
+		if s.signer != nil {
+			sig := s.signer.SignImage(clientIP, path, manifestID)
+			base += "&sig=" + sig
+		}
+		out[i].Src = base
 	}
 	return out, nil
 }

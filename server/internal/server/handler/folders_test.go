@@ -30,7 +30,7 @@ func TestGetFoldersReturnsNavigableRootPaths(t *testing.T) {
 		},
 	}
 
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders", nil)
 	rec := httptest.NewRecorder()
@@ -65,7 +65,7 @@ func TestGetFoldersUsesDriveLabelForWindowsRoots(t *testing.T) {
 		},
 	}
 
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders", nil)
 	rec := httptest.NewRecorder()
@@ -105,7 +105,7 @@ func TestBrowseFolderReturnsAbsoluteNavigablePaths(t *testing.T) {
 		},
 	}
 
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders/"+filepath.ToSlash(root)+"/browse", nil)
 	rec := httptest.NewRecorder()
@@ -152,7 +152,7 @@ func TestBrowseFolderRouteStripsBrowseSuffix(t *testing.T) {
 		},
 	}
 
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
 	e := echo.New()
 	e.GET("/api/v1/folders/*", h.BrowseFolder)
 
@@ -179,7 +179,7 @@ func TestBrowseFolderSerializesEmptyFilesAsArray(t *testing.T) {
 		},
 	}
 
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
 	e := echo.New()
 	e.GET("/api/v1/folders/*", h.BrowseFolder)
 
@@ -210,7 +210,7 @@ func TestBrowseFolderRouteDecodesEncodedUnicodePath(t *testing.T) {
 		},
 	}
 
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
 	e := echo.New()
 	e.GET("/api/v1/folders/*", h.BrowseFolder)
 
@@ -263,7 +263,7 @@ func TestBrowseFolder_Files_OnlyDirectChildren(t *testing.T) {
 		},
 	}
 
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
 	e := echo.New()
 	e.GET("/api/v1/folders/*", h.BrowseFolder)
 
@@ -320,7 +320,7 @@ func TestBrowseFolder_Files_SortedByName(t *testing.T) {
 		},
 	}
 
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
 	e := echo.New()
 	e.GET("/api/v1/folders/*", h.BrowseFolder)
 

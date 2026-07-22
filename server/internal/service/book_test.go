@@ -133,7 +133,7 @@ func buildEpubWithImage(t *testing.T, imgSrc, imgManifestID, imgManifestHref str
 func TestGetChapterBlocksRewritesImageSrc(t *testing.T) {
 	p := buildEpubWithImage(t, "images/foo.jpg", "img-foo", "images/foo.jpg")
 	svc := NewBookService()
-	blocks, err := svc.GetChapterBlocks(p, 0)
+	blocks, err := svc.GetChapterBlocks(t.Context(), p, 0, "127.0.0.1")
 	require.NoError(t, err)
 
 	var imgBlock *bookparser.Block
@@ -158,7 +158,7 @@ func TestGetChapterBlocksPreservesDataUri(t *testing.T) {
 	// skip rewriting for data: URIs rather than blanking them.
 	p := buildEpubWithImage(t, dataURI, "img-foo", "images/foo.jpg")
 	svc := NewBookService()
-	blocks, err := svc.GetChapterBlocks(p, 0)
+	blocks, err := svc.GetChapterBlocks(t.Context(), p, 0, "127.0.0.1")
 	require.NoError(t, err)
 	for _, b := range blocks {
 		if b.Type == "image" {
@@ -175,7 +175,7 @@ func TestGetChapterBlocksPreservesDataUri(t *testing.T) {
 func TestGetChapterBlocksBlanksOnNoManifestMatch(t *testing.T) {
 	p := buildEpubWithImage(t, "images/missing.jpg", "img-foo", "images/foo.jpg")
 	svc := NewBookService()
-	blocks, err := svc.GetChapterBlocks(p, 0)
+	blocks, err := svc.GetChapterBlocks(t.Context(), p, 0, "127.0.0.1")
 	require.NoError(t, err)
 	for _, b := range blocks {
 		if b.Type == "image" {

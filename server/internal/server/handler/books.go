@@ -2,7 +2,9 @@ package handler
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/labstack/echo/v4"
@@ -85,7 +87,7 @@ func (h *Handler) GetBookChapter(c echo.Context) error {
 	if idx >= len(b.Chapters) {
 		return respondError(c, http.StatusBadRequest, "index out of range")
 	}
-	blocks, err := h.books.GetChapterBlocks(resolved, idx)
+	blocks, err := h.books.GetChapterBlocks(c.Request().Context(), resolved, idx, c.RealIP())
 	if err != nil {
 		return mapBookError(c, err)
 	}
@@ -102,6 +104,15 @@ func (h *Handler) GetBookChapter(c echo.Context) error {
 // extension). Bytes are served with a 1-day browser cache via
 // setMediaCacheHeaders. Used by reader clients rendering <img> tags whose
 // Src was rewritten to /api/v1/books/image by BookService.GetChapterBlocks.
+//
+// Authentication (Round 32 Task 5): the preferred path is a ?sig= query
+// parameter — an HMAC-SHA256 of (clientIP, path, manifestID) computed by
+// BookSigner.SignImage, bound to this process's per-boot secret. The
+// deprecated ?token=<bearer> query fallback remains for any client that has
+// not yet migrated; hitting that path emits a slog.Warning so the operator
+// can track migration. When the handler's bookSigner is nil (tests / open
+// mode), neither check runs and the endpoint is gated solely by the
+// BearerToken middleware wrapping the /books group.
 func (h *Handler) GetBookImage(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
@@ -121,6 +132,26 @@ func (h *Handler) GetBookImage(c echo.Context) error {
 	if err != nil {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
+	// Signature gate. The ?sig= path is preferred because it does not leak
+	// the bearer token into logs/history/referer. The ?token= path is the
+	// pre-Round-32 fallback kept for migration; it is logged so operators
+	// can see when all clients have moved over.
+	if h.bookSigner != nil {
+		sig := c.QueryParam("sig")
+		switch {
+		case sig != "":
+			if !h.bookSigner.VerifyImage(c.RealIP(), resolved, manifestID, sig) {
+				return respondError(c, http.StatusUnauthorized, "invalid signature")
+			}
+		case c.QueryParam("token") != "":
+			slog.Warn("[DEPRECATED] /books/image called with ?token=",
+				"path", resolved,
+				"manifest", manifestID,
+			)
+		default:
+			return respondError(c, http.StatusUnauthorized, "signature required")
+		}
+	}
 	if h.books == nil {
 		return respondInternalError(c, errors.New("book service unavailable"))
 	}
@@ -130,6 +161,44 @@ func (h *Handler) GetBookImage(c echo.Context) error {
 	}
 	setMediaCacheHeaders(c)
 	return c.Blob(http.StatusOK, contentType, data)
+}
+
+// SignImage handles GET /api/v1/books/sign-image?path=...&manifest=... and
+// returns {"src": "<signed url>"} for the given image resource. The signed
+// URL embeds an HMAC bound to the requester's clientIP and is consumable by
+// <img> tags that cannot set Authorization headers. Authenticated via the
+// BearerToken middleware wrapping the /books group (header or ?token=
+// fallback), so the signer itself never appears on the unauthenticated path.
+//
+// When the handler's bookSigner is nil (tests / open mode), the endpoint
+// returns the unsigned URL — mirroring GetChapterBlocks' behaviour when no
+// signer is wired.
+func (h *Handler) SignImage(c echo.Context) error {
+	pathStr := c.QueryParam("path")
+	if pathStr == "" {
+		return respondError(c, http.StatusBadRequest, "path required")
+	}
+	manifestID := c.QueryParam("manifest")
+	if manifestID == "" {
+		return respondError(c, http.StatusBadRequest, "manifest required")
+	}
+	allowedExts := append([]string{}, h.cfg.Scan.TextExtensions...)
+	resolved, err := service.ValidateAccessibleMediaPath(
+		pathStr,
+		h.cfg.Scan.GetRoots(),
+		h.cfg.GetSystemAllowedRoots(),
+		allowedExts,
+	)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
+	}
+	src := "/api/v1/books/image?path=" + url.QueryEscape(resolved) + "&manifest=" + url.QueryEscape(manifestID)
+	if h.bookSigner != nil {
+		sig := h.bookSigner.SignImage(c.RealIP(), resolved, manifestID)
+		src += "&sig=" + sig
+	}
+	setJsonCacheBrief(c)
+	return c.JSON(http.StatusOK, map[string]string{"src": src})
 }
 
 // mapBookError translates bookparser error sentinels to HTTP status codes.

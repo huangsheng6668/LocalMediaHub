@@ -58,6 +58,15 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create thumbnail service: %w", err)
 	}
 	bookService := service.NewBookService()
+	// Round 32 Task 5: per-process HMAC secret for signing book image URLs.
+	// A fresh secret is generated on every startup, so all outstanding
+	// signed URLs become invalid the moment the server restarts. Failure to
+	// read 32 bytes from crypto/rand is fatal — surface it to the caller.
+	bookSigner, err := service.NewBookSigner()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create book signer: %w", err)
+	}
+	bookService.SetSigner(bookSigner)
 
 	s := &Server{
 		Echo:      e,
@@ -89,7 +98,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	// books: BookService wired in Task 8 — drives /api/v1/books/info|chapter.
-	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, bookService)
+	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, bookService, bookSigner)
 
 	s.registerRoutes(h)
 
@@ -111,6 +120,29 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// to a 500 instead of crashing the whole process.
 	s.Echo.Use(echoMw.Recover())
 	s.Echo.Use(echoMw.Logger())
+	// Round 32 Task 5 (S2): redact ?token= from access log.
+	// CRITICAL: registered AFTER echoMw.Logger() above. Echo middleware
+	// executes in LIFO order on the request side, so a middleware registered
+	// later runs FIRST. By registering this after Logger, our redact func
+	// sees the request BEFORE Logger does — letting us overwrite RawQuery so
+	// the log line shows token=REDACTED instead of the bearer value.
+	// _ = c.QueryParams() forces Echo to parse and cache the query params
+	// into its internal context BEFORE we mutate RawQuery; downstream code
+	// (notably middleware.BearerToken's c.QueryParam("token") fallback)
+	// continues to see the original value via that cached map.
+	// Redact ?token= from access log while caching query params for AuthMw
+	s.Echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			_ = c.QueryParams() // 触发 QueryParams() 解析并缓存到 context
+			req := c.Request()
+			q := req.URL.Query()
+			if q.Get("token") != "" {
+				q.Set("token", "REDACTED")
+				req.URL.RawQuery = q.Encode()
+			}
+			return next(c)
+		}
+	})
 	// B3: gzip JSON responses to reduce LAN transfer time (a 500-item folder
 	// listing is ~500KB raw → ~80KB compressed, a ~6x wire reduction).
 	// Skip binary endpoints (video/image/zip are already compressed, so gzip
@@ -230,6 +262,10 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	books.GET("/info", h.GetBookInfo)
 	books.GET("/chapter", h.GetBookChapter)
 	books.GET("/image", h.GetBookImage)
+	// Round 32 Task 5: returns a signed <img src> URL bound to (clientIP,
+	// path, manifestID). Authenticated via authMw — the endpoint itself
+	// never returns a usable URL to an unauthenticated caller.
+	books.GET("/sign-image", h.SignImage)
 
 	// Admin page
 }

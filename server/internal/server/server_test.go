@@ -71,6 +71,7 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 		service.NewStreamingService(""),
 		thumbnailService,
 		nil,
+		nil,
 	)
 	s.registerRoutes(h)
 
