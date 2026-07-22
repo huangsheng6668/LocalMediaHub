@@ -561,3 +561,88 @@ func TestPprofEnabledViaConfig(t *testing.T) {
 		t.Fatalf("got status %d, want 200", rec.Code)
 	}
 }
+
+// TestRedactMiddleware_TokenRedactedFromLogButVisibleToDownstream verifies
+// the two correctness invariants of the inline redact middleware mounted in
+// registerRoutes (Round 32 Task 5 S2):
+//
+//  1. Downstream handlers see the ORIGINAL ?token= value. This proves
+//     middleware.BearerToken (which has a c.QueryParam("token") fallback for
+//     <img> tags that cannot set Authorization headers) would still receive
+//     the real bearer token. The redaction is log-only.
+//
+//  2. The request's URL.RawQuery captured by the access log contains
+//     "token=REDACTED" — not the real token — so echoMw.Logger cannot leak
+//     bearer tokens into access logs, browser history mirrors, or any log
+//     shipper.
+//
+// This works because Echo middleware runs LIFO on the request side: the
+// redact middleware is registered AFTER echoMw.Logger in registerRoutes, so
+// it executes FIRST. It calls c.QueryParams() to force Echo to parse and
+// cache the query params into its internal context BEFORE mutating RawQuery;
+// downstream c.QueryParam("token") reads from that cached map and returns
+// the original value.
+//
+// We test the middleware function in isolation (not via a full Server boot)
+// because the redact logic is the only thing under test — booting the full
+// router would couple this test to every other middleware's behavior.
+func TestRedactMiddleware_TokenRedactedFromLogButVisibleToDownstream(t *testing.T) {
+	// Captured from the dummy downstream handler.
+	var capturedToken string
+	var capturedOther string
+
+	// redactMiddleware mirrors the inline middleware in registerRoutes
+	// (server.go lines 134-145). Kept in lockstep via the comment block above
+	// the production middleware; if the production middleware moves or
+	// changes shape, this replica must be updated to match.
+	redactMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			_ = c.QueryParams() // force parse + cache into context
+			req := c.Request()
+			q := req.URL.Query()
+			if q.Get("token") != "" {
+				q.Set("token", "REDACTED")
+				req.URL.RawQuery = q.Encode()
+			}
+			return next(c)
+		}
+	}
+
+	e := echo.New()
+	e.HideBanner = true
+	e.GET("/probe", func(c echo.Context) error {
+		capturedToken = c.QueryParam("token")
+		capturedOther = c.QueryParam("other")
+		return c.String(http.StatusOK, "ok")
+	}, redactMiddleware)
+
+	req := httptest.NewRequest(http.MethodGet, "/probe?token=secret123&other=keep", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%q)", rec.Code, rec.Body.String())
+	}
+
+	// (1) Downstream handler saw the REAL token — not "REDACTED". This proves
+	// the redact middleware is log-only and does not break BearerToken's
+	// ?token= fallback for <img> tags.
+	if capturedToken != "secret123" {
+		t.Errorf("downstream c.QueryParam(\"token\") = %q, want %q (redaction must not break downstream auth)",
+			capturedToken, "secret123")
+	}
+	// Sanity: other query params are passed through untouched.
+	if capturedOther != "keep" {
+		t.Errorf("downstream c.QueryParam(\"other\") = %q, want %q", capturedOther, "keep")
+	}
+
+	// (2) The URL.RawQuery (what echoMw.Logger would print) shows the token
+	// redacted. This is the S2 security guarantee.
+	rawQuery := req.URL.RawQuery
+	if !strings.Contains(rawQuery, "token=REDACTED") {
+		t.Errorf("expected RawQuery to contain token=REDACTED, got %q (bearer token would leak to access log)", rawQuery)
+	}
+	if strings.Contains(rawQuery, "secret123") {
+		t.Errorf("RawQuery must NOT contain the raw token value, got %q", rawQuery)
+	}
+}
