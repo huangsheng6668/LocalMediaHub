@@ -49,7 +49,7 @@ func NewTagsService(dataDir string) (*TagsService, error) {
 	// Round 32 P2: WAL 允许并发读 + 串行写，开多连接让读不互相阻塞。
 	// MaxOpenConns = max(4, NumCPU) 覆盖 LAN 多客户端并发读场景。
 	// 写仍由 SQLite 的 WAL 写锁串行（同时只允许一个写事务），无需 Go 层级锁。
-	db.SetMaxOpenConns(maxInt(4, runtime.NumCPU()))
+	db.SetMaxOpenConns(max(4, runtime.NumCPU()))
 	db.SetMaxIdleConns(2)
 	db.SetConnMaxLifetime(0)
 
@@ -407,13 +407,4 @@ func (s *TagsService) CleanDeletedPath(path string) error {
 
 	_, err := s.db.Exec("DELETE FROM associations WHERE file_path = ? OR file_path LIKE ?", normPath, prefix)
 	return err
-}
-
-// maxInt returns the larger of a or b. Used to size the SQLite connection pool
-// based on available CPUs while keeping a sane floor for low-core devices.
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
