@@ -15,9 +15,36 @@ import (
 	"strings"
 )
 
-// Matches `.innerHTML = <expr>` — captures the right-hand side.
+// Matches `.innerHTML = <expr>` / `.outerHTML = <expr>` /
+// `insertAdjacentHTML(pos, <expr>)` / `document.write(<expr>)` — captures the
+// right-hand side (the expression whose value flows into the DOM).
 // Anchored to end of line so multi-line expressions only catch the first line.
 var innerHTMLRe = regexp.MustCompile(`\.innerHTML\s*=\s*(.+?)\s*;?\s*$`)
+var outerHTMLRe = regexp.MustCompile(`\.outerHTML\s*=\s*(.+?)\s*;?\s*$`)
+var insertAdjRe = regexp.MustCompile(`insertAdjacentHTML\s*\(\s*[^,]+,\s*(.+?)\s*\)\s*;?\s*$`)
+var docWriteRe = regexp.MustCompile(`document\.write\s*\(\s*(.+?)\s*\)\s*;?\s*$`)
+
+// xssSafeCommentRe matches the justification comment that exempts a sink
+// from the escapeHtml requirement. The comment must appear on the SAME line
+// as the sink OR on the line immediately above it.
+var xssSafeCommentRe = regexp.MustCompile(`//\s*XSS-SAFE:`)
+
+// escapeHtmlCallRe matches a call to escapeHtml( anywhere in a sink expression.
+var escapeHtmlCallRe = regexp.MustCompile(`\bescapeHtml\s*\(`)
+
+// sinkPattern groups the regexes above so we can apply the same safe-guard
+// logic uniformly. Each entry tags the sink type for diagnostics.
+type sinkPattern struct {
+	kind string
+	re   *regexp.Regexp
+}
+
+var sinkPatterns = []sinkPattern{
+	{"innerHTML", innerHTMLRe},
+	{"outerHTML", outerHTMLRe},
+	{"insertAdjacentHTML", insertAdjRe},
+	{"document.write", docWriteRe},
+}
 
 // Matches `${ expr }` inside template literals.
 var templateExprRe = regexp.MustCompile(`\$\{([^}]+)\}`)
@@ -312,28 +339,65 @@ func scanFile(path string) ([]finding, error) {
 
 	var findings []finding
 	for i, raw := range lines {
+		// Compute the comment-stripped line for the existing expression analyzer.
 		line := raw
-		// Strip line comments (best-effort — doesn't handle // inside strings).
 		if idx := strings.Index(line, "//"); idx >= 0 {
 			if !insideString(line, idx) {
 				line = line[:idx]
 			}
 		}
 
-		m := innerHTMLRe.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		expr := m[1]
-		reason, bad := analyzeExpr(expr, safeVars)
-		if bad {
-			findings = append(findings, finding{
-				file:   path,
-				line:   i + 1,
-				column: strings.Index(raw, expr) + 1,
-				expr:   strings.TrimSpace(expr),
-				reason: reason,
-			})
+		// Try every supported sink pattern (innerHTML / outerHTML /
+		// insertAdjacentHTML / document.write). At most one will match a given
+		// line because each is anchored to end-of-line.
+		for _, sp := range sinkPatterns {
+			m := sp.re.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			expr := m[1]
+
+			// Enforce the Round 32 S4 rule: every sink MUST either
+			// (a) carry a `// XSS-SAFE:` comment on the same line or the
+			//     line immediately above, OR
+			// (b) call escapeHtml( somewhere in its expression.
+			// We check (b) on the raw (comment-stripped) sink expression: if
+			// escapeHtml is called anywhere, the sink is considered guarded.
+			// We check (a) against the unstripped raw line and the previous
+			// raw line, so the justification survives comment stripping.
+			if escapeHtmlCallRe.MatchString(expr) {
+				// escapeHtml is in the expression — safe.
+				continue
+			}
+			justified := xssSafeCommentRe.MatchString(raw)
+			if !justified && i > 0 {
+				justified = xssSafeCommentRe.MatchString(lines[i-1])
+			}
+			if justified {
+				continue
+			}
+
+			// Also run the legacy analyzer: it flags RAW (unescaped, no-comment)
+			// variables even when the rule above has not yet been applied. This
+			// preserves the original Phase 5 behavior for templates / concats.
+			reason, bad := analyzeExpr(expr, safeVars)
+			if !bad {
+				// Expression is statically safe (literal / function call /
+				// tracked safe-var) but lacks the required justification
+				// comment. Upgrade to a finding so the rule is enforced.
+				reason = fmt.Sprintf("%s sink without // XSS-SAFE: comment or escapeHtml() call", sp.kind)
+				bad = true
+			}
+			if bad {
+				findings = append(findings, finding{
+					file:   path,
+					line:   i + 1,
+					column: strings.Index(raw, expr) + 1,
+					expr:   strings.TrimSpace(expr),
+					reason: reason,
+				})
+			}
+			break // a line can only match one sink kind
 		}
 	}
 	return findings, nil

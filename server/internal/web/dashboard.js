@@ -64,9 +64,10 @@ export async function renderDashboard() {
 
             if (items.length === 0) {
                 elements.dashboardRecent.classList.add('empty-state');
-                elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>';
+                elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>'; // XSS-SAFE: hardcoded literal
             } else {
                 elements.dashboardRecent.classList.remove('empty-state');
+                // XSS-SAFE: map callback returns a template whose only dynamic field (file.name) is wrapped in escapeHtml()
                 elements.dashboardRecent.innerHTML = items.map((file, index) => {
                     return `
                         <div class="info-item" style="cursor:pointer;" data-action="open-video" data-index="${index}">
@@ -77,10 +78,10 @@ export async function renderDashboard() {
                 }).join('');
             }
         } catch (err) {
-            elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>';
+            elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>'; // XSS-SAFE: hardcoded literal
         }
     } catch (e) {
-        elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>';
+        elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>'; // XSS-SAFE: hardcoded literal
     }
 }
 

@@ -23,10 +23,11 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     if (typeof container._cleanupReader === 'function') container._cleanupReader();
 
     if (!path) {
-        container.innerHTML = '<div class="text-reader__error">缺少 path 参数</div>';
+        container.innerHTML = '<div class="text-reader__error">缺少 path 参数</div>'; // XSS-SAFE: hardcoded literal
         return;
     }
 
+    // XSS-SAFE: pure-literal template (loading skeleton); book content rendered later via textContent / DOM API
     container.innerHTML = `
         <div class="text-reader">
             <div class="text-reader__progress-bar"></div>
@@ -183,6 +184,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     // 1. Build settings dialog (HTML5 <dialog>), append into container.
     const dialog = document.createElement('dialog');
     dialog.id = 'reader-settings-dialog';
+    // XSS-SAFE: pure-literal template; the ${[...].map(...)} blocks emit only hardcoded enum values
     dialog.innerHTML = `
         <form method="dialog">
             <header class="reader-settings__header">
@@ -823,17 +825,18 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     function renderDrawerTabs() {
         const tabs = document.createElement('div');
         tabs.className = 'text-reader__tabs';
+        // XSS-SAFE: pure-literal template, no interpolation
         tabs.innerHTML = `
             <button class="text-reader__tab text-reader__tab--active" data-tab="toc">目录</button>
             <button class="text-reader__tab" data-tab="bookmarks">书签 (<span data-bm-count>0</span>)</button>
         `;
         const panel = document.createElement('div');
         panel.className = 'text-reader__tab-panel';
-        els.drawer.innerHTML = '';
+        els.drawer.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
         els.drawer.appendChild(tabs);
         els.drawer.appendChild(panel);
         function refresh(tab) {
-            panel.innerHTML = '';
+            panel.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
             if (tab === 'toc') {
                 (book.chapters || []).forEach((ch, i) => {
                     const btn = document.createElement('button');
@@ -860,7 +863,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 const bms = readerPrefs.getBookmarks(path);
                 tabs.querySelector('[data-bm-count]').textContent = bms.length;
                 if (bms.length === 0) {
-                    panel.innerHTML = '<div class="text-reader__empty">暂无书签，悬停段落 + 添加</div>';
+                    panel.innerHTML = '<div class="text-reader__empty">暂无书签，悬停段落 + 添加</div>'; // XSS-SAFE: hardcoded literal
                     return;
                 }
                 bms.forEach(bm => {
@@ -958,7 +961,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 maxLoadedIdx = Math.max(maxLoadedIdx, idx);
                 minLoadedIdx = Math.min(minLoadedIdx, idx);
             } else {
-                els.content.innerHTML = '';
+                els.content.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
                 els.content.appendChild(sec);
                 els.content.scrollTop = 0;
                 minLoadedIdx = idx;

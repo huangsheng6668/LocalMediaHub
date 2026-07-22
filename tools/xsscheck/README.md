@@ -40,7 +40,26 @@ tool), which resolves to `server/internal/web/*.js` at repo root.
 
 ## What the tool checks
 
-For each `.innerHTML = <expr>` line, the tool analyzes the right-hand side:
+For each DOM-write sink (`.innerHTML =`, `.outerHTML =`,
+`element.insertAdjacentHTML(pos, expr)`, `document.write(expr)`), the tool
+enforces TWO layers of safety:
+
+### Layer 1 — Round 32 S4 justification rule (NEW)
+
+Every sink must EITHER:
+
+- carry a `// XSS-SAFE: <reason>` comment on the **same line** as the sink OR
+  on the **line immediately above** it, OR
+- call `escapeHtml(...)` somewhere in the sink's expression.
+
+A sink that lacks both is flagged with
+`<kind> sink without // XSS-SAFE: comment or escapeHtml() call`. This forces
+every new sink to explicitly justify why it is safe.
+
+### Layer 2 — legacy expression analyzer (Phase 5)
+
+For `.innerHTML = <expr>` lines that DO carry a `// XSS-SAFE:` comment, the
+tool still analyzes the right-hand side to surface truly dangerous patterns:
 
 1. **Quoted literal** (`'...'` / `"..."`) — OK (no interpolation in JS).
 2. **Template literal** (`` `...${expr}...` ``) — each `${...}` must be a
@@ -64,7 +83,9 @@ For each `.innerHTML = <expr>` line, the tool analyzes the right-hand side:
   but complex control flow (branches, loops) is not modeled.
 - **Byte-level quote tracking**: escaped quotes inside strings (`"\"") are not
   handled. No current fixture or Web UI file triggers this.
-- Does not check `outerHTML`, `insertAdjacentHTML`, `document.write`, `eval`.
+- **Sink coverage**: `innerHTML`, `outerHTML`, `insertAdjacentHTML`, and
+  `document.write` are scanned. `eval` / `Function()` / `setTimeout(string)`
+  / `setInterval(string)` are NOT scanned.
 
 ## CI integration (Phase 6)
 

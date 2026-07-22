@@ -42,6 +42,7 @@ function renderCard(entry) {
     const card = document.createElement('div');
     card.className = 'bookshelf-card';
     const chapterText = `第 ${(entry.chapterIndex || 0) + 1} 章`;
+    // XSS-SAFE: pure-literal template; user data (title/progress) is set via textContent below
     card.innerHTML = `
         <div class="bookshelf-card__icon">📄</div>
         <div class="bookshelf-card__title"></div>
@@ -58,10 +59,10 @@ function renderCard(entry) {
 // Full-page render for the #/bookshelf route. Always replaces container
 // contents so re-navigation does not stack cards.
 export function render(container) {
-    container.innerHTML = '';
+    container.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
     const list = loadAll();
     if (list.length === 0) {
-        container.innerHTML = '<div class="text-reader__error">暂无阅读历史</div>';
+        container.innerHTML = '<div class="text-reader__error">暂无阅读历史</div>'; // XSS-SAFE: hardcoded literal
         return;
     }
     const grid = document.createElement('div');
@@ -73,12 +74,13 @@ export function render(container) {
 // Dashboard embed. Renders nothing (and clears the host) when the shelf is
 // empty so the dashboard stays clean for users who never opened a book.
 export function renderSection(container) {
-    container.innerHTML = '';
+    container.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
     const list = loadAll();
     if (list.length === 0) return;
 
     const section = document.createElement('section');
     section.className = 'widget-card bookshelf-section';
+    // XSS-SAFE: pure-literal template; cards appended below set their own textContent
     section.innerHTML = `
         <h2>我的书架</h2>
         <div class="bookshelf-grid"></div>

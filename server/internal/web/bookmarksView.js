@@ -43,10 +43,11 @@ export function renderBookmarks() {
     const listEl = elements.bookmarksManagerList;
     if (!listEl) return;
     
-    listEl.innerHTML = '';
+    listEl.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
     const bookmarks = loadAllBookmarks();
-    
+
     if (bookmarks.length === 0) {
+        // XSS-SAFE: pure-literal template, no interpolation
         listEl.innerHTML = `
             <div class="text-reader__empty" style="padding: 48px; text-align: center; background-color: var(--surface-card); border-radius: var(--radius-lg); border: 1px solid var(--border-color); color: var(--text-muted); font-size: 14px;">
                 暂无书签记录。您可以在媒体共享库中阅读小说，在段落上右侧悬浮并点击 “+” 添加书签。

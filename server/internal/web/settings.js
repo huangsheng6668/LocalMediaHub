@@ -53,6 +53,7 @@ function renderThemeGrid() {
     const grid = document.getElementById('settings-global-theme-grid');
     if (!grid) return;
     const currentTheme = readerPrefs.getSettings().theme || 'DAY';
+    // XSS-SAFE: key/label come from the frozen THEME_LABELS constant — not user input
     grid.innerHTML = Object.entries(readerPrefs.THEME_LABELS).map(([key, label]) => {
         const isChecked = currentTheme === key ? 'checked' : '';
         return `

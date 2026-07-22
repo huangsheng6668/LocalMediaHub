@@ -17,7 +17,7 @@ export async function loadRoots() {
     state.isSystemBrowse = false;
 
     // Breadcrumbs
-    elements.browserBreadcrumbs.innerHTML = '<span class="crumb active">根目录</span>';
+    elements.browserBreadcrumbs.innerHTML = '<span class="crumb active">根目录</span>'; // XSS-SAFE: hardcoded literal
 
     try {
         const folders = await apiRequest(`${state.apiBase}/api/v1/folders`);
@@ -31,6 +31,7 @@ export async function loadRoots() {
 
     // Grid list
     if (!state.folders || state.folders.length === 0) {
+        // XSS-SAFE: pure-literal template, no interpolation
         elements.browserList.innerHTML = `
             <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-muted);">
                 <h3>未配置扫描共享目录</h3>
@@ -42,6 +43,7 @@ export async function loadRoots() {
         return;
     }
 
+    // XSS-SAFE: map returns template whose dynamic fields (path, name) are wrapped in escapeHtml()
     elements.browserList.innerHTML = state.folders.map(folder => {
         const pathStr = typeof folder === 'string' ? folder : (folder.path || '');
         const nameStr = typeof folder === 'object' && folder.name ? folder.name : (pathStr.replace(/\\/g, '/').split('/').filter(Boolean).pop() || pathStr);
@@ -68,11 +70,12 @@ async function loadSystemDrives() {
     state.isSystemBrowse = true;
     state.currentPath = '/system';
 
-    elements.browserBreadcrumbs.innerHTML = '<span class="crumb" data-action="load-roots">根目录</span><span class="crumb active">磁盘盘符</span>';
+    elements.browserBreadcrumbs.innerHTML = '<span class="crumb" data-action="load-roots">根目录</span><span class="crumb active">磁盘盘符</span>'; // XSS-SAFE: hardcoded literal
 
     try {
         const drives = await apiRequest(`${state.apiBase}/api/v1/system/drives`);
         if (drives && drives.length > 0) {
+            // XSS-SAFE: map returns template whose dynamic field (drive) is wrapped in escapeHtml()
             elements.browserList.innerHTML = drives.map(drive => {
                 const safePath = escapeHtml(drive.replace(/\\/g, '/'));
                 return `
@@ -90,7 +93,7 @@ async function loadSystemDrives() {
                 `;
             }).join('');
         } else {
-            elements.browserList.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:48px;">无法获取本地磁盘，可能未在 config.yaml 启用 system.allowed_roots</div>';
+            elements.browserList.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:48px;">无法获取本地磁盘，可能未在 config.yaml 启用 system.allowed_roots</div>'; // XSS-SAFE: hardcoded literal
         }
     } catch (e) {
         showToast('获取系统磁盘盘符失败: ' + e.message, 'error');
@@ -113,7 +116,7 @@ export async function browsePath(path, bypassCache = false) {
         url += `${url.includes('?') ? '&' : '?'}_t=${Date.now()}`;
     }
 
-    elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">正在读取目录结构...</div>';
+    elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">正在读取目录结构...</div>'; // XSS-SAFE: hardcoded literal
 
     try {
         const data = await apiRequest(url);
@@ -194,7 +197,7 @@ export function renderBrowserList() {
     state.currentFiles = sortMediaItems(state.currentFiles, state.sortField, state.sortOrder, false);
 
     if (state.currentFolders.length === 0 && state.currentFiles.length === 0) {
-        elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px; color: var(--text-muted);">📁 当前目录为空（无媒体文件）</div>';
+        elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px; color: var(--text-muted);">📁 当前目录为空（无媒体文件）</div>'; // XSS-SAFE: hardcoded literal
         return;
     }
 
@@ -313,7 +316,7 @@ export function renderBrowserList() {
         `;
     });
 
-    elements.browserList.innerHTML = html;
+    elements.browserList.innerHTML = html; // XSS-SAFE: html built entirely from escapeHtml-wrapped folder/file fields above
 }
 
 // Delegated click dispatcher for breadcrumbs
@@ -351,7 +354,7 @@ function renderBreadcrumbs(path) {
         }
     });
 
-    elements.browserBreadcrumbs.innerHTML = html;
+    elements.browserBreadcrumbs.innerHTML = html; // XSS-SAFE: html built with escapeHtml-wrapped segment/path values above
 }
 
 // Filter current files recursively in Browser
@@ -363,7 +366,7 @@ async function triggerBrowserSearch() {
         return;
     }
 
-    elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">全局模糊匹配检索中...</div>';
+    elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">全局模糊匹配检索中...</div>'; // XSS-SAFE: hardcoded literal
 
     try {
         const url = `${state.apiBase}/api/v1/search?q=${encodeURIComponent(query)}&path=${encodeURIComponent(state.currentPath)}`;
@@ -373,6 +376,7 @@ async function triggerBrowserSearch() {
         state.currentFiles = data.files || [];
         renderBrowserList();
 
+        // XSS-SAFE: dynamic fields (state.currentPath, query) wrapped in escapeHtml()
         elements.browserBreadcrumbs.innerHTML = `
             <span class="crumb" data-action="crumb" data-path="${escapeHtml(state.currentPath)}">返回上级目录</span>
             <span class="crumb active">关于 "${escapeHtml(query)}" 的结果</span>

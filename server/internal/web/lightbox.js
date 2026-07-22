@@ -44,7 +44,7 @@ function renderLightboxImage() {
 
         // Render all files in stitch view if not already loaded/rendered
         if (elements.lightboxStitchView.children.length === 0) {
-            elements.lightboxStitchView.innerHTML = '';
+            elements.lightboxStitchView.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
             state.lightboxFiles.forEach((file, idx) => {
                 let url = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.relative_path)}/original`;
                 if (state.isSystemBrowse) {
@@ -53,6 +53,7 @@ function renderLightboxImage() {
                 const imgContainer = document.createElement('div');
                 imgContainer.className = 'stitch-image-item';
                 imgContainer.id = `stitch-img-${idx}`;
+                // XSS-SAFE: file.name wrapped in escapeHtml(); URL built from server-controlled relative_path + encodeURIComponent
                 imgContainer.innerHTML = `
                     <img src="${url}" alt="${escapeHtml(file.name)}" loading="lazy">
                     <div class="stitch-image-caption">${escapeHtml(file.name)} (${idx + 1}/${state.lightboxFiles.length})</div>
@@ -76,7 +77,7 @@ function renderLightboxImage() {
         elements.lightboxStitchView.style.display = 'none';
         elements.btnImagePrev.style.display = 'flex';
         elements.btnImageNext.style.display = 'flex';
-        elements.lightboxStitchView.innerHTML = ''; // Clean up stitch view content to free memory
+        elements.lightboxStitchView.innerHTML = ''; // XSS-SAFE: clearing stitch view to free memory
 
         const file = state.lightboxFiles[state.lightboxIndex];
 
@@ -108,7 +109,7 @@ export function setupLightboxListeners(elements) {
     elements.btnCloseImageModal.addEventListener('click', () => {
         elements.modalImagePreview.classList.remove('active');
         elements.lightboxImg.src = '';
-        elements.lightboxStitchView.innerHTML = '';
+        elements.lightboxStitchView.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
     });
 
     // Lightbox navigation
@@ -170,7 +171,7 @@ export function setupLightboxListeners(elements) {
         if (e.key === 'Escape') {
             elements.modalImagePreview.classList.remove('active');
             elements.lightboxImg.src = '';
-            elements.lightboxStitchView.innerHTML = '';
+            elements.lightboxStitchView.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
         }
     });
 }

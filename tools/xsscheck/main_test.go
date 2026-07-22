@@ -19,6 +19,12 @@ func TestScanFile(t *testing.T) {
 		{"literal_only.js", 0},
 		{"function_call.js", 0},
 		{"mixed.js", 2},
+		// Round 32 S4 rule-extension fixtures.
+		{"xsssafe_comment_above.js", 0},    // justification on the line above
+		{"outerhtml_unescaped.js", 1},      // outerHTML sink without justification
+		{"insert_adjacent_unescaped.js", 1}, // insertAdjacentHTML sink without justification
+		{"doc_write_unescaped.js", 1},      // document.write sink without justification
+		{"multiline_sink.js", 0},           // multi-line map() callback with comment
 	}
 
 	for _, tc := range cases {
