@@ -108,6 +108,55 @@ func TestRateLimitPerIPIsolation(t *testing.T) {
 	}
 }
 
+func TestRateLimitLRUEviction(t *testing.T) {
+	e := echo.New()
+	handler := func(c echo.Context) error {
+		return c.String(http.StatusNotFound, "nf")
+	}
+	mw := RateLimitWithConfig(5, time.Minute, 3)
+	wrapped := mw(handler)
+
+	for _, ip := range []string{"1.1.1.1", "2.2.2.2", "3.3.3.3"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = ip + ":1234"
+		rec := httptest.NewRecorder()
+		_ = wrapped(e.NewContext(req, rec))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("ip %s: got %d, want 404", ip, rec.Code)
+		}
+	}
+
+	// Insert a 4th distinct IP. Capacity is 3, so the LRU (1.1.1.1) is evicted.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "4.4.4.4:1234"
+	rec := httptest.NewRecorder()
+	_ = wrapped(e.NewContext(req, rec))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("ip4: got %d, want 404", rec.Code)
+	}
+
+	// Re-entry of evicted IP 1.1.1.1 must be treated as a fresh bucket (pass,
+	// not 429), proving its previous counter state was discarded.
+	// Exhaust its fresh bucket first to verify reset: 5 requests allowed.
+	for i := 0; i < 5; i++ {
+		reqR := httptest.NewRequest(http.MethodGet, "/", nil)
+		reqR.RemoteAddr = "1.1.1.1:1234"
+		recR := httptest.NewRecorder()
+		_ = wrapped(e.NewContext(reqR, recR))
+		if recR.Code != http.StatusNotFound {
+			t.Fatalf("evicted IP re-entry req %d: got %d, want 404 (fresh bucket)", i, recR.Code)
+		}
+	}
+	// 6th request on the fresh bucket should now be rate-limited.
+	req6 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req6.RemoteAddr = "1.1.1.1:1234"
+	rec6 := httptest.NewRecorder()
+	_ = wrapped(e.NewContext(req6, rec6))
+	if rec6.Code != http.StatusTooManyRequests {
+		t.Fatalf("evicted IP after refill: got %d, want 429", rec6.Code)
+	}
+}
+
 // TestRateLimitConcurrentSafety verifies the mutex protects the buckets map
 // under concurrent access. Run with -race to detect data races.
 func TestRateLimitConcurrentSafety(t *testing.T) {
