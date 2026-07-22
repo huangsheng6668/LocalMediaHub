@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -45,8 +46,12 @@ func NewTagsService(dataDir string) (*TagsService, error) {
 		return nil, err
 	}
 
-	// Optimize SQLite performance and connection behavior
-	db.SetMaxOpenConns(1)
+	// Round 32 P2: WAL 允许并发读 + 串行写，开多连接让读不互相阻塞。
+	// MaxOpenConns = max(4, NumCPU) 覆盖 LAN 多客户端并发读场景。
+	// 写仍由 SQLite 的 WAL 写锁串行（同时只允许一个写事务），无需 Go 层级锁。
+	db.SetMaxOpenConns(maxInt(4, runtime.NumCPU()))
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(0)
 
 	// A1.1: PRAGMA 优化（WAL + NORMAL + mmap + cache + foreign_keys）。
 	// 单个 PRAGMA 失败仅 log.Warn 不阻断启动，用默认配置降级运行。
@@ -188,8 +193,8 @@ func (s *TagsService) GetAllTags() []models.FileTag {
 }
 
 func (s *TagsService) CreateTag(name, color string) (*models.FileTag, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	// Check if already exists
 	var count int
@@ -215,8 +220,8 @@ func (s *TagsService) CreateTag(name, color string) (*models.FileTag, error) {
 }
 
 func (s *TagsService) DeleteTag(tagID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -239,8 +244,8 @@ func (s *TagsService) DeleteTag(tagID string) error {
 }
 
 func (s *TagsService) AssociateFile(tagID, filePath string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	// Check if association exists
 	var count int
@@ -260,8 +265,8 @@ func (s *TagsService) AssociateFile(tagID, filePath string) (bool, error) {
 }
 
 func (s *TagsService) DisassociateFile(tagID, filePath string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	_, err := s.db.Exec("DELETE FROM associations WHERE tag_id = ? AND file_path = ?", tagID, filePath)
 	return err
@@ -394,12 +399,21 @@ func (s *TagsService) GetAllFileTags() map[string][]models.FileTag {
 }
 
 func (s *TagsService) CleanDeletedPath(path string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	normPath := filepath.Clean(path)
 	prefix := normPath + string(filepath.Separator) + "%"
 
 	_, err := s.db.Exec("DELETE FROM associations WHERE file_path = ? OR file_path LIKE ?", normPath, prefix)
 	return err
+}
+
+// maxInt returns the larger of a or b. Used to size the SQLite connection pool
+// based on available CPUs while keeping a sane floor for low-core devices.
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

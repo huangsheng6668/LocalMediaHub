@@ -3,7 +3,9 @@ package service
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -290,5 +292,108 @@ func BenchmarkGetTagsForFiles(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = svc.GetTagsForFiles(queryPaths)
+	}
+}
+
+// TestTagsConcurrentReadWriteNoBlocking 验证 WAL + 连接池下，并发读不阻塞写。
+// Round 32 P2: SetMaxOpenConns(1) + s.mu.Lock 会让此测试在写期间阻塞所有读。
+func TestTagsConcurrentReadWriteNoBlocking(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewTagsService(dir)
+	if err != nil {
+		t.Fatalf("NewTagsService: %v", err)
+	}
+	defer s.Close()
+
+	// 先插入一个 tag 作为读目标
+	tag, err := s.CreateTag("readable", "#fff")
+	if err != nil {
+		t.Fatalf("CreateTag: %v", err)
+	}
+
+	// 启动持续写 goroutine
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		for i := 0; i < 50; i++ {
+			if _, err := s.CreateTag(fmt.Sprintf("w-%d", i), "#000"); err != nil {
+				t.Errorf("CreateTag w-%d: %v", i, err)
+				return
+			}
+		}
+	}()
+
+	// 主 goroutine 在写期间持续读，应能在 5s 内完成（非阻塞）
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for i := 0; i < 50; i++ {
+			_ = s.GetFilesForTag(tag.ID)
+		}
+	}()
+
+	select {
+	case <-readDone:
+		// 读在写期间完成 = WAL 并发读工作
+	case <-time.After(5 * time.Second):
+		t.Fatal("read blocked by write for 5s — WAL concurrent read not working")
+	}
+	<-writeDone
+}
+
+// TestTagsWalPragma 验证 WAL 模式生效。
+// Round 32 P2: WAL 是连接池并发读的前置条件。
+func TestTagsWalPragma(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewTagsService(dir)
+	if err != nil {
+		t.Fatalf("NewTagsService: %v", err)
+	}
+	defer s.Close()
+
+	var mode string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatalf("QueryRow PRAGMA journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Fatalf("journal_mode = %q, want %q", mode, "wal")
+	}
+}
+
+// TestTagsConcurrentWritesNoBusy 验证并发写不触发 SQLITE_BUSY。
+// Round 32 P2: busy_timeout=5000 + WAL 写串行应让所有写事务完成。
+func TestTagsConcurrentWritesNoBusy(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewTagsService(dir)
+	if err != nil {
+		t.Fatalf("NewTagsService: %v", err)
+	}
+	defer s.Close()
+
+	const N = 20
+	var wg sync.WaitGroup
+	errs := make(chan error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, err := s.CreateTag(fmt.Sprintf("t-%d", idx), "#abc")
+			if err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if strings.Contains(err.Error(), "SQLITE_BUSY") || strings.Contains(err.Error(), "database is locked") {
+			t.Fatalf("got lock error: %v", err)
+		}
+	}
+
+	all := s.GetAllTags()
+	if len(all) != N {
+		t.Fatalf("got %d tags, want %d", len(all), N)
 	}
 }
