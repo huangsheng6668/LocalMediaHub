@@ -789,6 +789,13 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (els.progressBar) {
             els.progressBar.style.width = `${percent}%`;
         }
+
+        // 每次进度更新（scroll 必触发）都同步抽屉高亮。放在 updateProgressUI
+        // 而非 onContentScroll 的 activeIdx 分支里，确保 currentIdx 一变化高亮就跟随。
+        // 用轻量 highlightCurrent（只移动 active class，不重建 DOM）。
+        if (!els.drawer.classList.contains('text-reader__drawer--hidden') && drawer && drawer.highlightCurrent) {
+            drawer.highlightCurrent();
+        }
     }
 
     function onContentScroll() {
