@@ -3,6 +3,8 @@ package bookparser
 import (
 	"os"
 	"path/filepath"
+
+
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -376,6 +378,52 @@ func TestParseUserNovel21(t *testing.T) {
 	assert.Equal(t, "妈妈是高级妓女 一、这就是工作", b.Chapters[1].Title)
 	assert.Equal(t, "妈妈是高级妓女 六、妈妈的新爱", b.Chapters[len(b.Chapters)-1].Title)
 }
+
+
+
+
+
+func TestTxtVolumeHierarchy(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "vol.txt")
+	content := "序章 准备\n准备正文\n第一卷 创世纪\n第1章 诞生\n诞生正文\n第2章 崛起\n崛起正文\n第二卷 英雄传\n第3章 征程\n征程正文"
+	writeBytes(t, p, []byte(content))
+
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 4)
+
+	assert.Equal(t, "序章 准备", b.Chapters[0].Title)
+	assert.Equal(t, "", b.Chapters[0].Volume)
+	assert.Equal(t, -1, b.Chapters[0].VolIndex)
+
+	assert.Equal(t, "第1章 诞生", b.Chapters[1].Title)
+	assert.Equal(t, "第一卷 创世纪", b.Chapters[1].Volume)
+	assert.Equal(t, 0, b.Chapters[1].VolIndex)
+
+	assert.Equal(t, "第2章 崛起", b.Chapters[2].Title)
+	assert.Equal(t, "第一卷 创世纪", b.Chapters[2].Volume)
+	assert.Equal(t, 0, b.Chapters[2].VolIndex)
+
+	assert.Equal(t, "第3章 征程", b.Chapters[3].Title)
+	assert.Equal(t, "第二卷 英雄传", b.Chapters[3].Volume)
+	assert.Equal(t, 1, b.Chapters[3].VolIndex)
+}
+
+
+func BenchmarkParseTxt(b *testing.B) {
+	content := []byte("第一卷 创世\n第1章 诞生\n测试内容\n第2章 崛起\n测试内容2\n")
+	tmpFile := filepath.Join(b.TempDir(), "bench.txt")
+	if err := os.WriteFile(tmpFile, content, 0644); err != nil {
+		b.Fatal(err)
+	}
+	info, _ := os.Stat(tmpFile)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = parseTxt(tmpFile, info)
+	}
+}
+
 
 
 

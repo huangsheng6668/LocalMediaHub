@@ -33,8 +33,10 @@ func TestIsEnclosedChapterHeader(t *testing.T) {
 		{"【第123章 决战】", true},
 		{"=== 第5章 启程 ===", true},
 		{"102. 再次重逢", true},
+		{"妈妈是高级妓女 一、这就是工作", true},
 		{"这是一普通正文句子。", false},
 	}
+
 
 	for _, tt := range tests {
 		if got := IsChapterHeader(tt.line); got != tt.want {

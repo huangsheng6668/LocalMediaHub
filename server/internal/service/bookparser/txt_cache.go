@@ -77,3 +77,14 @@ func GetChapterBlocksFromText(text string, charStart, charEnd int) []Block {
 func GetRuneCount(text string) int {
 	return utf8.RuneCountInString(text)
 }
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+

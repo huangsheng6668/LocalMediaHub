@@ -14,19 +14,6 @@ import (
 	"golang.org/x/text/transform"
 )
 
-var commonRules = []*regexp.Regexp{
-	regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[一二三四五六七八九十百千零0-9０-９]+(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*[章节回卷集部篇]`),
-	regexp.MustCompile(`^(?:Chapter|Section|Volume|Book)\s+\d+`),
-	regexp.MustCompile(`^楔子($|[\s　：:～~、，,;；])`),
-	regexp.MustCompile(`^序[章言]($|[\s　：:～~、，,;；])`),
-	regexp.MustCompile(`^尾声($|[\s　：:～~、，,;；])`),
-	regexp.MustCompile(`^前言($|[\s　：:～~、，,;；])`),
-	regexp.MustCompile(`^后记($|[\s　：:～~、，,;；])`),
-	regexp.MustCompile(`^终章($|[\s　：:～~、，,;；])`),
-	regexp.MustCompile(`^[^\p{L}\p{N}]*番外(?:篇|章|[\s　：:～~、，,;；\-_—\d一二三四五六七八九十0-9０-９]|$)`),
-	regexp.MustCompile(`^[^\s\d一二三四五六七八九十]+\s+[一二三四五六七八九十0-9０-９]{1,4}[、\.].*`),
-}
-
 var (
 	chapChapRegex   = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*章`)
 	chapNumRegex    = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*[章节回卷集部篇]`)
@@ -37,17 +24,8 @@ var (
 	pagePrefixRegex = regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[0-9一二三四五六七八九十]+\s*页[\s　]+`)
 )
 
-func isChapterHeader(trim string) bool {
-	for _, re := range commonRules {
-		if re.MatchString(trim) {
-			return true
-		}
-	}
-	return false
-}
-
 func isEndMarker(trim string) bool {
-	if isChapterHeader(trim) {
+	if IsChapterHeader(trim) {
 		return false
 	}
 	if utf8.RuneCountInString(trim) > 80 {
@@ -143,12 +121,19 @@ func parseTxt(path string, info os.FileInfo) (*Book, error) {
 	if info.Size() > MaxTxtSize {
 		return nil, fmt.Errorf("%w: %d bytes", ErrTooLarge, info.Size())
 	}
-	raw, err := os.ReadFile(path)
+	text, charset, err := globalTxtCache.GetOrLoad(path, func() (string, string, error) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return "", "", fmt.Errorf("%w: %v", ErrIoFailure, err)
+		}
+		decoded, cs := decodeTxt(raw)
+		return decoded, cs, nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrIoFailure, err)
+		return nil, err
 	}
-	decoded, charset := decodeTxt(raw)
-	chapters := splitChapters(decoded, filepath.Base(path))
+
+	chapters := splitChapters(text, filepath.Base(path))
 	return &Book{
 		Path:     path,
 		Format:   "txt",
@@ -188,8 +173,13 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 	var marks []chapterMark
 	type markMeta struct {
 		chapKey string
+		volume  string
+		volIdx  int
 	}
 	var metas []markMeta
+
+	currentVolume := ""
+	currentVolIdx := -1
 
 	off := 0
 	scanner := bufio.NewScanner(strings.NewReader(text))
@@ -198,18 +188,20 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 		line := scanner.Text()
 		trim := strings.TrimSpace(line)
 		trim = pagePrefixRegex.ReplaceAllString(trim, "")
+
+		if isVol, volTitle := IsVolumeHeader(trim); isVol {
+			currentVolume = volTitle
+			currentVolIdx++
+			off += utf8.RuneCountInString(line) + 1
+			continue
+		}
+
 		if isEndMarker(trim) {
 			off += utf8.RuneCountInString(line) + 1
 			continue
 		}
-		matched := false
-		for _, re := range commonRules {
-			if re.MatchString(trim) {
-				matched = true
-				break
-			}
-		}
-		if matched {
+
+		if IsChapterHeader(trim) {
 			key := extractChapKey(trim)
 			t := trim
 			if idx := strings.Index(t, "www."); idx > 0 {
@@ -230,14 +222,14 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 					currIsRange := strings.ContainsAny(trim, "-~～至到—–—")
 					if (prevIsRange && !currIsRange) || strings.HasPrefix(c1, c2) || strings.HasPrefix(c2, c1) || len(trim) >= len(prevM.title) {
 						marks[len(marks)-1] = m
-						metas[len(metas)-1] = markMeta{chapKey: key}
+						metas[len(metas)-1] = markMeta{chapKey: key, volume: currentVolume, volIdx: currentVolIdx}
 						off += utf8.RuneCountInString(line) + 1
 						continue
 					}
 				}
 			}
 			marks = append(marks, m)
-			metas = append(metas, markMeta{chapKey: key})
+			metas = append(metas, markMeta{chapKey: key, volume: currentVolume, volIdx: currentVolIdx})
 		}
 		off += utf8.RuneCountInString(line) + 1
 	}
@@ -250,7 +242,7 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 	if marks[0].start > 0 {
 		preamble := strings.TrimRight(text[:marks[0].start], "\n")
 		if strings.TrimSpace(preamble) != "" {
-			chapters = append(chapters, Chapter{Title: "序言", Index: 0, CharStart: 0, CharEnd: marks[0].start})
+			chapters = append(chapters, Chapter{Title: "序言", Index: 0, CharStart: 0, CharEnd: marks[0].start, Volume: "", VolIndex: -1})
 		}
 	}
 	for i, m := range marks {
@@ -261,11 +253,14 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 		} else {
 			end = utf8.RuneCountInString(text)
 		}
+		meta := metas[i]
 		chapters = append(chapters, Chapter{
 			Title:     m.title,
 			Index:     len(chapters),
 			CharStart: start,
 			CharEnd:   end,
+			Volume:    meta.volume,
+			VolIndex:  meta.volIdx,
 		})
 	}
 	for i := range chapters {
@@ -274,44 +269,21 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 	return chapters
 }
 
-// txtChapterBlocks reads the file, decodes via [decodeTxt], slices by
-// rune offsets CharStart..CharEnd, then splits on "\n\n" into multiple
-// text Blocks (empty paragraphs filtered). Returns a single "[本章节为空]"
-// placeholder block if the slice produces no non-empty paragraphs.
 func (b *Book) txtChapterBlocks(idx int) ([]Block, error) {
+	if idx < 0 || idx >= len(b.Chapters) {
+		return nil, fmt.Errorf("chapter index out of range: %d", idx)
+	}
 	c := b.Chapters[idx]
-	raw, err := os.ReadFile(b.Path)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrIoFailure, err)
-	}
-	text, _ := decodeTxt(raw)
-	runes := []rune(text)
-	start := clampInt(c.CharStart, 0, len(runes))
-	end := clampInt(c.CharEnd, 0, len(runes))
-	if start > end {
-		start = end
-	}
-	slice := string(runes[start:end])
-	paras := strings.Split(slice, "\n\n")
-	blocks := make([]Block, 0, len(paras))
-	for _, p := range paras {
-		if s := strings.TrimSpace(p); s != "" {
-			blocks = append(blocks, Block{Type: "text", Value: s})
+	text, _, err := globalTxtCache.GetOrLoad(b.Path, func() (string, string, error) {
+		raw, err := os.ReadFile(b.Path)
+		if err != nil {
+			return "", "", fmt.Errorf("%w: %v", ErrIoFailure, err)
 		}
+		decoded, cs := decodeTxt(raw)
+		return decoded, cs, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if len(blocks) == 0 {
-		return []Block{{Type: "text", Value: "[本章节为空]"}}, nil
-	}
-	return blocks, nil
-}
-
-// clampInt returns v clipped to [lo, hi]. Used for CharStart/CharEnd bounds.
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
+	return GetChapterBlocksFromText(text, c.CharStart, c.CharEnd), nil
 }

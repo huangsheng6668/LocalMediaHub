@@ -26,11 +26,13 @@ var chapterRules = []*regexp.Regexp{
 	regexp.MustCompile(`^后记($|[\s　：:～~、，,;；])`),
 	regexp.MustCompile(`^终章($|[\s　：:～~、，,;；])`),
 	regexp.MustCompile(`^[^\p{L}\p{N}]*番外(?:篇|章|[\s　：:～~、，,;；\-_—\d一二三四五六七八九十0-9０-９]|$)`),
+	regexp.MustCompile(`^[^\s\d一二三四五六七八九十]+\s+[一二三四五六七八九十0-9０-９]{1,4}[、\.].*`),
 }
+
 
 func IsVolumeHeader(line string) (bool, string) {
 	trim := strings.TrimSpace(line)
-	if utf8.RuneCountInString(trim) > 60 {
+	if utf8.RuneCountInString(trim) > 100 {
 		return false, ""
 	}
 	for _, re := range volumeRules {
@@ -43,12 +45,6 @@ func IsVolumeHeader(line string) (bool, string) {
 
 func IsChapterHeader(line string) bool {
 	trim := strings.TrimSpace(line)
-	if utf8.RuneCountInString(trim) > 60 {
-		return false
-	}
-	if strings.HasSuffix(trim, "。") || strings.HasSuffix(trim, "！") || strings.HasSuffix(trim, "？") {
-		return false
-	}
 	for _, re := range chapterRules {
 		if re.MatchString(trim) {
 			return true
@@ -56,3 +52,6 @@ func IsChapterHeader(line string) bool {
 	}
 	return false
 }
+
+
+
