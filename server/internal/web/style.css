@@ -2233,6 +2233,19 @@ body[data-active-tab="read"] .text-reader {
     opacity: 1;
 }
 
+.text-reader__drawer-item--active {
+    background-color: var(--reader-selection, rgba(124, 58, 237, 0.25));
+    color: var(--reader-fg, var(--text-white));
+    opacity: 1;
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 0 var(--primary);
+}
+
+.text-reader__drawer-item--active:hover {
+    background-color: var(--reader-selection, rgba(124, 58, 237, 0.35));
+    color: var(--reader-fg, var(--text-white));
+}
+
 .text-reader__drawer-del {
     margin-left: auto;
     background: transparent;

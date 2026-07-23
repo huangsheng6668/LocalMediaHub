@@ -840,7 +840,9 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             if (tab === 'toc') {
                 (book.chapters || []).forEach((ch, i) => {
                     const btn = document.createElement('button');
-                    btn.className = 'text-reader__drawer-item';
+                    const isCurrent = i === currentIdx;
+                    btn.className = 'text-reader__drawer-item' + (isCurrent ? ' text-reader__drawer-item--active' : '');
+                    if (isCurrent) btn.setAttribute('aria-current', 'true');
                     btn.textContent = ch.title || `第 ${i + 1} 章`;
                     btn.addEventListener('click', () => {
                         const s = readerPrefs.getSettings();
@@ -849,6 +851,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                             if (sec) {
                                 sec.scrollIntoView({ behavior: 'smooth' });
                                 currentIdx = i;
+                                drawer.refresh('toc');
                             } else {
                                 loadChapter(i, true);
                             }
@@ -859,6 +862,9 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                     });
                     panel.appendChild(btn);
                 });
+                // 当前章节滚动到可视区（避免高亮项在长列表外不可见）。
+                const activeBtn = panel.querySelector('.text-reader__drawer-item--active');
+                if (activeBtn) activeBtn.scrollIntoView({ block: 'nearest' });
             } else {
                 const bms = readerPrefs.getBookmarks(path);
                 tabs.querySelector('[data-bm-count]').textContent = bms.length;
@@ -972,6 +978,9 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             }
             updateProgressUI();
             saveProgress(path, { chapterIndex: idx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
+            // 章节切换后若目录 tab 正在显示，刷新以更新当前章节高亮。
+            const activeTab = els.drawer.querySelector('.text-reader__tab--active')?.dataset.tab;
+            if (activeTab === 'toc' && drawer && drawer.refresh) drawer.refresh('toc');
         } catch (e) {
             els.content.textContent = '加载章节失败: ' + e.message;
             showToast('加载章节失败: ' + e.message, 'error');
@@ -1073,4 +1082,29 @@ function toggleDrawer(drawerEl) {
     const willOpen = drawerEl.classList.contains('text-reader__drawer--hidden');
     drawerEl.classList.toggle('text-reader__drawer--hidden');
     drawerEl.setAttribute('aria-hidden', String(!willOpen));
+
+    if (willOpen) {
+        // 点击抽屉外部（阅读内容区）关闭抽屉。延迟一帧注册，避开触发打开的那次
+        // click 本身（目录按钮 click 冒泡到 document 时会命中此监听）。
+        // onOutsideDrawerClick 是模块级函数，自包含状态检查与清理——无论由哪条
+        // 路径（外部点击 / 闭包内 closeDrawer）关闭，下次 click 时它都会自移除。
+        requestAnimationFrame(() => {
+            document.addEventListener('click', onOutsideDrawerClick, true);
+        });
+    }
+}
+
+// 模块级外部点击监听。自检 drawer 状态：若已关闭则自移除监听；若点击落在 drawer
+// 内或落在目录按钮上（交给其 toggle handler）则放行。
+function onOutsideDrawerClick(e) {
+    const drawer = document.querySelector('.text-reader__drawer');
+    if (!drawer || drawer.classList.contains('text-reader__drawer--hidden')) {
+        document.removeEventListener('click', onOutsideDrawerClick, true);
+        return;
+    }
+    if (drawer.contains(e.target)) return;
+    if (e.target.closest && e.target.closest('.text-reader__toc')) return;
+    drawer.classList.add('text-reader__drawer--hidden');
+    drawer.setAttribute('aria-hidden', 'true');
+    document.removeEventListener('click', onOutsideDrawerClick, true);
 }
