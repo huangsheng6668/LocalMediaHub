@@ -1,27 +1,23 @@
 package com.juziss.localmediahub
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.core.content.ContextCompat
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.RecentActivityStore
-import com.juziss.localmediahub.pip.PipActionReceiver
 import com.juziss.localmediahub.pip.PipController
-import com.juziss.localmediahub.pip.PipControllerStore
 import com.juziss.localmediahub.ui.screen.VideoPlayerScreen
 import com.juziss.localmediahub.ui.theme.LocalMediaHubTheme
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -45,9 +41,9 @@ class VideoPlayerActivity : ComponentActivity() {
     @Inject
     lateinit var recentActivityStore: RecentActivityStore
 
-    private val _isInPipMode = MutableStateFlow(false)
-    /** 暴露给 VideoPlayerScreen Composable 读取的 PiP 状态。 */
-    val isInPipMode: StateFlow<Boolean> = _isInPipMode.asStateFlow()
+    val pipController = PipController()
+    val isInPipMode: StateFlow<Boolean> get() = pipController.isInPipMode
+    var onPipActionReceived: ((String) -> Unit)? = null
 
     /**
      * 临时标志：onPictureInPictureModeChanged(false) 时置 true，供 [onStop] 消费。
@@ -55,11 +51,13 @@ class VideoPlayerActivity : ComponentActivity() {
      */
     private var exitingFromPip: Boolean = false
 
-    /**
-     * 已注册的 [PipActionReceiver] 实例。必须保存注册时创建的同一个实例：
-     * Android 的 unregisterReceiver 按 binder 身份匹配（对象相等性），不是按类匹配。
-     */
-    private var pipReceiver: PipActionReceiver? = null
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.action?.let { action ->
+                onPipActionReceived?.invoke(action)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,6 +72,17 @@ class VideoPlayerActivity : ComponentActivity() {
         val streamUrl = intent.getStringExtra(VideoPlayerIntentBuilder.EXTRA_STREAM_URL) ?: ""
         val initialPositionMs = intent.getLongExtra(VideoPlayerIntentBuilder.EXTRA_INITIAL_POSITION_MS, 0L)
         val isSystemBrowse = intent.getBooleanExtra(VideoPlayerIntentBuilder.EXTRA_IS_SYSTEM_BROWSE, false)
+
+        val filter = IntentFilter().apply {
+            addAction(PipController.ACTION_PIP_PLAY_PAUSE)
+            addAction(PipController.ACTION_PIP_REWIND)
+            addAction(PipController.ACTION_PIP_FORWARD)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(pipReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(pipReceiver, filter)
+        }
 
         setContent {
             LocalMediaHubTheme {
@@ -98,7 +107,7 @@ class VideoPlayerActivity : ComponentActivity() {
     }
 
     private fun parseMediaFileExtra(intent: Intent): MediaFile? {
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent.getParcelableExtra(VideoPlayerIntentBuilder.EXTRA_MEDIA_FILE, MediaFile::class.java)
         } else {
             @Suppress("DEPRECATION")
@@ -116,54 +125,29 @@ class VideoPlayerActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // VideoPlayerScreen 内部用 remember(streamUrl) 重建 ExoPlayer。这里改了 intent
-        // 后需要让 Composable 重新读取并重建。最简单的方式：recreate() 让 Activity
-        // 重新走 onCreate（会从新 intent 读参数）。
         recreate()
     }
 
     /**
      * 由 VideoPlayerScreen 的「悬浮窗」按钮调用。返回 true 表示成功进入 PiP。
-     *
-     * 在进入 PiP 前动态注册 [PipActionReceiver] (RECEIVER_NOT_EXPORTED, targetSdk 34 强制)
-     * 以便接收 RemoteAction 的 PendingIntent 派发。退出 PiP 时在
-     * [onPictureInPictureModeChanged] 中解绑。
      */
     @Suppress("DEPRECATION")
     fun enterPipMode(
-        width: Int,
-        height: Int,
-        isPlaying: Boolean,
+        width: Int = 0,
+        height: Int = 0,
+        isPlaying: Boolean = true,
         sourceRectHint: android.graphics.Rect? = null,
     ): Boolean {
         if (!packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) {
             return false
         }
-        // NOTE: PipController.buildParams does not currently accept a sourceRectHint;
-        // it is reserved for a future Task that extends buildParams. The parameter is kept
-        // on this public API so VideoPlayerScreen can pass it through without a later
-        // breaking change.
-        val params = PipController.buildParams(this, width, height, isPlaying)
-        return try {
-            // compileSdk 36 上单参 enterPictureInPictureMode(PictureInPictureParams) 被弃用，
-            // 替换签名要求 API 36+ 的 Executor + Consumer，超出本次范围；minSdk 26 不支持新重载，
-            // 旧的弃用调用在所有 API 26+ 设备上仍工作正常。
-            val entered = enterPictureInPictureMode(params)
-            if (entered && pipReceiver == null) {
-                val receiver = PipActionReceiver()
-                ContextCompat.registerReceiver(
-                    this,
-                    receiver,
-                    IntentFilter(PipController.ACTION_PLAY_PAUSE),
-                    ContextCompat.RECEIVER_NOT_EXPORTED,
-                )
-                pipReceiver = receiver
-            }
-            entered
-        } catch (e: IllegalStateException) {
-            // 部分 ROM 在 Activity 非 resumed 时调用 enterPictureInPictureMode 会抛。
-            false
-        }
+        pipController.enterPipMode(this, width, height, isPlaying)
+        return true
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        pipController.enterPipMode(this)
     }
 
     override fun onPictureInPictureModeChanged(
@@ -172,14 +156,11 @@ class VideoPlayerActivity : ComponentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         android.util.Log.d("PipDebug", "onPiPModeChanged: isInPip=$isInPictureInPictureMode, lifecycle=${lifecycle.currentState}")
-        _isInPipMode.value = isInPictureInPictureMode
+        pipController.onPictureInPictureModeChanged(isInPictureInPictureMode)
         if (!isInPictureInPictureMode) {
-            unregisterPipReceiver()
-
             // 区分「点 × 关闭浮窗」(需 finish 释放资源) 和「点主体回全屏」(保留)：
             // - 关闭浮窗：Activity 即将进入 STOPPED/DESTROYED，lifecycle 是 CREATED 或更低
             // - 点主体回全屏：Activity 即将进入 RESUMED，lifecycle 是 STARTED 或更高
-            // Vivo X100 / OriginOS 在某些场景下不调用 onStop，只依赖 lifecycle 判断更可靠。
             val closing = !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
             android.util.Log.d("PipDebug", "onPiPModeChanged: closing=$closing (lifecycle=${lifecycle.currentState})")
             exitingFromPip = true
@@ -199,16 +180,6 @@ class VideoPlayerActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * 当 Activity 从 PiP 模式退出后切到完全不可见（onStop）时，finish 自己。
-     *
-     * 这捕获"用户关闭 PiP 浮窗"场景 —— 系统先调 onPictureInPictureModeChanged(false)
-     * 设置 exitingFromPip=true，随后调 onStop 时 finish，彻底销毁 Activity 并释放
-     * ExoPlayer，避免视频音频在后台 task 栈继续播放。
-     *
-     * 普通全屏切后台（未进过 PiP）→ exitingFromPip==false → 不 finish，保留 Activity。
-     * 点 PiP 浮窗主体回全屏 → 走 onResume，不经 onStop → 不 finish。
-     */
     override fun onStop() {
         super.onStop()
         android.util.Log.d("PipDebug", "onStop: exitingFromPip=$exitingFromPip, isFinishing=$isFinishing")
@@ -221,20 +192,15 @@ class VideoPlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         android.util.Log.d("PipDebug", "onDestroy called")
-        unregisterPipReceiver()
-        PipControllerStore.unbind()
+        try {
+            unregisterReceiver(pipReceiver)
+        } catch (_: IllegalArgumentException) {
+            // ignore if not registered
+        }
     }
 
-    /**
-     * 解绑已注册的 [pipReceiver]（按 binder 身份匹配）。重复调用或未注册时静默忽略。
-     */
-    private fun unregisterPipReceiver() {
-        val receiver = pipReceiver ?: return
-        try {
-            unregisterReceiver(receiver)
-        } catch (_: IllegalArgumentException) {
-            // already unregistered
-        }
-        pipReceiver = null
+    companion object {
+        const val EXTRA_STREAM_URL = "extra_stream_url"
+        const val EXTRA_INITIAL_POSITION = "extra_initial_position"
     }
 }

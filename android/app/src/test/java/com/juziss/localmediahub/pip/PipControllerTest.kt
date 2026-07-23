@@ -47,28 +47,31 @@ class PipControllerTest {
     }
 
     @Test
-    fun `buildParams always returns non-null params with at least one action`() {
+    fun `buildParams returns non-null params with 3 remote actions`() {
         val params = PipController.buildParams(ctx, width = 1920, height = 1080, isPlaying = true)
         assertNotNull(params)
         assertNotNull(params.aspectRatio)
-        // getActions() 是 API 35+ 公开 getter；Robolectric 在 API 36 下应返回我们塞入的列表。
         val actions = params.actions
         assertNotNull("actions list must be set", actions)
-        assertTrue("expected at least 1 RemoteAction, got ${actions?.size}",
-            actions!!.isNotEmpty())
+        assertEquals(3, actions?.size)
     }
 
     @Test
     fun `buildParams plays or pauses is encoded via isPlaying into returned params`() {
-        // 两个 isPlaying 状态都应成功构造、不抛异常，且共享同一宽高比；
-        // 此外每个 params 都应携带恰好 1 个 RemoteAction。
         val playing = PipController.buildParams(ctx, 1920, 1080, isPlaying = true)
         val paused  = PipController.buildParams(ctx, 1920, 1080, isPlaying = false)
         assertNotNull(playing)
         assertNotNull(paused)
         assertEquals(playing.aspectRatio, paused.aspectRatio)
-        assertEquals(1, playing.actions?.size)
-        assertEquals(1, paused.actions?.size)
+        assertEquals(3, playing.actions?.size)
+        assertEquals(3, paused.actions?.size)
         assertFalse("params should be distinct objects", playing === paused)
+    }
+
+    @Test
+    fun `action constants are defined correctly`() {
+        assertEquals("com.juziss.localmediahub.PIP_PLAY_PAUSE", PipController.ACTION_PIP_PLAY_PAUSE)
+        assertEquals("com.juziss.localmediahub.PIP_REWIND", PipController.ACTION_PIP_REWIND)
+        assertEquals("com.juziss.localmediahub.PIP_FORWARD", PipController.ACTION_PIP_FORWARD)
     }
 }
