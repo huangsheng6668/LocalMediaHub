@@ -957,6 +957,10 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
     // 9. Re-render bookmarks tab when prefs change.
     const drawer = renderDrawerTabs();
+    // 把 highlightCurrent 挂到 drawer 元素上，让模块级 toggleDrawer 在打开抽屉时
+    // 能调用它刷新高亮（toggleDrawer 在闭包外，访问不到 drawer 对象）。必须在
+    // const drawer 初始化之后赋值，否则触发 TDZ ReferenceError。
+    els.drawer._highlightCurrent = drawer.highlightCurrent;
     const unsubBms = readerPrefs.subscribe((e) => {
         if (e.detail?.type === 'bookmarks') {
             const activeTab = els.drawer.querySelector('.text-reader__tab--active')?.dataset.tab;
@@ -1131,6 +1135,12 @@ function toggleDrawer(drawerEl) {
         requestAnimationFrame(() => {
             document.addEventListener('click', onOutsideDrawerClick, true);
         });
+        // 打开抽屉时立即刷新当前章节高亮：TOC 列表 DOM 只在首次 render 时构建一次，
+        // 之后章节切换若没重建（分章模式点击 / 滚动模式跨章），高亮会停留在旧位置。
+        // 这里通过 drawer 元素上挂载的 highlightCurrent 钩子（render 中设置）调用。
+        if (typeof drawerEl._highlightCurrent === 'function') {
+            drawerEl._highlightCurrent();
+        }
     }
 }
 
