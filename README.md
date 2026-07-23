@@ -30,7 +30,7 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 
 ### 2. 小说阅读器（txt / epub）
 
-服务端章节解析与 epub 图片内联。7 套主题（AUTO + 日间 × 3 + 夜间 × 3），嵌入 LXGW WenKai + Noto Serif SC 字体。V2 设置：字号 / 行距 / 段距 / 首行缩进 / 字体族 / 文本最大宽度（最高 1400px/1400dp）。支持分章模式与全文滚动模式、全屏沉浸模式（隐藏系统栏/顶底栏，Esc 或后退手势优先退出沉浸）、实时百分比阅读进度与细进度条（分章内进度 % + 全书进度 %）、分章模式左右区域点击翻页、自动滚动、书签、章节列表、首字下沉、淡入过渡。
+服务端章节解析（bookparser：LRU 文本缓存 + 字节/字符偏移映射，大文件章加载 ~200ms→<5ms；支持卷层级与非标准章节标题）与 epub 图片内联（签名 URL，绑定 clientIP）。Web 端阅读器已模块化为 bus 解耦架构（textReader + toc/bookmarks/progress/autoscroll/reader-settings 子模块）。7 套主题（AUTO + 日间 × 3 + 夜间 × 3），嵌入 LXGW WenKai + Noto Serif SC 字体。V2 设置：字号 / 行距 / 段距 / 首行缩进 / 字体族 / 文本最大宽度（最高 1400px/1400dp）。支持分章模式与全文滚动模式、全屏沉浸模式（隐藏系统栏/顶底栏，Esc 或后退手势优先退出沉浸）、实时百分比阅读进度与细进度条（分章内进度 % + 全书进度 %）、分章模式左右区域点击翻页、自动滚动、书签、章节列表（高亮当前章节）、首字下沉、淡入过渡。
 
 ### 3. 续播与上下文恢复
 
@@ -46,7 +46,7 @@ WorkManager 前台服务执行下载，常驻通知栏显示进度；支持单�
 
 ### 6. 安全加固
 
-Bearer Token 认证（admin / system / media / books-image 路由组强制）；安全响应头（CSP / X-Frame-Options / nosniff / Referrer-Policy）；Release APK 签名 fail-fast 守卫；libffmpeg SHA256 preBuild 校验；路径遍历防护（ValidatePath + ValidateSystemMediaAccess + ValidateAccessibleMediaPath）。
+Bearer Token 认证（admin / system / media / books 路由组强制，SHA256 + constant-time 比较）；**books 图片签名 URL**（HMAC 绑定 clientIP + path + manifestID，替代明文 bearer token 入 URL/log）；access log `?token=` redact；**rate limit LRU + 容量上限**（防伪造 `X-Forwarded-For` 内存膨胀）；安全响应头（CSP / X-Frame-Options / nosniff / Referrer-Policy）；**`/debug/pprof` 默认关闭**（需显式 flag/config 开启）；Release APK 签名 fail-fast 守卫；libffmpeg SHA256 preBuild 校验；路径遍历防护（ValidatePath + ValidateSystemMediaAccess + ValidateAccessibleMediaPath）；**Web SPA XSS lint**（`tools/xsscheck` 扫描所有 DOM 写入 sink，缺 `// XSS-SAFE:` 注释即失败）。
 
 ## 技术栈
 

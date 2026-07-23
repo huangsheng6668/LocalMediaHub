@@ -12,18 +12,21 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **路由**：`server/internal/server/server.go`（`Server` struct 持有所有 service 引用；`Server.Stop` 关闭 scanner + tags DB）
 - **Handler**：`server/internal/server/handler/*.go`（只做参数解析与响应，不写业务逻辑；通过 `Handler` struct 持有 service 依赖，**不使用全局变量**）
 - **Service**：`server/internal/service/*.go`
-  - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + 2s 防抖 + `cacheByDir` 每目录索引）
-  - `tags.go` — 标签系统（SQLite + RWMutex + PRAGMA + index + 批量 IN 查询 + JSON→SQLite 自动迁移，`Close()` 关闭 DB）
-  - `streaming.go` — 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`，原生 Range）
-  - `thumbnail.go` — 缩略图（LANCZOS + MD5 缓存 + sync.Pool + hot path priority）
-  - `book.go` — BookService（章节解析、epub 图片字节读取、相对路径重写为 `/api/v1/books/image`）
-  - `bookparser/` 子包 — `parser.go` / `txt.go` / `epub.go` / `unsupported.go`
+  - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + per-root 防抖 + `cacheByDir` 每目录索引 + per-root 并发 `g.SetLimit` + 输出按路径排序）
+  - `tags.go` — 标签系统（SQLite WAL + busy_timeout + `SetMaxOpenConns(max(4,NumCPU))` + 索引 + 批量 IN 查询 + JSON→SQLite 自动迁移，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）
+  - `streaming.go` — 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`（修正 SeekCurrent 偏移），原生 Range）
+  - `thumbnail.go` — 缩略图（LANCZOS→Linear + MD5 缓存 + sync.Pool + hot path priority + `durations.json` ffprobe 缓存 + per-file `hotTracker`）
+  - `hot_dirs.go` — per-directory 访问计数 LRU（容量 256，5min flush + Shutdown 原子落盘到 `hot_directories.json`），驱动冷启动分层预热（Tier1 hot 目录 → Tier2 根目录 → Tier3 懒生成）
+  - `book.go` — BookService（章节解析、epub 图片字节读取、`GetChapterBlocks` 注入签名 `<img src>`）
+  - `book_signing.go` — `BookSigner`（HMAC-SHA256 签名，绑定 clientIP + path + manifestID，无 expire，进程重启失效）
+  - `bookparser/` 子包 — `parser.go` / `txt.go` / `txt_cache.go`（LRU 文本缓存 + 字节/字符偏移映射）/ `rules.go`（章节+卷规则）/ `epub.go` / `unsupported.go`
   - `path.go` — 路径校验三件套（见 [安全约定](#安全约定触碰前必读)）
 - **Middleware**：`server/internal/server/middleware/*.go`
   - `cors.go` — CORS
-  - `auth.go` — Bearer Token（header + query fallback）
+  - `auth.go` — Bearer Token（header + query fallback，**SHA256 + constant-time 比较**）
   - `security_headers.go` — CSP / XFO / nosniff / Referrer-Policy（**必须在 CORS 之前挂载**）
-  - `ratelimit.go` — per-route rate limit（挂在 scan trigger + delete）
+  - `ratelimit.go` — per-route rate limit（挂在 scan trigger + delete）+ **LRU 容量上限**（默认 4096，防伪造 `X-Forwarded-For` 内存膨胀；确定性淘汰：expired-first → oldest lastSeen → insertion seq）
+  - `private_net.go` — 私网/loopback 限制（pprof 用）
 - **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）
 - **配置**：`server/config.yaml`（运行时）/ `server/config.example.yaml`（模板）
 
@@ -32,13 +35,13 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **Application**：`android/app/src/main/java/com/juziss/localmediahub/LocalMediaHubApplication.kt`（Hilt `@HiltAndroidApplication`）
 - **Activity**：
   - `MainActivity.kt`（singleTop + NavHost + 视频续播调度 `checkPlaybackProgress` / `playVideo` / `resumeRequest`；启动请求 `POST_NOTIFICATIONS`）
-  - `VideoPlayerActivity.kt`（独立视频播放 Activity，承载 PiP 浮窗；`exitingFromPip` 标志区分"关闭浮窗"vs"切后台"，关闭浮窗后 `onStop` 自动 `finish()` 释放 ExoPlayer）
+  - `VideoPlayerActivity.kt`（独立视频播放 Activity，承载 PiP 浮窗 + RemoteAction 广播接收；`exitingFromPip` 标志区分"关闭浮窗"vs"切后台"，关闭浮窗后 `onStop` 自动 `finish()` 释放 ExoPlayer）
 - **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen`（支持分章/全文滚动模式、实时百分比进度与沉浸/普通双进度条、BackHandler手势退出沉浸模式、左右触控翻页） / `DownloadsScreen`
 - **Component**（`ui/component/`）：
   - `home/`（首页卡片：Hero / Library / ContinueWatching / RecentMedia / Favorite）
   - `browse/`（浏览子组件：TopBar / SortMenu / SearchView / FavoritesView / DeleteConfirmDialog / QuickActionsDialog 等）
   - `reader/`（`ReaderSettingsSheet`（带可滚动与1400dp最大宽度） / `ReaderThemeWrapper` / `ReaderFontFamily`）
-  - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`
+  - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `PlayerGestureHud`（音量/亮度 Pill HUD + seek ripple）/ `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`
 - **ViewModel**（`viewmodel/`）：
   - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel`
   - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
@@ -59,10 +62,20 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 
 服务端内置 SPA，浏览器访问 server 地址（如 `http://localhost:8000`）即可。
 
-- **公共层**：`server/internal/web/` 下 `app.js` / `router.js` / `state.js` / `dom.js` / `api.js`
-- **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `textReader.js` / `readerPrefs.js` / `bookmarksView.js`（取代旧 `tagsView.js`）/ `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `toast.js` / `utils.js`
+- **公共层**：`server/internal/web/` 下 `app.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js`
+- **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
+- **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行）+ 子模块
+  - `bus.js`（事件总线 on/emit/off/EVT，零依赖）
+  - `reader-state.js`（共享状态单例 + `setCurrentIdx` 触发 `chapter:changed`）
+  - `progress.js`（进度计算 + 滚动章节推断，纯函数 + 阈值 120px）
+  - `toc.js`（目录抽屉：渲染/高亮/开关/外部点击关闭，单一 drawerEl）
+  - `bookmarks.js`（书签 tab + 当前章节弱标记）
+  - `autoscroll.js`（自动滚动 rAF 面板）
+  - `reader-settings.js`（阅读设置 dialog，emit `settings:changed`）
+  - **注意**：`state.js` / `settings.js` 是全局 app 模块，**勿与** `reader-state.js` / `reader-settings.js` 混淆
+- **测试**：`node --test`（用 `.test.mjs` 扩展名 + jsdom，详见 [测试与验证](#测试与验证)）
 - **Token 集成**：`api.js` 的 `apiRequest()` 自动注入 Bearer header + 401 事件 → `app.js` 弹 token modal；sessionStorage 持久化
-- **CSP 兼容**：无 inline `<script>`；inline `style=` 暂留 `'unsafe-inline'`（待 Phase 5 Web UI XSS 整改）
+- **CSP 兼容**：无 inline `<script>`；inline `style=` 暂留 `'unsafe-inline'`
 - **无构建步骤**，跟随 server 静态服务
 
 ### Rust 原生解码
@@ -118,7 +131,14 @@ cargo test
 
 ```bash
 cd tools/xsscheck
-go run . ../server/internal/web
+go run . ../../server/internal/web
+```
+
+### Web 单元测试（node:test + jsdom）
+
+```bash
+cd server/internal/web
+node --test
 ```
 
 ## 编码规则
@@ -144,11 +164,13 @@ go run . ../server/internal/web
 
 ### Web (前端 JS)
 
-- 模块化（每个视图一个 `.js` 文件），无构建步骤
-- 零 inline `<script>`（CSP `script-src 'self'`）；`style` 的 `'unsafe-inline'` 待 Phase 5 Web UI XSS 整改后移除
+- 模块化（每个视图一个 `.js` 文件），无构建步骤，ES module 原生 `import`/`export`
+- 阅读器（`textReader.js`）已拆分为 bus 解耦架构（见 [Web 管理界面](#web-管理界面)）；新增子模块改动后跑 `cd server/internal/web && node --test`
+- 零 inline `<script>`（CSP `script-src 'self'`）
 - 统一通过 `api.js` 的 `apiRequest()` 发请求（自动注入 Bearer header + 401 事件）
 - Token 通过 sessionStorage 持久化
-- 涉及 `innerHTML` 的代码需通过 `tools/xsscheck` 静态分析
+- 涉及 `innerHTML` / `outerHTML` / `insertAdjacentHTML` / `document.write` 的代码必须带 `// XSS-SAFE:` 注释或调用 `escapeHtml()`，否则 `tools/xsscheck` 失败
+- 测试文件用 `.test.mjs` 扩展名（package.json 无 `type: module`）；`import` 路径必须带 `.js` 扩展名
 
 ### Rust
 
@@ -175,7 +197,23 @@ go run . ../server/internal/web
 
 - 挂载路由组：admin / system / media / books-image
 - 接受 header（`Authorization: Bearer <token>`）与 query（`?token=`）双 fallback（query 仅为 `<img src>` 这种无法加 header 的场景）
-- 常量时间比较，防 timing attack
+- **SHA256 + constant-time 比较**，防 timing attack 与 length leakage
+
+### Books 图片签名 token（Round 32 S2）
+
+`server/internal/service/book_signing.go` + `server/internal/server/handler/books.go`：
+
+- `<img src="/api/v1/books/image?path=...&manifest=...&sig=...">`，sig = HMAC-SHA256(serverSecret, clientIP + "|" + path + "|" + manifestID)
+- 绑定 clientIP + path + manifestID，无 expire；进程重启 serverSecret 重生成，旧 sig 全部失效
+- `/api/v1/books/image` 优先认 `?sig=`；`?token=` 作为 deprecated fallback（打 `[DEPRECATED]` warn）
+- 新增 `/api/v1/books/sign-image` endpoint 供动态场景（lightbox）
+- access log redact：`?token=` 替换为 `REDACTED`（redact 中间件挂在 Logger 之后 = 请求侧先执行）
+
+### /debug/pprof 默认关闭（Round 32 S3）
+
+- 默认不注册 pprof 路由（404）
+- 显式开启：`config.debug.pprof: true` 或 `--debug-pprof` flag（flag 覆盖 config）
+- 开启后仍受 `PrivateNetOnly` 中间件限制
 
 ### Config 默认安全（Phase 3）
 
@@ -190,7 +228,7 @@ go run . ../server/internal/web
 - `X-Frame-Options: DENY`
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: no-referrer`
-- `Content-Security-Policy`: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; media-src 'self'; connect-src 'self'`
+- `Content-Security-Policy`: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'`
 - 中间件**必须在 CORS 之前挂载**
 - 已知 TODO: `style 'unsafe-inline'` 待 Web UI XSS 整改后移除
 
@@ -210,9 +248,17 @@ go run . ../server/internal/web
 
 `DownloadWorker` 解压前校验每个 entry 路径不越界目标目录。
 
-### Rate Limit（Phase 8）
+### Rate Limit（Phase 8 + Round 32 S1）
 
-`server/internal/server/middleware/ratelimit.go` per-route 限流，挂在 scan trigger + delete 路由。
+`server/internal/server/middleware/ratelimit.go` per-route 限流，挂在 scan trigger + delete 路由。**LRU 容量上限**（默认 4096，`RateLimitWithConfig(max, window, maxBuckets)`），确定性淘汰（expired-first → oldest lastSeen → insertion seq），防伪造 `X-Forwarded-For` 内存膨胀。
+
+### Web SPA XSS 防护（Round 29 Phase 5 + Round 32 S4）
+
+`tools/xsscheck/` 静态扫描所有 `innerHTML` / `outerHTML` / `insertAdjacentHTML` / `document.write` sink：
+
+- 每个 sink 必须同行或上一行有 `// XSS-SAFE:` 注释，或调用 `escapeHtml()`
+- 缺注释/未转义 → lint 失败（阻断构建）
+- 覆盖 26 个 web 文件，run: `cd tools/xsscheck && go run . ../../server/internal/web`
 
 ### 触碰安全敏感代码前先看
 
@@ -227,7 +273,7 @@ go run . ../server/internal/web
 - 改 `server/`：`cd server && go test ./...`
 - 改 `android/`：`cd android && ./gradlew testDebugUnitTest`
 - 改 Rust crate：`cd android/app/src/main/rust && cargo test`
-- 改 `server/internal/web/`：额外跑 `cd tools/xsscheck && go run . ../server/internal/web`
+- 改 `server/internal/web/`：`cd server/internal/web && node --test` + 额外跑 `cd tools/xsscheck && go run . ../../server/internal/web`
 - 交付前推荐组合：`cd android && ./gradlew testDebugUnitTest assembleDebug`
 
 ## 提交与分支约定
