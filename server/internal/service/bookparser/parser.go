@@ -31,6 +31,8 @@ type Chapter struct {
 	CharStart  int    `json:"char_start,omitempty"`
 	CharEnd    int    `json:"char_end,omitempty"`
 	ManifestID string `json:"manifest_id,omitempty"`
+	Volume     string `json:"volume,omitempty"`
+	VolIndex   int    `json:"vol_index,omitempty"`
 }
 
 type Book struct {
