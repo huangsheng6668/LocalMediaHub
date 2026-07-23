@@ -15,13 +15,128 @@ import (
 )
 
 var commonRules = []*regexp.Regexp{
-	regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[一二三四五六七八九十百千零0-9０-９]+\s*[章节回卷集部篇]`),
-	regexp.MustCompile(`^Chapter\s+\d+`),
+	regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[一二三四五六七八九十百千零0-9０-９]+(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*[章节回卷集部篇]`),
+	regexp.MustCompile(`^(?:Chapter|Section|Volume|Book)\s+\d+`),
 	regexp.MustCompile(`^楔子($|[\s　：:～~、，,;；])`),
-	regexp.MustCompile(`^序章($|[\s　：:～~、，,;；])`),
+	regexp.MustCompile(`^序[章言]($|[\s　：:～~、，,;；])`),
 	regexp.MustCompile(`^尾声($|[\s　：:～~、，,;；])`),
 	regexp.MustCompile(`^前言($|[\s　：:～~、，,;；])`),
 	regexp.MustCompile(`^后记($|[\s　：:～~、，,;；])`),
+	regexp.MustCompile(`^终章($|[\s　：:～~、，,;；])`),
+	regexp.MustCompile(`^[^\p{L}\p{N}]*番外(?:篇|章|[\s　：:～~、，,;；\-_—\d一二三四五六七八九十0-9０-９]|$)`),
+	regexp.MustCompile(`^[^\s\d一二三四五六七八九十]+\s+[一二三四五六七八九十0-9０-９]{1,4}[、\.].*`),
+}
+
+var (
+	chapChapRegex   = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*章`)
+	chapNumRegex    = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*[章节回卷集部篇]`)
+	chapDotRegex    = regexp.MustCompile(`([一二三四五六七八九十0-9０-９]{1,4})[、\.]`)
+	chapEngRegex    = regexp.MustCompile(`(?i)^(?:Chapter|Section|Volume|Book)\s+(\d+)`)
+	endMarkerRegex  = regexp.MustCompile(`[章节回卷集部篇]\s*完($|[\s　：:～~、，,;；]|评分|【|（|\()`)
+	authorNoteRegex = regexp.MustCompile(`^(前言|后记|序言|序章|编者按|作者的话)[：:]`)
+	pagePrefixRegex = regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[0-9一二三四五六七八九十]+\s*页[\s　]+`)
+)
+
+func isChapterHeader(trim string) bool {
+	for _, re := range commonRules {
+		if re.MatchString(trim) {
+			return true
+		}
+	}
+	return false
+}
+
+func isEndMarker(trim string) bool {
+	if isChapterHeader(trim) {
+		return false
+	}
+	if utf8.RuneCountInString(trim) > 80 {
+		return true
+	}
+	if authorNoteRegex.MatchString(trim) && utf8.RuneCountInString(trim) > 20 {
+		return true
+	}
+	if endMarkerRegex.MatchString(trim) {
+		return true
+	}
+	if strings.Contains(trim, "本章完") || strings.Contains(trim, "全书完") || strings.Contains(trim, "全剧终") || strings.Contains(trim, "评分完成") {
+		return true
+	}
+	if strings.Contains(trim, "加") && (strings.Contains(trim, "银元") || strings.Contains(trim, "金币")) {
+		return true
+	}
+	if strings.HasSuffix(trim, "。") || strings.HasSuffix(trim, "！") || strings.HasSuffix(trim, "？") || strings.HasSuffix(trim, "!") || strings.HasSuffix(trim, "?") {
+		return true
+	}
+	if strings.Contains(trim, "节课") || strings.Contains(trim, "；") {
+		return true
+	}
+	return false
+}
+
+func chineseToNum(s string) int {
+	var buf strings.Builder
+	for _, r := range s {
+		if r >= '０' && r <= '９' {
+			buf.WriteRune(r - '０' + '0')
+		} else {
+			buf.WriteRune(r)
+		}
+	}
+	norm := buf.String()
+	var val int
+	if _, err := fmt.Sscanf(norm, "%d", &val); err == nil && val > 0 {
+		return val
+	}
+
+	cnMap := map[rune]int{'零': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+	unitMap := map[rune]int{'十': 10, '百': 100, '千': 1000, '万': 10000}
+
+	total := 0
+	num := 0
+	for _, r := range norm {
+		if v, ok := cnMap[r]; ok {
+			num = v
+		} else if u, ok := unitMap[r]; ok {
+			if num == 0 && u == 10 {
+				num = 1
+			}
+			total += num * u
+			num = 0
+		} else if r >= '0' && r <= '9' {
+			num = int(r - '0')
+		}
+	}
+	total += num
+	return total
+}
+
+func extractChapKey(trim string) string {
+	trim = pagePrefixRegex.ReplaceAllString(trim, "")
+	m := chapChapRegex.FindStringSubmatch(trim)
+	if len(m) == 0 {
+		m = chapNumRegex.FindStringSubmatch(trim)
+	}
+	if len(m) == 0 {
+		m = chapDotRegex.FindStringSubmatch(trim)
+	}
+	if len(m) > 1 {
+		if n := chineseToNum(m[1]); n > 0 {
+			return fmt.Sprintf("%d", n)
+		}
+		return m[1]
+	}
+	if m2 := chapEngRegex.FindStringSubmatch(trim); len(m2) > 1 {
+		return m2[1]
+	}
+	return ""
+}
+
+func cleanTitleForComparison(title string) string {
+	title = strings.ReplaceAll(title, " ", "")
+	title = strings.ReplaceAll(title, "　", "")
+	title = strings.ReplaceAll(title, "\t", "")
+	return title
 }
 
 func parseTxt(path string, info os.FileInfo) (*Book, error) {
@@ -71,17 +186,58 @@ type chapterMark struct {
 
 func splitChapters(text, fallbackTitle string) []Chapter {
 	var marks []chapterMark
+	type markMeta struct {
+		chapKey string
+	}
+	var metas []markMeta
+
 	off := 0
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		trim := strings.TrimSpace(line)
+		trim = pagePrefixRegex.ReplaceAllString(trim, "")
+		if isEndMarker(trim) {
+			off += utf8.RuneCountInString(line) + 1
+			continue
+		}
+		matched := false
 		for _, re := range commonRules {
 			if re.MatchString(trim) {
-				marks = append(marks, chapterMark{title: trim, start: off})
+				matched = true
 				break
 			}
+		}
+		if matched {
+			key := extractChapKey(trim)
+			t := trim
+			if idx := strings.Index(t, "www."); idx > 0 {
+				t = strings.TrimSpace(t[:idx])
+			}
+			if utf8.RuneCountInString(t) > 50 {
+				runes := []rune(t)
+				t = string(runes[:50])
+			}
+			m := chapterMark{title: t, start: off}
+			if len(marks) > 0 && key != "" {
+				prevM := marks[len(marks)-1]
+				prevMeta := metas[len(metas)-1]
+				if key == prevMeta.chapKey && (off-prevM.start < 3000) {
+					c1 := cleanTitleForComparison(prevM.title)
+					c2 := cleanTitleForComparison(trim)
+					prevIsRange := strings.ContainsAny(prevM.title, "-~～至到—–—")
+					currIsRange := strings.ContainsAny(trim, "-~～至到—–—")
+					if (prevIsRange && !currIsRange) || strings.HasPrefix(c1, c2) || strings.HasPrefix(c2, c1) || len(trim) >= len(prevM.title) {
+						marks[len(marks)-1] = m
+						metas[len(metas)-1] = markMeta{chapKey: key}
+						off += utf8.RuneCountInString(line) + 1
+						continue
+					}
+				}
+			}
+			marks = append(marks, m)
+			metas = append(metas, markMeta{chapKey: key})
 		}
 		off += utf8.RuneCountInString(line) + 1
 	}

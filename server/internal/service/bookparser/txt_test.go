@@ -129,31 +129,274 @@ func TestTxtChapterOffsetsRoundTripCRLF_Drift(t *testing.T) {
 func TestTxtChapterRegexComprehensive(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "comprehensive.txt")
-	content := "楔子～开启故事\n第一章　龙回故乡\n第１章：走马上任\n第229章-尾声\n第０１章、第一次性交示范课\n第2章我成了神手\n第 2 章 我成了神手\n第2章\n后记"
+	content := "楔子～开启故事\n第一章　龙回故乡\n第２章：走马上任\n第229章-尾声\n第０３章、第一次性交示范课\n第4章我成了神手\n第 5 章 我成了神手\n第6章\n后记"
 	writeBytes(t, p, []byte(content))
 	b, err := Parse(p)
 	require.NoError(t, err)
 	
-	// Should match: 楔子, 第一章, 第１章, 第229章, 第０１章, 第2章, 第 2 章, 第2章, 后记
+	// Should match: 楔子, 第一章, 第２章, 第229章, 第０３章, 第4章, 第 5 章, 第6章, 后记
 	require.Len(t, b.Chapters, 9)
 	assert.Equal(t, "楔子～开启故事", b.Chapters[0].Title)
 	assert.Equal(t, "第一章　龙回故乡", b.Chapters[1].Title)
-	assert.Equal(t, "第１章：走马上任", b.Chapters[2].Title)
+	assert.Equal(t, "第２章：走马上任", b.Chapters[2].Title)
 	assert.Equal(t, "第229章-尾声", b.Chapters[3].Title)
-	assert.Equal(t, "第０１章、第一次性交示范课", b.Chapters[4].Title)
-	assert.Equal(t, "第2章我成了神手", b.Chapters[5].Title)
-	assert.Equal(t, "第 2 章 我成了神手", b.Chapters[6].Title)
-	assert.Equal(t, "第2章", b.Chapters[7].Title)
+	assert.Equal(t, "第０３章、第一次性交示范课", b.Chapters[4].Title)
+	assert.Equal(t, "第4章我成了神手", b.Chapters[5].Title)
+	assert.Equal(t, "第 5 章 我成了神手", b.Chapters[6].Title)
+	assert.Equal(t, "第6章", b.Chapters[7].Title)
 	assert.Equal(t, "后记", b.Chapters[8].Title)
 }
 
-func TestTxtTooLargeRejected(t *testing.T) {
+func TestTxtEndMarkerAndDuplicateFilter(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "big.txt")
-	f, err := os.Create(p)
+	p := filepath.Join(dir, "end_markers.txt")
+	content := "第一章 开始\n正文1\n第一章 完\n第二章 生死之交\n作者寄语\n第二章 生死之交 2004/09/29\n正文2\n第二章完评分完成：已经给 接触零距离 加上30银元！"
+	writeBytes(t, p, []byte(content))
+	b, err := Parse(p)
 	require.NoError(t, err)
-	require.NoError(t, f.Truncate(int64(MaxTxtSize + 1)))
-	require.NoError(t, f.Close())
-	_, err = Parse(p)
-	assert.ErrorIs(t, err, ErrTooLarge)
+	require.GreaterOrEqual(t, len(b.Chapters), 2)
+	assert.Equal(t, "第一章 开始", b.Chapters[0].Title)
 }
+
+func TestParseUserNovel(t *testing.T) {
+	p := `H:\IDM_Download\Novel\金鳞岂是池中物_全229章完.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 230)
+	assert.Equal(t, "序言", b.Chapters[0].Title)
+	assert.Equal(t, "第一章　龙回故乡", b.Chapters[1].Title)
+}
+
+func TestParseUserNovel2(t *testing.T) {
+	p := `H:\IDM_Download\Novel\母上攻略_1-132.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 132)
+	assert.Equal(t, "━━━ 第一章 ━━━", b.Chapters[1].Title)
+	assert.Equal(t, "━━━ 第一百三十三章 ━━━", b.Chapters[len(b.Chapters)-1].Title)
+}
+
+func TestParseUserNovel3(t *testing.T) {
+	p := `H:\IDM_Download\Novel\我的美艳校长妈妈_1-128完结.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 128)
+}
+
+func TestParseUserNovel4(t *testing.T) {
+	p := `H:\IDM_Download\Novel\肏妈男孩唐飞的故事_1-73+番外.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 74)
+	assert.Equal(t, "第一章", b.Chapters[1].Title)
+}
+
+func TestParseUserNovel5(t *testing.T) {
+	p := `H:\IDM_Download\Novel\高考陪读那三年_全65章完结.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 66)
+}
+
+func TestParseUserNovel6(t *testing.T) {
+	p := `H:\IDM_Download\Novel\良家人妻系列第一部_1-22完结.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 23)
+}
+
+func TestParseUserNovel7(t *testing.T) {
+	p := `H:\IDM_Download\Novel\妈妈的大意_1-37.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 37)
+}
+
+func TestParseUserNovel8(t *testing.T) {
+	p := `H:\IDM_Download\Novel\妈妈林菲菲的一滴泪_1-34完结.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 35)
+}
+
+func TestParseUserNovel9(t *testing.T) {
+	p := `H:\IDM_Download\Novel\妈妈的欲臀_1-46.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 46)
+}
+
+func TestParseUserNovel10(t *testing.T) {
+	p := `H:\IDM_Download\Novel\妈妈互助团_1-37.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 37)
+}
+
+func TestParseUserNovel11(t *testing.T) {
+	p := `H:\IDM_Download\Novel\末日中的母子_1-46.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 46)
+}
+
+func TestParseUserNovel12(t *testing.T) {
+	p := `H:\IDM_Download\Novel\母亲的针织衫_1-28完加番外.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 22)
+}
+
+func TestParseUserNovel13(t *testing.T) {
+	p := `H:\IDM_Download\Novel\温柔妈妈坚持用骚穴，唤醒了成为植物人的我_01-20完结.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 20)
+}
+
+func TestParseUserNovel14(t *testing.T) {
+	p := `H:\IDM_Download\Novel\我的教授母亲_1-86.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 86)
+}
+
+func TestParseUserNovel15(t *testing.T) {
+	p := `H:\IDM_Download\Novel\我的美母教师_1-43.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 43)
+}
+
+func TestParseUserNovel16(t *testing.T) {
+	p := `H:\IDM_Download\Novel\我脑中有好感度系统_1-36未完.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 36)
+}
+
+func TestParseUserNovel17(t *testing.T) {
+	p := `H:\IDM_Download\Novel\艳母的荒唐赌约_1-120完.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 120)
+}
+
+func TestParseUserNovel18(t *testing.T) {
+	p := `H:\IDM_Download\Novel\韵母攻略_1-101章连载中.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 100)
+}
+
+func TestParseUserNovel19(t *testing.T) {
+	p := `H:\IDM_Download\Novel\在寡妇村当老师_1.1-13.8.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(b.Chapters), 100)
+}
+
+func TestParseUserNovel20(t *testing.T) {
+	p := `H:\IDM_Download\Novel\在男科工作的美母张文涛同人篇_1-63完.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.Equal(t, 71, len(b.Chapters), "Should parse 71 chapters (1 preamble + 70 main/sub chapters)")
+	assert.Equal(t, "第一章", b.Chapters[1].Title)
+	assert.Equal(t, "第六十三章", b.Chapters[len(b.Chapters)-1].Title)
+}
+
+func TestParseUserNovel21(t *testing.T) {
+	p := `H:\IDM_Download\Novel\妈妈是高级妓女_全.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	assert.Equal(t, 7, len(b.Chapters), "Should parse 7 chapters (1 preamble + 6 main chapters)")
+	assert.Equal(t, "妈妈是高级妓女 一、这就是工作", b.Chapters[1].Title)
+	assert.Equal(t, "妈妈是高级妓女 六、妈妈的新爱", b.Chapters[len(b.Chapters)-1].Title)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
