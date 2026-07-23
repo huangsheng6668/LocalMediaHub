@@ -64,6 +64,11 @@ import kotlin.math.abs
 
 
 
+import androidx.compose.ui.res.vectorResource
+import com.juziss.localmediahub.pip.PipController
+import com.juziss.localmediahub.ui.component.DoubleTapSeekRippleOverlay
+import com.juziss.localmediahub.ui.component.VolumeBrightnessPillHud
+
 /**
  * Builds a stream URL for the given base, transcode flag and start position.
  *
@@ -112,8 +117,8 @@ fun VideoPlayerScreen(
     // Captured from ExoPlayer.onVideoSizeChanged so enterPipMode can build the
     // correct aspect-ratio params. Defaults to 0 (PipController falls back to
     // 16:9 when width/height are not positive).
-    var videoWidth by remember { mutableStateOf(0) }
-    var videoHeight by remember { mutableStateOf(0) }
+    var videoWidth by remember { mutableIntStateOf(0) }
+    var videoHeight by remember { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     // Composables can't receive Hilt constructor injection directly; this
     // ViewModel is the injection seam for the shared singleton OkHttpClient
@@ -196,6 +201,32 @@ fun VideoPlayerScreen(
     DisposableEffect(mediaSession) {
         onDispose {
             mediaSession.release()
+        }
+    }
+
+    // ---- PiP Action Listener ----
+    DisposableEffect(activity, exoPlayer) {
+        activity?.onPipActionReceived = { action ->
+            when (action) {
+                PipController.ACTION_PIP_PLAY_PAUSE -> {
+                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
+                }
+                PipController.ACTION_PIP_REWIND -> {
+                    val newPos = (exoPlayer.currentPosition - 10000L).coerceAtLeast(0L)
+                    exoPlayer.seekTo(newPos)
+                }
+                PipController.ACTION_PIP_FORWARD -> {
+                    val duration = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
+                    val newPos = (exoPlayer.currentPosition + 10000L).coerceAtMost(duration)
+                    exoPlayer.seekTo(newPos)
+                }
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O && activity != null) {
+                activity.pipController.updatePipParams(activity, videoWidth, videoHeight, exoPlayer.isPlaying)
+            }
+        }
+        onDispose {
+            activity?.onPipActionReceived = null
         }
     }
 
@@ -319,6 +350,26 @@ fun VideoPlayerScreen(
     var brightnessIndicator by remember { mutableStateOf(GestureIndicator()) }
     var volumeIndicator by remember { mutableStateOf(GestureIndicator()) }
 
+    // Double-tap seek state
+    var rewindSeekSeconds by remember { mutableIntStateOf(0) }
+    var isRewindRippleVisible by remember { mutableStateOf(false) }
+    var forwardSeekSeconds by remember { mutableIntStateOf(0) }
+    var isForwardRippleVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isRewindRippleVisible) {
+        if (isRewindRippleVisible) {
+            delay(600)
+            isRewindRippleVisible = false
+        }
+    }
+
+    LaunchedEffect(isForwardRippleVisible) {
+        if (isForwardRippleVisible) {
+            delay(600)
+            isForwardRippleVisible = false
+        }
+    }
+
     // Auto-hide play/pause indicator
     LaunchedEffect(playPauseIndicator.visible) {
         if (playPauseIndicator.visible) {
@@ -390,7 +441,21 @@ fun VideoPlayerScreen(
         onSeekStateChange = { seekState = it },
         onBrightnessIndicatorChange = { brightnessIndicator = it },
         onVolumeIndicatorChange = { volumeIndicator = it },
-        onPlayPauseIndicatorChange = { playPauseIndicator = it }
+        onPlayPauseIndicatorChange = { playPauseIndicator = it },
+        onDoubleTapSeek = { isForward, seconds ->
+            if (isForward) {
+                val duration = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
+                val target = (exoPlayer.currentPosition + seconds * 1000L).coerceAtMost(duration)
+                exoPlayer.seekTo(target)
+                forwardSeekSeconds = if (isForwardRippleVisible) forwardSeekSeconds + seconds else seconds
+                isForwardRippleVisible = true
+            } else {
+                val target = (exoPlayer.currentPosition - seconds * 1000L).coerceAtLeast(0L)
+                exoPlayer.seekTo(target)
+                rewindSeekSeconds = if (isRewindRippleVisible) rewindSeekSeconds + seconds else seconds
+                isRewindRippleVisible = true
+            }
+        }
     )
 
     Box(
@@ -423,166 +488,160 @@ fun VideoPlayerScreen(
         )
 
         // ---- Gesture indicator overlays (non-interactive, pass-through) ----
-        // Seek indicator
-        AnimatedVisibility(
-            visible = seekState.isSeeking,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Icon(
-                    painter = painterResource(if (seekState.offsetMs >= 0) R.drawable.ic_fast_forward else R.drawable.ic_fast_rewind),
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = formatSeekOffset(seekState.offsetMs),
-                    color = Color.White,
-                    fontSize = 16.sp
-                )
-            }
-        }
-
-        // Play/Pause indicator
-        AnimatedVisibility(
-            visible = playPauseIndicator.visible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(64.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-            ) {
-                val iconResId = playPauseIndicator.iconResId
-                val iconVector = playPauseIndicator.icon
-                val playPausePainter = when {
-                    iconResId != null -> painterResource(iconResId)
-                    iconVector != null -> rememberVectorPainter(iconVector)
-                    else -> rememberVectorPainter(Icons.Default.PlayArrow)
-                }
-                Icon(
-                    painter = playPausePainter,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(36.dp)
-                )
-            }
-        }
-
-        // Brightness indicator
-        AnimatedVisibility(
-            visible = brightnessIndicator.visible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.CenterStart)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Icon(painterResource(R.drawable.ic_brightness_6), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(brightnessIndicator.text, color = Color.White, fontSize = 14.sp)
-            }
-        }
-
-        // Volume indicator
-        AnimatedVisibility(
-            visible = volumeIndicator.visible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.CenterEnd)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Icon(painterResource(R.drawable.ic_volume_up), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(volumeIndicator.text, color = Color.White, fontSize = 14.sp)
-            }
-        }
-
-        // Round 22: "restart from beginning" chip — shown for 3s after resuming
-        // a non-zero position. Tap to seek back to 0 without reloading.
-        AnimatedVisibility(
-            visible = showRestartChip,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomEnd)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier
-                    .padding(end = 16.dp, bottom = 24.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
-                    .clickable {
-                        if (isTranscodingEnabled) {
-                            // Transcoded streams can't byte-seek; rebuild URL
-                            // without the ?start= param and re-prepare.
-                            val restartedUrl = buildStreamUrl(streamUrl, true, 0.0)
-                            exoPlayer.setMediaItem(MediaItem.fromUri(restartedUrl))
-                            exoPlayer.prepare()
-                            exoPlayer.seekTo(0L)
-                            exoPlayer.play()
-                        } else {
-                            exoPlayer.seekTo(0L)
-                        }
-                        savedPositionMs = 0L
-                        showRestartChip = false
-                    }
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_fast_rewind),
-                    contentDescription = stringResource(R.string.video_restart_from_beginning),
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-                Text(
-                    text = stringResource(R.string.resume_dialog_btn_restart),
-                    color = Color.White,
-                    fontSize = 13.sp,
-                )
-            }
-        }
-
-        // Buffering indicator
-        AnimatedVisibility(
-            visible = isBuffering,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
-        ) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(72.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-            ) {
-                CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
-            }
-        }
-
-        // PiP 按钮（只在非 PiP 全屏模式下显示）
         if (!isInPipMode) {
+            // Seek indicator
+            AnimatedVisibility(
+                visible = seekState.isSeeking,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(if (seekState.offsetMs >= 0) R.drawable.ic_fast_forward else R.drawable.ic_fast_rewind),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = formatSeekOffset(seekState.offsetMs),
+                        color = Color.White,
+                        fontSize = 16.sp
+                    )
+                }
+            }
+
+            // Play/Pause indicator
+            AnimatedVisibility(
+                visible = playPauseIndicator.visible,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                ) {
+                    val iconResId = playPauseIndicator.iconResId
+                    val iconVector = playPauseIndicator.icon
+                    val playPausePainter = when {
+                        iconResId != null -> painterResource(iconResId)
+                        iconVector != null -> rememberVectorPainter(iconVector)
+                        else -> rememberVectorPainter(Icons.Default.PlayArrow)
+                    }
+                    Icon(
+                        painter = playPausePainter,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+            }
+
+            // Top Center Volume / Brightness Pill HUD
+            val isPillVisible = brightnessIndicator.visible || volumeIndicator.visible
+            val pillIcon = ImageVector.vectorResource(if (volumeIndicator.visible) R.drawable.ic_volume_up else R.drawable.ic_brightness_6)
+            val pillText = if (volumeIndicator.visible) volumeIndicator.text else brightnessIndicator.text
+            val pillProgress = if (volumeIndicator.visible) volumeIndicator.progress else brightnessIndicator.progress
+
+            VolumeBrightnessPillHud(
+                icon = pillIcon,
+                text = pillText,
+                progress = pillProgress,
+                visible = isPillVisible,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 16.dp)
+            )
+
+            // Double-Tap Seek Ripples
+            DoubleTapSeekRippleOverlay(
+                isForward = false,
+                seekSeconds = rewindSeekSeconds,
+                visible = isRewindRippleVisible,
+                modifier = Modifier.align(Alignment.CenterStart)
+            )
+
+            DoubleTapSeekRippleOverlay(
+                isForward = true,
+                seekSeconds = forwardSeekSeconds,
+                visible = isForwardRippleVisible,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+
+            // Round 22: "restart from beginning" chip — shown for 3s after resuming
+            // a non-zero position. Tap to seek back to 0 without reloading.
+            AnimatedVisibility(
+                visible = showRestartChip,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomEnd)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .padding(end = 16.dp, bottom = 24.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                        .clickable {
+                            if (isTranscodingEnabled) {
+                                // Transcoded streams can't byte-seek; rebuild URL
+                                // without the ?start= param and re-prepare.
+                                val restartedUrl = buildStreamUrl(streamUrl, true, 0.0)
+                                exoPlayer.setMediaItem(MediaItem.fromUri(restartedUrl))
+                                exoPlayer.prepare()
+                                exoPlayer.seekTo(0L)
+                                exoPlayer.play()
+                            } else {
+                                exoPlayer.seekTo(0L)
+                            }
+                            savedPositionMs = 0L
+                            showRestartChip = false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_fast_rewind),
+                        contentDescription = stringResource(R.string.video_restart_from_beginning),
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.resume_dialog_btn_restart),
+                        color = Color.White,
+                        fontSize = 13.sp,
+                    )
+                }
+            }
+
+            // Buffering indicator
+            AnimatedVisibility(
+                visible = isBuffering,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(72.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                ) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
+                }
+            }
+
+            // PiP 按钮（只在非 PiP 全屏模式下显示）
             IconButton(
                 onClick = {
                     val act = activity ?: return@IconButton
@@ -608,10 +667,8 @@ fun VideoPlayerScreen(
                     tint = Color.White,
                 )
             }
-        }
 
-        // Back button (只在非 PiP 模式下显示)
-        if (!isInPipMode) {
+            // Back button (只在非 PiP 模式下显示)
             IconButton(
                 onClick = onBack,
                 modifier = Modifier

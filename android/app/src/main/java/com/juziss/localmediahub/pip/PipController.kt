@@ -39,8 +39,13 @@ class PipController {
     fun buildPipParams(context: Context, videoWidth: Int, videoHeight: Int, isPlaying: Boolean): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder()
         if (videoWidth > 0 && videoHeight > 0) {
-            val aspect = (videoWidth.toFloat() / videoHeight).coerceIn(0.41841f, 2.39f)
-            builder.setAspectRatio(Rational((aspect * 1000).toInt(), 1000))
+            val aspect = videoWidth.toFloat() / videoHeight
+            if (aspect in 0.41841f..2.39f) {
+                builder.setAspectRatio(Rational(videoWidth, videoHeight))
+            } else {
+                val clamped = aspect.coerceIn(0.41841f, 2.39f)
+                builder.setAspectRatio(Rational((clamped * 1000).toInt(), 1000))
+            }
         } else {
             builder.setAspectRatio(DEFAULT_RATIO)
         }

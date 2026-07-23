@@ -26,6 +26,7 @@ data class GestureIndicator(
     val iconResId: Int? = null,
     val icon: ImageVector? = null,
     val text: String = "",
+    val progress: Float = 0f,
 )
 
 @Composable
@@ -37,6 +38,7 @@ fun rememberPlayerGestureListener(
     onBrightnessIndicatorChange: (GestureIndicator) -> Unit,
     onVolumeIndicatorChange: (GestureIndicator) -> Unit,
     onPlayPauseIndicatorChange: (GestureIndicator) -> Unit,
+    onDoubleTapSeek: ((isForward: Boolean, seekSeconds: Int) -> Unit)? = null,
 ): View.OnTouchListener {
     return remember(exoPlayer) {
         var gestureStartX = 0f
@@ -163,7 +165,8 @@ fun rememberPlayerGestureListener(
                                     GestureIndicator(
                                         visible = true,
                                         iconResId = R.drawable.ic_brightness_6,
-                                        text = "${(newBrightness * 100).toInt()}%"
+                                        text = "${(newBrightness * 100).toInt()}%",
+                                        progress = newBrightness,
                                     )
                                 )
                             } else {
@@ -171,13 +174,15 @@ fun rememberPlayerGestureListener(
                                 val delta = (progress * maxVol).toInt()
                                 val newVol = (volumeStart + delta).coerceIn(0, maxVol)
                                 setVolume(ctx, newVol)
-                                 onVolumeIndicatorChange(
-                                     GestureIndicator(
-                                         visible = true,
-                                         iconResId = R.drawable.ic_volume_up,
-                                         text = "$newVol/$maxVol"
-                                     )
-                                 )
+                                val volProgress = if (maxVol > 0) newVol.toFloat() / maxVol else 0f
+                                onVolumeIndicatorChange(
+                                    GestureIndicator(
+                                        visible = true,
+                                        iconResId = R.drawable.ic_volume_up,
+                                        text = "${(volProgress * 100).toInt()}%",
+                                        progress = volProgress,
+                                    )
+                                )
                             }
                         }
                     }
@@ -196,25 +201,33 @@ fun rememberPlayerGestureListener(
                     } else if (event.actionMasked == MotionEvent.ACTION_UP) {
                         val now = System.currentTimeMillis()
                         if (now - lastTapTime < 300) {
-                            // Double tap: toggle play/pause
-                            if (exoPlayer.isPlaying) {
-                                exoPlayer.pause()
-                                onPlayPauseIndicatorChange(
-                                    GestureIndicator(
-                                        visible = true,
-                                        iconResId = R.drawable.ic_pause,
-                                        text = pausedText
-                                    )
-                                )
+                            val x = event.x
+                            val width = viewWidth
+                            if (onDoubleTapSeek != null && x < width * 0.35f) {
+                                onDoubleTapSeek(false, 10)
+                            } else if (onDoubleTapSeek != null && x > width * 0.65f) {
+                                onDoubleTapSeek(true, 10)
                             } else {
-                                exoPlayer.play()
-                                onPlayPauseIndicatorChange(
-                                    GestureIndicator(
-                                        visible = true,
-                                        icon = Icons.Default.PlayArrow,
-                                        text = playingText
+                                // Double tap center: toggle play/pause
+                                if (exoPlayer.isPlaying) {
+                                    exoPlayer.pause()
+                                    onPlayPauseIndicatorChange(
+                                        GestureIndicator(
+                                            visible = true,
+                                            iconResId = R.drawable.ic_pause,
+                                            text = pausedText
+                                        )
                                     )
-                                )
+                                } else {
+                                    exoPlayer.play()
+                                    onPlayPauseIndicatorChange(
+                                        GestureIndicator(
+                                            visible = true,
+                                            icon = Icons.Default.PlayArrow,
+                                            text = playingText
+                                        )
+                                    )
+                                }
                             }
                             lastTapTime = 0L
                         } else {
