@@ -36,3 +36,71 @@ test('baseline: initial render shows chapter 1 active', async () => {
         teardownJsdom();
     }
 });
+
+// Mock global.fetch so renderTextReader can complete against the mock book.
+// textReader.js → api.js → apiRequest() → fetch(). getBookInfo hits
+// /books/info; getBookChapter hits /books/chapter. We stub both with the
+// shared mockBook + a single-chapter payload.
+function mockFetch() {
+    global.fetch = async (url) => {
+        if (url.includes('/books/info')) {
+            return { ok: true, status: 200, json: async () => mockBook };
+        }
+        if (url.includes('/books/chapter')) {
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    title: '第一章 开端',
+                    blocks: [{ type: 'text', value: '正文内容' }],
+                }),
+            };
+        }
+        return { ok: false, status: 404 };
+    };
+}
+
+// End-to-end snapshot: drive the REAL renderTextReader against the mock book.
+// This is the load-bearing baseline for Task 8 — it MUST pass both before and
+// after textReader.js is slimmed, proving zero behavior regression.
+test('e2e baseline: render shows chapter 1 active + title + progress', async () => {
+    setupJsdom();
+    // state.js (auth state) reads sessionStorage at module load; jsdom helper
+    // doesn't stub it, so we provide a minimal in-memory impl here.
+    global.sessionStorage = global.sessionStorage || {
+        _s: {},
+        getItem(k) { return k in this._s ? this._s[k] : null; },
+        setItem(k, v) { this._s[k] = String(v); },
+        removeItem(k) { delete this._s[k]; },
+    };
+    // jsdom doesn't implement window.matchMedia; readerPrefs/theme resolve uses it.
+    window.matchMedia = window.matchMedia || (() => ({
+        matches: false,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+    }));
+    mockFetch();
+    try {
+        const { renderTextReader } = await import('./textReader.js');
+        const container = document.getElementById('view-reader');
+        await renderTextReader(container, mockBook.path, 0);
+        // allow any trailing async microtasks (rAF stubs, setTimeout) to flush
+        await new Promise((r) => setTimeout(r, 50));
+        const snap = snapshotReader(container);
+        assert.ok(
+            snap.title.includes('第一章'),
+            `title was: ${JSON.stringify(snap.title)}`
+        );
+        assert.ok(
+            snap.progress.includes('1 / 3'),
+            `progress was: ${JSON.stringify(snap.progress)}`
+        );
+        assert.equal(snap.tocCount, mockBook.chapters.length);
+        assert.equal(snap.activeTocIndex, 0);
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
