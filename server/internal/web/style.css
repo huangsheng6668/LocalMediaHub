@@ -2246,6 +2246,11 @@ body[data-active-tab="read"] .text-reader {
     color: var(--reader-fg, var(--text-white));
 }
 
+/* 书签 tab：属于当前章节的书签弱标记（区别于 TOC 的强高亮，避免混淆选中语义）。 */
+.text-reader__drawer-item--current-chapter {
+    background-color: rgba(124, 58, 237, 0.08);
+}
+
 .text-reader__drawer-del {
     margin-left: auto;
     background: transparent;

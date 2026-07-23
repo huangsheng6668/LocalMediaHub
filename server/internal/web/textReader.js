@@ -874,9 +874,10 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 }
                 bms.forEach(bm => {
                     const row = document.createElement('div');
-                    row.className = 'text-reader__drawer-item';
+                    const inCurrentChapter = bm.chapterIndex === currentIdx;
+                    row.className = 'text-reader__drawer-item' + (inCurrentChapter ? ' text-reader__drawer-item--current-chapter' : '');
                     const title = document.createElement('span');
-                    title.textContent = `第 ${bm.chapterIndex + 1} 章 · ${bm.preview}`;
+                    title.textContent = (inCurrentChapter ? '› ' : '') + `第 ${bm.chapterIndex + 1} 章 · ${bm.preview}`;
                     const del = document.createElement('button');
                     del.className = 'text-reader__drawer-del';
                     del.textContent = '✕';
@@ -978,9 +979,12 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             }
             updateProgressUI();
             saveProgress(path, { chapterIndex: idx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
-            // 章节切换后若目录 tab 正在显示，刷新以更新当前章节高亮。
+            // 章节切换后刷新抽屉：目录 tab 更新当前章节高亮，书签 tab 更新
+            // "属于当前章节"的书签标记。只在抽屉可见时刷新，避免无谓 DOM 操作。
             const activeTab = els.drawer.querySelector('.text-reader__tab--active')?.dataset.tab;
-            if (activeTab === 'toc' && drawer && drawer.refresh) drawer.refresh('toc');
+            if (!els.drawer.classList.contains('text-reader__drawer--hidden') && drawer && drawer.refresh) {
+                drawer.refresh(activeTab || 'toc');
+            }
         } catch (e) {
             els.content.textContent = '加载章节失败: ' + e.message;
             showToast('加载章节失败: ' + e.message, 'error');
