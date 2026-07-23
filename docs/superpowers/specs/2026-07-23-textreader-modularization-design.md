@@ -27,12 +27,12 @@
 ```
 textReader.js   主 render + 编排 + 生命周期 + 章节加载 + 翻章手势（~350 行）
 bus.js          事件总线（订阅/发布/取消，零依赖，~60 行）
-state.js        核心状态容器（currentIdx/book/chapterCount/els refs，~80 行）
+reader-state.js        核心状态容器（currentIdx/book/chapterCount/els refs，~80 行）
 toc.js          目录抽屉（渲染/高亮/开关/外部点击关闭，~200 行）
 bookmarks.js    书签 tab（渲染/增删/当前章节标记，~150 行）
 progress.js     进度计算 + UI + 滚动章节推断（~120 行）
 autoscroll.js   自动滚动面板（播放/调速 rAF，~100 行）
-settings.js     阅读设置 dialog（主题/字号/行距等，~250 行）
+reader-settings.js     阅读设置 dialog（主题/字号/行距等，~250 行）
 ```
 
 ## 模块边界与依赖
@@ -49,7 +49,7 @@ bus.js (零依赖)
   ├─ emit(event, payload) → try/catch 每个 handler
   └─ EVT 常量集中定义
 
-state.js (依赖 bus)
+reader-state.js (依赖 bus)
   ├─ 单例：currentIdx / book / chapterCount / els / settings
   ├─ setCurrentIdx(idx) → 更新 + emit('chapter:changed', {idx})
   └─ 各模块 import 读写
@@ -69,7 +69,7 @@ progress.js (依赖 state)
   └─ detectActiveChapterOnScroll() → 修复后阈值
 
 autoscroll.js (依赖 state) → 面板 + rAF 循环
-settings.js (依赖 state, readerPrefs) → dialog 构建
+reader-settings.js (依赖 state, readerPrefs) → dialog 构建
 ```
 
 ## 事件总线契约
@@ -125,12 +125,12 @@ export const EVT = {
 
 ```
 Step 1: bus.js          （零依赖，纯新增）             → 单测 + commit
-Step 2: state.js        （依赖 bus）                   → 单测 + commit
+Step 2: reader-state.js        （依赖 bus）                   → 单测 + commit
 Step 3: progress.js     （依赖 state，含阈值修复）       → 单测 + 快照 + commit
 Step 4: toc.js          （依赖 state/bus，含修复 1+2）   → 快照 + commit
 Step 5: bookmarks.js    （依赖 state/bus/readerPrefs）   → 快照 + commit
 Step 6: autoscroll.js   （依赖 state）                  → 快照 + commit
-Step 7: settings.js     （依赖 state/readerPrefs）       → 快照 + commit
+Step 7: reader-settings.js     （依赖 state/readerPrefs）       → 快照 + commit
 Step 8: textReader.js   （瘦身为主模块 + cleanup）       → 全量快照 + 手测 + commit
 ```
 

@@ -4,7 +4,7 @@
 
 **Goal:** 把 1160 行的 `textReader.js` 拆成 8 个职责清晰的 ES module + 事件总线，消除 `_highlightCurrent` hack 与双路径抽屉关闭，顺带修复无测试的章节推断阈值，全程零行为回归。
 
-**Architecture:** 增量迁移，按依赖底向上（bus → state → progress → toc → bookmarks → autoscroll → settings → 主模块）。引入极简事件总线 `bus.js` 解耦模块；核心共享状态收进 `state.js` 单例。每步独立可编译、可测、可 commit。行为不变性由 Step 0 记录的 jsdom 快照基线守护。
+**Architecture:** 增量迁移，按依赖底向上（bus → state → progress → toc → bookmarks → autoscroll → settings → 主模块）。引入极简事件总线 `bus.js` 解耦模块；核心共享状态收进 `reader-state.js` 单例。每步独立可编译、可测、可 commit。行为不变性由 Step 0 记录的 jsdom 快照基线守护。
 
 **Tech Stack:** 原生 ES module（无构建步骤）、Node.js 内置 `node:test`、jsdom（DOM 快照测试）、现有 `readerPrefs.js` / `api.js` / `toast.js`。
 
@@ -27,8 +27,8 @@
 |---|---|---|
 | `bus.js` | 事件总线 on/emit/EVT 常量 | Create |
 | `bus.test.mjs` | bus 单测 | Create |
-| `state.js` | 核心状态单例 + setCurrentIdx | Create |
-| `state.test.mjs` | state 单测 | Create |
+| `reader-state.js` | 核心状态单例 + setCurrentIdx | Create |
+| `reader-state.test.mjs` | state 单测 | Create |
 | `progress.js` | 进度计算 + 滚动章节推断（阈值修复） | Create |
 | `progress.test.mjs` | progress 单测（含阈值边界） | Create |
 | `toc.js` | 目录抽屉（修复 1 hack + 修复 2 双路径） | Create |
@@ -36,7 +36,7 @@
 | `bookmarks.js` | 书签 tab | Create |
 | `bookmarks.test.mjs` | bookmarks 快照 | Create |
 | `autoscroll.js` | 自动滚动面板 | Create |
-| `settings.js` | 阅读设置 dialog | Create |
+| `reader-settings.js` | 阅读设置 dialog | Create |
 | `textReader.js` | 瘦身为主模块（编排 + cleanup + loadChapter + 手势） | Modify |
 | `snapshot-baseline.test.mjs` | Step 0 记录的行为快照基线，全程守护 | Create |
 | `package.json` | 加 `test` 脚本 + jsdom devDependency | Modify |
@@ -361,11 +361,11 @@ EOF
 
 ---
 
-## Task 2: state.js 核心状态单例
+## Task 2: reader-state.js 核心状态单例
 
 **Files:**
-- Create: `server/internal/web/state.js`
-- Create: `server/internal/web/state.test.mjs`
+- Create: `server/internal/web/reader-state.js`
+- Create: `server/internal/web/reader-state.test.mjs`
 
 **Interfaces:**
 - Consumes: `bus.js` 的 `on/emit/EVT`。
@@ -373,12 +373,12 @@ EOF
 
 - [ ] **Step 1: 写失败测试**
 
-创建 `server/internal/web/state.test.mjs`：
+创建 `server/internal/web/reader-state.test.mjs`：
 
 ```javascript
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { state, setCurrentIdx, resetState } from './state.js';
+import { state, setCurrentIdx, resetState } from './reader-state.js';
 import { on, EVT } from './bus.js';
 
 test('setCurrentIdx updates state and emits chapter:changed', () => {
@@ -421,12 +421,12 @@ test('resetState restores defaults', () => {
 
 - [ ] **Step 2: 运行测试验证 FAIL**
 
-Run: `cd server/internal/web && node --test state.test.mjs`
-Expected: FAIL（`Cannot find module './state.js'`）。
+Run: `cd server/internal/web && node --test reader-state.test.mjs`
+Expected: FAIL（`Cannot find module './reader-state.js'`）。
 
-- [ ] **Step 3: 实现 state.js**
+- [ ] **Step 3: 实现 reader-state.js**
 
-创建 `server/internal/web/state.js`：
+创建 `server/internal/web/reader-state.js`：
 
 ```javascript
 // 核心状态单例：textReader 各子模块共享的可变状态。
@@ -469,18 +469,18 @@ export function resetState() {
 
 - [ ] **Step 4: 运行测试验证 PASS**
 
-Run: `cd server/internal/web && node --test state.test.mjs`
+Run: `cd server/internal/web && node --test reader-state.test.mjs`
 Expected: 4 tests PASS。
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd server/internal/web
-git add state.js state.test.mjs
+git add reader-state.js reader-state.test.mjs
 git commit -m "$(cat <<'EOF'
 feat(reader): add state singleton for shared reader state
 
-state.js holds currentIdx/book/chapterCount/els/settings as a module
+reader-state.js holds currentIdx/book/chapterCount/els/settings as a module
 singleton. setCurrentIdx is the single mutation entry that also emits
 chapter:changed — the mechanism that replaces the _highlightCurrent
 hack (toc subscribes to the event instead).
@@ -571,7 +571,7 @@ Expected: FAIL（`Cannot find module './progress.js'`）。
 // 进度计算 + 滚动模式章节推断。依赖 state 单例。
 // 从 textReader.js 原 updateProgressUI + onContentScroll 章节推断逻辑提取。
 // 修复 3：章节推断阈值从 <=100 放宽到 <=120，提取为可测纯函数。
-import { state } from './state.js';
+import { state } from './reader-state.js';
 
 // 纯函数：根据各章节 section 的 bounding rect 推断当前活动章节。
 // sections: [{ top, bottom, dataset: { chapterIndex } }]
@@ -686,7 +686,7 @@ EOF
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setupJsdom, teardownJsdom, mockBook } from './_snapshot-helpers.mjs';
-import { state, setCurrentIdx, resetState } from './state.js';
+import { state, setCurrentIdx, resetState } from './reader-state.js';
 import { renderToc } from './toc.js';
 
 function setupDrawer() {
@@ -780,7 +780,7 @@ Expected: FAIL（`Cannot find module './toc.js'`）。
 // 目录抽屉：渲染 TOC 列表 + 高亮当前章节 + 开关 + 外部点击关闭。
 // 修复 1：订阅 EVT.CHAPTER_CHANGED 自更新高亮（替代 _highlightCurrent hack）。
 // 修复 2：open/close/toggle/外部点击全在此模块，单一 drawerEl 引用，导出 dispose。
-import { state, setCurrentIdx } from './state.js';
+import { state, setCurrentIdx } from './reader-state.js';
 import { on, EVT } from './bus.js';
 
 // 渲染 TOC 到 drawerEl，返回控制器。
@@ -941,7 +941,7 @@ EOF
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setupJsdom, teardownJsdom, mockBook } from './_snapshot-helpers.mjs';
-import { state, resetState } from './state.js';
+import { state, resetState } from './reader-state.js';
 import { renderBookmarks } from './bookmarks.js';
 
 // 注意：readerPrefs 在 node 环境用 localStorage，_snapshot-helpers.mjs 已 stub localStorage。
@@ -1007,7 +1007,7 @@ Expected: FAIL（`Cannot find module './bookmarks.js'`）。
 ```javascript
 // 书签 tab：渲染书签列表 + 增删 + 当前章节弱标记。
 // 从 textReader.js 原 renderDrawerTabs 的 bookmarks 分支提取。
-import { state } from './state.js';
+import { state } from './reader-state.js';
 import { on, EVT } from './bus.js';
 import * as readerPrefs from './readerPrefs.js';
 
@@ -1104,7 +1104,7 @@ EOF
 ```javascript
 // 自动滚动面板：播放/暂停/调速 rAF 循环。
 // 从 textReader.js 原自动滚动逻辑提取。
-import { state } from './state.js';
+import { state } from './reader-state.js';
 
 export function renderAutoscroll({ panelEl, playBtn, minusBtn, plusBtn, speedValEl }) {
     let rafId = null;
@@ -1188,10 +1188,10 @@ EOF
 
 ---
 
-## Task 7: settings.js 阅读设置 dialog
+## Task 7: reader-settings.js 阅读设置 dialog
 
 **Files:**
-- Create: `server/internal/web/settings.js`
+- Create: `server/internal/web/reader-settings.js`
 
 **Interfaces:**
 - Consumes: `state`、`readerPrefs`、`bus`（emit SETTINGS_CHANGED）。
@@ -1201,11 +1201,11 @@ EOF
 
 - [ ] **Step 1: 读取现有 settings dialog 代码**
 
-执行 agent：先 `grep -n "reader-settings-dialog\|reader-settings__" server/internal/web/textReader.js` 找到 dialog 构建代码范围（约 250 行），完整 Read 该区域，作为 settings.js 实现的迁移源。
+执行 agent：先 `grep -n "reader-settings-dialog\|reader-settings__" server/internal/web/textReader.js` 找到 dialog 构建代码范围（约 250 行），完整 Read 该区域，作为 reader-settings.js 实现的迁移源。
 
-- [ ] **Step 2: 实现 settings.js**
+- [ ] **Step 2: 实现 reader-settings.js**
 
-创建 `server/internal/web/settings.js`，把现有 dialog 构建代码搬入，做以下调整：
+创建 `server/internal/web/reader-settings.js`，把现有 dialog 构建代码搬入，做以下调整：
 - 函数签名改为 `export function renderSettings(container) { ... }`。
 - 用 `state.settings` 替代直接调 `readerPrefs.getSettings()`。
 - 设置变更后 `emit(EVT.SETTINGS_CHANGED, { settings })`。
@@ -1228,9 +1228,9 @@ Expected: 所有测试 PASS。
 
 ```bash
 cd server/internal/web
-git add settings.js
+git add reader-settings.js
 git commit -m "$(cat <<'EOF'
-feat(reader): extract settings dialog into settings.js
+feat(reader): extract settings dialog into reader-settings.js
 
 Theme/font/line-height/content-width/immersive/scroll-mode settings
 dialog moves out of textReader.js. Changes now emit settings:changed on
@@ -1381,12 +1381,12 @@ EOF
 | Spec 要求 | 对应 Task |
 |---|---|
 | bus.js 事件总线 | Task 1 |
-| state.js 单例 + setCurrentIdx | Task 2 |
+| reader-state.js 单例 + setCurrentIdx | Task 2 |
 | progress.js（含阈值修复 3） | Task 3 |
 | toc.js（修复 1 hack + 修复 2 双路径） | Task 4 |
 | bookmarks.js | Task 5 |
 | autoscroll.js | Task 6 |
-| settings.js | Task 7 |
+| reader-settings.js | Task 7 |
 | textReader.js 瘦身 + 编排 | Task 8 |
 | 测试基础设施（jsdom + 快照基线） | Task 0 |
 | 每步 xsscheck lint | Task 1/4/5/6/7/8 各有 lint step |
