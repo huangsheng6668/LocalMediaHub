@@ -815,6 +815,14 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 const chapterTitle = (book.chapters && book.chapters[currentIdx]) ? book.chapters[currentIdx].title : '';
                 els.title.textContent = `${chapterTitle || ''} — ${book.title || ''}`;
                 saveProgress(path, { chapterIndex: currentIdx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
+                // 滚动模式：当前章节变化时更新抽屉高亮。用轻量 highlightCurrent
+                // （只移动 active class），不重建 DOM，避免滚动卡顿 + scrollIntoView 抢焦点。
+                // 书签 tab 的当前章节标记数较少，频率可接受，走 refresh。
+                if (!els.drawer.classList.contains('text-reader__drawer--hidden') && drawer) {
+                    const activeTab = els.drawer.querySelector('.text-reader__tab--active')?.dataset.tab;
+                    if (activeTab === 'toc' && drawer.highlightCurrent) drawer.highlightCurrent();
+                    else if (drawer.refresh) drawer.refresh(activeTab || 'toc');
+                }
             }
         }
         updateProgressUI();
@@ -841,6 +849,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 (book.chapters || []).forEach((ch, i) => {
                     const btn = document.createElement('button');
                     const isCurrent = i === currentIdx;
+                    btn.dataset.chapterIndex = String(i);
                     btn.className = 'text-reader__drawer-item' + (isCurrent ? ' text-reader__drawer-item--active' : '');
                     if (isCurrent) btn.setAttribute('aria-current', 'true');
                     btn.textContent = ch.title || `第 ${i + 1} 章`;
@@ -916,7 +925,27 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             });
         });
         refresh('toc');
-        return { refresh };
+        // 轻量高亮更新：只移动 active class，不重建 DOM。供滚动中频繁的章节切换
+        // 调用，避免 refresh 全量重建造成的卡顿 + scrollIntoView 抢滚动焦点。
+        // 只在当前显示的是 TOC tab 时生效；书签 tab 仍走 refresh（标记数较少，可接受）。
+        function highlightCurrent() {
+            const activeTab = tabs.querySelector('.text-reader__tab--active')?.dataset.tab;
+            if (activeTab !== 'toc') return;
+            const items = panel.querySelectorAll('.text-reader__drawer-item');
+            items.forEach((el) => {
+                const wasActive = el.classList.contains('text-reader__drawer-item--active');
+                const shouldBeActive = parseInt(el.dataset.chapterIndex, 10) === currentIdx;
+                if (shouldBeActive === wasActive) return;
+                el.classList.toggle('text-reader__drawer-item--active', shouldBeActive);
+                if (shouldBeActive) {
+                    el.setAttribute('aria-current', 'true');
+                    el.scrollIntoView({ block: 'nearest' });
+                } else {
+                    el.removeAttribute('aria-current');
+                }
+            });
+        }
+        return { refresh, highlightCurrent };
     }
 
     // 9. Re-render bookmarks tab when prefs change.
