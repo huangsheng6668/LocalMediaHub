@@ -17,7 +17,7 @@ var volumeRules = []*regexp.Regexp{
 }
 
 var chapterRules = []*regexp.Regexp{
-	regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[一二三四五六七八九十百千零0-9０-９]+(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*[章节回卷集部篇]`),
+	regexp.MustCompile(`^[^\p{L}\p{N}]*(?:第\s*)?[一二三四五六七八九十百千零0-9０-９]+(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*[章节回卷集部篇]`),
 	// Allow decorative prefix before brackets (e.g., ＊＊＊（３）)
 	regexp.MustCompile(`^[^\p{L}\p{N}]*[【\[（(]\s*第?\s*[一二三四五六七八九十百千零0-9０-９\s]+\s*[章节回]?\s*[】\]）)]\s*.*`),
 	regexp.MustCompile(`^(?:={3,}|-{3,}|\*{3,}|━{3,})\s*第?\s*[一二三四五六七八九十0-9]+.*`),

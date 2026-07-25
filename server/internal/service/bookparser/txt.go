@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	chapChapRegex            = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*章`)
-	chapNumRegex             = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*[章节回卷集部篇]`)
+	chapChapRegex            = regexp.MustCompile(`(?:第\s*)?([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*章`)
+	chapNumRegex             = regexp.MustCompile(`(?:第\s*)?([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*[章节回卷集部篇]`)
 	// Allow decorative prefix before brackets (e.g., ＊＊＊（３）)
 	chapParenRegex           = regexp.MustCompile(`^[^\p{L}\p{N}]*[【\[（(]\s*第?\s*([一二三四五六七八九十百千零0-9０-９]+)\s*[章节回]?\s*[】\]）)]`)
 	chapDotRegex             = regexp.MustCompile(`([一二三四五六七八九十0-9０-９]{1,4})[、\.]`)
@@ -26,7 +26,7 @@ var (
 	endMarkerRegex           = regexp.MustCompile(`[章节回卷集部篇]\s*完($|[\s　：:～~、，,;；]|评分|【|（|\()`)
 	authorNoteRegex          = regexp.MustCompile(`^(前言|后记|序言|序章|编者按|作者的话)[：:]`)
 	pagePrefixRegex          = regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[0-9一二三四五六七八九十]+\s*页[\s　]+`)
-	inlineChapterSuffixRegex = regexp.MustCompile(`^(.+?)(第\s*[一二三四五六七八九十百千零0-9０-９]{1,4}\s*[章节回])\s*$`)
+	inlineChapterSuffixRegex = regexp.MustCompile(`^(.+?)((?:第\s*)?[一二三四五六七八九十百千零0-9０-９]{1,4}\s*[章节回])\s*$`)
 )
 
 func isEndMarker(trim string) bool {

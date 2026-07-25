@@ -61,7 +61,10 @@ func GetChapterBlocksFromText(text string, charStart, charEnd int) []Block {
 		start = end
 	}
 	slice := string(runes[start:end])
-	paras := strings.Split(slice, "\n\n")
+	slice = strings.ReplaceAll(slice, "\r\n", "\n")
+	slice = strings.ReplaceAll(slice, "\t", "\n")
+
+	paras := strings.Split(slice, "\n")
 	blocks := make([]Block, 0, len(paras))
 	for _, p := range paras {
 		if s := strings.TrimSpace(p); s != "" {

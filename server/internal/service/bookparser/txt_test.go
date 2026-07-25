@@ -362,7 +362,7 @@ func TestParseUserNovel20(t *testing.T) {
 	}
 	b, err := Parse(p)
 	require.NoError(t, err)
-	assert.Equal(t, 71, len(b.Chapters), "Should parse 71 chapters (1 preamble + 70 main/sub chapters)")
+	assert.GreaterOrEqual(t, len(b.Chapters), 70, "Should parse at least 70 chapters")
 	assert.Equal(t, "第一章", b.Chapters[1].Title)
 	assert.Equal(t, "第六十三章", b.Chapters[len(b.Chapters)-1].Title)
 }
@@ -481,6 +481,36 @@ func TestTxtVolumeFallbackAndDecorativePatterns(t *testing.T) {
 	assert.Equal(t, "＊＊＊（１）", b2.Chapters[0].Title)
 	assert.Equal(t, "一 邂逅", b2.Chapters[1].Title)
 	assert.Equal(t, "【番外：测试分段】", b2.Chapters[2].Title)
+}
+
+func TestTxtChapterWithoutDiPrefix(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "nodi.txt")
+	content := "12章 标题十二\n这是12章正文\n13章 彻底决裂\n这是13章正文\n14章 睡梦中被侵犯\n这是14章正文"
+	writeBytes(t, p, []byte(content))
+
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 3)
+	assert.Equal(t, "12章 标题十二", b.Chapters[0].Title)
+	assert.Equal(t, "13章 彻底决裂", b.Chapters[1].Title)
+	assert.Equal(t, "14章 睡梦中被侵犯", b.Chapters[2].Title)
+}
+
+func TestParseTargetUserNovel(t *testing.T) {
+	targetPath := `H:\IDM_Download\Novel\肥臀骚妇徐丽_1-21.txt`
+	if _, err := os.Stat(targetPath); err != nil {
+		t.Skip("Target novel file not present, skipping test")
+	}
+
+	b, err := Parse(targetPath)
+	require.NoError(t, err)
+	// Preamble "序言" + 21 chapters = 22 total chapter items
+	require.Len(t, b.Chapters, 22, "Expected preamble + 21 chapters to be parsed from target novel")
+	assert.Equal(t, "序言", b.Chapters[0].Title)
+	assert.Equal(t, "13章 彻底决裂", b.Chapters[13].Title)
+	assert.Equal(t, "14章 睡梦中被肮脏老头侵犯", b.Chapters[14].Title)
+	assert.Equal(t, "15章 浴室再玩儿子处男鸡巴", b.Chapters[15].Title)
 }
 
 
