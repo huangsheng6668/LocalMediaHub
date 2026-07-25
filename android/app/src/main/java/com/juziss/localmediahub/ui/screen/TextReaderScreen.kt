@@ -552,13 +552,17 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                         viewModel.updateCurrentIndex(targetIdx)
                                         listState.scrollToItem(itemOffset)
                                     } else {
-                                        viewModel.loadChapter(targetIdx, resetScroll = true)
-                                        viewModel.preloadScrollChapters(3)
-                                        listState.scrollToItem(0)
+                                        val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
+                                        if (ok) {
+                                            viewModel.preloadScrollChapters(3)
+                                            listState.scrollToItem(0)
+                                        }
                                     }
                                 } else {
-                                    viewModel.loadChapter(targetIdx, resetScroll = true)
-                                    listState.scrollToItem(0)
+                                    val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
+                                    if (ok) {
+                                        listState.scrollToItem(0)
+                                    }
                                 }
                             }
                         },
