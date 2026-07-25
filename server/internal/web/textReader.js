@@ -119,9 +119,22 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         setVar('--reader-content-width', s.contentWidth + 'px');
         document.body.dataset.readerTheme = themeKey;
         if (els.autoscrollSpeedVal) els.autoscrollSpeedVal.textContent = s.autoScrollSpeed;
+        updateParagraphClasses();
     }
     applySettingsToUI();
     scheduleImmersiveEntry();
+
+    // firstLineIndent / paragraphSpacing 只在 renderBlocks 时写进 <p> className，
+    // 设置变更后需手动刷新已渲染段落的 class，否则开关无反应。
+    function updateParagraphClasses() {
+        const s = readerPrefs.getSettings();
+        const indent = s.firstLineIndent ? 'indent-on' : 'indent-off';
+        const gap = s.paragraphSpacing ? 'gap-on' : 'gap-off';
+        els.content.querySelectorAll('.text-reader__p').forEach(p => {
+            const dropcap = p.classList.contains('text-reader__p--dropcap') ? 'text-reader__p--dropcap' : '';
+            p.className = `text-reader__p ${indent} ${gap} ${dropcap}`.trim();
+        });
+    }
 
     function updateReadingModeUI(mode) {
         const hide = mode === 'scroll';
@@ -367,8 +380,11 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             section.appendChild(h);
         }
         const list = blocks || [];
+        // 排除以标点/空白开头的段落：破折号、引号（中英文）、书名号等。
+        // 否则 ::first-letter 会把引号/书名号放大，造成首字下沉错位。
         const dropCapIdx = list.findIndex(b => b && b.type === 'text' &&
-            typeof b.value === 'string' && b.value.trim().length >= 4 && !/^[—…\-\s]/.test(b.value.trim()));
+            typeof b.value === 'string' && b.value.trim().length >= 4 &&
+            !/^[—…\-\s"“”‘’《〈（(【]/.test(b.value.trim()));
         list.forEach((block, idx) => {
             if (block && block.type === 'image') {
                 const img = document.createElement('img');
