@@ -54,12 +54,11 @@ export function updateProgressUI() {
         }
         const overallFraction = (currentIdx + chapterFraction) / chapterCount;
         percent = Math.min(100, Math.max(0, Math.round(overallFraction * 100)));
-        els.progress.textContent = `全书进度 ${percent}% · 第 ${currentIdx + 1} / ${chapterCount} 章`;
+        // .text-reader__progress 已作为 scrubber 宿主,进度文本由 scrubber.formatLabel 接管
     } else {
         const scrollTop = els.content.scrollTop;
         const maxScroll = Math.max(1, els.content.scrollHeight - els.content.clientHeight);
         percent = computePercent(scrollTop, maxScroll);
-        els.progress.textContent = `第 ${currentIdx + 1} / ${chapterCount} 章 (${percent}%)`;
     }
 
     if (els.progressBar) {
