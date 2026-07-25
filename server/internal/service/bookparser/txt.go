@@ -17,9 +17,11 @@ import (
 var (
 	chapChapRegex            = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*章`)
 	chapNumRegex             = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*[章节回卷集部篇]`)
-	chapParenRegex           = regexp.MustCompile(`^[【\[（(]\s*第?\s*([一二三四五六七八九十百千零0-9０-９]+)\s*[章节回]?\s*[】\]）)]`)
+	// Allow decorative prefix before brackets (e.g., ＊＊＊（３）)
+	chapParenRegex           = regexp.MustCompile(`^[^\p{L}\p{N}]*[【\[（(]\s*第?\s*([一二三四五六七八九十百千零0-9０-９]+)\s*[章节回]?\s*[】\]）)]`)
 	chapDotRegex             = regexp.MustCompile(`([一二三四五六七八九十0-9０-９]{1,4})[、\.]`)
 	chapBareRegex            = regexp.MustCompile(`^(\d{1,4})\s+`)
+	chapCnBareRegex          = regexp.MustCompile(`^([一二三四五六七八九十]+)\s+`)
 	chapEngRegex             = regexp.MustCompile(`(?i)^(?:Chapter|Section|Volume|Book)\s+(\d+)`)
 	endMarkerRegex           = regexp.MustCompile(`[章节回卷集部篇]\s*完($|[\s　：:～~、，,;；]|评分|【|（|\()`)
 	authorNoteRegex          = regexp.MustCompile(`^(前言|后记|序言|序章|编者按|作者的话)[：:]`)
@@ -107,6 +109,9 @@ func extractChapKey(trim string) string {
 	if len(m) == 0 {
 		m = chapBareRegex.FindStringSubmatch(trim)
 	}
+	if len(m) == 0 {
+		m = chapCnBareRegex.FindStringSubmatch(trim)
+	}
 	if len(m) > 1 {
 		s := strings.TrimSpace(m[1])
 		if n := chineseToNum(s); n > 0 {
@@ -188,6 +193,13 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 	}
 	var metas []markMeta
 
+	// Track volume marker positions for fallback promotion
+	type volMark struct {
+		title string
+		start int
+	}
+	var volMarks []volMark
+
 	currentVolume := ""
 	currentVolIdx := -1
 
@@ -200,6 +212,7 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 		trim = pagePrefixRegex.ReplaceAllString(trim, "")
 
 		if isVol, volTitle := IsVolumeHeader(trim); isVol {
+			volMarks = append(volMarks, volMark{title: volTitle, start: off})
 			currentVolume = volTitle
 			currentVolIdx++
 			off += utf8.RuneCountInString(line) + 1
@@ -280,6 +293,14 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 			metas = append(metas, markMeta{chapKey: key, volume: currentVolume, volIdx: currentVolIdx})
 		}
 		off += utf8.RuneCountInString(line) + 1
+	}
+
+	// If no chapter marks found but volume markers exist, promote volumes to chapters
+	if len(marks) == 0 && len(volMarks) > 0 {
+		for _, vm := range volMarks {
+			marks = append(marks, chapterMark{title: vm.title, start: vm.start})
+			metas = append(metas, markMeta{chapKey: "", volume: "", volIdx: -1})
+		}
 	}
 
 	if len(marks) == 0 {

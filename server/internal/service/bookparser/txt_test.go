@@ -457,6 +457,33 @@ func TestTxtVolumeHierarchy(t *testing.T) {
 	assert.Equal(t, 1, b.Chapters[3].VolIndex)
 }
 
+func TestTxtVolumeFallbackAndDecorativePatterns(t *testing.T) {
+	dir := t.TempDir()
+
+	// 1. Test volume-only promotion (e.g. ━━━ 上 ━━━)
+	p1 := filepath.Join(dir, "vol_fallback.txt")
+	content1 := "━━━ 上 ━━━\n上篇正文内容\n━━━ 中 ━━━\n中篇正文内容\n━━━ 下 ━━━\n下篇正文内容"
+	writeBytes(t, p1, []byte(content1))
+	b1, err := Parse(p1)
+	require.NoError(t, err)
+	require.Len(t, b1.Chapters, 3, "should promote volumes to chapters when no chapter headers exist")
+	assert.Equal(t, "━━━ 上 ━━━", b1.Chapters[0].Title)
+	assert.Equal(t, "━━━ 中 ━━━", b1.Chapters[1].Title)
+	assert.Equal(t, "━━━ 下 ━━━", b1.Chapters[2].Title)
+
+	// 2. Test decorative prefixes and Chinese numeral + space + bracket patterns
+	p2 := filepath.Join(dir, "decorative.txt")
+	content2 := "＊＊＊（１）\n这是第一章的正文内容。\n　　一 邂逅\n这是第二章的正文内容。\n【番外：测试分段】\n这是第三章的正文内容。"
+	writeBytes(t, p2, []byte(content2))
+	b2, err := Parse(p2)
+	require.NoError(t, err)
+	require.Len(t, b2.Chapters, 3, "should match decorative, bare Chinese numeral, and bracketed section titles")
+	assert.Equal(t, "＊＊＊（１）", b2.Chapters[0].Title)
+	assert.Equal(t, "一 邂逅", b2.Chapters[1].Title)
+	assert.Equal(t, "【番外：测试分段】", b2.Chapters[2].Title)
+}
+
+
 
 func BenchmarkParseTxt(b *testing.B) {
 	content := []byte("第一卷 创世\n第1章 诞生\n测试内容\n第2章 崛起\n测试内容2\n")
