@@ -244,16 +244,15 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         speedValEl: els.autoscrollSpeedVal,
     });
 
-    // ===== 全书进度拖动条(松手才跳)=====
+    // ===== 进度拖动条 =====
+    //   分章模式:thumb = 章内进度,拖动实时滚动本章(不跳章),到顶/底即停。
+    //   滚动模式:thumb = 全书进度,松手才跳章(避免频繁触发章节惰性加载)。
     const scrubberApi = renderScrubber({
         containerEl: els.progress,   // 原 .text-reader__progress span 作为宿主
         getProgress: () => {
-            const cc = state.chapterCount || 1;
-            // 两种模式都映射到全书进度:
-            //   paged: (currentIdx + chapterInnerFraction) / cc
-            //   scroll: updateProgressUI 已算 overallFraction,这里复用同口径
             const isScroll = readerPrefs.getSettings().readingMode === 'scroll';
             if (isScroll) {
+                const cc = state.chapterCount || 1;
                 const activeSec = els.content.querySelector(
                     `.text-reader__chapter-section[data-chapter-index="${state.currentIdx}"]`
                 );
@@ -265,23 +264,37 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 }
                 return Math.min(1, Math.max(0, (state.currentIdx + frac) / cc));
             }
+            // 分章模式:章内滚动比例
             const maxScroll = Math.max(1, els.content.scrollHeight - els.content.clientHeight);
-            const inner = Math.min(1, Math.max(0, els.content.scrollTop / maxScroll));
-            return Math.min(1, Math.max(0, (state.currentIdx + inner) / cc));
+            return Math.min(1, Math.max(0, els.content.scrollTop / maxScroll));
         },
         getChapterCount: () => state.chapterCount || 1,
         onSeekStart: () => { if (autoscrollApi) autoscrollApi.stop(); },
-        onSeek: () => {},  // 纯本地预览,renderScrubber 内部已更新 thumb/label
+        onSeek: (p) => {
+            // 分章模式:拖动实时滚动本章内容
+            if (readerPrefs.getSettings().readingMode !== 'scroll') {
+                const maxScroll = Math.max(0, els.content.scrollHeight - els.content.clientHeight);
+                els.content.scrollTop = p * maxScroll;
+            }
+            // 滚动模式:纯本地预览,renderScrubber 内部已更新 thumb/label
+        },
         onSeekEnd: (p) => {
+            // 分章模式已在 onSeek 实时滚动,无需跳章;滚动模式松手跳章
+            if (readerPrefs.getSettings().readingMode !== 'scroll') return;
             const targetIdx = progressToChapterIndex(p, state.chapterCount || 1);
             onNavigate(targetIdx);
         },
         formatLabel: (p, dragging) => {
             const cc = state.chapterCount || 1;
-            const targetIdx = progressToChapterIndex(p, cc);
+            const isScroll = readerPrefs.getSettings().readingMode === 'scroll';
             const pct = Math.round(p * 100);
-            if (dragging) return `将跳到第 ${targetIdx + 1} 章`;
-            return `第 ${state.currentIdx + 1} / ${cc} 章 (${pct}%)`;
+            if (isScroll) {
+                const targetIdx = progressToChapterIndex(p, cc);
+                if (dragging) return `将跳到第 ${targetIdx + 1} 章`;
+                return `第 ${state.currentIdx + 1} / ${cc} 章 (${pct}%)`;
+            }
+            // 分章模式:章内百分比
+            return `第 ${state.currentIdx + 1} / ${cc} 章 · 本章 ${pct}%`;
         },
     });
 

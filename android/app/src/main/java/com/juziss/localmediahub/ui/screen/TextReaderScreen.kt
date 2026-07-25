@@ -530,37 +530,44 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                             }
                         }
                     }
-                    // ===== 右侧悬浮全书进度拖动条(松手才跳)=====
+                    // ===== 右侧进度拖动条 =====
+                    //   分章模式:thumb = 章内进度,拖动实时滚动本章(不跳章)。
+                    //   滚动模式:thumb = 全书进度,松手才跳章。
                     ReaderScrollbar(
-                        progress = (overallPercent / 100f).coerceIn(0f, 1f),
+                        progress = ((if (isScrollMode) overallPercent else chapterPercent) / 100f).coerceIn(0f, 1f),
                         onSeekStart = {
                             if (viewModel.isAutoScrolling.value) viewModel.stopAutoScroll()
                         },
-                        onSeek = { /* 纯本地预览,组件内部已更新 thumb */ },
+                        onSeek = { p ->
+                            // 分章模式:拖动实时滚动本章 item
+                            if (!isScrollMode) {
+                                val totalItems = listState.layoutInfo.totalItemsCount
+                                if (totalItems > 1) {
+                                    val targetItem = (p * (totalItems - 1)).roundToInt().coerceIn(0, totalItems - 1)
+                                    scope.launch { listState.scrollToItem(targetItem) }
+                                }
+                            }
+                            // 滚动模式:纯本地预览,组件内部已更新 thumb
+                        },
                         onSeekEnd = { p ->
+                            // 分章模式已在 onSeek 实时滚动,无需跳章;滚动模式松手跳章
+                            if (!isScrollMode) return@ReaderScrollbar
                             val total = (book?.chapters?.size ?: 1).coerceAtLeast(1)
                             val targetIdx = (p * (total - 1)).roundToInt().coerceIn(0, total - 1)
                             scope.launch {
-                                if (isScrollMode) {
-                                    val loadedCh = scrollChapters.find { it.chapterIndex == targetIdx }
-                                    if (loadedCh != null) {
-                                        var itemOffset = 0
-                                        for (c in scrollChapters) {
-                                            if (c.chapterIndex == targetIdx) break
-                                            itemOffset += c.blocks.size + 2
-                                        }
-                                        viewModel.updateCurrentIndex(targetIdx)
-                                        listState.scrollToItem(itemOffset)
-                                    } else {
-                                        val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
-                                        if (ok) {
-                                            viewModel.preloadScrollChapters(3)
-                                            listState.scrollToItem(0)
-                                        }
+                                val loadedCh = scrollChapters.find { it.chapterIndex == targetIdx }
+                                if (loadedCh != null) {
+                                    var itemOffset = 0
+                                    for (c in scrollChapters) {
+                                        if (c.chapterIndex == targetIdx) break
+                                        itemOffset += c.blocks.size + 2
                                     }
+                                    viewModel.updateCurrentIndex(targetIdx)
+                                    listState.scrollToItem(itemOffset)
                                 } else {
                                     val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
                                     if (ok) {
+                                        viewModel.preloadScrollChapters(3)
                                         listState.scrollToItem(0)
                                     }
                                 }
