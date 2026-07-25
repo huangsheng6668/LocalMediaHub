@@ -83,7 +83,9 @@ export function renderScrubber({
         if (onSeekEnd) onSeekEnd(dragProgress);
     }
 
-    track.addEventListener('pointerdown', onPointerDown);
+    // pointerdown 绑在 root(整个 28px 命中区)而非 4px 的 track:用户实际按下的
+    // 是 thumb(14px,盖在 track 上)或 root 空白区,事件冒泡到 root 才能可靠捕获。
+    root.addEventListener('pointerdown', onPointerDown);
     root.addEventListener('pointermove', onPointerMove);
     root.addEventListener('pointerup', onPointerUp);
     root.addEventListener('pointercancel', onPointerUp);
@@ -96,7 +98,7 @@ export function renderScrubber({
     }
 
     function dispose() {
-        track.removeEventListener('pointerdown', onPointerDown);
+        root.removeEventListener('pointerdown', onPointerDown);
         root.removeEventListener('pointermove', onPointerMove);
         root.removeEventListener('pointerup', onPointerUp);
         root.removeEventListener('pointercancel', onPointerUp);

@@ -69,6 +69,18 @@ test('renderScrubber: builds DOM with track/thumb/label', () => {
     api.dispose();
 });
 
+// 拖动事件统一 dispatch 到 root(整个 28px 命中区),而非 4px 的 track。
+// 真实用户按下时命中 thumb 或 root 空白区,products 的 pointerdown listener
+// 必须在 root 上才能捕获——历史上 listener 误挂在 track 上导致只能点不能拖。
+function setupScrubberHost(host) {
+    const track = host.querySelector('.text-reader__scrubber-track');
+    Object.defineProperty(track, 'getBoundingClientRect', {
+        value: () => ({ left: 0, width: 200, right: 200, top: 0, bottom: 10, height: 10 }),
+        configurable: true,
+    });
+    return host.querySelector('.text-reader__scrubber');
+}
+
 test('renderScrubber: pointerdown+move+up fires onSeekStart/onSeek/onSeekEnd', () => {
     const host = setupDom();
     const calls = { start: 0, seek: [], end: [] };
@@ -81,15 +93,9 @@ test('renderScrubber: pointerdown+move+up fires onSeekStart/onSeek/onSeekEnd', (
         onSeekEnd: (p) => { calls.end.push(p); },
         formatLabel: () => '',
     });
-    const track = host.querySelector('.text-reader__scrubber-track');
-    // 模拟 track 宽度 200px
-    Object.defineProperty(track, 'getBoundingClientRect', {
-        value: () => ({ left: 0, width: 200, right: 200, top: 0, bottom: 10, height: 10 }),
-        configurable: true,
-    });
+    const root = setupScrubberHost(host);
     const dispatch = (type, x) => {
-        const ev = new window.PointerEvent(type, { clientX: x, bubbles: true });
-        track.dispatchEvent(ev);
+        root.dispatchEvent(new window.PointerEvent(type, { clientX: x, bubbles: true }));
     };
     dispatch('pointerdown', 100);  // 50%
     dispatch('pointermove', 150);  // 75%
@@ -110,15 +116,37 @@ test('renderScrubber: progress clamped to [0,1] on drag', () => {
         onSeekStart: () => {}, onSeek: (p) => seekVals.push(p), onSeekEnd: () => {},
         formatLabel: () => '',
     });
-    const track = host.querySelector('.text-reader__scrubber-track');
-    Object.defineProperty(track, 'getBoundingClientRect', {
-        value: () => ({ left: 0, width: 200, right: 200, top: 0, bottom: 10, height: 10 }),
-        configurable: true,
-    });
-    const dispatch = (type, x) => track.dispatchEvent(new window.PointerEvent(type, { clientX: x, bubbles: true }));
+    const root = setupScrubberHost(host);
+    const dispatch = (type, x) => root.dispatchEvent(new window.PointerEvent(type, { clientX: x, bubbles: true }));
     dispatch('pointerdown', -50);   // <0 → 0
     dispatch('pointermove', 999);   // >width → 1
     assert.deepEqual(seekVals, [0, 1]);
+    api.dispose();
+});
+
+// 回归测试:pointerdown 落在 thumb 子元素(冒泡到 root)也必须启动拖动。
+// 这正是真实浏览器的失败场景——用户按下 14px 的 thumb 而非 4px 的 track。
+test('renderScrubber: pointerdown on thumb child still initiates drag', () => {
+    const host = setupDom();
+    const calls = { start: 0, seek: [], end: [] };
+    const api = renderScrubber({
+        containerEl: host,
+        getProgress: () => 0,
+        getChapterCount: () => 10,
+        onSeekStart: () => { calls.start++; },
+        onSeek: (p) => { calls.seek.push(p); },
+        onSeekEnd: (p) => { calls.end.push(p); },
+        formatLabel: () => '',
+    });
+    const root = setupScrubberHost(host);
+    const thumb = host.querySelector('.text-reader__scrubber-thumb');
+    // pointerdown 派发到 thumb(bubbles:true 冒泡到 root)
+    thumb.dispatchEvent(new window.PointerEvent('pointerdown', { clientX: 100, bubbles: true }));
+    root.dispatchEvent(new window.PointerEvent('pointermove', { clientX: 150, bubbles: true }));
+    root.dispatchEvent(new window.PointerEvent('pointerup', { clientX: 180, bubbles: true }));
+    assert.equal(calls.start, 1, 'onSeekStart must fire when pressing thumb');
+    assert.deepEqual(calls.seek, [0.5, 0.75]);
+    assert.deepEqual(calls.end, [0.9]);
     api.dispose();
 });
 
