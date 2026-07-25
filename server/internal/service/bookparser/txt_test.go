@@ -383,6 +383,39 @@ func TestParseUserNovel21(t *testing.T) {
 
 
 
+func TestTxtInlineChapterSuffix(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "inline_chap.txt")
+	// Simulates the pattern seen in 女神美母收藏系统: chapter title embedded at end of content line
+	content := "第一章\n这是第一章的内容，讲了很多故事。    第二章\n这是第二章的内容，继续讲故事啊。    第三章\n这是第三章的内容。"
+	writeBytes(t, p, []byte(content))
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 3, "should detect inline chapter suffixes")
+	assert.Equal(t, "第一章", b.Chapters[0].Title)
+	assert.Equal(t, "第二章", b.Chapters[1].Title)
+	assert.Equal(t, "第三章", b.Chapters[2].Title)
+	// Verify content split: chapter 0 should contain only its own content
+	c0, err := b.ChapterBlocks(0)
+	require.NoError(t, err)
+	joined0 := joinTextBlocks(c0)
+	assert.Contains(t, joined0, "第一章")
+	assert.NotContains(t, joined0, "第三章")
+}
+
+func TestParseUserNovel22(t *testing.T) {
+	p := `H:\IDM_Download\Novel\女神美母收藏系统_1-13.txt`
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("user file not found")
+	}
+	b, err := Parse(p)
+	require.NoError(t, err)
+	// 13 chapters + 1 preamble ("序言")
+	assert.GreaterOrEqual(t, len(b.Chapters), 13, "should detect all 13 chapters")
+	assert.Equal(t, "序言", b.Chapters[0].Title)
+	assert.Equal(t, "第一章", b.Chapters[1].Title)
+}
+
 func TestTxtVolumeHierarchy(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "vol.txt")

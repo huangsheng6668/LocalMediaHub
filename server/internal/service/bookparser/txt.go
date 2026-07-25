@@ -22,6 +22,10 @@ var (
 	endMarkerRegex  = regexp.MustCompile(`[章节回卷集部篇]\s*完($|[\s　：:～~、，,;；]|评分|【|（|\()`)
 	authorNoteRegex = regexp.MustCompile(`^(前言|后记|序言|序章|编者按|作者的话)[：:]`)
 	pagePrefixRegex = regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[0-9一二三四五六七八九十]+\s*页[\s　]+`)
+	// inlineChapterSuffixRegex matches a chapter header embedded at the end of a content line,
+	// e.g. "...正式开始。    第三章" or "...幸福地在一起！第二章" (with 0 or more spaces as separator).
+	// It requires at least one Chinese character or punctuation before the chapter token.
+	inlineChapterSuffixRegex = regexp.MustCompile(`^(.+?)(第\s*[一二三四五六七八九十百千零0-9０-９]{1,4}\s*[章节回])\s*$`)
 )
 
 func isEndMarker(trim string) bool {
@@ -194,6 +198,44 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 			currentVolIdx++
 			off += utf8.RuneCountInString(line) + 1
 			continue
+		}
+
+		// Check for inline chapter suffix: a chapter header embedded at the end of a content
+		// line (e.g. "...正式开始。    第三章" or "...幸福地在一起！第二章").
+		// This must run BEFORE isEndMarker, because long content lines (>80 chars) or lines
+		// ending with Chinese punctuation would otherwise be discarded by isEndMarker.
+		if !IsChapterHeader(trim) {
+			if sub := inlineChapterSuffixRegex.FindStringSubmatch(trim); len(sub) == 3 {
+				// Ensure the prefix is genuine content (not just whitespace or punctuation-only).
+				prefix := strings.TrimSpace(sub[1])
+				if utf8.RuneCountInString(prefix) >= 3 {
+					chapTitle := strings.TrimSpace(sub[2])
+					lineRunes := utf8.RuneCountInString(line)
+					prefixRunes := utf8.RuneCountInString(sub[1])
+					// Place the chapter mark at the offset where the chapter token begins.
+					chapOff := off + prefixRunes
+					key := extractChapKey(chapTitle)
+					m := chapterMark{title: chapTitle, start: chapOff}
+					if len(marks) > 0 && key != "" {
+						prevM := marks[len(marks)-1]
+						prevMeta := metas[len(metas)-1]
+						if key == prevMeta.chapKey && (chapOff-prevM.start < 3000) {
+							c1 := cleanTitleForComparison(prevM.title)
+							c2 := cleanTitleForComparison(chapTitle)
+							if strings.HasPrefix(c1, c2) || strings.HasPrefix(c2, c1) || len(chapTitle) >= len(prevM.title) {
+								marks[len(marks)-1] = m
+								metas[len(metas)-1] = markMeta{chapKey: key, volume: currentVolume, volIdx: currentVolIdx}
+								off += lineRunes + 1
+								continue
+							}
+						}
+					}
+					marks = append(marks, m)
+					metas = append(metas, markMeta{chapKey: key, volume: currentVolume, volIdx: currentVolIdx})
+					off += lineRunes + 1
+					continue
+				}
+			}
 		}
 
 		if isEndMarker(trim) {
