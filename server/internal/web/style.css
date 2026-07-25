@@ -2355,6 +2355,54 @@ dialog#reader-settings-dialog menu {
     transition: color 0.2s ease;
 }
 
+/* 全书进度拖动条:替换原 .text-reader__progress 文字 */
+.text-reader__scrubber {
+    position: relative;
+    flex: 1;
+    min-width: 120px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    touch-action: none;  /* pointer 拖动不被滚动抢占 */
+}
+.text-reader__scrubber-track {
+    position: relative;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background-color: var(--reader-border, var(--border-color));
+}
+.text-reader__scrubber-thumb {
+    position: absolute;
+    top: 50%;
+    left: 0%;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    background-color: var(--primary, #6366f1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    transition: width 0.1s ease, height 0.1s ease;
+}
+.text-reader__scrubber:hover .text-reader__scrubber-thumb,
+.text-reader__scrubber:active .text-reader__scrubber-thumb {
+    width: 18px;
+    height: 18px;
+}
+.text-reader__scrubber-label {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: var(--reader-chrome-fg, var(--text-muted));
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0.85;
+}
+
 /* 顶部细进度条，支持沉浸模式与普通模式下置顶显示 */
 .text-reader__progress-bar {
     position: fixed;

@@ -13,6 +13,7 @@ import { renderToc } from './toc.js';
 import { renderBookmarks } from './bookmarks.js';
 import { renderAutoscroll } from './autoscroll.js';
 import { renderSettings } from './reader-settings.js';
+import { renderScrubber, progressToChapterIndex } from './readerScrubber.js';
 
 const STORAGE_PREFIX = 'book_progress:';
 
@@ -242,6 +243,48 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         plusBtn: els.autoscrollPlus,
         speedValEl: els.autoscrollSpeedVal,
     });
+
+    // ===== 全书进度拖动条(松手才跳)=====
+    const scrubberApi = renderScrubber({
+        containerEl: els.progress,   // 原 .text-reader__progress span 作为宿主
+        getProgress: () => {
+            const cc = state.chapterCount || 1;
+            // 两种模式都映射到全书进度:
+            //   paged: (currentIdx + chapterInnerFraction) / cc
+            //   scroll: updateProgressUI 已算 overallFraction,这里复用同口径
+            const isScroll = readerPrefs.getSettings().readingMode === 'scroll';
+            if (isScroll) {
+                const activeSec = els.content.querySelector(
+                    `.text-reader__chapter-section[data-chapter-index="${state.currentIdx}"]`
+                );
+                let frac = 0;
+                if (activeSec) {
+                    const rect = activeSec.getBoundingClientRect();
+                    const containerTop = els.content.getBoundingClientRect().top;
+                    frac = Math.min(1, Math.max(0, (containerTop - rect.top) / Math.max(1, rect.height)));
+                }
+                return Math.min(1, Math.max(0, (state.currentIdx + frac) / cc));
+            }
+            const maxScroll = Math.max(1, els.content.scrollHeight - els.content.clientHeight);
+            const inner = Math.min(1, Math.max(0, els.content.scrollTop / maxScroll));
+            return Math.min(1, Math.max(0, (state.currentIdx + inner) / cc));
+        },
+        getChapterCount: () => state.chapterCount || 1,
+        onSeekStart: () => { if (autoscrollApi) autoscrollApi.stop(); },
+        onSeek: () => {},  // 纯本地预览,renderScrubber 内部已更新 thumb/label
+        onSeekEnd: (p) => {
+            const targetIdx = progressToChapterIndex(p, state.chapterCount || 1);
+            onNavigate(targetIdx);
+        },
+        formatLabel: (p, dragging) => {
+            const cc = state.chapterCount || 1;
+            const targetIdx = progressToChapterIndex(p, cc);
+            const pct = Math.round(p * 100);
+            if (dragging) return `将跳到第 ${targetIdx + 1} 章`;
+            return `第 ${state.currentIdx + 1} / ${cc} 章 (${pct}%)`;
+        },
+    });
+
     const settingsApi = renderSettings(container);
 
     // Header action buttons: Aa opens settings, ▶ toggles autoscroll.
@@ -336,6 +379,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             }
         }
         updateProgressUI();
+        if (scrubberApi) scrubberApi.update();
     }
     els.content.addEventListener('scroll', onContentScroll);
     const onVisibilityChange = () => { if (document.hidden) autoscrollApi.stop(); };
@@ -345,6 +389,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     container._cleanupReader = () => {
         unsubSettings(); unsubPrefs(); unsubBms();
         tocApi.dispose(); bookmarksApi.dispose(); autoscrollApi.dispose(); settingsApi.dispose();
+        scrubberApi.dispose();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         document.removeEventListener('keydown', onKeyDown);
         document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -465,6 +510,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 els.content.classList.add('text-reader__content--entering');
             }
             updateProgressUI();
+            if (scrubberApi) scrubberApi.update();
             saveProgress(path, { chapterIndex: idx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
         } catch (e) {
             els.content.textContent = '加载章节失败: ' + e.message;

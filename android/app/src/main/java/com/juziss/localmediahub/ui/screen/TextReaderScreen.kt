@@ -88,6 +88,7 @@ import coil3.compose.AsyncImage
 import com.juziss.localmediahub.data.Bookmark
 import com.juziss.localmediahub.data.ReadingMode
 import com.juziss.localmediahub.data.ScrollModeChapter
+import com.juziss.localmediahub.ui.component.reader.ReaderScrollbar
 import com.juziss.localmediahub.ui.component.reader.ReaderSettingsSheet
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
@@ -96,6 +97,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Compose UI for the text reader screen.
@@ -528,6 +530,44 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                             }
                         }
                     }
+                    // ===== 右侧悬浮全书进度拖动条(松手才跳)=====
+                    ReaderScrollbar(
+                        progress = (overallPercent / 100f).coerceIn(0f, 1f),
+                        onSeekStart = {
+                            if (viewModel.isAutoScrolling.value) viewModel.stopAutoScroll()
+                        },
+                        onSeek = { /* 纯本地预览,组件内部已更新 thumb */ },
+                        onSeekEnd = { p ->
+                            val total = (book?.chapters?.size ?: 1).coerceAtLeast(1)
+                            val targetIdx = (p * (total - 1)).roundToInt().coerceIn(0, total - 1)
+                            scope.launch {
+                                if (isScrollMode) {
+                                    val loadedCh = scrollChapters.find { it.chapterIndex == targetIdx }
+                                    if (loadedCh != null) {
+                                        var itemOffset = 0
+                                        for (c in scrollChapters) {
+                                            if (c.chapterIndex == targetIdx) break
+                                            itemOffset += c.blocks.size + 2
+                                        }
+                                        viewModel.updateCurrentIndex(targetIdx)
+                                        listState.scrollToItem(itemOffset)
+                                    } else {
+                                        val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
+                                        if (ok) {
+                                            viewModel.preloadScrollChapters(3)
+                                            listState.scrollToItem(0)
+                                        }
+                                    }
+                                } else {
+                                    val ok = viewModel.loadChapter(targetIdx, resetScroll = true)
+                                    if (ok) {
+                                        listState.scrollToItem(0)
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    )
                 }
             }
         }
