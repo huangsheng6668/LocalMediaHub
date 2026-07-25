@@ -383,6 +383,20 @@ func TestParseUserNovel21(t *testing.T) {
 
 
 
+func TestTxtExpandedPatterns(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "expanded.txt")
+	content := "(1) 第一节内容\n这是(1)正文\n（二） 第二节内容\n这是（二）正文\n3 第三节内容\n这是3正文\n（ 4 ） 第四节内容\n这是4正文"
+	writeBytes(t, p, []byte(content))
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 4, "should detect expanded chapter patterns")
+	assert.Equal(t, "(1) 第一节内容", b.Chapters[0].Title)
+	assert.Equal(t, "（二） 第二节内容", b.Chapters[1].Title)
+	assert.Equal(t, "3 第三节内容", b.Chapters[2].Title)
+	assert.Equal(t, "（ 4 ） 第四节内容", b.Chapters[3].Title)
+}
+
 func TestTxtInlineChapterSuffix(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "inline_chap.txt")

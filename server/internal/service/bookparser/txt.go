@@ -15,16 +15,15 @@ import (
 )
 
 var (
-	chapChapRegex   = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*章`)
-	chapNumRegex    = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*[章节回卷集部篇]`)
-	chapDotRegex    = regexp.MustCompile(`([一二三四五六七八九十0-9０-９]{1,4})[、\.]`)
-	chapEngRegex    = regexp.MustCompile(`(?i)^(?:Chapter|Section|Volume|Book)\s+(\d+)`)
-	endMarkerRegex  = regexp.MustCompile(`[章节回卷集部篇]\s*完($|[\s　：:～~、，,;；]|评分|【|（|\()`)
-	authorNoteRegex = regexp.MustCompile(`^(前言|后记|序言|序章|编者按|作者的话)[：:]`)
-	pagePrefixRegex = regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[0-9一二三四五六七八九十]+\s*页[\s　]+`)
-	// inlineChapterSuffixRegex matches a chapter header embedded at the end of a content line,
-	// e.g. "...正式开始。    第三章" or "...幸福地在一起！第二章" (with 0 or more spaces as separator).
-	// It requires at least one Chinese character or punctuation before the chapter token.
+	chapChapRegex            = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*章`)
+	chapNumRegex             = regexp.MustCompile(`第\s*([一二三四五六七八九十百千零0-9０-９]+)(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*[章节回卷集部篇]`)
+	chapParenRegex           = regexp.MustCompile(`^[【\[（(]\s*第?\s*([一二三四五六七八九十百千零0-9０-９]+)\s*[章节回]?\s*[】\]）)]`)
+	chapDotRegex             = regexp.MustCompile(`([一二三四五六七八九十0-9０-９]{1,4})[、\.]`)
+	chapBareRegex            = regexp.MustCompile(`^(\d{1,4})\s+`)
+	chapEngRegex             = regexp.MustCompile(`(?i)^(?:Chapter|Section|Volume|Book)\s+(\d+)`)
+	endMarkerRegex           = regexp.MustCompile(`[章节回卷集部篇]\s*完($|[\s　：:～~、，,;；]|评分|【|（|\()`)
+	authorNoteRegex          = regexp.MustCompile(`^(前言|后记|序言|序章|编者按|作者的话)[：:]`)
+	pagePrefixRegex          = regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[0-9一二三四五六七八九十]+\s*页[\s　]+`)
 	inlineChapterSuffixRegex = regexp.MustCompile(`^(.+?)(第\s*[一二三四五六七八九十百千零0-9０-９]{1,4}\s*[章节回])\s*$`)
 )
 
@@ -100,13 +99,20 @@ func extractChapKey(trim string) string {
 		m = chapNumRegex.FindStringSubmatch(trim)
 	}
 	if len(m) == 0 {
+		m = chapParenRegex.FindStringSubmatch(trim)
+	}
+	if len(m) == 0 {
 		m = chapDotRegex.FindStringSubmatch(trim)
 	}
+	if len(m) == 0 {
+		m = chapBareRegex.FindStringSubmatch(trim)
+	}
 	if len(m) > 1 {
-		if n := chineseToNum(m[1]); n > 0 {
+		s := strings.TrimSpace(m[1])
+		if n := chineseToNum(s); n > 0 {
 			return fmt.Sprintf("%d", n)
 		}
-		return m[1]
+		return s
 	}
 	if m2 := chapEngRegex.FindStringSubmatch(trim); len(m2) > 1 {
 		return m2[1]
