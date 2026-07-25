@@ -26,16 +26,21 @@ Android 端已存在 `VerticalScrollbar.kt` 组件(支持 drag-to-seek,绑 `Lazy
 
 ---
 
-## 2. 核心规则(两端统一)
+## 2. 核心规则(两端统一,模式分化)
 
-可拖动进度控件在**两端、两种阅读模式下统一表示全书进度 (0~100%)**:
+进度控件的语义**按阅读模式分化**,两端口径一致:
 
-- **进度语义**: 无论是**分章模式**还是**滚动模式**,进度条 Thumb 位置均对应**全书总进度** (0~100%)。
-  - *为什么分章模式不能使用章内进度*: 拖动进度条映射的目标是全书章节 `targetIdx = round(p * (totalChaptersCount - 1))`。若分章模式下 Thumb 表示章内进度 (例如第 1 章读到 50% 处 Thumb 位于 50% 位置),用户点击或微拖 Thumb 就会误跨越到第 50 章。因此 Thumb 位置必须统一表示全书进度。
-- **拖动交互**: 两种模式下**均采用松手才跳转**的策略——拖动过程中只移动 Thumb 并实时显示"将跳到第 X 章 (Y%)"提示,**松手 (Release) 时才触发章节加载与滚动跳转**。
+- **分章模式 (PAGED, 默认)**:
+  - **进度语义**: Thumb 位置 = **当前章内**进度 (0~100%)。全书位置由底部"第 X/Y 章"文字 + 顶部固定进度条体现,Thumb 不承担全书定位。
+  - **拖动交互**: **实时跟随**——拖动过程中实时滚动本章内容(`scrollTop` / `listState.scrollToItem`),不触发跳章,到顶/底即停。翻章继续用底部"上一章/下一章"按钮。
+  - *为什么不跳章*: 分章模式一次只显示一章,拖动 Thumb 只是"本章内快速定位"。拖动只滚本章彻底消除了"误跨章"问题(用户在章内拖 Thumb 永远不会跳到别的章)。内容已在内存,实时跟随无加载开销、体验连贯。
+
+- **滚动模式 (SCROLL)**:
+  - **进度语义**: Thumb 位置 = **全书**进度 (0~100%),`targetIdx = round(p * (totalChaptersCount - 1))`。
+  - **拖动交互**: **松手才跳转**——拖动过程中只移动 Thumb 并实时显示"将跳到第 X 章"提示,**松手 (Release) 时才触发章节加载与滚动跳转**。
   - *为什么松手才跳转*: 避免拖动过程中频繁触发网络 API 加载章节、重复重置滚动模式的缓冲窗口 (`scrollChapters`),保证滑动流畅无卡顿。Kindle / 微信读书等主流阅读器普遍采用此策略。
 
-> **统一结论**: 两种模式在进度语义(全书 0~100%)、拖动交互(松手才跳)以及跳转目标计算上**完全一致**,两端代码无需为分章/滚动分化两套 Seek 算式。
+> **统一结论**: 两端代码口径一致;分章与滚动两种模式的差异仅在进度语义(章内 vs 全书)和拖动交互(实时跟随 vs 松手才跳),由 `readingMode` 分支处理。
 
 ---
 
@@ -162,19 +167,38 @@ export function renderScrubber({
 
 ---
 
-## 5. 数据流(两端统一口径)
+## 5. 数据流(两端统一口径,模式分化)
 
-两种模式的拖动跳转语义**两端完全一致**:
+两端口径一致;分章与滚动两种模式的数据流如下:
 
-### 拖动与 Seek 完整生命周期
+### 分章模式 (PAGED) —— 实时跟随,不跳章
 ```
 用户按住 thumb (pointerdown / Press)
   → onSeekStart()
-      → 若正在自动滚动 → 停止自动滚动 (viewModel.stopAutoScroll() / autoscrollApi.stop())
+      → 若正在自动滚动 → 停止自动滚动
       → 标记 isDragging = true
 用户滑动 thumb (pointermove / Move)
   → onSeek(p)
-      → p 范围限制在 [0f, 1f]
+      → p 范围限制在 [0f, 1f] (代表章内进度)
+      → 实时滚动本章内容:
+          [Web]    els.content.scrollTop = p * (scrollHeight - clientHeight)
+          [Android] listState.scrollToItem(round(p * (totalItems-1)))
+      → 更新 Thumb UI 位置 + label "第 X/Y 章 · 本章 round(p*100)%"
+用户松开 thumb (pointerup / Release)
+  → onSeekEnd(p)
+      → 标记 isDragging = false
+      → [不跳章,本章位置已在 onSeek 实时定位;直接 return]
+```
+
+### 滚动模式 (SCROLL) —— 松手才跳章
+```
+用户按住 thumb (pointerdown / Press)
+  → onSeekStart()
+      → 若正在自动滚动 → 停止自动滚动
+      → 标记 isDragging = true
+用户滑动 thumb (pointermove / Move)
+  → onSeek(p)
+      → p 范围限制在 [0f, 1f] (代表全书进度)
       → targetIdx = round(p * (chapterCount - 1))
       → 更新 Thumb UI 位置 + 显示提示 "将跳到第 targetIdx + 1 章"
       → [不触发任何章节 fetch 或页面 scroll]
@@ -182,11 +206,10 @@ export function renderScrubber({
   → onSeekEnd(p)
       → 标记 isDragging = false
       → targetIdx = round(p * (chapterCount - 1))
-      → [Android] viewModel.loadChapter(targetIdx, resetScroll=true)
-      → [Web] onNavigate(targetIdx)
+      → 已加载? scrollToItem(offset) : loadChapter(targetIdx, reset=true) + preload
 ```
 
-> **结论**: 分章模式与滚动模式均遵循"全书进度语义 + 松手才跳转"。这使得 `ReaderScrollbar` / `renderScrubber` 的实现高度纯粹——`onSeek` 只做纯 UI 预览,真正的异步加载与跳转解耦至 `onSeekEnd` 处理。
+> **结论**: `ReaderScrollbar` / `renderScrubber` 组件本身是模式无关的纯 UI(progress + onSeekStart/onSeek/onSeekEnd 回调),模式分化由 `TextReaderScreen` / `textReader.js` 在回调实现里按 `readingMode` 分支处理。
 
 ---
 
