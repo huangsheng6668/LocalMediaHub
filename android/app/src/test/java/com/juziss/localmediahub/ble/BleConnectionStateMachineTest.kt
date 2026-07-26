@@ -12,10 +12,10 @@ class BleConnectionStateMachineTest {
     }
 
     @Test
-    fun idle_toScanning_toConnecting_toConnected() {
+    fun idle_toAdvertising_toConnecting_toConnected() {
         val sm = BleConnectionStateMachine()
-        sm.onStartScan()
-        assertEquals(BleConnState.SCANNING, sm.state.value)
+        sm.onStartAdvertising()
+        assertEquals(BleConnState.ADVERTISING, sm.state.value)
         sm.onConnecting()
         assertEquals(BleConnState.CONNECTING, sm.state.value)
         sm.onConnected()
@@ -25,7 +25,7 @@ class BleConnectionStateMachineTest {
     @Test
     fun connected_toDisconnected_returnsToIdle() {
         val sm = BleConnectionStateMachine()
-        sm.onStartScan()
+        sm.onStartAdvertising()
         sm.onConnecting()
         sm.onConnected()
         sm.onDisconnected()
@@ -35,7 +35,7 @@ class BleConnectionStateMachineTest {
     @Test
     fun onBleDisabled_overridesToDisabled() {
         val sm = BleConnectionStateMachine()
-        sm.onStartScan()
+        sm.onStartAdvertising()
         sm.onBleDisabled()
         assertEquals(BleConnState.DISABLED, sm.state.value)
     }
@@ -43,7 +43,7 @@ class BleConnectionStateMachineTest {
     @Test
     fun onError_fromAnyState_returnsToIdle() {
         val sm = BleConnectionStateMachine()
-        sm.onStartScan()
+        sm.onStartAdvertising()
         sm.onConnecting()
         sm.onError()
         assertEquals(BleConnState.IDLE, sm.state.value)
