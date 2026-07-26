@@ -22,6 +22,14 @@ import (
 // bookSigner (added in Round 32 Task 5) signs rewritten <img> src URLs so the
 // /books/image endpoint can authenticate without inlining the Bearer token
 // in the URL. May be nil in tests that do not exercise the signing path.
+//
+// bleCentral (added in BLE GATT wiring Task 4) is the handler-level seam over
+// the BLE Central backend. It is intentionally an interface (BLECentralBackend)
+// rather than the concrete *ble.Central so handler tests can inject a fake.
+// Set ONLY when BLE is available — leaving it as a true nil interface (not a
+// nil pointer wrapped in a non-nil interface) so the handlers' `== nil` checks
+// correctly route to the "ble unavailable" responses. server.New handles the
+// conditional assignment (Gotcha 1 in the BLE GATT wiring plan).
 type Handler struct {
 	cfg        *config.Config
 	scanner    *service.Scanner
@@ -30,6 +38,7 @@ type Handler struct {
 	thumbnail  *service.ThumbnailService
 	books      *service.BookService
 	bookSigner *service.BookSigner
+	BLECentral BLECentralBackend
 }
 
 // New creates a Handler with all required service dependencies.
