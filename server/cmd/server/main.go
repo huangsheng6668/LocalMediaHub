@@ -6,6 +6,7 @@ import (
 	"os"
 	"net/http"
 
+	"github.com/localmediahub/server/internal/ble"
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/gui"
 	localmdns "github.com/localmediahub/server/internal/mdns"
@@ -63,6 +64,22 @@ func main() {
 	} else {
 		if err := mdnsSvc.Start(cfg.Server.Host, cfg.Server.Port); err != nil {
 			slog.Warn("Failed to start mDNS", "error", err)
+		}
+	}
+
+	// BLE control channel (experimental, opt-in on client side). Server-side
+	// startup failure is non-fatal: if no Bluetooth adapter is present or the
+	// build lacks the "bluetooth" tag, BLE is simply unavailable and the
+	// server continues with Wi-Fi/HTTP only (zero-regression principle).
+	bleAdapter, err := ble.NewTinyGoAdapter()
+	if err != nil {
+		slog.Info("BLE channel disabled on server", "reason", err)
+	} else {
+		blePeripheral := ble.NewPeripheral(bleAdapter)
+		if err := blePeripheral.Start(); err != nil {
+			slog.Warn("BLE Peripheral start failed; continuing without BLE", "error", err)
+		} else {
+			slog.Info("BLE Peripheral advertising", "service", ble.ServiceUUID)
 		}
 	}
 
