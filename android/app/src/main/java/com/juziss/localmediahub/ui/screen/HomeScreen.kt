@@ -185,7 +185,7 @@ fun HomeScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .padding(innerPadding),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(22.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
             item {
                 HeroCard(
@@ -220,7 +220,10 @@ fun HomeScreen(
                     )
                 }
                 item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
                         items(uiState.libraries, key = { it.path }) { library ->
                             LibraryCard(library = library, onClick = { onOpenLibrary(library) })
                         }
@@ -258,7 +261,10 @@ fun HomeScreen(
                     )
                 }
                 item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
                         items(uiState.continueWatching, key = { "${it.file.relativePath}-${it.updatedAt}" }) { entry ->
                             ContinueWatchingCard(
                                 entry = entry,
@@ -296,7 +302,10 @@ fun HomeScreen(
                     )
                 }
                 item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
                         items(uiState.recentMedia, key = { "${it.file.relativePath}-${it.openedAt}" }) { entry ->
                             RecentMediaCard(
                                 entry = entry,
@@ -316,7 +325,10 @@ fun HomeScreen(
                     )
                 }
                 item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
                         items(uiState.favoriteFiles, key = { it.relativePath }) { file ->
                             FavoritePreviewCard(
                                 file = file,
@@ -335,7 +347,10 @@ fun HomeScreen(
                     )
                 }
                 item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
                         items(downloadedEntries.take(10), key = { "home-download-${it.file.relativePath}" }) { entry ->
                             DownloadedPreviewCard(
                                 entry = entry,

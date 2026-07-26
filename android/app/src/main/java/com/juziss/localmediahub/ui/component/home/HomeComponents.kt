@@ -791,7 +791,8 @@ fun BookshelfCard(
     if (books.isEmpty()) return
     LazyRow(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         items(books, key = { it.path }) { entry ->
             BookshelfTile(entry = entry, onClick = { onOpen(entry) })
