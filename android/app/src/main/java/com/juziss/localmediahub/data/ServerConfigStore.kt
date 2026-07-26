@@ -3,6 +3,7 @@ package com.juziss.localmediahub.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -32,6 +33,7 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
         private val KEY_KNOWN_SERVERS = stringPreferencesKey("known_servers")
         private val KEY_AUTH_TOKEN = stringPreferencesKey("auth_token")
         private val KEY_APP_THEME = stringPreferencesKey("app_theme")
+        private val KEY_BLE_ENABLED = booleanPreferencesKey("ble_enabled")
     }
 
     private val gson = Gson()
@@ -56,6 +58,10 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
         prefs[KEY_APP_THEME] ?: "AUTO"
     }
 
+    val bleEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_BLE_ENABLED] ?: false
+    }
+
     val knownServers: Flow<List<KnownServer>> = context.dataStore.data.map { prefs ->
         decodeKnownServers(prefs[KEY_KNOWN_SERVERS])
     }
@@ -63,6 +69,12 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
     suspend fun saveAppTheme(theme: String) {
         context.dataStore.edit { prefs ->
             prefs[KEY_APP_THEME] = theme
+        }
+    }
+
+    suspend fun saveBleEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_BLE_ENABLED] = enabled
         }
     }
 
