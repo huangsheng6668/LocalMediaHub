@@ -5,120 +5,225 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LocalMediaHub · UI 优化对照预览</title>
 <style>
-  :root{
-    /* —— 现状（浅色） —— */
-    --c-bg:#F6F1E8; --c-surface:#FFFBF7; --c-primary:#135F65; --c-secondary:#B96D1D;
-    --c-on-bg:#1A1F1C; --c-on-surface:#1A1F1C; --c-on-var:#5A6462;
-    --c-outline:#C7D0CC; --c-shadow:0 1px 3px rgba(0,0,0,.12);
-    /* —— 现状（暗色） —— */
-    --d-bg:#0D1718; --d-surface:#142022; --d-primary:#7AD4D2; --d-secondary:#FFBC6D;
-    --d-on-bg:#E9F1EF; --d-on-var:#ADC4C1; --d-outline:#314749; --d-shadow:0 1px 3px rgba(0,0,0,.4);
+  /* ================================================================
+     主题作用域隔离
+     - .theme-cur = 现状 (Teal)
+     - .theme-opt = 优化后 (Terracotta 纸感)
+     ================================================================ */
+
+  /* 现状（Teal 绿 / 沉闷阴影 / 混用圆角 / 无描边） */
+  .theme-cur {
+    --c-bg: #F6F1E8;
+    --c-surface: #FFFBF7;
+    --c-primary: #135F65;
+    --c-primary-text: #135F65;
+    --c-secondary: #B96D1D;
+    --c-tertiary: #647A33;
+    --c-on-bg: #1A1F1C;
+    --c-on-surface: #1A1F1C;
+    --c-on-var: #5A6462;
+    --c-outline: #C7D0CC;
+    --c-outline-soft: transparent;
+    --c-primary-container: #DDF1F1;
+    --c-secondary-container: #FFE4C9;
+    --c-shadow: 0 1px 3px rgba(0,0,0,.12);
+    --radius-card: 14px;
+    --radius-hero: 24px;
+    --radius-chip: 12px;
+    --radius-btn: 12px;
+    --sec-spacing: 22px;
+    --card-gap: 12px;
+    --btn-sec-bg: #E6E3DA;
+    --btn-sec-border: 1px solid #C7D0CC;
+    --headline-weight: 700;
+
+    --d-bg: #0D1718;
+    --d-surface: #142022;
+    --d-primary: #7AD4D2;
+    --d-secondary: #FFBC6D;
+    --d-on-bg: #E9F1EF;
+    --d-on-var: #ADC4C1;
+    --d-outline: #314749;
+    --d-outline-soft: transparent;
+    --d-primary-container: #1C3A3F;
+    --d-secondary-container: #473017;
+    --d-shadow: 0 1px 3px rgba(0,0,0,.4);
   }
-  /* 优化态用 body.opt 切换 */
-  body.opt{
-    --c-bg:#F4EEE2; --c-surface:#FBF6EC; --c-primary:#B96D1D; --c-secondary:#3E7A7E;
-    --c-on-bg:#2A2218; --c-on-surface:#2A2218; --c-on-var:#6B5E48;
-    --c-outline:#E2D9C6; --c-shadow:0 1px 2px rgba(60,40,20,.06);
-    --d-bg:#141210; --d-surface:#1E1A17; --d-primary:#E8915A; --d-secondary:#6FB8BC;
-    --d-on-bg:#EDE6DA; --d-on-var:#B3A793; --d-outline:#332B24; --d-shadow:0 1px 2px rgba(0,0,0,.5);
+
+  /* 优化后（Terracotta 暖琥珀 / 纸感细描边 / 统一圆角 / 极微阴影） */
+  .theme-opt {
+    --c-bg: #F4EEE2;
+    --c-surface: #FBF6EC;
+    --c-primary: #B96D1D;
+    --c-primary-text: #965410;
+    --c-secondary: #3E7A7E;
+    --c-tertiary: #647A33;
+    --c-on-bg: #2A2218;
+    --c-on-surface: #2A2218;
+    --c-on-var: #6B5E48;
+    --c-outline: #D4CCBA;
+    --c-outline-soft: #E2D9C6;
+    --c-primary-container: #FBEBD8;
+    --c-secondary-container: #D6EFF0;
+    --c-shadow: 0 1px 2px rgba(60,40,20,.06);
+    --radius-card: 16px;
+    --radius-hero: 20px;
+    --radius-chip: 12px;
+    --radius-btn: 12px;
+    --sec-spacing: 28px;
+    --card-gap: 14px;
+    --btn-sec-bg: #FBF6EC;
+    --btn-sec-border: 1px solid #E2D9C6;
+    --headline-weight: 600;
+
+    --d-bg: #141210;
+    --d-surface: #1E1A17;
+    --d-primary: #E8915A;
+    --d-secondary: #6FB8BC;
+    --d-on-bg: #EDE6DA;
+    --d-on-var: #B3A793;
+    --d-outline: #3A3229;
+    --d-outline-soft: #332B24;
+    --d-primary-container: #3A2516;
+    --d-secondary-container: #1A3335;
+    --d-shadow: 0 1px 2px rgba(0,0,0,.5);
   }
 
-  *{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:#eee;color:#222}
-  .toolbar{position:sticky;top:0;z-index:10;background:#1a1a1a;color:#fff;padding:12px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .toolbar h1{font-size:15px;margin:0 16px 0 0;font-weight:600;white-space:nowrap}
-  .seg{display:inline-flex;background:#333;border-radius:8px;padding:3px}
-  .seg button{border:0;background:transparent;color:#ccc;padding:6px 14px;font-size:13px;border-radius:6px;cursor:pointer}
-  .seg button.on{background:#E8915A;color:#fff}
-  .note{font-size:12px;color:#999;margin-left:auto}
+  /* ================================================================
+     全局基础样式
+     ================================================================ */
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; background: #eaeaea; color: #222; }
 
-  .wrap{max-width:1180px;margin:0 auto;padding:24px 16px 80px}
-  .h2{font-size:20px;font-weight:700;margin:36px 0 4px;color:#333}
-  .h2 .tag{font-size:11px;background:#135F65;color:#fff;border-radius:4px;padding:2px 7px;margin-left:8px;vertical-align:middle;font-weight:500}
-  body.opt .h2 .tag{background:#B96D1D}
-  .sub{font-size:13px;color:#777;margin:0 0 18px}
+  /* 工具栏 */
+  .toolbar { position: sticky; top: 0; z-index: 10; background: #1a1a1a; color: #fff; padding: 12px 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  .toolbar h1 { font-size: 16px; margin: 0 16px 0 0; font-weight: 600; white-space: nowrap; }
+  .seg { display: inline-flex; background: #333; border-radius: 8px; padding: 3px; }
+  .seg button { border: 0; background: transparent; color: #ccc; padding: 6px 14px; font-size: 13px; border-radius: 6px; cursor: pointer; transition: all .2s; }
+  .seg button.on { background: #B96D1D; color: #fff; font-weight: 600; }
+  .note { font-size: 12px; color: #aaa; margin-left: auto; }
 
-  /* 双列对照 */
-  .pair{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-  .pair.side{grid-template-columns:1fr}
-  .panel{background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
-  .panel-label{font-size:12px;color:#888;margin-bottom:10px;font-weight:600;letter-spacing:.5px}
+  /* 内容容器 */
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 16px 80px; }
+  .h2 { font-size: 20px; font-weight: 700; margin: 40px 0 4px; color: #222; display: flex; align-items: center; gap: 10px; }
+  .h2 .tag { font-size: 11px; background: #B96D1D; color: #fff; border-radius: 4px; padding: 2px 8px; font-weight: 500; }
+  .sub { font-size: 13px; color: #666; margin: 0 0 18px; line-height: 1.6; }
 
-  /* —— 手机框 —— */
-  .phone{width:360px;margin:0 auto;border-radius:30px;overflow:hidden;border:8px solid #1a1a1a;background:var(--c-bg);box-shadow:0 8px 30px rgba(0,0,0,.18)}
-  .statusbar{height:26px;background:var(--c-bg);display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:11px;color:var(--c-on-bg)}
-  .appbar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 6px;background:var(--c-bg)}
-  .appbar .ttl{font-size:17px;font-weight:700;color:var(--c-on-bg)}
-  body.opt .appbar .ttl{font-weight:600}
-  .appbar .sub2{font-size:11px;color:var(--c-on-var);margin-top:1px}
-  .appbar .acts{display:flex;gap:6px}
-  .ic{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--c-on-var);font-size:15px}
-  .ic.err{color:#c0392b}
-  .ic.pri{color:var(--c-primary)}
-  .body{padding:6px 20px 26px}
-  .sec{margin-top:22px}
-  body.opt .sec{margin-top:28px}
-  .sec-h{font-size:14px;font-weight:700;color:var(--c-on-bg);margin-bottom:4px}
-  .sec-s{font-size:11px;color:var(--c-on-var);margin-bottom:10px}
+  /* 双列对照网格 */
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .panel { background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #e2e2e2; }
+  .panel-label { font-size: 13px; color: #555; margin-bottom: 12px; font-weight: 700; letter-spacing: .5px; display: flex; align-items: center; gap: 6px; }
+  .panel-label .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #eee; color: #666; }
+  .theme-opt .panel-label .badge { background: #FBF6EC; color: #965410; border: 1px solid #E2D9C6; }
 
-  /* Hero */
-  .hero{background:var(--c-surface);border-radius:18px;padding:16px;box-shadow:var(--c-shadow)}
-  body.opt .hero{border:1px solid var(--c-outline)}
-  .hero .row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-  .btn{font-size:12px;padding:8px 14px;border-radius:10px;border:0;cursor:default;font-weight:600}
-  .btn-pri{background:var(--c-primary);color:#fff}
-  .btn-sec{background:transparent;color:var(--c-primary);border:1px solid var(--c-outline)}
-  body:not(.opt) .btn-sec{background:#EEEAE0}
-  .hero h3{margin:0;font-size:15px;color:var(--c-on-surface)}
-  .hero p{margin:4px 0 0;font-size:11px;color:var(--c-on-var)}
+  /* ================================================================
+     模拟手机外框
+     ================================================================ */
+  .phone { width: 360px; margin: 0 auto; border-radius: 32px; overflow: hidden; border: 8px solid #1a1a1a; background: var(--c-bg); box-shadow: 0 12px 36px rgba(0,0,0,.15); }
+  .statusbar { height: 28px; background: var(--c-bg); display: flex; align-items: center; justify-content: space-between; padding: 0 18px; font-size: 11px; color: var(--c-on-bg); font-weight: 600; }
+  .appbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 18px 6px; background: var(--c-bg); }
+  .appbar .ttl { font-size: 18px; font-weight: var(--headline-weight); color: var(--c-on-bg); }
+  .appbar .sub2 { font-size: 11px; color: var(--c-on-var); margin-top: 1px; }
+  .appbar .acts { display: flex; gap: 6px; }
+  .ic { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--c-on-var); font-size: 15px; cursor: pointer; }
+  .ic.err { color: #c0392b; }
+  .ic.pri { color: var(--c-primary); }
 
-  /* 横滚卡 */
-  .hscroll{display:flex;gap:12px;overflow:hidden}
-  body.opt .hscroll{gap:14px}
-  .card{background:var(--c-surface);border-radius:14px;box-shadow:var(--c-shadow);flex:0 0 120px;overflow:hidden}
-  body.opt .card{border:1px solid var(--c-outline);border-radius:16px}
-  .card .thumb{height:88px;background:linear-gradient(135deg,var(--c-primary),var(--c-secondary));opacity:.85}
-  .card .meta{padding:8px 10px}
-  .card .meta b{display:block;font-size:11px;color:var(--c-on-surface);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .card .meta span{font-size:10px;color:var(--c-on-var)}
+  .phone-body { padding: 6px 18px 28px; }
+  .sec { margin-top: var(--sec-spacing); }
+  .sec:first-child { margin-top: 0; }
+  .sec-h { font-size: 14px; font-weight: var(--headline-weight); color: var(--c-on-bg); margin-bottom: 2px; }
+  .sec-s { font-size: 11px; color: var(--c-on-var); margin-bottom: 10px; }
 
-  /* chip */
-  .chips{display:flex;flex-wrap:wrap;gap:8px}
-  .chip{background:var(--c-surface);border-radius:20px;padding:6px 12px;font-size:11px;color:var(--c-on-surface);box-shadow:var(--c-shadow)}
-  body.opt .chip{border:1px solid var(--c-outline);box-shadow:none}
+  /* Hero 卡片（使用 container 颜色渐变） */
+  .hero { background: linear-gradient(135deg, var(--c-primary-container), var(--c-secondary-container)); border-radius: var(--radius-hero); padding: 16px; box-shadow: var(--c-shadow); border: 1px solid var(--c-outline-soft); }
+  .hero .row { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .btn { font-size: 12px; padding: 8px 14px; border-radius: var(--radius-btn); border: 0; cursor: pointer; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; min-height: 36px; transition: transform .1s; }
+  .btn:active { transform: scale(0.96); }
+  .btn-pri { background: var(--c-primary); color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .btn-sec { background: var(--btn-sec-bg); color: var(--c-primary-text); border: var(--btn-sec-border); }
+  .hero h3 { margin: 0; font-size: 15px; color: var(--c-on-bg); font-weight: 700; }
+  .hero p { margin: 4px 0 0; font-size: 11px; color: var(--c-on-var); }
 
-  /* continue card */
-  .cont{background:var(--c-surface);border-radius:14px;box-shadow:var(--c-shadow);flex:0 0 200px;overflow:hidden}
-  body.opt .cont{border:1px solid var(--c-outline);border-radius:16px}
-  .cont .thumb{height:110px;background:linear-gradient(135deg,#5a3a2a,#B96D1D);position:relative}
-  .cont .bar{position:absolute;left:0;bottom:0;height:4px;width:55%;background:var(--c-primary)}
-  .cont .meta{padding:10px}
+  /* 横向滚动区 */
+  .hscroll { display: flex; gap: var(--card-gap); overflow-x: auto; padding: 2px 2px 6px; }
+  .card { background: var(--c-surface); border-radius: var(--radius-card); box-shadow: var(--c-shadow); border: 1px solid var(--c-outline-soft); flex: 0 0 120px; overflow: hidden; transition: transform .15s ease; cursor: pointer; }
+  .card:hover { transform: translateY(-2px); }
+  .card:active { transform: scale(0.98); }
+  .card .thumb { height: 80px; background: linear-gradient(135deg, var(--c-primary), var(--c-secondary)); opacity: .88; display: grid; place-items: center; color: rgba(255,255,255,.8); font-size: 20px; }
+  .card .meta { padding: 8px 10px; }
+  .card .meta b { display: block; font-size: 11px; color: var(--c-on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .meta span { font-size: 10px; color: var(--c-on-var); }
 
-  /* —— Token 页 —— */
-  .tokens{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-  .tg{background:#fff;border-radius:10px;padding:14px;border:1px solid #e5e5e5}
-  .tg h4{margin:0 0 10px;font-size:13px;color:#444}
-  .sw{display:flex;align-items:center;gap:10px;margin-bottom:8px}
-  .sw .dot{width:34px;height:34px;border-radius:8px;border:1px solid rgba(0,0,0,.1)}
-  .sw .nm{font-size:12px;color:#555;font-family:ui-monospace,monospace}
-  .type-row{display:flex;align-items:baseline;gap:14px;padding:6px 0;border-bottom:1px dashed #eee}
-  .type-row:last-child{border:0}
-  .rad{display:flex;gap:10px;align-items:flex-end}
-  .rad div{text-align:center;font-size:10px;color:#888}
-  .rad .r{background:#B96D1D;width:48px;height:48px;margin-bottom:4px}
+  /* Chip 样式 */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { background: var(--c-surface); border-radius: var(--radius-chip); padding: 6px 12px; font-size: 11px; color: var(--c-on-surface); box-shadow: var(--c-shadow); border: 1px solid var(--c-outline-soft); min-height: 32px; display: inline-flex; align-items: center; cursor: pointer; transition: transform .1s; }
+  .chip:active { transform: scale(0.96); }
 
-  /* 暗色预览壳 */
-  .darkshell{background:var(--d-bg);color:var(--d-on-bg);border-radius:18px;padding:14px}
-  .darkshell .ttl{font-weight:700;margin-bottom:10px;font-size:14px}
-  body.opt .darkshell .ttl{font-weight:600}
-  .dcard{background:var(--d-surface);border-radius:12px;padding:12px;margin-bottom:10px}
-  body.opt .dcard{border:1px solid var(--d-outline)}
-  .dbtn{display:inline-block;background:var(--d-primary);color:#111;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;margin-right:8px}
-  .dact{color:var(--d-secondary);font-size:12px}
+  /* Continue 进度卡 */
+  .cont { background: var(--c-secondary-container); border-radius: var(--radius-card); box-shadow: var(--c-shadow); border: 1px solid var(--c-outline-soft); flex: 0 0 170px; overflow: hidden; cursor: pointer; transition: transform .15s; }
+  .cont:active { transform: scale(0.98); }
+  .cont .thumb { height: 80px; background: linear-gradient(135deg, rgba(0,0,0,.15), rgba(0,0,0,.05)); position: relative; display: grid; place-items: center; color: var(--c-on-var); font-size: 22px; }
+  .cont .bar { position: absolute; left: 0; bottom: 0; height: 4px; width: 65%; background: var(--c-primary); border-radius: 0 2px 0 0; }
+  .cont .meta { padding: 10px; }
+  .cont .meta b { display: block; font-size: 12px; color: var(--c-on-surface); }
+  .cont .meta span { font-size: 10px; color: var(--c-on-var); }
+
+  /* 书架 tile */
+  .book-tile { background: rgba(100,122,51,.12); border-radius: var(--radius-card); border: 1px solid var(--c-outline-soft); padding: 10px; flex: 0 0 100px; text-align: center; cursor: pointer; }
+  .book-tile .book-icon { font-size: 22px; margin-bottom: 4px; }
+  .book-tile b { font-size: 11px; color: var(--c-on-surface); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .book-tile span { font-size: 10px; color: var(--c-tertiary); }
+
+  /* 收藏/下载卡 */
+  .fav-card { background: var(--c-surface); border-radius: var(--radius-card); border: 1px solid var(--c-outline-soft); box-shadow: var(--c-shadow); flex: 0 0 120px; padding: 10px; text-align: center; cursor: pointer; }
+  .fav-card .fav-icon { font-size: 20px; margin-bottom: 4px; }
+  .fav-card b { font-size: 11px; color: var(--c-on-surface); display: block; }
+  .fav-card span { font-size: 10px; color: var(--c-on-var); }
+
+  /* ================================================================
+     Token 总览
+     ================================================================ */
+  .tokens { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .tg { background: var(--c-surface); border-radius: var(--radius-card); padding: 14px; border: 1px solid var(--c-outline-soft); box-shadow: var(--c-shadow); }
+  .tg h4 { margin: 0 0 10px; font-size: 13px; color: var(--c-on-surface); font-weight: 600; }
+  .sw { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+  .sw .dot { width: 28px; height: 28px; border-radius: 6px; border: 1px solid rgba(0,0,0,.08); flex-shrink: 0; }
+  .sw .nm { font-size: 11px; color: var(--c-on-surface); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; line-height: 1.3; }
+  .type-row { display: flex; align-items: baseline; gap: 12px; padding: 5px 0; border-bottom: 1px dashed var(--c-outline); }
+  .type-row:last-child { border: 0; }
+  .rad { display: flex; gap: 10px; align-items: flex-end; }
+  .rad div { text-align: center; font-size: 10px; color: var(--c-on-var); }
+  .rad .r { background: var(--c-primary); width: 42px; height: 42px; margin-bottom: 4px; }
+
+  /* 暗色整机壳 */
+  .dark-phone { width: 320px; margin: 0 auto; border-radius: 28px; overflow: hidden; border: 7px solid #111; background: var(--d-bg); box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+  .dark-phone .statusbar { background: var(--d-bg); color: var(--d-on-bg); }
+  .dark-phone .appbar { background: var(--d-bg); }
+  .dark-phone .appbar .ttl { color: var(--d-on-bg); }
+  .dark-phone .appbar .sub2 { color: var(--d-on-var); }
+  .dark-phone .ic.pri { color: var(--d-primary); }
+  .dark-phone .phone-body { background: var(--d-bg); }
+  .dark-phone .sec-h { color: var(--d-on-bg); }
+  .dark-phone .sec-s { color: var(--d-on-var); }
+  .dark-phone .dcard { background: var(--d-surface); border-radius: var(--radius-card); padding: 14px; border: 1px solid var(--d-outline-soft); }
+  .dark-phone .dbtn { display: inline-block; background: var(--d-primary); color: #111; padding: 8px 14px; border-radius: var(--radius-btn); font-size: 12px; font-weight: 600; margin-right: 6px; cursor: pointer; }
+  .dark-phone .dbtn-sec { display: inline-block; background: transparent; color: var(--d-secondary); padding: 8px 14px; border-radius: var(--radius-btn); font-size: 12px; font-weight: 600; border: 1px solid var(--d-outline); cursor: pointer; }
+  .dark-phone .dact { color: var(--d-secondary); font-size: 11px; font-weight: 500; margin-top: 8px; display: block; }
+  .dark-phone .d-card-row { display: flex; gap: var(--card-gap); overflow: hidden; margin-top: 8px; }
+  .dark-phone .d-mini-card { background: var(--d-surface); border-radius: var(--radius-card); border: 1px solid var(--d-outline-soft); flex: 0 0 100px; overflow: hidden; }
+  .dark-phone .d-mini-card .d-thumb { height: 60px; background: linear-gradient(135deg, var(--d-primary), var(--d-secondary)); opacity: .7; }
+  .dark-phone .d-mini-card .d-meta { padding: 6px 8px; color: var(--d-on-bg); font-size: 10px; }
 
   /* 卡片特写 */
-  .zoom{display:flex;gap:30px;flex-wrap:wrap;justify-content:center}
-  .bigcard{width:260px}
+  .zoom { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+  .bigcard { width: 100%; max-width: 280px; }
+
+  /* 响应式 */
+  @media (max-width: 840px) {
+    .pair { grid-template-columns: 1fr !important; }
+    .tokens { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -126,65 +231,108 @@
 <div class="toolbar">
   <h1>LocalMediaHub · UI 优化对照</h1>
   <div class="seg" id="seg">
-    <button data-mode="cur" class="on">现状</button>
+    <button data-mode="cur">现状</button>
     <button data-mode="opt">优化后</button>
-    <button data-mode="side">左右对照</button>
+    <button data-mode="side" class="on">左右对照</button>
   </div>
-  <span class="note">切换查看；左右对照可滚动对比</span>
+  <span class="note">作用域隔离 · Container 色渐变 · 完整 8 段 · 按压预览</span>
 </div>
 
 <div class="wrap">
 
-  <!-- ====== 1. HomeScreen ====== -->
-  <h2 class="h2">1 · HomeScreen <span class="tag">L.b 呼吸感</span></h2>
-  <p class="sub">入口数量不变。优化后：Section 间距 22→28dp、卡片描边 + 极微阴影（纸感）、图标统一 outline。</p>
+  <!-- ====== 1. HomeScreen 浅色 ====== -->
+  <h2 class="h2">1 · HomeScreen 浅色 <span class="tag">L.b 呼吸感</span></h2>
+  <p class="sub">入口数量不变。优化后：Section 间距 22→28dp、HeroCard 使用 terracotta container 渐变、全部卡片 1px 细描边 + 极微阴影。</p>
 
-  <div id="home-pair" class="pair">
-    <!-- 当前 -->
-    <div class="panel">
-      <div class="panel-label">现状</div>
+  <div class="pair">
+    <!-- 现状 -->
+    <div class="panel theme-cur">
+      <div class="panel-label">现状 <span class="badge">Teal #135F65 / 无描边 / 24dp HeroCard</span></div>
       <div class="phone">
         <div class="statusbar"><span>9:41</span><span>●●● 100%</span></div>
         <div class="appbar">
           <div><div class="ttl">LocalMediaHub</div><div class="sub2">你的本地媒体中心</div></div>
           <div class="acts"><span class="ic pri">🌐</span><span class="ic">⟳</span><span class="ic err">✕</span></div>
         </div>
-        <div class="body">
+        <div class="phone-body">
           <div class="hero">
             <h3>继续浏览</h3><p>上次停留：电影 / 科幻</p>
-            <div class="row"><button class="btn btn-pri">继续</button><button class="btn btn-sec">收藏</button><button class="btn btn-sec">下载 3</button></div>
+            <div class="row"><button class="btn btn-pri">继续</button><button class="btn btn-sec">⭐ 收藏</button><button class="btn btn-sec">⬇ 下载 3</button></div>
           </div>
           <div class="sec"><div class="sec-h">媒体库</div><div class="sec-s">4 个库</div>
-            <div class="hscroll"><div class="card"><div class="thumb"></div><div class="meta"><b>电影</b><span>1.2k 项</span></div></div><div class="card"><div class="thumb"></div><div class="meta"><b>剧集</b><span>340 项</span></div></div><div class="card"><div class="thumb"></div><div class="meta"><b>音乐</b><span>5.6k</span></div></div></div>
+            <div class="hscroll"><div class="card"><div class="thumb">🎬</div><div class="meta"><b>电影</b><span>1.2k 项</span></div></div><div class="card"><div class="thumb">📺</div><div class="meta"><b>剧集</b><span>340 项</span></div></div><div class="card"><div class="thumb">🎵</div><div class="meta"><b>音乐</b><span>5.6k</span></div></div></div>
           </div>
-          <div class="sec"><div class="sec-h">合集</div><div class="chips"><span class="chip">动作</span><span class="chip">纪录片</span><span class="chip">动画</span><span class="chip">经典</span></div></div>
-          <div class="sec"><div class="sec-h">继续观看</div><div class="hscroll"><div class="cont"><div class="thumb"><div class="bar"></div></div><div class="meta"><b>片名 A</b><span>剩余 22 分</span></div></div><div class="cont"><div class="thumb"><div class="bar" style="width:30%"></div></div><div class="meta"><b>片名 B</b><span>剩余 48 分</span></div></div></div></div>
-          <div class="sec"><div class="sec-h">书架</div><div class="card" style="flex:0 0 100%"><div class="meta" style="padding:12px"><b>最近阅读</b><span>3 本</span></div></div></div>
-          <div class="sec"><div class="sec-h">最近媒体</div><div class="hscroll"><div class="card"><div class="thumb"></div><div class="meta"><b>文件 X</b></div></div><div class="card"><div class="thumb"></div><div class="meta"><b>文件 Y</b></div></div></div></div>
+          <div class="sec"><div class="sec-h">合集</div><div class="chips"><span class="chip">🎭 动作</span><span class="chip">📽 纪录片</span><span class="chip">🎨 动画</span><span class="chip">📜 经典</span></div></div>
+          <div class="sec"><div class="sec-h">继续观看</div><div class="hscroll"><div class="cont"><div class="thumb">▶<div class="bar"></div></div><div class="meta"><b>星际穿越</b><span>剩余 22 分</span></div></div><div class="cont"><div class="thumb">▶<div class="bar" style="width:30%"></div></div><div class="meta"><b>黑客帝国</b><span>剩余 48 分</span></div></div></div></div>
+          <div class="sec"><div class="sec-h">书架</div><div class="hscroll"><div class="book-tile"><div class="book-icon">📖</div><b>三体</b><span>第 12 章</span></div><div class="book-tile"><div class="book-icon">📕</div><b>基地</b><span>第 3 章</span></div></div></div>
+          <div class="sec"><div class="sec-h">最近媒体</div><div class="hscroll"><div class="card"><div class="thumb">📄</div><div class="meta"><b>三体.epub</b><span>2 小时前</span></div></div><div class="card"><div class="thumb">🖼️</div><div class="meta"><b>海报.png</b><span>昨天</span></div></div></div></div>
+          <div class="sec"><div class="sec-h">收藏</div><div class="hscroll"><div class="fav-card"><div class="fav-icon">❤️</div><b>片名 A</b><span>.mkv</span></div><div class="fav-card"><div class="fav-icon">❤️</div><b>音乐 B</b><span>.mp3</span></div></div></div>
+          <div class="sec"><div class="sec-h">离线下载</div><div class="hscroll"><div class="fav-card"><div class="fav-icon">⬇️</div><b>电影 C</b><span>已完成</span></div></div></div>
         </div>
       </div>
     </div>
+
     <!-- 优化后 -->
-    <div class="panel">
-      <div class="panel-label">优化后</div>
+    <div class="panel theme-opt">
+      <div class="panel-label">优化后 <span class="badge">Terracotta #B96D1D / 1px 描边 / 20dp HeroCard</span></div>
       <div class="phone">
         <div class="statusbar"><span>9:41</span><span>●●● 100%</span></div>
         <div class="appbar">
           <div><div class="ttl">LocalMediaHub</div><div class="sub2">你的本地媒体中心</div></div>
           <div class="acts"><span class="ic pri">🌐</span><span class="ic">⟳</span><span class="ic err">✕</span></div>
         </div>
-        <div class="body">
+        <div class="phone-body">
           <div class="hero">
             <h3>继续浏览</h3><p>上次停留：电影 / 科幻</p>
-            <div class="row"><button class="btn btn-pri">继续</button><button class="btn btn-sec">收藏</button><button class="btn btn-sec">下载 3</button></div>
+            <div class="row"><button class="btn btn-pri">继续</button><button class="btn btn-sec">⭐ 收藏</button><button class="btn btn-sec">⬇ 下载 3</button></div>
           </div>
           <div class="sec"><div class="sec-h">媒体库</div><div class="sec-s">4 个库</div>
-            <div class="hscroll"><div class="card"><div class="thumb"></div><div class="meta"><b>电影</b><span>1.2k 项</span></div></div><div class="card"><div class="thumb"></div><div class="meta"><b>剧集</b><span>340 项</span></div></div><div class="card"><div class="thumb"></div><div class="meta"><b>音乐</b><span>5.6k</span></div></div></div>
+            <div class="hscroll"><div class="card"><div class="thumb">🎬</div><div class="meta"><b>电影</b><span>1.2k 项</span></div></div><div class="card"><div class="thumb">📺</div><div class="meta"><b>剧集</b><span>340 项</span></div></div><div class="card"><div class="thumb">🎵</div><div class="meta"><b>音乐</b><span>5.6k</span></div></div></div>
           </div>
-          <div class="sec"><div class="sec-h">合集</div><div class="chips"><span class="chip">动作</span><span class="chip">纪录片</span><span class="chip">动画</span><span class="chip">经典</span></div></div>
-          <div class="sec"><div class="sec-h">继续观看</div><div class="hscroll"><div class="cont"><div class="thumb"><div class="bar"></div></div><div class="meta"><b>片名 A</b><span>剩余 22 分</span></div></div><div class="cont"><div class="thumb"><div class="bar" style="width:30%"></div></div><div class="meta"><b>片名 B</b><span>剩余 48 分</span></div></div></div></div>
-          <div class="sec"><div class="sec-h">书架</div><div class="card" style="flex:0 0 100%"><div class="meta" style="padding:12px"><b>最近阅读</b><span>3 本</span></div></div></div>
-          <div class="sec"><div class="sec-h">最近媒体</div><div class="hscroll"><div class="card"><div class="thumb"></div><div class="meta"><b>文件 X</b></div></div><div class="card"><div class="thumb"></div><div class="meta"><b>文件 Y</b></div></div></div></div>
+          <div class="sec"><div class="sec-h">合集</div><div class="chips"><span class="chip">🎭 动作</span><span class="chip">📽 纪录片</span><span class="chip">🎨 动画</span><span class="chip">📜 经典</span></div></div>
+          <div class="sec"><div class="sec-h">继续观看</div><div class="hscroll"><div class="cont"><div class="thumb">▶<div class="bar"></div></div><div class="meta"><b>星际穿越</b><span>剩余 22 分</span></div></div><div class="cont"><div class="thumb">▶<div class="bar" style="width:30%"></div></div><div class="meta"><b>黑客帝国</b><span>剩余 48 分</span></div></div></div></div>
+          <div class="sec"><div class="sec-h">书架</div><div class="hscroll"><div class="book-tile"><div class="book-icon">📖</div><b>三体</b><span>第 12 章</span></div><div class="book-tile"><div class="book-icon">📕</div><b>基地</b><span>第 3 章</span></div></div></div>
+          <div class="sec"><div class="sec-h">最近媒体</div><div class="hscroll"><div class="card"><div class="thumb">📄</div><div class="meta"><b>三体.epub</b><span>2 小时前</span></div></div><div class="card"><div class="thumb">🖼️</div><div class="meta"><b>海报.png</b><span>昨天</span></div></div></div></div>
+          <div class="sec"><div class="sec-h">收藏</div><div class="hscroll"><div class="fav-card"><div class="fav-icon">❤️</div><b>片名 A</b><span>.mkv</span></div><div class="fav-card"><div class="fav-icon">❤️</div><b>音乐 B</b><span>.mp3</span></div></div></div>
+          <div class="sec"><div class="sec-h">离线下载</div><div class="hscroll"><div class="fav-card"><div class="fav-icon">⬇️</div><b>电影 C</b><span>已完成</span></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== 2. 暗色整机 ====== -->
+  <h2 class="h2">2 · 暗色整机 <span class="tag">冷暖并存</span></h2>
+  <p class="sub">左：冷青绿黑 #0D1718 + teal primary。右：近纯黑带暖 #141210 + 暖琥珀 primary + teal secondary。</p>
+  <div class="pair">
+    <div class="panel theme-cur"><div class="panel-label">现状暗色</div>
+      <div class="dark-phone">
+        <div class="statusbar"><span>9:41</span><span>●●● 100%</span></div>
+        <div class="appbar">
+          <div><div class="ttl">LocalMediaHub</div><div class="sub2">你的本地媒体中心</div></div>
+          <div class="acts"><span class="ic pri">🌐</span></div>
+        </div>
+        <div class="phone-body">
+          <div class="sec"><div class="dcard">继续浏览 · 上次停留：电影 / 科幻<div style="margin-top:10px"><span class="dbtn">继续</span><span class="dbtn-sec">收藏</span></div></div></div>
+          <div class="sec"><div class="sec-h">媒体库</div>
+            <div class="d-card-row"><div class="d-mini-card"><div class="d-thumb"></div><div class="d-meta"><b>电影</b></div></div><div class="d-mini-card"><div class="d-thumb"></div><div class="d-meta"><b>剧集</b></div></div></div>
+          </div>
+          <div class="sec"><span class="dact">▶ 继续观看 · 星际穿越 · 剩余 22 分</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel theme-opt"><div class="panel-label">优化后暗色</div>
+      <div class="dark-phone">
+        <div class="statusbar"><span>9:41</span><span>●●● 100%</span></div>
+        <div class="appbar">
+          <div><div class="ttl">LocalMediaHub</div><div class="sub2">你的本地媒体中心</div></div>
+          <div class="acts"><span class="ic pri">🌐</span></div>
+        </div>
+        <div class="phone-body">
+          <div class="sec"><div class="dcard">继续浏览 · 上次停留：电影 / 科幻<div style="margin-top:10px"><span class="dbtn">继续</span><span class="dbtn-sec">收藏</span></div></div></div>
+          <div class="sec"><div class="sec-h">媒体库</div>
+            <div class="d-card-row"><div class="d-mini-card"><div class="d-thumb"></div><div class="d-meta"><b>电影</b></div></div><div class="d-mini-card"><div class="d-thumb"></div><div class="d-meta"><b>剧集</b></div></div></div>
+          </div>
+          <div class="sec"><span class="dact">▶ 继续观看 · 星际穿越 · 剩余 22 分</span></div>
         </div>
       </div>
     </div>
@@ -192,111 +340,103 @@
 
   <!-- ====== 3. 卡片特写 ====== -->
   <h2 class="h2">3 · 卡片特写 <span class="tag">T 组件打磨</span></h2>
-  <p class="sub">圆角统一 16dp、1px 描边、极微阴影、图标激活用 primary。左侧现状 / 右侧优化后。</p>
+  <p class="sub">现状圆角混用 14/16/24dp → 统一 16/20dp；所有卡片加 1px outline-soft 纸感描边。按压卡片可见 scale(0.98) 反馈。</p>
   <div class="pair">
-    <div class="panel"><div class="panel-label">现状</div>
+    <div class="panel theme-cur">
+      <div class="panel-label">现状（elevation 2dp / 无描边 / Bold 字重）</div>
       <div class="zoom"><div class="bigcard">
-        <div class="card" style="flex:none;width:100%"><div class="thumb" style="height:140px"></div><div class="meta" style="padding:14px"><b style="font-size:14px">LibraryCard · 电影</b><span>1,234 项 · 12 GB</span></div></div>
-        <div class="cont" style="flex:none;width:100%;margin-top:14px"><div class="thumb" style="height:120px"><div class="bar"></div></div><div class="meta" style="padding:14px"><b style="font-size:14px">ContinueWatching · 片名 A</b><span>剩余 22 分</span></div></div>
-        <div class="card" style="flex:none;width:100%;margin-top:14px"><div class="thumb" style="height:120px"></div><div class="meta" style="padding:14px"><b style="font-size:14px">RecentMedia · 文件 X</b><span>2 小时前</span></div></div>
+        <div class="card" style="flex:none;width:100%"><div class="thumb" style="height:110px">🎬</div><div class="meta" style="padding:14px"><b style="font-size:14px">LibraryCard · 电影</b><span>1,234 项 · 12 GB</span></div></div>
+        <div class="cont" style="flex:none;width:100%;margin-top:14px"><div class="thumb" style="height:100px">▶<div class="bar"></div></div><div class="meta" style="padding:14px"><b style="font-size:14px">ContinueWatching · 星际穿越</b><span>剩余 22 分</span></div></div>
+        <div class="card" style="flex:none;width:100%;margin-top:14px"><div class="thumb" style="height:90px">📄</div><div class="meta" style="padding:14px"><b style="font-size:14px">RecentMedia · 三体.epub</b><span>2 小时前</span></div></div>
       </div></div>
     </div>
-    <div class="panel"><div class="panel-label">优化后</div>
+    <div class="panel theme-opt">
+      <div class="panel-label">优化后（极微阴影 / 1px 描边 / SemiBold 字重）</div>
       <div class="zoom"><div class="bigcard">
-        <div class="card" style="flex:none;width:100%"><div class="thumb" style="height:140px"></div><div class="meta" style="padding:14px"><b style="font-size:14px">LibraryCard · 电影</b><span>1,234 项 · 12 GB</span></div></div>
-        <div class="cont" style="flex:none;width:100%;margin-top:14px"><div class="thumb" style="height:120px"><div class="bar"></div></div><div class="meta" style="padding:14px"><b style="font-size:14px">ContinueWatching · 片名 A</b><span>剩余 22 分</span></div></div>
-        <div class="card" style="flex:none;width:100%;margin-top:14px"><div class="thumb" style="height:120px"></div><div class="meta" style="padding:14px"><b style="font-size:14px">RecentMedia · 文件 X</b><span>2 小时前</span></div></div>
+        <div class="card" style="flex:none;width:100%"><div class="thumb" style="height:110px">🎬</div><div class="meta" style="padding:14px"><b style="font-size:14px;font-weight:600">LibraryCard · 电影</b><span>1,234 项 · 12 GB</span></div></div>
+        <div class="cont" style="flex:none;width:100%;margin-top:14px"><div class="thumb" style="height:100px">▶<div class="bar"></div></div><div class="meta" style="padding:14px"><b style="font-size:14px;font-weight:600">ContinueWatching · 星际穿越</b><span>剩余 22 分</span></div></div>
+        <div class="card" style="flex:none;width:100%;margin-top:14px"><div class="thumb" style="height:90px">📄</div><div class="meta" style="padding:14px"><b style="font-size:14px;font-weight:600">RecentMedia · 三体.epub</b><span>2 小时前</span></div></div>
       </div></div>
     </div>
   </div>
 
-  <!-- ====== 5. Token 总览 ====== -->
-  <h2 class="h2">5 · Token 总览 <span class="tag">P.a 配色精修</span></h2>
-  <p class="sub">左现状 / 右优化后。主色 teal→terracotta；纸感靠 outline-soft 描边；暗色冷暖并存。</p>
+  <!-- ====== 4. Token 总览 ====== -->
+  <h2 class="h2">4 · Token 总览 <span class="tag">P.a 配色精修</span></h2>
+  <p class="sub">主色 teal→terracotta；补充 primary-text / container 色 / outline-soft；暗色冷暖并存。数值与 spec §1 一致。</p>
 
   <div class="pair">
     <!-- 现状 token -->
-    <div class="panel"><div class="panel-label">现状</div>
+    <div class="panel theme-cur"><div class="panel-label">现状 Token (Theme.kt)</div>
       <div class="tokens">
-        <div class="tg"><h4>浅色</h4>
+        <div class="tg"><h4>浅色 Theme</h4>
           <div class="sw"><span class="dot" style="background:#135F65"></span><span class="nm">primary #135F65</span></div>
           <div class="sw"><span class="dot" style="background:#B96D1D"></span><span class="nm">secondary #B96D1D</span></div>
+          <div class="sw"><span class="dot" style="background:#647A33"></span><span class="nm">tertiary #647A33</span></div>
           <div class="sw"><span class="dot" style="background:#F6F1E8"></span><span class="nm">background #F6F1E8</span></div>
           <div class="sw"><span class="dot" style="background:#FFFBF7"></span><span class="nm">surface #FFFBF7</span></div>
-          <div class="sw"><span class="dot" style="background:#C7D0CC"></span><span class="nm">outline #C7D0CC</span></div>
+          <div class="sw"><span class="dot" style="background:#DDF1F1"></span><span class="nm">primaryContainer #DDF1F1</span></div>
+          <div class="sw"><span class="dot" style="background:#FFE4C9"></span><span class="nm">secondaryContainer #FFE4C9</span></div>
+          <div class="sw"><span class="dot" style="background:#C7D0CC"></span><span class="nm">outlineVariant #C7D0CC</span></div>
         </div>
-        <div class="tg"><h4>暗色</h4>
+        <div class="tg"><h4>暗色 Theme</h4>
           <div class="sw"><span class="dot" style="background:#7AD4D2"></span><span class="nm">primary #7AD4D2</span></div>
           <div class="sw"><span class="dot" style="background:#FFBC6D"></span><span class="nm">secondary #FFBC6D</span></div>
           <div class="sw"><span class="dot" style="background:#0D1718"></span><span class="nm">background #0D1718</span></div>
           <div class="sw"><span class="dot" style="background:#142022"></span><span class="nm">surface #142022</span></div>
+          <div class="sw"><span class="dot" style="background:#1C3A3F"></span><span class="nm">primaryContainer #1C3A3F</span></div>
+          <div class="sw"><span class="dot" style="background:#473017"></span><span class="nm">secondaryContainer #473017</span></div>
+          <div class="sw"><span class="dot" style="background:#314749"></span><span class="nm">outlineVariant #314749</span></div>
         </div>
-        <div class="tg"><h4>字号</h4>
-          <div class="type-row"><b style="font-size:25px">Headline</b><span class="nm">Bold 25</span></div>
-          <div class="type-row"><b style="font-size:17px">Title</b><span class="nm">SemiBold 17</span></div>
-          <div class="type-row"><span style="font-size:14px">Body</span><span class="nm">Normal 14</span></div>
+        <div class="tg"><h4>字号排版</h4>
+          <div class="type-row"><b style="font-size:25px">Headline</b><span class="nm">Bold 25sp</span></div>
+          <div class="type-row"><b style="font-size:17px">Title</b><span class="nm">SemiBold 17sp</span></div>
+          <div class="type-row"><span style="font-size:14px">Body</span><span class="nm">Normal 14sp</span></div>
         </div>
         <div class="tg"><h4>圆角 / 阴影</h4>
           <div class="rad">
-            <div><div class="r" style="border-radius:14px"></div>14?</div>
-            <div><div class="r" style="border-radius:18px"></div>18?</div>
-            <div><div class="r" style="border-radius:20px"></div>20?</div>
+            <div><div class="r" style="border-radius:12px"></div>12 Chip</div>
+            <div><div class="r" style="border-radius:16px"></div>16 Card</div>
+            <div><div class="r" style="border-radius:24px"></div>24 Hero</div>
           </div>
-          <p class="nm" style="margin-top:8px">现状混用；阴影默认 0 1px 3px</p>
+          <p class="nm" style="margin-top:8px">elevation 2dp; 无描边</p>
         </div>
       </div>
     </div>
     <!-- 优化后 token -->
-    <div class="panel"><div class="panel-label">优化后</div>
+    <div class="panel theme-opt"><div class="panel-label">优化后 Token</div>
       <div class="tokens">
-        <div class="tg"><h4>浅色</h4>
+        <div class="tg"><h4>浅色 (Terracotta 纸感)</h4>
           <div class="sw"><span class="dot" style="background:#B96D1D"></span><span class="nm">primary #B96D1D</span></div>
+          <div class="sw"><span class="dot" style="background:#965410"></span><span class="nm">primary-text #965410 (4.6:1)</span></div>
           <div class="sw"><span class="dot" style="background:#3E7A7E"></span><span class="nm">secondary #3E7A7E</span></div>
-          <div class="sw"><span class="dot" style="background:#F4EEE2"></span><span class="nm">background #F4EEE2</span></div>
+          <div class="sw"><span class="dot" style="background:#F4EEE2"></span><span class="nm">bg #F4EEE2 (纸感)</span></div>
           <div class="sw"><span class="dot" style="background:#FBF6EC"></span><span class="nm">surface #FBF6EC</span></div>
-          <div class="sw"><span class="dot" style="background:#E2D9C6"></span><span class="nm">outline-soft #E2D9C6</span></div>
+          <div class="sw"><span class="dot" style="background:#FBEBD8"></span><span class="nm">primaryContainer #FBEBD8</span></div>
+          <div class="sw"><span class="dot" style="background:#D6EFF0"></span><span class="nm">secondaryContainer #D6EFF0</span></div>
+          <div class="sw"><span class="dot" style="background:#E2D9C6"></span><span class="nm">outline-soft #E2D9C6 (新增)</span></div>
         </div>
-        <div class="tg"><h4>暗色</h4>
-          <div class="sw"><span class="dot" style="background:#E8915A"></span><span class="nm">primary #E8915A</span></div>
+        <div class="tg"><h4>暗色 (近纯黑带暖)</h4>
+          <div class="sw"><span class="dot" style="background:#E8915A"></span><span class="nm">primary #E8915A (7.8:1)</span></div>
           <div class="sw"><span class="dot" style="background:#6FB8BC"></span><span class="nm">secondary #6FB8BC</span></div>
-          <div class="sw"><span class="dot" style="background:#141210"></span><span class="nm">background #141210</span></div>
+          <div class="sw"><span class="dot" style="background:#141210"></span><span class="nm">bg #141210 (暖黑)</span></div>
           <div class="sw"><span class="dot" style="background:#1E1A17"></span><span class="nm">surface #1E1A17</span></div>
-          <div class="sw"><span class="dot" style="background:#332B24"></span><span class="nm">outline-soft #332B24</span></div>
+          <div class="sw"><span class="dot" style="background:#3A2516"></span><span class="nm">primaryContainer #3A2516</span></div>
+          <div class="sw"><span class="dot" style="background:#1A3335"></span><span class="nm">secondaryContainer #1A3335</span></div>
+          <div class="sw"><span class="dot" style="background:#332B24"></span><span class="nm">outline-soft #332B24 (新增)</span></div>
         </div>
-        <div class="tg"><h4>字号</h4>
-          <div class="type-row"><b style="font-size:25px;font-weight:600">Headline</b><span class="nm">SemiBold 25</span></div>
-          <div class="type-row"><b style="font-size:17px;font-weight:600">Title</b><span class="nm">SemiBold 17</span></div>
-          <div class="type-row"><span style="font-size:14px">Body</span><span class="nm">Normal 14</span></div>
+        <div class="tg"><h4>字号排版</h4>
+          <div class="type-row"><b style="font-size:25px;font-weight:600">Headline</b><span class="nm">SemiBold 25sp</span></div>
+          <div class="type-row"><b style="font-size:17px;font-weight:600">Title</b><span class="nm">SemiBold 17sp</span></div>
+          <div class="type-row"><span style="font-size:14px">Body</span><span class="nm">Normal 14sp</span></div>
         </div>
         <div class="tg"><h4>圆角 / 阴影</h4>
           <div class="rad">
-            <div><div class="r" style="border-radius:12px"></div>12 小卡</div>
-            <div><div class="r" style="border-radius:16px"></div>16 大卡</div>
+            <div><div class="r" style="border-radius:12px"></div>12 Chip</div>
+            <div><div class="r" style="border-radius:16px"></div>16 Card</div>
+            <div><div class="r" style="border-radius:20px"></div>20 Hero</div>
           </div>
-          <p class="nm" style="margin-top:8px">统一 12/16；阴影 0 1px 2px(.06)</p>
+          <p class="nm" style="margin-top:8px">0dp elevation; 1px 描边 + 暖微阴影</p>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 暗色整机预览（优化态独有，对照用现状色） -->
-  <h2 class="h2">附 · 暗色整机 <span class="tag">冷暖并存</span></h2>
-  <p class="sub">近纯黑带暖意底；主操作暖琥珀，激活态 teal。</p>
-  <div class="pair">
-    <div class="panel"><div class="panel-label">现状（冷青绿黑）</div>
-      <div class="darkshell" style="background:#0D1718;color:#E9F1EF">
-        <div class="ttl">LocalMediaHub</div>
-        <div class="dcard" style="background:#142022">继续浏览 · 上次停留：电影 / 科幻</div>
-        <span class="dbtn" style="background:#7AD4D2">继续</span>
-        <span class="dact" style="color:#FFBC6D">▶ 已激活</span>
-      </div>
-    </div>
-    <div class="panel"><div class="panel-label">优化后</div>
-      <div class="darkshell">
-        <div class="ttl">LocalMediaHub</div>
-        <div class="dcard">继续浏览 · 上次停留：电影 / 科幻</div>
-        <span class="dbtn">继续</span>
-        <span class="dact">▶ 已激活</span>
       </div>
     </div>
   </div>
@@ -304,28 +444,38 @@
 </div>
 
 <script>
-  const seg=document.getElementById('seg');
-  const homePair=document.getElementById('home-pair');
-  function setMode(m){
-    document.body.classList.toggle('opt', m!=='cur');
-    // 现状/优化/对照 都展示两个面板；"对照"时正常双列
-    homePair.className='pair';
-    document.querySelectorAll('.panel').forEach(p=>p.style.display='');
-    seg.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
+  const seg = document.getElementById('seg');
+  const pairs = document.querySelectorAll('.pair');
+
+  function setMode(m) {
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+    pairs.forEach(pair => {
+      const curPanel = pair.querySelector('.panel.theme-cur');
+      const optPanel = pair.querySelector('.panel.theme-opt');
+      if (m === 'cur') {
+        pair.style.gridTemplateColumns = '1fr';
+        if (curPanel) curPanel.style.display = '';
+        if (optPanel) optPanel.style.display = 'none';
+      } else if (m === 'opt') {
+        pair.style.gridTemplateColumns = '1fr';
+        if (curPanel) curPanel.style.display = 'none';
+        if (optPanel) optPanel.style.display = '';
+      } else { // side-by-side
+        pair.style.gridTemplateColumns = '1fr 1fr';
+        if (curPanel) curPanel.style.display = '';
+        if (optPanel) optPanel.style.display = '';
+      }
+    });
   }
-  seg.addEventListener('click',e=>{
-    const b=e.target.closest('button'); if(!b)return;
-    const m=b.dataset.mode;
-    if(m==='side'){ // 对照：强制优化态配色在右、现状在左，并滚动到首页
-      document.body.classList.add('opt');
-      // 但让左面板显示为现状色：临时给左面板加 cur 类
-      homePair.className='pair';
-      seg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
-      window.scrollTo({top:0,behavior:'smooth'});
-    } else {
-      setMode(m);
-    }
+
+  seg.addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    setMode(b.dataset.mode);
   });
+
+  // 默认：左右对照
+  setMode('side');
 </script>
 </body>
 </html>
