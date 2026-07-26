@@ -23,21 +23,24 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.res.painterResource
+import com.juziss.localmediahub.ui.theme.outlineSoftColor
+import com.juziss.localmediahub.ui.theme.primaryTextColor
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -75,7 +78,7 @@ fun HeroCard(
     onOpenWeb: () -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
         ),
@@ -83,10 +86,10 @@ fun HeroCard(
             .fillMaxWidth()
             .border(
                 width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                shape = RoundedCornerShape(24.dp)
+                color = outlineSoftColor(),
+                shape = RoundedCornerShape(20.dp)
             ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier
@@ -145,7 +148,7 @@ fun HeroCard(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Icon(
-                        Icons.Filled.CheckCircle,
+                        Icons.Outlined.CheckCircle,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                     )
@@ -226,34 +229,28 @@ fun HeroCard(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 uiState.lastBrowseLocation?.let { location ->
-                    FilledTonalButton(
+                    Button(
                         onClick = { onResumeBrowse(location) },
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
                     ) {
                         Icon(painterResource(R.drawable.ic_history), contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("继续浏览 ${location.title}")
                     }
                 }
-                FilledTonalButton(
+                OutlinedButton(
                     onClick = onOpenFavorites,
                     shape = RoundedCornerShape(12.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                    border = androidx.compose.foundation.BorderStroke(1.dp, outlineSoftColor()),
                 ) {
-                    Icon(Icons.Filled.Favorite, contentDescription = null)
+                    Icon(Icons.Outlined.Favorite, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.home_view_favorites))
                 }
-                FilledTonalButton(
+                OutlinedButton(
                     onClick = onOpenDownloads,
                     shape = RoundedCornerShape(12.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
+                    border = androidx.compose.foundation.BorderStroke(1.dp, outlineSoftColor()),
                 ) {
                     Icon(painterResource(R.drawable.ic_folder), contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
@@ -286,7 +283,7 @@ fun HeroMetric(
                 text = value,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = primaryTextColor(),
             )
             Text(
                 text = label,
@@ -306,7 +303,7 @@ fun SectionHeader(
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
         )
         Text(
             text = subtitle,
@@ -323,12 +320,14 @@ fun LibraryCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(232.dp),
+        modifier = Modifier
+            .width(232.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -352,7 +351,7 @@ fun LibraryCard(
                     Text(
                         text = stringResource(R.string.home_shared_root),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = primaryTextColor(),
                     )
                 }
             }
@@ -375,11 +374,11 @@ fun LibraryCard(
                 Text(
                     text = stringResource(R.string.home_open_library),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = primaryTextColor(),
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(
-                    Icons.AutoMirrored.Filled.ArrowForward,
+                    Icons.AutoMirrored.Outlined.ArrowForward,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp),
@@ -415,12 +414,14 @@ fun ContinueWatchingCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(232.dp),
+        modifier = Modifier
+            .width(232.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -475,12 +476,14 @@ fun RecentMediaCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(184.dp),
+        modifier = Modifier
+            .width(184.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column {
             Box(
@@ -547,7 +550,7 @@ fun RecentMediaCard(
                     },
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = primaryTextColor(),
                 )
                 Text(
                     text = entry.file.name,
@@ -572,19 +575,21 @@ fun FavoritePreviewCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(184.dp),
+        modifier = Modifier
+            .width(184.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Filled.Favorite,
+                Icons.Outlined.Favorite,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error,
             )
@@ -614,11 +619,13 @@ fun FavoritePreviewCard(
 @Composable
 fun EmptyHomeStateCard() {
     ElevatedCard(
+        modifier = Modifier
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier
@@ -674,12 +681,14 @@ fun DownloadedPreviewCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(184.dp),
+        modifier = Modifier
+            .width(184.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column {
             if (entry.file.mediaType == "image") {
@@ -747,7 +756,7 @@ fun DownloadedPreviewCard(
                     },
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = primaryTextColor(),
                 )
                 Text(
                     text = entry.file.name,
@@ -783,7 +792,8 @@ fun BookshelfCard(
     if (books.isEmpty()) return
     LazyRow(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         items(books, key = { it.path }) { entry ->
             BookshelfTile(entry = entry, onClick = { onOpen(entry) })
@@ -798,12 +808,14 @@ private fun BookshelfTile(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(140.dp),
+        modifier = Modifier
+            .width(140.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier

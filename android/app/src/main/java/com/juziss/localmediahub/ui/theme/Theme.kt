@@ -14,41 +14,41 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFF7AD4D2),
-    secondary = Color(0xFFFFBC6D),
+    primary = Color(0xFFE8915A),
+    secondary = Color(0xFF6FB8BC),
     tertiary = Color(0xFFC8D78E),
-    background = Color(0xFF0D1718),
-    surface = Color(0xFF142022),
-    surfaceVariant = Color(0xFF213235),
-    primaryContainer = Color(0xFF1C3A3F),
-    secondaryContainer = Color(0xFF473017),
-    onPrimary = Color(0xFF062A2C),
-    onSecondary = Color(0xFF381B00),
+    background = Color(0xFF141210),
+    surface = Color(0xFF1E1A17),
+    surfaceVariant = Color(0xFF2A2420),
+    primaryContainer = Color(0xFF3A2516),
+    secondaryContainer = Color(0xFF1A3335),
+    onPrimary = Color(0xFF2A1408),
+    onSecondary = Color(0xFF042022),
     onTertiary = Color.White,
-    onBackground = Color(0xFFE9F1EF),
-    onSurface = Color(0xFFE9F1EF),
-    onSurfaceVariant = Color(0xFFADC4C1),
-    outline = Color(0xFF67817F),
-    outlineVariant = Color(0xFF314749),
+    onBackground = Color(0xFFEDE6DA),
+    onSurface = Color(0xFFEDE6DA),
+    onSurfaceVariant = Color(0xFFB3A793),
+    outline = Color(0xFF3A3229),
+    outlineVariant = Color(0xFF3A3229),
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF135F65),
-    secondary = Color(0xFFB96D1D),
+    primary = Color(0xFFB96D1D),
+    secondary = Color(0xFF3E7A7E),
     tertiary = Color(0xFF647A33),
-    background = Color(0xFFF6F1E8),
-    surface = Color(0xFFFFFBF7),
-    surfaceVariant = Color(0xFFE6E3DA),
-    primaryContainer = Color(0xFFDDF1F1),
-    secondaryContainer = Color(0xFFFFE4C9),
+    background = Color(0xFFF4EEE2),
+    surface = Color(0xFFFBF6EC),
+    surfaceVariant = Color(0xFFEDE6D6),
+    primaryContainer = Color(0xFFFBEBD8),
+    secondaryContainer = Color(0xFFD6EFF0),
     onPrimary = Color.White,
     onSecondary = Color.White,
     onTertiary = Color.White,
-    onBackground = Color(0xFF1A1F1C),
-    onSurface = Color(0xFF1A1F1C),
-    onSurfaceVariant = Color(0xFF5A6462),
-    outline = Color(0xFF7A8683),
-    outlineVariant = Color(0xFFC7D0CC),
+    onBackground = Color(0xFF2A2218),
+    onSurface = Color(0xFF2A2218),
+    onSurfaceVariant = Color(0xFF6B5E48),
+    outline = Color(0xFFD4CCBA),
+    outlineVariant = Color(0xFFD4CCBA),
 )
 
 private val AppTypography = Typography(
@@ -173,23 +173,32 @@ fun LocalMediaHubTheme(
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = when (themeKey.uppercase()) {
-        "EYE_CARE_GREEN" -> EyeCareGreenColorScheme
-        "EYE_CARE" -> EyeCareColorScheme
-        "PARCHMENT" -> ParchmentColorScheme
-        "NIGHT_BLACK" -> NightBlackColorScheme
-        "NIGHT" -> DarkColorScheme
-        "DAY", "DAY_BRIGHT" -> LightColorScheme
-        else -> if (darkTheme) DarkColorScheme else LightColorScheme
+    val upper = themeKey.uppercase()
+    val (colorScheme, outlineSoft, primaryText) = when (upper) {
+        "EYE_CARE_GREEN" -> Triple(EyeCareGreenColorScheme, OutlineSoft.EyeCareGreen, PrimaryText.EyeCareGreen)
+        "EYE_CARE" -> Triple(EyeCareColorScheme, OutlineSoft.EyeCare, PrimaryText.EyeCare)
+        "PARCHMENT" -> Triple(ParchmentColorScheme, OutlineSoft.Parchment, PrimaryText.Parchment)
+        "NIGHT_BLACK" -> Triple(NightBlackColorScheme, OutlineSoft.NightBlack, PrimaryText.NightBlack)
+        "NIGHT" -> Triple(DarkColorScheme, OutlineSoft.Dark, PrimaryText.Dark)
+        "DAY", "DAY_BRIGHT" -> Triple(LightColorScheme, OutlineSoft.Light, PrimaryText.Light)
+        else -> Triple(
+            if (darkTheme) DarkColorScheme else LightColorScheme,
+            if (darkTheme) OutlineSoft.Dark else OutlineSoft.Light,
+            if (darkTheme) PrimaryText.Dark else PrimaryText.Light,
+        )
     }
 
     MaterialTheme(
         colorScheme = colorScheme,
         typography = AppTypography,
     ) {
-        // See NoRippleIndication.kt — overrides Material 1.3.1's legacy PlatformRipple
-        // (which only implements Indication, not IndicationNodeFactory) so that
-        // foundation 1.11.x's clickable doesn't crash on release R8 builds.
-        ProvideNoRippleIndication(content)
+        ProvideOutlineSoft(outlineSoft) {
+            ProvidePrimaryText(primaryText) {
+                // See NoRippleIndication.kt — overrides Material 1.3.1's legacy PlatformRipple
+                // (which only implements Indication, not IndicationNodeFactory) so that
+                // foundation 1.11.x's clickable doesn't crash on release R8 builds.
+                ProvideNoRippleIndication(content)
+            }
+        }
     }
 }

@@ -30,9 +30,11 @@
     --text-muted:      #7A7A78;
     --text-on-accent:  #FFFFFF;
 
-    --accent:          #C75B39;
-    --accent-hover:    #B14E2E;
-    --accent-soft:     rgba(199, 91, 57, 0.12);
+    --accent:          #B96D1D;
+    --accent-hover:    #9E5C16;
+    --accent-soft:     rgba(185, 109, 29, 0.12);
+    --accent-text:     #965410;
+    --border-soft:     #E2D9C6;
 
     --border-subtle:   #E5E2D8;
     --shadow-sm:       0 1px 2px rgba(43, 43, 43, 0.04), 0 1px 3px rgba(43, 43, 43, 0.06);
@@ -156,16 +158,18 @@
     --surface-app:     #1A1A1F;
     --surface-card:    #232328;
     --surface-sidebar: #16161A;
-    --surface-hover:   rgba(199, 91, 57, 0.16);
+    --surface-hover:   rgba(232, 145, 90, 0.16);
 
     --text-primary:    #C9C9CE;
     --text-secondary:  #A8A8AD;
     --text-muted:      #84848A;
     --text-on-accent:  #FFFFFF;
 
-    --accent:          #D97A56;
-    --accent-hover:    #E68B6A;
-    --accent-soft:     rgba(217, 122, 86, 0.16);
+    --accent:          #E8915A;
+    --accent-hover:    #F0A066;
+    --accent-soft:     rgba(232, 145, 90, 0.16);
+    --accent-text:     #F2A878;
+    --border-soft:     #3A3A40;
     --primary-light:   var(--accent-hover);
 
     --border-subtle:   #2D2D33;
@@ -324,7 +328,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .menu-item.active {
-    color: var(--accent);
+    color: var(--accent-text);
     background-color: var(--accent-soft);
 }
 
@@ -545,7 +549,7 @@ input:focus, textarea:focus, select:focus {
 
 .stat-card {
     background: var(--surface-card);
-    border: 1px solid var(--border-subtle);
+    border: 1px solid var(--border-soft);
     border-radius: var(--radius-lg);
     padding: var(--space-5);
     display: flex;
@@ -587,7 +591,7 @@ input:focus, textarea:focus, select:focus {
 
 .widget-card {
     background: var(--surface-card);
-    border: 1px solid var(--border-subtle);
+    border: 1px solid var(--border-soft);
     border-radius: var(--radius-lg);
     padding: var(--space-5);
     box-shadow: var(--shadow-sm);
@@ -1065,7 +1069,7 @@ input:focus, textarea:focus, select:focus {
 /* System Settings Card Details */
 .settings-card {
     background: var(--surface-card);
-    border: 1px solid var(--border-subtle);
+    border: 1px solid var(--border-soft);
     border-radius: var(--radius-lg);
     padding: var(--space-5);
     box-shadow: var(--shadow-sm);
