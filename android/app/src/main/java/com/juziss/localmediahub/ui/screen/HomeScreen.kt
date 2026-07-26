@@ -59,6 +59,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -85,7 +88,7 @@ import com.juziss.localmediahub.viewmodel.HomeUiState
 import com.juziss.localmediahub.viewmodel.HomeViewModel
 import com.juziss.localmediahub.viewmodel.LibrarySummary
  
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalMaterial3WindowSizeClassApi::class)
 @Composable
 fun HomeScreen(
     onOpenLibrary: (LibrarySummary) -> Unit,
@@ -104,6 +107,30 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsState()
     val recentBooks by viewModel.recentBooks.collectAsState()
     val context = LocalContext.current
+
+    // Task 7: responsive horizontal padding via WindowSizeClass.
+    // DOWNSCOPED: only `horizontalPadding` is consumed; `columns` is computed
+    // (and reserved for a future multi-column LazyVerticalGrid enhancement) but
+    // the LazyColumn below still renders a single column regardless of value.
+    //
+    // `calculateWindowSizeClass` is a @Composable that requires a real Activity
+    // window. Because the Compose compiler forbids try/catch around composable
+    // invocations, we guard the call with a null-check on the cast Activity and
+    // only invoke it when we actually have one. When null (e.g. the composable
+    // is hosted in a non-Activity Context), we fall back to Compact-width
+    // defaults: columns = 1 → 20.dp.
+    val activity = context as? android.app.Activity
+    val windowClass = activity?.let { calculateWindowSizeClass(it) }
+    val columns = when (windowClass?.widthSizeClass) {
+        WindowWidthSizeClass.Expanded -> 3
+        WindowWidthSizeClass.Medium -> 2
+        else -> 1
+    }
+    val horizontalPadding = when (columns) {
+        3 -> 32.dp
+        2 -> 24.dp
+        else -> 20.dp
+    }
  
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -184,7 +211,7 @@ fun HomeScreen(
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 28.dp),
+            contentPadding = PaddingValues(start = horizontalPadding, end = horizontalPadding, top = 12.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
             item {
