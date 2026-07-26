@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.res.painterResource
+import com.juziss.localmediahub.ui.theme.outlineSoftColor
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -75,7 +76,7 @@ fun HeroCard(
     onOpenWeb: () -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
         ),
@@ -83,10 +84,10 @@ fun HeroCard(
             .fillMaxWidth()
             .border(
                 width = 1.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                shape = RoundedCornerShape(24.dp)
+                color = outlineSoftColor(),
+                shape = RoundedCornerShape(20.dp)
             ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier
@@ -306,7 +307,7 @@ fun SectionHeader(
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
         )
         Text(
             text = subtitle,
@@ -323,12 +324,14 @@ fun LibraryCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(232.dp),
+        modifier = Modifier
+            .width(232.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -415,12 +418,14 @@ fun ContinueWatchingCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(232.dp),
+        modifier = Modifier
+            .width(232.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f),
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -475,12 +480,14 @@ fun RecentMediaCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(184.dp),
+        modifier = Modifier
+            .width(184.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column {
             Box(
@@ -572,12 +579,14 @@ fun FavoritePreviewCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(184.dp),
+        modifier = Modifier
+            .width(184.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -614,11 +623,13 @@ fun FavoritePreviewCard(
 @Composable
 fun EmptyHomeStateCard() {
     ElevatedCard(
+        modifier = Modifier
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier
@@ -674,12 +685,14 @@ fun DownloadedPreviewCard(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(184.dp),
+        modifier = Modifier
+            .width(184.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column {
             if (entry.file.mediaType == "image") {
@@ -798,12 +811,14 @@ private fun BookshelfTile(
 ) {
     ElevatedCard(
         onClick = onClick,
-        modifier = Modifier.width(140.dp),
+        modifier = Modifier
+            .width(140.dp)
+            .border(width = 1.dp, color = outlineSoftColor(), shape = RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier
