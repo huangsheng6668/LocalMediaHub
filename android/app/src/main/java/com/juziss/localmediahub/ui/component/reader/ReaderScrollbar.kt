@@ -45,12 +45,26 @@ fun ReaderScrollbar(
     modifier: Modifier = Modifier,
     testTag: String? = null,
 ) {
-    val clampedProgress = progress.coerceIn(0f, 1f)
+    val currentProgress by androidx.compose.runtime.rememberUpdatedState(progress.coerceIn(0f, 1f))
     var isDragging by remember { mutableStateOf(false) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
+    var holdAfterRelease by remember { mutableStateOf(false) }
+    var releasedProgress by remember { mutableFloatStateOf(0f) }
 
     val displayProgress by remember {
-        derivedStateOf { if (isDragging) dragProgress else clampedProgress }
+        derivedStateOf {
+            when {
+                isDragging -> dragProgress
+                holdAfterRelease -> releasedProgress
+                else -> currentProgress
+            }
+        }
+    }
+    LaunchedEffect(holdAfterRelease) {
+        if (holdAfterRelease) {
+            kotlinx.coroutines.delay(800)
+            holdAfterRelease = false
+        }
     }
 
     var trackPx by remember { mutableFloatStateOf(0f) }
@@ -90,6 +104,8 @@ fun ReaderScrollbar(
                                         dragProgress = (y / trackPx).coerceIn(0f, 1f)
                                     }
                                     isDragging = false
+                                    releasedProgress = dragProgress
+                                    holdAfterRelease = true
                                     onSeekEnd(dragProgress)
                                 }
                             }

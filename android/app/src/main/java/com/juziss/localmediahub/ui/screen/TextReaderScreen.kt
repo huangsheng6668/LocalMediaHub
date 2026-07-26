@@ -65,7 +65,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -373,18 +375,67 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
 
             // 动态计算阅读进度
             val totalChaptersCount = book?.chapters?.size ?: 1
-            // 分章模式：按本章 item 位置算章内进度
-            val chapterPercent = remember(listState.firstVisibleItemIndex, listState.layoutInfo.totalItemsCount) {
-                val totalItems = listState.layoutInfo.totalItemsCount
-                if (totalItems <= 1) {
-                    0
+            // 分章模式：章内连续进度(亚 item 级)。
+            // 用当前首个可见 item 的真实高度把 scrollOffset 归一化在 [0, 1] 范围内,
+            // 再与 firstVisibleItemIndex 拼接得到连续位置。与 onSeek 中的
+            // targetFloat ↔ scrollToItem(targetItem, offset) 构成完美的双向可逆映射。
+            val chapterPercent = remember {
+                derivedStateOf {
+                    val info = listState.layoutInfo
+                    val totalItems = info.totalItemsCount
+                    if (totalItems <= 1) {
+                        0
+                    } else {
+                        val visItems = info.visibleItemsInfo
+                        val firstItemH = visItems.firstOrNull()?.size?.toFloat() ?: 1f
+                        val offsetFrac = (listState.firstVisibleItemScrollOffset.toFloat() / firstItemH.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                        val continuous = listState.firstVisibleItemIndex.toFloat() + offsetFrac
+                        ((continuous / (totalItems - 1).coerceAtLeast(1)) * 100).toInt().coerceIn(0, 100)
+                    }
+                }
+            }.value
+
+            // 滚动模式：全书连续进度。按 listState.firstVisibleItemIndex 匹配当前所在的章节与章内位置。
+            val overallPercent = remember(idx, chapterPercent, totalChaptersCount, scrollChapters, isScrollMode) {
+                if (isScrollMode) {
+                    if (scrollChapters.isEmpty() || totalChaptersCount <= 0) {
+                        0
+                    } else {
+                        val info = listState.layoutInfo
+                        val visItems = info.visibleItemsInfo
+                        val firstIdx = listState.firstVisibleItemIndex
+
+                        var accumulatedItems = 0
+                        var currentChIdx = idx
+                        var chFraction = 0f
+
+                        for (ch in scrollChapters) {
+                            val itemsInCh = ch.blocks.size + 2
+                            if (firstIdx < accumulatedItems + itemsInCh) {
+                                currentChIdx = ch.chapterIndex
+                                val itemInCh = firstIdx - accumulatedItems
+                                // 用当前可见 item 的实际高度计算亚 item 偏移
+                                val firstItemH = visItems.firstOrNull()?.size?.toFloat() ?: 1f
+                                val subItemFrac = (listState.firstVisibleItemScrollOffset.toFloat() / firstItemH.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                chFraction = (itemInCh.toFloat() + subItemFrac) / itemsInCh.coerceAtLeast(1)
+                                break
+                            }
+                            accumulatedItems += itemsInCh
+                        }
+                        val continuousBookPos = currentChIdx.toFloat() + chFraction.coerceIn(0f, 1f)
+                        ((continuousBookPos / totalChaptersCount.coerceAtLeast(1)) * 100).toInt().coerceIn(0, 100)
+                    }
                 } else {
-                    ((listState.firstVisibleItemIndex.toFloat() / (totalItems - 1).coerceAtLeast(1)) * 100).toInt().coerceIn(0, 100)
+                    0
                 }
             }
-            // 滚动模式：按全书 item 位置算全书进度
-            val overallPercent = remember(idx, chapterPercent, totalChaptersCount) {
-                (((idx.toFloat() + (chapterPercent / 100f)) / totalChaptersCount.coerceAtLeast(1)) * 100).toInt().coerceIn(0, 100)
+
+            // 分章模式：blocks 变化时(切章)自动滚动到顶部,
+            // 解决 nextChapter/prevChapter 异步竞争导致新章节停在旧滚动位置的问题。
+            LaunchedEffect(blocks) {
+                if (!isScrollMode && blocks.isNotEmpty()) {
+                    listState.scrollToItem(0)
+                }
             }
 
             Scaffold(
@@ -438,8 +489,8 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                         modifier = Modifier.padding(16.dp),
                                     )
                                     Spacer(Modifier.weight(1f))
-                                    TextButton(onClick = { viewModel.prevChapter(); scope.launch { listState.scrollToItem(0) } }) { Text("上一章") }
-                                    TextButton(onClick = { viewModel.nextChapter(); scope.launch { listState.scrollToItem(0) } }) { Text("下一章") }
+                                    TextButton(onClick = { viewModel.prevChapter() }) { Text("上一章") }
+                                    TextButton(onClick = { viewModel.nextChapter() }) { Text("下一章") }
                                 }
                             }
                         }
@@ -539,12 +590,22 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                             if (viewModel.isAutoScrolling.value) viewModel.stopAutoScroll()
                         },
                         onSeek = { p ->
-                            // 分章模式:拖动实时滚动本章 item
+                            // 分章模式:拖动实时滚动本章内容(亚 item 级,连续)。
+                            // 双向精确寻址：将 p 映射为 (targetItem, offset)，offset 严格约束在 [0, itemH - 1]，确保 scrollToItem 秒级即时响应
                             if (!isScrollMode) {
-                                val totalItems = listState.layoutInfo.totalItemsCount
+                                val info = listState.layoutInfo
+                                val totalItems = info.totalItemsCount
                                 if (totalItems > 1) {
-                                    val targetItem = (p * (totalItems - 1)).roundToInt().coerceIn(0, totalItems - 1)
-                                    scope.launch { listState.scrollToItem(targetItem) }
+                                    val targetFloat = p * (totalItems - 1)
+                                    val targetItem = targetFloat.toInt().coerceIn(0, totalItems - 1)
+                                    val frac = targetFloat - targetItem
+                                    val visItems = info.visibleItemsInfo
+                                    val itemH = visItems.find { it.index == targetItem }?.size?.toFloat()
+                                        ?: visItems.firstOrNull()?.size?.toFloat()
+                                        ?: 300f
+                                    val maxOffset = (itemH - 1f).coerceAtLeast(0f)
+                                    val offset = (frac * itemH).toInt().coerceIn(0, maxOffset.toInt())
+                                    scope.launch { listState.scrollToItem(targetItem, offset) }
                                 }
                             }
                             // 滚动模式:纯本地预览,组件内部已更新 thumb
