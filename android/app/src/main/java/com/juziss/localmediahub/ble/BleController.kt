@@ -58,12 +58,8 @@ class BleController @Inject constructor(
             centralManager.stopScan()
             return
         }
-        if (connectionState.value == BleConnState.DISABLED ||
-            connectionState.value == BleConnState.IDLE
-        ) {
-            machine.onStartScan()
-            centralManager.startScan()
-        }
+        machine.onStartScan()
+        centralManager.startScan()
     }
 
     suspend fun setEnabled(enabled: Boolean) {
