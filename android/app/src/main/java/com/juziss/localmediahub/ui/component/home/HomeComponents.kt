@@ -30,15 +30,16 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.res.painterResource
 import com.juziss.localmediahub.ui.theme.outlineSoftColor
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -227,34 +228,28 @@ fun HeroCard(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 uiState.lastBrowseLocation?.let { location ->
-                    FilledTonalButton(
+                    Button(
                         onClick = { onResumeBrowse(location) },
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
                     ) {
                         Icon(painterResource(R.drawable.ic_history), contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("继续浏览 ${location.title}")
                     }
                 }
-                FilledTonalButton(
+                OutlinedButton(
                     onClick = onOpenFavorites,
                     shape = RoundedCornerShape(12.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                    border = androidx.compose.foundation.BorderStroke(1.dp, outlineSoftColor()),
                 ) {
                     Icon(Icons.Filled.Favorite, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.home_view_favorites))
                 }
-                FilledTonalButton(
+                OutlinedButton(
                     onClick = onOpenDownloads,
                     shape = RoundedCornerShape(12.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
+                    border = androidx.compose.foundation.BorderStroke(1.dp, outlineSoftColor()),
                 ) {
                     Icon(painterResource(R.drawable.ic_folder), contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
