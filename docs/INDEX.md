@@ -239,6 +239,17 @@
 - EXIF orientation 自动校正
 - 通道约定：Android `ARGB_8888` == NDK `RGBA_8888`，解码器直接 `copy_from_slice`
 
+### UI 配色精修（温暖复古 · terracotta · 纸感）
+
+- 默认主题主强调色 teal → terracotta；暗色近纯黑带暖意 + 冷暖并存（主操作暖琥珀、激活态 teal）
+- 新增 `outline-soft` token（CompositionLocal，未 Provide 时回退 outlineVariant），纸感卡片细描边
+- HomeComponents 卡片 elevation 2dp → 0dp + 1px outline-soft 描边；圆角统一（HeroCard 20dp / 大卡 16dp / 小卡 12dp）；图标统一 Outlined；HeroCard 按钮分级（Button 主 + OutlinedButton 次）
+- HomeScreen section 间距 22→28dp、横滚边距 8dp；响应式 padding（WindowSizeClass：Compact 20 / Medium 24 / Expanded 32dp，Grid 多列留后续）
+- Web style.css day/night accent 对齐 Android；新增 `--border-soft` / `--accent-text`
+- 关键文件：`ui/theme/Theme.kt`、`ui/theme/ColorTokens.kt`、`ui/component/home/HomeComponents.kt`、`ui/screen/HomeScreen.kt`、`server/internal/web/style.css`
+- HTML 对照预览：`docs/ui-redesign/ui-redesign-preview.html`
+- spec：`docs/superpowers/specs/2026-07-26-ui-redesign-design.md`｜plan：`docs/superpowers/plans/2026-07-26-ui-redesign-implementation.md`
+
 ### Compose workaround
 
 `android/app/src/main/java/com/juziss/localmediahub/ui/theme/NoRippleIndication.kt` 解决 foundation 1.11.x + material3 1.3.1 错配（release R8 构建崩溃）；material3 升级到 1.4.x+ 后可移除。
