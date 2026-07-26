@@ -25,8 +25,12 @@ import org.robolectric.RobolectricTestRunner
  * Renders the full HomeScreen (TopAppBar + body) under the DAY theme and
  * asserts the persistent "LocalMediaHub" title is displayed. This verifies
  * that the newly added `material3-window-size-class` import + the
- * `calculateWindowSizeClass(context as Activity)` call wrapped in try/catch
- * do not crash composition under Robolectric (no real Activity window).
+ * null-guarded `calculateWindowSizeClass((context as? Activity)?.let { it })`
+ * call do not crash composition. The production code casts `context as?
+ * Activity` and only invokes `calculateWindowSizeClass` when non-null, so it
+ * fails safe to Compact padding when the host is not an Activity. Under
+ * Robolectric the host is a `ComponentActivity`, the cast succeeds, and a
+ * real Activity window is provided so the actual window-size class is used.
  *
  * `HomeViewModel` is `@HiltViewModel` and cannot be resolved via the default
  * `viewModel()` factory inside a plain `ComponentActivity` (no Hilt entry
