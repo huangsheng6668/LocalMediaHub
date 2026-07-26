@@ -23,9 +23,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.res.painterResource
 import com.juziss.localmediahub.ui.theme.outlineSoftColor
@@ -147,7 +147,7 @@ fun HeroCard(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Icon(
-                        Icons.Filled.CheckCircle,
+                        Icons.Outlined.CheckCircle,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                     )
@@ -242,7 +242,7 @@ fun HeroCard(
                     shape = RoundedCornerShape(12.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, outlineSoftColor()),
                 ) {
-                    Icon(Icons.Filled.Favorite, contentDescription = null)
+                    Icon(Icons.Outlined.Favorite, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.home_view_favorites))
                 }
@@ -377,7 +377,7 @@ fun LibraryCard(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(
-                    Icons.AutoMirrored.Filled.ArrowForward,
+                    Icons.AutoMirrored.Outlined.ArrowForward,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp),
@@ -588,7 +588,7 @@ fun FavoritePreviewCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Filled.Favorite,
+                Icons.Outlined.Favorite,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error,
             )
