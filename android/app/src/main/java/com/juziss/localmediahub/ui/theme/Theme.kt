@@ -174,15 +174,18 @@ fun LocalMediaHubTheme(
     content: @Composable () -> Unit,
 ) {
     val upper = themeKey.uppercase()
-    val (colorScheme, outlineSoft) = when (upper) {
-        "EYE_CARE_GREEN" -> EyeCareGreenColorScheme to OutlineSoft.EyeCareGreen
-        "EYE_CARE" -> EyeCareColorScheme to OutlineSoft.EyeCare
-        "PARCHMENT" -> ParchmentColorScheme to OutlineSoft.Parchment
-        "NIGHT_BLACK" -> NightBlackColorScheme to OutlineSoft.NightBlack
-        "NIGHT" -> DarkColorScheme to OutlineSoft.Dark
-        "DAY", "DAY_BRIGHT" -> LightColorScheme to OutlineSoft.Light
-        else -> (if (darkTheme) DarkColorScheme else LightColorScheme) to
-                (if (darkTheme) OutlineSoft.Dark else OutlineSoft.Light)
+    val (colorScheme, outlineSoft, primaryText) = when (upper) {
+        "EYE_CARE_GREEN" -> Triple(EyeCareGreenColorScheme, OutlineSoft.EyeCareGreen, PrimaryText.EyeCareGreen)
+        "EYE_CARE" -> Triple(EyeCareColorScheme, OutlineSoft.EyeCare, PrimaryText.EyeCare)
+        "PARCHMENT" -> Triple(ParchmentColorScheme, OutlineSoft.Parchment, PrimaryText.Parchment)
+        "NIGHT_BLACK" -> Triple(NightBlackColorScheme, OutlineSoft.NightBlack, PrimaryText.NightBlack)
+        "NIGHT" -> Triple(DarkColorScheme, OutlineSoft.Dark, PrimaryText.Dark)
+        "DAY", "DAY_BRIGHT" -> Triple(LightColorScheme, OutlineSoft.Light, PrimaryText.Light)
+        else -> Triple(
+            if (darkTheme) DarkColorScheme else LightColorScheme,
+            if (darkTheme) OutlineSoft.Dark else OutlineSoft.Light,
+            if (darkTheme) PrimaryText.Dark else PrimaryText.Light,
+        )
     }
 
     MaterialTheme(
@@ -190,10 +193,12 @@ fun LocalMediaHubTheme(
         typography = AppTypography,
     ) {
         ProvideOutlineSoft(outlineSoft) {
-            // See NoRippleIndication.kt — overrides Material 1.3.1's legacy PlatformRipple
-            // (which only implements Indication, not IndicationNodeFactory) so that
-            // foundation 1.11.x's clickable doesn't crash on release R8 builds.
-            ProvideNoRippleIndication(content)
+            ProvidePrimaryText(primaryText) {
+                // See NoRippleIndication.kt — overrides Material 1.3.1's legacy PlatformRipple
+                // (which only implements Indication, not IndicationNodeFactory) so that
+                // foundation 1.11.x's clickable doesn't crash on release R8 builds.
+                ProvideNoRippleIndication(content)
+            }
         }
     }
 }

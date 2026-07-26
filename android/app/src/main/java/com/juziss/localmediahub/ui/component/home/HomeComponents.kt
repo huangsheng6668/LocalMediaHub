@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.res.painterResource
 import com.juziss.localmediahub.ui.theme.outlineSoftColor
+import com.juziss.localmediahub.ui.theme.primaryTextColor
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -282,7 +283,7 @@ fun HeroMetric(
                 text = value,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = primaryTextColor(),
             )
             Text(
                 text = label,
@@ -350,7 +351,7 @@ fun LibraryCard(
                     Text(
                         text = stringResource(R.string.home_shared_root),
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = primaryTextColor(),
                     )
                 }
             }
@@ -373,7 +374,7 @@ fun LibraryCard(
                 Text(
                     text = stringResource(R.string.home_open_library),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = primaryTextColor(),
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Icon(
@@ -549,7 +550,7 @@ fun RecentMediaCard(
                     },
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = primaryTextColor(),
                 )
                 Text(
                     text = entry.file.name,
@@ -755,7 +756,7 @@ fun DownloadedPreviewCard(
                     },
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = primaryTextColor(),
                 )
                 Text(
                     text = entry.file.name,
