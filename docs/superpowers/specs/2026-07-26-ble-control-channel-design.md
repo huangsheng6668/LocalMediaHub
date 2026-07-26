@@ -264,3 +264,45 @@ BLE 通道同时承载"控制信令"和"文本数据"时，**控制信令永远�
 - Wi-Fi 健康探针的判定阈值（RTT 上限、失败次数）
 - BLE scan / connect 的退避重试参数（间隔、上限）
 - 设置页 UI 文案（"实验性"标注、状态指示）
+
+---
+
+## 10. MVP 实施状态（2026-07-26）
+
+**本期实施范围 = spec 范围 2（双向 GATT 消息通道技术验证）。**
+
+### 已实现（本期）
+
+- **server 端**（Go，`server/internal/ble/`）：
+  - BLE 协议层：UUID 常量 + Frame 编解码（big-endian `[ver][len:2 BE][payload]`）。
+  - `Peripheral` 状态机 + `Adapter` 接口抽象（纯逻辑可单测）。
+  - `tinygo.org/x/bluetooth` v0.15.0 接入（`bluetooth` build tag），stub fallback（默认构建）。
+  - main.go 非致命启动：BLE 不可用仅 `slog.Warn`，server 继续 Wi-Fi/HTTP。
+- **Android 端**（`com.juziss.localmediahub.ble`）：
+  - `BleProtocol`（与 server 对称的 codec）。
+  - `BleConnectionStateMachine`（纯逻辑状态机，DISABLED/IDLE/SCANNING/CONNECTING/CONNECTED/DISCONNECTED）。
+  - `ServerConfigStore.bleEnabled` DataStore 开关（默认 false）。
+  - `BleController`（@Singleton）门控逻辑：开关 + 硬件可用性 → 状态机；`@ApplicationScope` 协程 collect `bleEnabled` 驱动 `evaluateAvailability(enabled)`。
+  - `AndroidBleCentralManager`（`BluetoothManager` 骨架）+ `di/BleModule` Hilt 装配。
+  - `ConnectionScreen` 设置开关 + `BleSettingsViewModel` + `BleToggleRule` + 运行时权限请求。
+- **测试**：server 7 + Android 17 = **24 个新单测，全绿**；`go build`（默认 + `-tags bluetooth`）通过；Android `assembleDebug` 通过。
+
+### 留作下一期（明确边界）
+
+- **真实 GATT 硬件接线**：`AndroidBleCentralManager.startScan/stopScan/send` 与 server `tinyGoAdapter.StartAdvertising/Notify` 当前是 TODO 骨架（`TODO(hardware-integration)` 标记）。本期通道协议/状态机/门控/UI 已由单测覆盖，但**真机收发字节需补这些接线**。
+- **业务信令语义**（播放控制、进度同步、选书）——server 当前无控制消费方（架构 gap），下期需先决策 server 角色。
+- **文本降级传输**（spec §6：分章、优先级队列、断点续传）。
+- **Wi-Fi 健康探针与自动降级路由**（spec §3 运行中降级）。
+- **BluetoothAdapter 运行时状态监听**（当前 `hardwareAvailable` 是快照，用户切系统蓝牙需重进界面/重 toggle 才生效；MVP YAGNI）。
+
+### CI 注意事项
+
+server 的 BLE 依赖 `tinygo.org/x/bluetooth` 仅在 `//go:build bluetooth` tag 下导入，故默认 `go mod tidy` 会把它当未使用剥离。**CI 若运行 `go mod tidy` 校验，须设 `GOFLAGS=-tags=bluetooth`**，否则依赖消失。
+
+### 手动验证清单（需真实硬件，下一期或硬件接线完成后执行）
+
+- [ ] PC server 以 `go build -tags bluetooth` 构建，启动后日志显示 "BLE Peripheral advertising"。
+- [ ] Android 开启"蓝牙稳定通道（实验性）"开关 → 授权蓝牙权限 → 状态指示正确变化。
+- [ ] 手机发送测试字节 → server 收到（日志打印解码后的 payload）。
+- [ ] server 广播测试字节 → Android 收到（UI 或日志显示）。
+- [ ] 关闭开关 → 状态立即变"关闭"，Wi-Fi/HTTP 行为不受影响（零退化）。

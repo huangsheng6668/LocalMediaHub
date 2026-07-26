@@ -2,9 +2,10 @@
 // the Go server (Peripheral) and the Android client (Central).
 //
 // Frame wire format (big-endian):
-//   [0]    version (currently 0x01)
-//   [1:3]  uint16 payload length
-//   [3:]   payload bytes
+//
+//	[0]    version (currently 0x01)
+//	[1:3]  uint16 payload length
+//	[3:]   payload bytes
 package ble
 
 import (
