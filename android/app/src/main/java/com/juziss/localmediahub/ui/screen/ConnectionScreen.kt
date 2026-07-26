@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -66,10 +67,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.juziss.localmediahub.viewmodel.ConnectionState
 import androidx.compose.ui.res.stringResource
 import com.juziss.localmediahub.R
+import com.juziss.localmediahub.ble.BleConnState
+import com.juziss.localmediahub.ble.BleToggleRule
+import com.juziss.localmediahub.viewmodel.BleSettingsViewModel
 import com.juziss.localmediahub.viewmodel.ConnectionViewModel
 import com.juziss.localmediahub.viewmodel.DiscoveredServer
 import com.juziss.localmediahub.viewmodel.DiscoveryState
 import com.juziss.localmediahub.viewmodel.shouldAttemptAutoConnect
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
  
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,19 +85,48 @@ fun ConnectionScreen(
     onConnected: () -> Unit,
     onBrowseOffline: () -> Unit = {},
     viewModel: ConnectionViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+    bleViewModel: BleSettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
     var ip by remember { mutableStateOf("") }
     var port by remember { mutableStateOf("8000") }
     var tokenInput by remember { mutableStateOf("") }
     var autoConnectAttempted by rememberSaveable { mutableStateOf(false) }
     var showServerSelection by remember { mutableStateOf(false) }
- 
+
     val savedIp by viewModel.savedIp.collectAsState()
     val savedPort by viewModel.savedPort.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
     val discoveryState by viewModel.discoveryState.collectAsState()
     val scanProgress by viewModel.scanProgress.collectAsState()
     val discoveredServers by viewModel.discoveredServers.collectAsState()
+
+    // Experimental BLE channel toggle. Collected here so the card reflects
+    // the persisted setting + live connection state from BleController.
+    val bleEnabled by bleViewModel.bleEnabled.collectAsState()
+    val bleConnState by bleViewModel.connectionState.collectAsState()
+    val bleHardwareAvailable by remember { mutableStateOf(bleViewModel.hardwareAvailable()) }
+
+    // Runtime permission launcher for BLE. On Android 12+ both BLUETOOTH_SCAN
+    // and BLUETOOTH_CONNECT are runtime permissions; on older API levels they
+    // are install-time (the manifest declares them with maxSdkVersion guards)
+    // and the contract auto-grants, so the same launcher works for all levels.
+    // The launcher must be registered at the composable body level; the
+    // Switch's onCheckedChange calls it instead of touching the VM directly.
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        // Treat as granted only if every requested permission was granted
+        // (or considered already-granted, which appears as `true` here).
+        val granted = result.values.all { it }
+        if (granted) {
+            bleViewModel.onBleToggle(requested = true)
+        } else if (!bleEnabled) {
+            // User denied and the switch was off: make sure we don't leave
+            // the persisted setting on. Calling with false is a no-op when
+            // already off but keeps state honest if it was on.
+            bleViewModel.onBleToggle(requested = false)
+        }
+    }
  
     LaunchedEffect(savedIp, savedPort, connectionState) {
         if (ip.isEmpty() && savedIp.isNotEmpty()) {
@@ -243,7 +280,35 @@ fun ConnectionScreen(
                 DiscoveryState.Idle,
                 DiscoveryState.Scanning -> Unit
             }
- 
+
+            BleExperimentalToggleCard(
+                enabled = bleEnabled,
+                connectionState = bleConnState,
+                hardwareAvailable = bleHardwareAvailable,
+                onCheckedChange = { requested ->
+                    if (!requested) {
+                        // Turning off never needs a permission prompt.
+                        bleViewModel.onBleToggle(requested = false)
+                        return@BleExperimentalToggleCard
+                    }
+                    // Turning on: request runtime BLE permissions first.
+                    // On API < 31 the permissions are install-time, in which
+                    // case the system returns granted immediately.
+                    val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        arrayOf(
+                            Manifest.permission.BLUETOOTH_SCAN,
+                            Manifest.permission.BLUETOOTH_CONNECT,
+                        )
+                    } else {
+                        arrayOf(
+                            Manifest.permission.BLUETOOTH,
+                            Manifest.permission.BLUETOOTH_ADMIN,
+                        )
+                    }
+                    blePermissionLauncher.launch(perms)
+                },
+            )
+
             Spacer(modifier = Modifier.height(8.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Spacer(modifier = Modifier.height(4.dp))
@@ -737,6 +802,88 @@ private fun StatusCard(
                     color = contentColor,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Experimental BLE control-channel toggle + status indicator.
+ *
+ * Renders a Switch bound to the persisted `bleEnabled` setting and a one-line
+ * status text derived from the controller's [BleConnState]. The switch is
+ * greyed out (non-interactive) on devices without usable Bluetooth hardware —
+ * see [BleToggleRule].
+ *
+ * MVP scope: flipping the switch to ON requests BLUETOOTH_SCAN/BLUETOOTH_CONNECT
+ * runtime permission and then calls [BleSettingsViewModel.onBleToggle]; the
+ * actual scan/connect wiring is the deferred hardware-integration TODO in
+ * `AndroidBleCentralManager` (Task 8). Wi-Fi/HTTP behavior is entirely
+ * unaffected regardless of this switch's state.
+ */
+@Composable
+private fun BleExperimentalToggleCard(
+    enabled: Boolean,
+    connectionState: BleConnState,
+    hardwareAvailable: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val canToggle = BleToggleRule.canToggle(hardwareAvailable = hardwareAvailable)
+
+    val statusText = when (connectionState) {
+        BleConnState.DISABLED -> if (hardwareAvailable) "关闭" else "此设备不支持"
+        BleConnState.IDLE -> "待机"
+        BleConnState.SCANNING -> "搜索中…"
+        BleConnState.CONNECTING -> "连接中…"
+        BleConnState.CONNECTED -> "已连接"
+        BleConnState.DISCONNECTED -> "已断开"
+    }
+
+    ElevatedCard(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.border(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(16.dp)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "蓝牙稳定通道（实验性）",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "可选的低功耗蓝牙控制通道；不可用时自动退回 Wi-Fi。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "状态：$statusText",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (connectionState == BleConnState.CONNECTED)
+                        MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = enabled,
+                enabled = canToggle,
+                onCheckedChange = onCheckedChange,
+            )
         }
     }
 }
