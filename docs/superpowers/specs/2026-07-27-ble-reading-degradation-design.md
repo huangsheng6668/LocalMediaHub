@@ -93,7 +93,7 @@ LocalMediaHub 的 BLE 通道已成功调通双向 GATT 控制信道（PC Central
 2. `data/MediaRepository.kt`:
    - 在 `getBookInfo` 和 `getBookChapter` 中加入降级逻辑：HTTP 抛出 `IOException` / `SocketTimeoutException` 且 `BleController.isConnected == true` 时，自动切入 `BleTransportFallback`。
 3. `ui/screen/TextReaderScreen.kt`:
-   - 顶部状态栏增加 **`[⚡ BLE 降级传输中]`** 提示 Tag，用户体验无缝透明。
+   - 切换到降级模式时浮动弹出 **`[⚡ BLE 降级传输中]`** 提示 Chip，**展示 3 秒后自动淡出消失**，避免持续遮挡阅读排版区域。
 
 ---
 
