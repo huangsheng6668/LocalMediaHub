@@ -18,6 +18,17 @@ object BleProtocol {
     const val FRAME_VERSION: Byte = 0x01
     const val MAX_PAYLOAD_LEN = 244
 
+    // ---- Application-layer CmdID values (payload[0]) ----
+    // Mirrors server/internal/ble/protocol.go. See spec §2.2.
+    const val CMD_ECHO: Byte = 0x01
+    const val CMD_BOOK_INFO_REQ: Byte = 0x10
+    const val CMD_BOOK_CHAPTER_REQ: Byte = 0x11
+    /** PC → Android (GATT Write): one chunk of a chapter's Block JSON. */
+    const val CMD_BOOK_CHAPTER_CHUNK: Byte = 0x12
+
+    /** Per-chunk payload cap (spec §1.2). Pure advisory; not enforced here. */
+    const val MAX_CHUNK_PAYLOAD_BYTES = 200
+
     data class Frame(val payload: ByteArray) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
