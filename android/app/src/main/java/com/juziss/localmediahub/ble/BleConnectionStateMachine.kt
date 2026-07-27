@@ -28,7 +28,6 @@ class BleConnectionStateMachine {
     }
 
     fun onStartAdvertising() {
-        if (_state.value == BleConnState.DISABLED) return
         _state.value = BleConnState.ADVERTISING
     }
 

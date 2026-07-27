@@ -44,6 +44,15 @@ class BleConnectionStateMachineTest {
     }
 
     @Test
+    fun disabled_toAdvertising_resumesAdvertising() {
+        val sm = BleConnectionStateMachine()
+        sm.onBleDisabled()
+        assertEquals(BleConnState.DISABLED, sm.state.value)
+        sm.onStartAdvertising()
+        assertEquals(BleConnState.ADVERTISING, sm.state.value)
+    }
+
+    @Test
     fun onError_fromAnyState_returnsToIdle() {
         val sm = BleConnectionStateMachine()
         sm.onStartAdvertising()
