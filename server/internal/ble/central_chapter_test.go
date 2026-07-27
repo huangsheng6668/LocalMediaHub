@@ -2,19 +2,16 @@ package ble
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/localmediahub/server/internal/service/bookparser"
 )
 
 // collectScanner is a CentralScanner fake that records every WriteCommand
-// frame so ServeChapterRequest's multi-chunk stream can be inspected. It
-// mirrors fakeScanner's shape (central_test.go) but accumulates writes
-// instead of overwriting the last one.
+// frame so ServeApiRequest's multi-chunk stream can be inspected. It mirrors
+// fakeScanner's shape (central_test.go) but accumulates writes instead of
+// overwriting the last one.
 type collectScanner struct {
 	mu       sync.Mutex
 	written  [][]byte
@@ -39,43 +36,50 @@ func (c *collectScanner) WaitNotify(context.Context) ([]byte, error) {
 	return nil, errors.New("not used in this test")
 }
 
-// stubChapterProvider is a minimal ChapterProvider for unit testing.
-type stubChapterProvider struct {
-	blocks []bookparser.Block
-	err    error
-	last   struct {
+// jsonBlockProvider is a minimal ApiProvider that always returns a fixed JSON
+// body, recording the last (path, idx, ip) it was called with. Used to exercise
+// ServeApiRequest's multi-chunk stream path without depending on service.BookService.
+type jsonBlockProvider struct {
+	body []byte
+	err  error
+	last struct {
+		ep   byte
 		path string
 		idx  int
-		ip   string
 	}
 }
 
-func (s *stubChapterProvider) GetChapterBlocks(_ context.Context, path string, idx int, ip string) ([]bookparser.Block, error) {
-	s.last.path = path
-	s.last.idx = idx
-	s.last.ip = ip
-	return s.blocks, s.err
+func (p *jsonBlockProvider) HandleBleRequest(_ context.Context, endpoint byte, path string, index int) ([]byte, error) {
+	p.last.ep = endpoint
+	p.last.path = path
+	p.last.idx = index
+	return p.body, p.err
 }
 
-func TestServeChapterRequestStreamsChunks(t *testing.T) {
-	// 30 blocks at ~64 bytes each forces multiple chunks at the 244-byte cap.
-	blocks := make([]bookparser.Block, 30)
-	for i := range blocks {
-		blocks[i] = bookparser.Block{Type: "text", Value: "padding-padding-padding-padding-padding"}
+// TestServeApiRequestStreamsMultipleChunks exercises the legacy multi-chunk
+// streaming behaviour (formerly TestServeChapterRequestStreamsChunks) via the
+// generalized ApiProvider surface: a large JSON body forces multiple chunks at
+// the 200-byte spec ceiling, every chunk must decode as a CMD_JSON_CHUNK frame
+// with sequential ChunkIndex and a stable TotalChunks count.
+func TestServeApiRequestStreamsMultipleChunks(t *testing.T) {
+	// ~2KB JSON body forces ~12 chunks at the 200-byte spec §1.2 cap.
+	body := make([]byte, 2048)
+	for i := range body {
+		body[i] = 'x'
 	}
-	provider := &stubChapterProvider{blocks: blocks}
+	provider := &jsonBlockProvider{body: body}
 	scanner := &collectScanner{}
 	c := NewCentral(scanner)
-	c.SetChapterProvider(provider)
+	c.SetApiProvider(provider)
 	_ = c.Connect(context.Background(), "AA:BB")
 
-	req, encErr := EncodeBookChapterReqPayload("/books/novel.txt", 4)
+	req, encErr := EncodeApiReqPayload(EndpointBookChapter, "/books/novel.txt", 4)
 	if encErr != nil {
-		t.Fatalf("EncodeBookChapterReqPayload: %v", encErr)
+		t.Fatalf("EncodeApiReqPayload: %v", encErr)
 	}
-	written, err := c.ServeChapterRequest(context.Background(), req, "10.0.0.5")
+	written, err := c.ServeApiRequest(context.Background(), req, "10.0.0.5")
 	if err != nil {
-		t.Fatalf("ServeChapterRequest: %v", err)
+		t.Fatalf("ServeApiRequest: %v", err)
 	}
 	if written < 2 {
 		t.Fatalf("expected multiple chunks, got %d", written)
@@ -85,20 +89,15 @@ func TestServeChapterRequestStreamsChunks(t *testing.T) {
 	}
 
 	// Provider was called with the decoded args.
-	if provider.last.path != "/books/novel.txt" || provider.last.idx != 4 || provider.last.ip != "10.0.0.5" {
-		t.Fatalf("provider called with path=%q idx=%d ip=%q",
-			provider.last.path, provider.last.idx, provider.last.ip)
+	if provider.last.ep != EndpointBookChapter ||
+		provider.last.path != "/books/novel.txt" ||
+		provider.last.idx != 4 {
+		t.Fatalf("provider called with ep=%#x path=%q idx=%d",
+			provider.last.ep, provider.last.path, provider.last.idx)
 	}
 
 	// Every written frame is a valid CMD_JSON_CHUNK frame whose payload fits
-	// in the MTU and whose ChunkIndex is its position in the stream. The third
-	// header field is TotalBytes (length of the marshalled JSON body) under the
-	// generalized protocol; legacy code still reads it via the deprecated
-	// DecodeBookChapterChunkPayload alias until Task 2 migrates central.go.
-	wantBytes, mErr := json.Marshal(blocks)
-	if mErr != nil {
-		t.Fatalf("json.Marshal: %v", mErr)
-	}
+	// in the MTU and whose ChunkIndex is its position in the stream.
 	total := -1
 	for i, raw := range scanner.written {
 		frame, derr := DecodeFrame(raw)
@@ -108,7 +107,7 @@ func TestServeChapterRequestStreamsChunks(t *testing.T) {
 		if len(frame.Payload) > maxPayloadLen {
 			t.Fatalf("frame %d payload %d > max %d", i, len(frame.Payload), maxPayloadLen)
 		}
-		tot, cidx, totalBytes, _, perr := DecodeBookChapterChunkPayload(frame.Payload)
+		tot, cidx, totalBytes, _, perr := DecodeJsonChunkPayload(frame.Payload)
 		if perr != nil {
 			t.Fatalf("frame %d chunk decode error: %v", i, perr)
 		}
@@ -120,8 +119,8 @@ func TestServeChapterRequestStreamsChunks(t *testing.T) {
 		if cidx != i {
 			t.Fatalf("frame %d has ChunkIndex %d", i, cidx)
 		}
-		if totalBytes != len(wantBytes) {
-			t.Fatalf("frame %d TotalBytes %d want %d", i, totalBytes, len(wantBytes))
+		if totalBytes != len(body) {
+			t.Fatalf("frame %d TotalBytes %d want %d", i, totalBytes, len(body))
 		}
 	}
 	if total != written {
@@ -129,48 +128,9 @@ func TestServeChapterRequestStreamsChunks(t *testing.T) {
 	}
 }
 
-func TestServeChapterRequestRequiresProvider(t *testing.T) {
-	scanner := &collectScanner{}
-	c := NewCentral(scanner)
-	_ = c.Connect(context.Background(), "AA:BB")
-	req, _ := EncodeBookChapterReqPayload("/books/x", 0)
-	_, err := c.ServeChapterRequest(context.Background(), req, "")
-	if err != ErrNoChapterProvider {
-		t.Fatalf("expected ErrNoChapterProvider, got %v", err)
-	}
-}
-
-func TestServeChapterRequestRequiresConnection(t *testing.T) {
-	scanner := &collectScanner{}
-	c := NewCentral(scanner)
-	c.SetChapterProvider(&stubChapterProvider{})
-	req, _ := EncodeBookChapterReqPayload("/books/x", 0)
-	_, err := c.ServeChapterRequest(context.Background(), req, "")
-	if err != ErrNotConnected {
-		t.Fatalf("expected ErrNotConnected, got %v", err)
-	}
-}
-
-func TestServeChapterRequestRejectsWrongCmdID(t *testing.T) {
-	scanner := &collectScanner{}
-	c := NewCentral(scanner)
-	c.SetChapterProvider(&stubChapterProvider{})
-	_ = c.Connect(context.Background(), "AA:BB")
-	// A well-formed chapter-request payload (satisfies the length check) but
-	// whose leading byte is not CmdBookChapterReq. The decoder returns the
-	// zero CmdID and ErrBadCmdID; ServeChapterRequest surfaces the error
-	// without re-checking cmdID (that re-check was dead code, now removed).
-	bad, _ := EncodeBookChapterReqPayload("/x", 0)
-	bad[0] = byte(CmdEcho)
-	_, err := c.ServeChapterRequest(context.Background(), bad, "")
-	if err != ErrBadCmdID {
-		t.Fatalf("expected ErrBadCmdID, got %v", err)
-	}
-}
-
 // scriptedScanner is a CentralScanner fake whose WaitNotify returns a fixed
 // sequence of prebuilt frames, then blocks until the test unblocks it (or the
-// listener ctx is cancelled, which it surfaces to RunChapterListener as
+// listener ctx is cancelled, which it surfaces to RunApiListener as
 // context.Canceled so the loop exits cleanly).
 type scriptedScanner struct {
 	collectScanner
@@ -187,9 +147,9 @@ func (s *scriptedScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 		return f, nil
 	}
 	// Frames exhausted: signal the test, then block until either the test
-	// unblocks us or the listener ctx is cancelled (RunChapterListener's
-	// caller cancels ctx on shutdown). Returning context.Canceled makes the
-	// loop's WaitNotify-error path re-check ctx.Err() and exit cleanly.
+	// unblocks us or the listener ctx is cancelled (RunApiListener's caller
+	// cancels ctx on shutdown). Returning context.Canceled makes the loop's
+	// WaitNotify-error path re-check ctx.Err() and exit cleanly.
 	select {
 	case <-s.doneCh:
 	default:
@@ -203,26 +163,22 @@ func (s *scriptedScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 	}
 }
 
-// TestRunChapterListenerDispatchesChapterRequests exercises the long-lived
-// listener loop (spec §3.1) end-to-end: a stub scanner yields two
-// CMD_BOOK_CHAPTER_REQ frames; RunChapterListener must decode each and hand
-// it to ServeChapterRequest, which writes the expected CMD_BOOK_CHAPTER_CHUNK
-// frames via WriteCommand. Verifies the multi-goroutine dispatch path and the
-// non-chapter frame ignore path.
-func TestRunChapterListenerDispatchesChapterRequests(t *testing.T) {
-	blocks := []bookparser.Block{
-		{Type: "text", Value: "hello-listener"},
-	}
-	provider := &stubChapterProvider{blocks: blocks}
+// TestRunApiListenerDispatchesApiRequests exercises the long-lived listener
+// loop (spec §3.1) end-to-end: a stub scanner yields two CMD_API_REQ frames;
+// RunApiListener must decode each and hand it to ServeApiRequest, which writes
+// the expected CMD_JSON_CHUNK frames via WriteCommand. Verifies the multi-
+// goroutine dispatch path and the non-CMD_API_REQ frame ignore path.
+func TestRunApiListenerDispatchesApiRequests(t *testing.T) {
+	provider := &jsonBlockProvider{body: []byte(`hello-listener`)}
 	scanner := &scriptedScanner{
 		doneCh:    make(chan struct{}),
 		unblockCh: make(chan struct{}),
 	}
-	// Build two physical chapter-request frames (encoded as the Android
-	// Peripheral would notify them) plus one non-chapter frame the listener
-	// MUST silently ignore.
-	req1, _ := EncodeBookChapterReqPayload("/books/a.txt", 1)
-	req2, _ := EncodeBookChapterReqPayload("/books/b.txt", 2)
+	// Build two physical CMD_API_REQ frames (encoded as the Android Peripheral
+	// would notify them) plus one non-API frame the listener MUST silently
+	// ignore.
+	req1, _ := EncodeApiReqPayload(EndpointBookChapter, "/books/a.txt", 1)
+	req2, _ := EncodeApiReqPayload(EndpointBookChapter, "/books/b.txt", 2)
 	echo := EncodeFrame([]byte{byte(CmdEcho), 0xAA})
 	scanner.frames = [][]byte{
 		EncodeFrame(req1),
@@ -231,24 +187,24 @@ func TestRunChapterListenerDispatchesChapterRequests(t *testing.T) {
 	}
 
 	c := NewCentral(scanner)
-	c.SetChapterProvider(provider)
+	c.SetApiProvider(provider)
 	_ = c.Connect(context.Background(), "AA:BB")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	listenerDone := make(chan struct{})
 	go func() {
-		_ = c.RunChapterListener(ctx)
+		_ = c.RunApiListener(ctx)
 		close(listenerDone)
 	}()
 
 	// Wait until the scanner has yielded all scripted frames.
 	<-scanner.doneCh
-	// The listener dispatched each chapter request in its own goroutine; wait
-	// for BOTH ServeChapterRequest calls to finish writing their chunk frames
-	// before cancelling. Cancelling mid-dispatch would abort an in-flight
-	// WriteCommand and under-count writes (the production listener detaches
-	// each request so a shutdown doesn't truncate a chapter mid-stream).
+	// The listener dispatched each request in its own goroutine; wait for BOTH
+	// ServeApiRequest calls to finish writing their chunk frames before
+	// cancelling. Cancelling mid-dispatch would abort an in-flight WriteCommand
+	// and under-count writes (the production listener detaches each request so
+	// a shutdown doesn't truncate a response mid-stream).
 	waitForWrites := func(n int) {
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
@@ -268,40 +224,40 @@ func TestRunChapterListenerDispatchesChapterRequests(t *testing.T) {
 	cancel()
 	<-listenerDone
 
-	// The listener must have dispatched both chapter requests to
-	// ServeChapterRequest, which writes the chunk frames via WriteCommand.
-	// The echo frame must NOT produce any write (the listener ignores it).
+	// The listener must have dispatched both requests to ServeApiRequest,
+	// which writes the chunk frames via WriteCommand. The echo frame must NOT
+	// produce any write (the listener ignores it).
 	scanner.collectScanner.mu.Lock()
 	written := len(scanner.collectScanner.written)
 	scanner.collectScanner.mu.Unlock()
 	if written < 2 {
-		t.Fatalf("expected >=2 chunk writes (one per chapter req), got %d", written)
+		t.Fatalf("expected >=2 chunk writes (one per request), got %d", written)
 	}
 
-	// Every written frame must be a CMD_BOOK_CHAPTER_CHUNK payload.
+	// Every written frame must be a CMD_JSON_CHUNK payload.
 	for i, raw := range scanner.collectScanner.written {
 		frame, derr := DecodeFrame(raw)
 		if derr != nil {
 			t.Fatalf("frame %d decode: %v", i, derr)
 		}
-		_, _, _, _, perr := DecodeBookChapterChunkPayload(frame.Payload)
+		_, _, _, _, perr := DecodeJsonChunkPayload(frame.Payload)
 		if perr != nil {
 			t.Fatalf("frame %d chunk decode: %v", i, perr)
 		}
 	}
 }
 
-// TestRunChapterListenerRequiresProvider verifies the startup gate: with no
-// ChapterProvider injected, RunChapterListener refuses to start.
-func TestRunChapterListenerRequiresProvider(t *testing.T) {
+// TestRunApiListenerRequiresProvider verifies the startup gate: with no
+// ApiProvider injected, RunApiListener refuses to start.
+func TestRunApiListenerRequiresProvider(t *testing.T) {
 	scanner := &scriptedScanner{
 		doneCh:    make(chan struct{}),
 		unblockCh: make(chan struct{}),
 	}
 	c := NewCentral(scanner)
 	_ = c.Connect(context.Background(), "AA:BB")
-	if err := c.RunChapterListener(context.Background()); err != ErrNoChapterProvider {
-		t.Fatalf("expected ErrNoChapterProvider, got %v", err)
+	if err := c.RunApiListener(context.Background()); err != ErrNoApiProvider {
+		t.Fatalf("expected ErrNoApiProvider, got %v", err)
 	}
 }
 
@@ -329,19 +285,18 @@ func (s *transientErrorScanner) callCount() int {
 	return s.calls
 }
 
-// TestRunChapterListenerBacksOffOnTransientError verifies the Important fix
-// from the final re-review: when WaitNotify returns a transient error in a
-// tight loop (the production pre-connect state), RunChapterListener must NOT
-// busy-spin. A stub whose WaitNotify always errors is run for a fixed wall-
-// clock window with a real-but-tiny injected retry backoff; the call count
-// over that window must be bounded (roughly window/backoff plus a small
-// margin), proving the goroutine sleeps between retries instead of hammering
-// EnableNotifications and flooding logs from server startup until first
-// connect.
-func TestRunChapterListenerBacksOffOnTransientError(t *testing.T) {
+// TestRunApiListenerBacksOffOnTransientError verifies the Important fix from
+// the final re-review: when WaitNotify returns a transient error in a tight
+// loop (the production pre-connect state), RunApiListener must NOT busy-spin.
+// A stub whose WaitNotify always errors is run for a fixed wall-clock window
+// with a real-but-tiny injected retry backoff; the call count over that window
+// must be bounded (roughly window/backoff plus a small margin), proving the
+// goroutine sleeps between retries instead of hammering EnableNotifications
+// and flooding logs from server startup until first connect.
+func TestRunApiListenerBacksOffOnTransientError(t *testing.T) {
 	scanner := &transientErrorScanner{}
 	c := NewCentral(scanner)
-	c.SetChapterProvider(&stubChapterProvider{})
+	c.SetApiProvider(&jsonBlockProvider{body: []byte(`{}`)})
 	_ = c.Connect(context.Background(), "AA:BB")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -356,7 +311,7 @@ func TestRunChapterListenerBacksOffOnTransientError(t *testing.T) {
 
 	listenerDone := make(chan struct{})
 	go func() {
-		_ = c.runChapterListener(ctx, backoff)
+		_ = c.runApiListener(ctx, backoff)
 		close(listenerDone)
 	}()
 
@@ -371,12 +326,12 @@ func TestRunChapterListenerBacksOffOnTransientError(t *testing.T) {
 	// blow past this by 2-3 orders of magnitude.
 	maxAllowed := int(window/backoff) + 2
 	if got > maxAllowed {
-		t.Fatalf("RunChapterListener busy-spun on transient error: %d WaitNotify calls in %s "+
+		t.Fatalf("RunApiListener busy-spun on transient error: %d WaitNotify calls in %s "+
 			"(backoff=%s, expected <= %d)", got, window, backoff, maxAllowed)
 	}
 	// Lower bound sanity: at least one retry must have happened (otherwise the
 	// goroutine never entered the loop or crashed before sleeping).
 	if got < 2 {
-		t.Fatalf("RunChapterListener did not retry WaitNotify at all: %d calls", got)
+		t.Fatalf("RunApiListener did not retry WaitNotify at all: %d calls", got)
 	}
 }

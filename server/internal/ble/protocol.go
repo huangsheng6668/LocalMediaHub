@@ -10,10 +10,7 @@ package ble
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"errors"
-
-	"github.com/localmediahub/server/internal/service/bookparser"
 )
 
 // CmdID is the application-layer command identifier carried in the first byte
@@ -54,7 +51,7 @@ const (
 // API-request / chunk transport header sizes (excluding the variable Path /
 // Chunk bytes). Used to size buffers and to validate short payloads on decode.
 const (
-	apiReqFixedOverhead = 1 + 1 + 1 + 2 // CmdID + Endpoint + PathLen + Index
+	apiReqFixedOverhead = 1 + 1 + 1 + 2     // CmdID + Endpoint + PathLen + Index
 	chunkFixedOverhead  = 1 + 2 + 2 + 2 + 2 // CmdID + TotalChunks + ChunkIndex + TotalBytes + ChunkLen
 	// maxPathLen is the largest Path string accepted on decode. The PathLen
 	// field is a single byte (max 255), so the wire-format hard ceiling is 255.
@@ -242,59 +239,4 @@ func ChunkJsonBytes(jsonBytes []byte) ([][]byte, int, error) {
 		frames = append(frames, EncodeJsonChunkPayload(totalChunks, idx, totalBytes, chunk))
 	}
 	return frames, totalBytes, nil
-}
-
-// Deprecated aliases — removed in Task 2 once central.go and its tests are
-// migrated to the generalized CMD_API_REQ + ApiProvider surface. These exist
-// solely so package ble continues to compile during the staged cutover. New
-// code MUST use the generalized names above.
-const (
-	// Deprecated: use CmdApiReq.
-	CmdBookChapterReq = CmdApiReq
-	// Deprecated: use CmdJsonChunk.
-	CmdBookChapterChunk = CmdJsonChunk
-)
-
-// Deprecated: use EncodeApiReqPayload. Wraps the new encoder pinned to the
-// chapter endpoint so legacy callers (central.go, central_chapter_test.go)
-// keep compiling until the Task 2 cutover.
-func EncodeBookChapterReqPayload(path string, chapterIndex int) ([]byte, error) {
-	return EncodeApiReqPayload(EndpointBookChapter, path, chapterIndex)
-}
-
-// Deprecated: use DecodeApiReqPayload. Adapts the new (endpoint, path, index)
-// return to the legacy (CmdID, path, index) shape expected by central.go's
-// ServeChapterRequest.
-func DecodeBookChapterReqPayload(payload []byte) (CmdID, string, int, error) {
-	endpoint, path, idx, err := DecodeApiReqPayload(payload)
-	if err != nil {
-		return 0, "", 0, err
-	}
-	return CmdID(endpoint), path, idx, nil
-}
-
-// Deprecated: use EncodeJsonChunkPayload.
-func EncodeBookChapterChunkPayload(totalChunks, chunkIndex, totalBlocks int, chunk []byte) []byte {
-	return EncodeJsonChunkPayload(totalChunks, chunkIndex, totalBlocks, chunk)
-}
-
-// Deprecated: use DecodeJsonChunkPayload.
-func DecodeBookChapterChunkPayload(payload []byte) (int, int, int, []byte, error) {
-	return DecodeJsonChunkPayload(payload)
-}
-
-// Deprecated: marshal blocks to JSON then delegate to ChunkJsonBytes. The
-// generalized surface takes already-serialized bytes; this wrapper preserves
-// the old "give me blocks" ergonomics for central.go during the Task 2
-// cutover. Returns (frames, totalBlocks, err) to match the old contract.
-func ChunkChapterBlocks(blocks []bookparser.Block) ([][]byte, int, error) {
-	jsonBytes, err := json.Marshal(blocks)
-	if err != nil {
-		return nil, 0, err
-	}
-	frames, _, cerr := ChunkJsonBytes(jsonBytes)
-	if cerr != nil {
-		return nil, 0, cerr
-	}
-	return frames, len(blocks), nil
 }
