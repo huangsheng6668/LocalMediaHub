@@ -127,7 +127,7 @@ class BleTransportFallback(
     fun onFrameReceived(frame: ByteArray) {
         val payload = BleProtocol.decodeFrame(frame)?.payload ?: return
         if (payload.isEmpty()) return
-        if (payload[0] != BleProtocol.CMD_BOOK_CHAPTER_CHUNK) return
+        if (payload[0] != BleProtocol.CMD_JSON_CHUNK) return
 
         // Minimum header = CmdID(1) + TotalChunks(2) + ChunkIndex(2)
         //                 + TotalBlocks(2) + ChunkLen(2) = 9 bytes.
@@ -200,21 +200,18 @@ class BleTransportFallback(
      *
      * Returns null when the buffer is incomplete, empty, or the JSON failed to
      * parse. Safe to call repeatedly; does not mutate state on success.
+     *
+     * Task 3: retained for backward compat with [fetchChapterBlocks] callers
+     * (MediaRepository until Task 4). New code should use [fetchJson] and
+     * deserialize at the call site.
      */
-    fun assembleBlocks(): List<Block>? = synchronized(stateLock) { assembleBlocksLocked() }
-
-    private fun assembleBlocksLocked(): List<Block>? {
-        if (chunkBuffer.isEmpty() || chunkBuffer.size < totalChunks) return null
-        // Concatenate in ascending ChunkIndex order, NOT insertion order:
-        // chunks may legitimately arrive out of sequence from the radio.
-        val ordered = chunkBuffer.entries.sortedBy { it.key }
-        val assembled = ByteArray(ordered.sumOf { it.value.size })
-        var offset = 0
-        for ((_, chunk) in ordered) {
-            System.arraycopy(chunk, 0, assembled, offset, chunk.size)
-            offset += chunk.size
-        }
-        val json = String(assembled, Charsets.UTF_8)
+    @Deprecated(
+        "Use fetchJson(...) + caller-side Gson. Removed once Task 4 migrates MediaRepository.",
+        ReplaceWith("fetchJson(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index)"),
+    )
+    fun assembleBlocks(): List<Block>? {
+        val bytes = assembleBytes() ?: return null
+        val json = String(bytes, Charsets.UTF_8)
         return try {
             gson.fromJson<List<Block>>(json, blockListType)
         } catch (t: Throwable) {
@@ -259,6 +256,10 @@ class BleTransportFallback(
      *   budget; coerce to at least one [frameTimeoutMs] so a misconfigured
      *   small `maxAttempts` still leaves room for at least one frame.
      */
+    @Deprecated(
+        "Use fetchJson(endpoint, path, index). Task 4 will migrate MediaRepository; removed afterward.",
+        ReplaceWith("fetchJson(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index)"),
+    )
     @Suppress("UNUSED_PARAMETER")
     suspend fun fetchChapterBlocks(
         path: String,
@@ -266,33 +267,95 @@ class BleTransportFallback(
         timeoutMs: Long = (frameTimeoutMs * maxAttempts).coerceAtLeast(frameTimeoutMs),
         dispatch: () -> Unit,
     ): List<Block>? {
+        val bytes = fetchBytes(timeoutMs, dispatch) ?: return null
+        // Re-deserialize the UTF-8 bytes as a JSON array of Block. Errors here
+        // surface as null (caller treats it as a BLE failure).
+        return try {
+            gson.fromJson<List<Block>>(String(bytes, Charsets.UTF_8), blockListType)
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * Task 3 entry point. Drives ONE complete API fetch cycle as a suspending
+     * call and returns the reassembled chunk bytes decoded as a UTF-8 string.
+     * The caller is responsible for Gson-deserializing the returned JSON
+     * (e.g. into List<Block>, Folder lists, BookInfo, …) — this layer no longer
+     * hard-codes the Block type.
+     *
+     * Replaces the chapter-specific [fetchChapterBlocks] with a generalized
+     * endpoint-routed fetch. The chapter path is preserved as
+     * `fetchJson(ENDPOINT_BOOK_CHAPTER, path, index)`.
+     *
+     * Single-coroutine contract: this function is NOT reentrant; only one
+     * fetch cycle may be in flight at a time. The repository is the sole
+     * caller and is itself single-threaded per request.
+     *
+     * @param endpoint one of `BleProtocol.ENDPOINT_*` (advisory: only used to
+     *   build the dispatch lambda; the engine itself is endpoint-agnostic).
+     * @param path resource path passed through to [dispatch].
+     * @param index pagination / chapter index passed through to [dispatch].
+     * @param timeoutMs overall deadline. Defaults to
+     *   `frameTimeoutMs * maxAttempts` to mirror the engine's own retry
+     *   budget; coerce to at least one [frameTimeoutMs] so a misconfigured
+     *   small `maxAttempts` still leaves room for at least one frame.
+     * @return the reassembled chunk bytes decoded as a UTF-8 string, or null
+     *   on timeout / dispatch failure / incomplete buffer.
+     */
+    suspend fun fetchJson(
+        @Suppress("UNUSED_PARAMETER") endpoint: Byte,
+        @Suppress("UNUSED_PARAMETER") path: String = "",
+        @Suppress("UNUSED_PARAMETER") index: Int = 0,
+        timeoutMs: Long = (frameTimeoutMs * maxAttempts).coerceAtLeast(frameTimeoutMs),
+        dispatch: () -> Unit = {},
+    ): String? {
+        val bytes = fetchBytes(timeoutMs, dispatch) ?: return null
+        return String(bytes, Charsets.UTF_8)
+    }
+
+    /**
+     * Shared suspend-bridge core: reset → register completion hook → dispatch
+     * → await reassembled bytes via withTimeoutOrNull. Returns the raw
+     * concatenated chunk bytes, or null on timeout / dispatch failure /
+     * incomplete buffer. Both [fetchChapterBlocks] (Gson → List<Block>) and
+     * [fetchJson] (UTF-8 → String) delegate here so the lock discipline lives
+     * in exactly one place.
+     *
+     * Lock discipline (unchanged from the prior concurrency fix): the
+     * completion hook is registered UNDER the lock and dispatch happens
+     * AFTER releasing it; the hook is invoked OUTSIDE [onFrameReceived]'s
+     * synchronized block; the lock is NEVER held across `deferred.await()`.
+     */
+    private suspend fun fetchBytes(
+        timeoutMs: Long,
+        dispatch: () -> Unit,
+    ): ByteArray? {
         // Clear stale buffer/attempt state from any prior cycle and detach a
         // leftover hook (defensive — [reset] also clears it).
         reset()
 
-        val deferred = CompletableDeferred<List<Block>?>()
+        val deferred = CompletableDeferred<ByteArray?>()
         // Hook body runs inside onFrameReceived the moment the buffer fills
         // or the engine exhausts its retry budget. It computes the
-        // reassembled blocks once (re-acquiring stateMutex inside
-        // assembleBlocks — safe because onFrameReceived invokes the hook
+        // reassembled bytes once (re-acquiring stateLock inside
+        // assembleBytesLocked — safe because onFrameReceived invokes the hook
         // OUTSIDE its own lock hold) and completes the deferred; the hook is
         // then cleared so the next cycle starts clean.
         val hook: () -> Unit = {
             // Clear the hook under the lock so a concurrent cycle cannot
-            // observe a stale reference. assembleBlocks re-acquires the lock
+            // observe a stale reference. assembleBytes re-acquires the lock
             // on its own.
             synchronized(stateLock) { completionHook = null }
-            val blocks = assembleBlocks()
+            val bytes = assembleBytes()
             if (!deferred.isCompleted) {
-                deferred.complete(blocks)
+                deferred.complete(bytes)
             }
         }
 
         // Register the hook UNDER the lock; dispatch happens AFTER releasing
         // it so a synchronous test-fake callback (or a same-thread GATT
-        // callback) can re-enter onFrameReceived without surprises. The JVM
-        // monitor is reentrant so a same-thread re-entry would not deadlock
-        // either, but keeping dispatch outside the lock bounds its hold time.
+        // callback) can re-enter onFrameReceived without surprises.
         synchronized(stateLock) {
             completionHook = hook
         }
@@ -314,6 +377,32 @@ class BleTransportFallback(
         // thread) can acquire it freely to deliver the chunk that completes
         // the deferred.
         return withTimeoutOrNull(timeoutMs) { deferred.await() }
+    }
+
+    /**
+     * Concatenate the buffered chunks in ascending ChunkIndex order and return
+     * the raw reassembled bytes (no JSON parsing). Returns null when the
+     * buffer is incomplete or empty. Safe to call repeatedly; does not mutate
+     * state.
+     *
+     * Task 3 refactor: the JSON deserialization that used to live here moved
+     * to the public entry points ([fetchChapterBlocks] → List<Block>,
+     * [fetchJson] → String) so the engine is payload-format-agnostic.
+     */
+    private fun assembleBytes(): ByteArray? = synchronized(stateLock) { assembleBytesLocked() }
+
+    private fun assembleBytesLocked(): ByteArray? {
+        if (chunkBuffer.isEmpty() || chunkBuffer.size < totalChunks) return null
+        // Concatenate in ascending ChunkIndex order, NOT insertion order:
+        // chunks may legitimately arrive out of sequence from the radio.
+        val ordered = chunkBuffer.entries.sortedBy { it.key }
+        val assembled = ByteArray(ordered.sumOf { it.value.size })
+        var offset = 0
+        for ((_, chunk) in ordered) {
+            System.arraycopy(chunk, 0, assembled, offset, chunk.size)
+            offset += chunk.size
+        }
+        return assembled
     }
 
     /** True once the retry budget has been exhausted by consecutive timeouts. */

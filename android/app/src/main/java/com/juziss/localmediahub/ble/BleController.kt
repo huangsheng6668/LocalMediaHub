@@ -14,7 +14,7 @@ import javax.inject.Singleton
  *
  * When the Central writes to the Command characteristic, [BlePeripheralManager]
  * invokes the registered callback with the decoded payload. Task 3 routing:
- *  - CMD_BOOK_CHAPTER_CHUNK frames are handed to [bleTransportFallback] for
+ *  - CMD_JSON_CHUNK frames are handed to [bleTransportFallback] for
  *    reassembly (spec §3.2 / §1.2 step 4) so [com.juziss.localmediahub.data.MediaRepository]
  *    can fail HTTP requests over to BLE when Wi-Fi is down.
  *  - Any other command is echoed back via [BlePeripheralManager.notifyPayload]
@@ -47,9 +47,11 @@ class BleController @Inject constructor(
     init {
         // Route CHUNK frames into the fallback engine; echo everything else so
         // the connectivity-loop verification (Central write → Notify back) still
-        // works for non-payload commands like CMD_ECHO.
+        // works for non-payload commands like CMD_ECHO. CMD_JSON_CHUNK is the
+        // Task 1 rename of CMD_BOOK_CHAPTER_CHUNK — same byte (0x12), so
+        // existing wire traffic still routes correctly.
         peripheralManager.setOnPayloadReceived { payload ->
-            if (payload.isNotEmpty() && payload[0] == BleProtocol.CMD_BOOK_CHAPTER_CHUNK) {
+            if (payload.isNotEmpty() && payload[0] == BleProtocol.CMD_JSON_CHUNK) {
                 bleTransportFallback.onFrameReceived(BleProtocol.encodeFrame(payload))
             } else {
                 peripheralManager.notifyPayload(BleProtocol.encodeFrame(payload))
@@ -107,6 +109,11 @@ class BleController @Inject constructor(
      * known (path, index) and asserts the bytes reaching the peripheral
      * manager are byte-identical.
      */
+    @Deprecated(
+        "Use requestApi(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index). " +
+            "Task 4 will migrate MediaRepository; removed afterward.",
+        ReplaceWith("requestApi(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index)"),
+    )
     fun requestChapter(path: String, index: Int): Boolean {
         val pathBytes = path.toByteArray(Charsets.UTF_8)
         // PathLen is a single byte (max 255); a longer path cannot be encoded
@@ -123,6 +130,53 @@ class BleController @Inject constructor(
         payload[p++] = (index and 0xFF).toByte()
         payload[p++] = (pathBytes.size and 0xFF).toByte()
         System.arraycopy(pathBytes, 0, payload, p, pathBytes.size)
+        return peripheralManager.notifyPayload(BleProtocol.encodeFrame(payload))
+    }
+
+    /**
+     * Task 3: Dispatch a CMD_API_REQ to the Central (PC server) over the State
+     * (Notify) characteristic so it streams the requested resource back as a
+     * sequence of CMD_JSON_CHUNK frames that [BleTransportFallback] reassembles.
+     *
+     * Replaces the chapter-specific [requestChapter] with a generalized
+     * endpoint-routed request. The chapter path is preserved as
+     * `requestApi(ENDPOINT_BOOK_CHAPTER, path, index)`.
+     *
+     * Returns true when a GATT subscriber was actually notified; false when
+     * there is no subscriber (the Central has not yet enabled notifications),
+     * or when [path] exceeds the 255-byte PathLen ceiling (the request is
+     * dropped silently — the resource will surface as a BLE timeout upstream,
+     * matching the Go encoder's `ErrPathTooLong` rejection).
+     *
+     * Wire format (spec §2.2; MUST match server `EncodeApiReqPayload` /
+     * `DecodeApiReqPayload` byte-for-byte — locked by
+     * [BleControllerTest.requestApi_emitsGoSpecApiReqLayout]):
+     * `[CmdID 1B = CMD_API_REQ][Endpoint 1B][PathLen 1B][Path UTF-8][Index 2B BE]`
+     *
+     * @param endpoint one of `BleProtocol.ENDPOINT_*`. Selects which Go
+     *   ApiProvider handler the Central dispatches to (BookChapter, Folders,
+     *   BrowseFolder, BookInfo).
+     * @param path resource path (UTF-8). Length must fit in 1 byte (≤ 255).
+     * @param index pagination / chapter index. Serialized uint16 big-endian;
+     *   negative values are programmer error and masked to their low 16 bits.
+     */
+    fun requestApi(endpoint: Byte, path: String, index: Int): Boolean {
+        val pathBytes = path.toByteArray(Charsets.UTF_8)
+        // PathLen is a single byte (max 255); a longer path cannot be encoded
+        // without truncation, which would make the server fetch a wrong
+        // resource. Match the Go encoder's ErrPathTooLong rejection: drop.
+        if (pathBytes.size > 0xFF) return false
+        val payload = ByteArray(1 + 1 + 1 + pathBytes.size + 2)
+        var p = 0
+        payload[p++] = BleProtocol.CMD_API_REQ
+        payload[p++] = endpoint
+        payload[p++] = (pathBytes.size and 0xFF).toByte()
+        System.arraycopy(pathBytes, 0, payload, p, pathBytes.size); p += pathBytes.size
+        // Index as uint16 big-endian (high byte first) — matches Go's
+        // binary.BigEndian.PutUint16. Negative indices are programmer error
+        // and are masked to their low 16 bits.
+        payload[p++] = ((index shr 8) and 0xFF).toByte()
+        payload[p++] = (index and 0xFF).toByte()
         return peripheralManager.notifyPayload(BleProtocol.encodeFrame(payload))
     }
 

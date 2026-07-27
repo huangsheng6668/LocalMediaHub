@@ -2,6 +2,7 @@ package com.juziss.localmediahub.ble
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -184,5 +185,100 @@ class BleControllerTest {
         assertTrue("over-length path must not be notified", !notified)
         assertEquals("no frame should be sent for an over-length path",
             null, mgr.received)
+    }
+
+    /**
+     * Task 3 cross-side wire-parity guard: hand-build the EXACT byte sequence
+     * the Go encoder (`server/internal/ble/protocol.go` EncodeApiReqPayload,
+     * Task 1 commit 48e7d4a) produces for a known (endpoint, path, index) and
+     * assert the bytes the peripheral manager receives from `requestApi` are
+     * byte-identical.
+     *
+     * Task 1 wire layout (matches Go server EncodeApiReqPayload):
+     *   Physical frame: [0x01 version][uint16 BE length][payload]
+     *   Payload:        [CmdID 0x11][Endpoint 1B][PathLen 1B][Path UTF-8]
+     *                   [Index 2B BE]
+     *
+     * This test MUST never regress — it is the cross-side parity contract for
+     * the generalized endpoint-routing wire format.
+     */
+    @Test
+    fun requestApi_emitsGoSpecApiReqLayout() {
+        val mgr = FakePeripheralManager()
+        val controller = BleController(
+            peripheralManager = mgr,
+            bleTransportFallback = BleTransportFallback(),
+            bleEnabledFlow = MutableStateFlow(true),
+            bleHardwareAvailable = { true },
+            saveBleEnabled = {},
+        )
+
+        val path = "/books/n" // 8 bytes UTF-8
+        val index = 7
+        val pathBytes = path.toByteArray(Charsets.UTF_8)
+
+        // Hand-build the expected payload exactly as the Go encoder does.
+        val expectedPayload = ByteArray(1 + 1 + 1 + pathBytes.size + 2)
+        var q = 0
+        expectedPayload[q++] = BleProtocol.CMD_API_REQ               // 0x11
+        expectedPayload[q++] = BleProtocol.ENDPOINT_BROWSE_FOLDER    // 0x03
+        expectedPayload[q++] = (pathBytes.size and 0xFF).toByte()    // PathLen (1 byte)
+        System.arraycopy(pathBytes, 0, expectedPayload, q, pathBytes.size)
+        q += pathBytes.size
+        expectedPayload[q++] = ((index shr 8) and 0xFF).toByte()     // Index high byte
+        expectedPayload[q++] = (index and 0xFF).toByte()             // Index low byte
+        val expectedFrame = BleProtocol.encodeFrame(expectedPayload)
+
+        val notified = controller.requestApi(
+            endpoint = BleProtocol.ENDPOINT_BROWSE_FOLDER,
+            path = path,
+            index = index,
+        )
+
+        assertTrue("requestApi must report a notified subscriber", notified)
+        val sent = mgr.received
+        assertNotNull("peripheral manager must have received a frame", sent)
+        // Byte-identical assertion: ANY field-width or ordering drift fails here.
+        assertEquals(
+            "requestApi wire layout must match Go EncodeApiReqPayload",
+            expectedFrame.toList(),
+            sent!!.toList(),
+        )
+
+        // Field-level spot checks (mirror the brief's byte-index assertions on
+        // the raw sent frame: [ver][len2][0x11][endpoint][pathLen][path][idx2 BE]).
+        assertEquals(0x11.toByte(), sent!![3])
+        assertEquals(BleProtocol.ENDPOINT_BROWSE_FOLDER, sent[4])
+        assertEquals(8, sent[5].toInt() and 0xFF)
+        assertEquals(0, sent[6 + 8].toInt() and 0xFF)       // index high
+        assertEquals(7, sent[6 + 8 + 1].toInt() and 0xFF)   // index low
+    }
+
+    /**
+     * Task 3 boundary: a path whose UTF-8 length exceeds the 1-byte PathLen
+     * ceiling (255) must be rejected (return false, no notify) — mirroring the
+     * Go encoder's `ErrPathTooLong` rejection.
+     */
+    @Test
+    fun requestApi_rejectsPathLongerThan255() {
+        val mgr = FakePeripheralManager()
+        val controller = BleController(
+            peripheralManager = mgr,
+            bleTransportFallback = BleTransportFallback(),
+            bleEnabledFlow = MutableStateFlow(true),
+            bleHardwareAvailable = { true },
+            saveBleEnabled = {},
+        )
+        val longPath = "a".repeat(256)
+        val ok = controller.requestApi(
+            endpoint = BleProtocol.ENDPOINT_BOOK_INFO,
+            path = longPath,
+            index = 0,
+        )
+        assertFalse("over-length path must not be notified", ok)
+        assertEquals(
+            "no frame should be sent for an over-length path",
+            null, mgr.received,
+        )
     }
 }

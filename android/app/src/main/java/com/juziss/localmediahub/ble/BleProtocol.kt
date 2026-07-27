@@ -22,9 +22,44 @@ object BleProtocol {
     // Mirrors server/internal/ble/protocol.go. See spec §2.2.
     const val CMD_ECHO: Byte = 0x01
     const val CMD_BOOK_INFO_REQ: Byte = 0x10
-    const val CMD_BOOK_CHAPTER_REQ: Byte = 0x11
-    /** PC → Android (GATT Write): one chunk of a chapter's Block JSON. */
-    const val CMD_BOOK_CHAPTER_CHUNK: Byte = 0x12
+
+    /**
+     * Task 1 (commit 48e7d4a) generalized the wire protocol so a single
+     * CmdID routes to any API endpoint. The Kotlin side MUST emit a
+     * byte-identical layout to Go's `EncodeApiReqPayload`:
+     * `[CmdID 1B = CMD_API_REQ][Endpoint 1B][PathLen 1B][Path UTF-8][Index 2B BE]`
+     *
+     * Endpoints are enumerated below (`ENDPOINT_*`). See spec §2.2.
+     */
+    const val CMD_API_REQ: Byte = 0x11
+
+    /**
+     * PC → Android (GATT Write): one chunk of an arbitrary JSON byte stream.
+     * Renamed in Task 1 from `CMD_BOOK_CHAPTER_CHUNK`; the chunk layout is
+     * unchanged — only the semantics broadened (any JSON, not just chapter
+     * Block arrays).
+     */
+    const val CMD_JSON_CHUNK: Byte = 0x12
+
+    // ---- Endpoint enumeration (payload[1] of a CMD_API_REQ frame) ----
+    // Mirrors Go's `Endpoint` enum in server/internal/ble/protocol.go (Task 1).
+    /** Chapter blocks (legacy BookChapter API). */
+    const val ENDPOINT_BOOK_CHAPTER: Byte = 0x01
+    /** Folder list API. */
+    const val ENDPOINT_FOLDERS: Byte = 0x02
+    /** Browse-folder API (paginated entries). */
+    const val ENDPOINT_BROWSE_FOLDER: Byte = 0x03
+    /** Book metadata API. */
+    const val ENDPOINT_BOOK_INFO: Byte = 0x04
+
+    // ---- Backward-compat aliases (deprecated; removed once Task 4 migrates
+    // MediaRepository to requestApi/fetchJson). Wire values are unchanged so
+    // these aliases are byte-identical to their renamed counterparts. ----
+    @Deprecated("Use CMD_API_REQ (Task 1 generalized endpoint routing).", ReplaceWith("CMD_API_REQ"))
+    const val CMD_BOOK_CHAPTER_REQ: Byte = CMD_API_REQ
+
+    @Deprecated("Use CMD_JSON_CHUNK (Task 1 generalized chunk semantics).", ReplaceWith("CMD_JSON_CHUNK"))
+    const val CMD_BOOK_CHAPTER_CHUNK: Byte = CMD_JSON_CHUNK
 
     /** Per-chunk payload cap (spec §1.2). Pure advisory; not enforced here. */
     const val MAX_CHUNK_PAYLOAD_BYTES = 200

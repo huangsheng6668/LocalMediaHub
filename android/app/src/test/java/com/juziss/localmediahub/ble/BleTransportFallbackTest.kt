@@ -1,6 +1,7 @@
 package com.juziss.localmediahub.ble
 
 import com.juziss.localmediahub.data.Block
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -165,6 +166,63 @@ class BleTransportFallbackTest {
         fallback.reset()
         assertNull(fallback.assembleBlocks())
         assertTrue("reset must clear retry exhaustion", fallback.attemptsUsed() == 0)
+    }
+
+    /**
+     * Task 3: `fetchJson` returns the reassembled chunk bytes as a UTF-8 string
+     * (caller does Gson). The dispatch lambda is bound to `requestApi` so any
+     * JSON the Central streams back synchronously inside dispatch is observed
+     * by the suspend bridge and surfaced as the returned string.
+     *
+     * Locks the new entry-point signature + return type without depending on
+     * Gson/Block — a plain `{"k":1}` JSON body round-trips verbatim.
+     */
+    @Test
+    fun fetchJson_returnsReassembledUtf8String() = runTest {
+        val fallback = BleTransportFallback()
+        val jsonText = "{\"k\":1}"
+        val json = jsonText.toByteArray(Charsets.UTF_8)
+        val frame = chunkFrame(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json)
+
+        val result = fallback.fetchJson(
+            endpoint = BleProtocol.ENDPOINT_BOOK_CHAPTER,
+            path = "/book.txt",
+            index = 0,
+        ) {
+            // Dispatch: simulate the Central streaming the chunk back. In
+            // production this lambda is `controller.requestApi(ep, path, idx)`
+            // and the chunks arrive on the GATT callback thread; here we drive
+            // onFrameReceived inline to keep the test deterministic.
+            fallback.onFrameReceived(frame)
+        }
+
+        assertNotNull("fetchJson must return the reassembled string", result)
+        assertEquals(
+            "fetchJson must return the raw JSON bytes decoded as UTF-8",
+            jsonText, result,
+        )
+    }
+
+    /**
+     * Task 3: when the Central never streams any chunk back, `fetchJson` must
+     * time out and return null (caller surfaces the upstream error). Uses a
+     * short timeout budget so the test stays fast.
+     */
+    @Test
+    fun fetchJson_returnsNullOnTimeout() = runTest {
+        val fallback = BleTransportFallback(
+            frameTimeoutMs = 50L,
+            maxAttempts = 1,
+        )
+        val result = fallback.fetchJson(
+            endpoint = BleProtocol.ENDPOINT_BOOK_CHAPTER,
+            path = "/book.txt",
+            index = 0,
+            timeoutMs = 100L,
+        ) {
+            // No-op dispatch: Central never responds.
+        }
+        assertNull("fetchJson must return null when chunks never arrive", result)
     }
 
     private companion object {
