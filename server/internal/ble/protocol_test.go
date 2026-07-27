@@ -2,12 +2,9 @@ package ble
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/localmediahub/server/internal/service/bookparser"
 )
 
 func TestFrameRoundTrip(t *testing.T) {
@@ -41,13 +38,13 @@ func TestUUIDsAreDistinct(t *testing.T) {
 	}
 }
 
-// TestEncodeBookChapterReqPayloadRejectsOversizedPath verifies the encoder
+// TestEncodeApiReqPayloadRejectsOversizedPath verifies the encoder
 // returns ErrPathTooLong instead of silently truncating when the path exceeds
 // the 255-byte PathLen ceiling. Silent truncation would cause the server to
 // fetch the wrong chapter path — a correctness footgun.
-func TestEncodeBookChapterReqPayloadRejectsOversizedPath(t *testing.T) {
+func TestEncodeApiReqPayloadRejectsOversizedPath(t *testing.T) {
 	longPath := strings.Repeat("a", 256)
-	got, err := EncodeBookChapterReqPayload(longPath, 0)
+	got, err := EncodeApiReqPayload(EndpointBookChapter, longPath, 0)
 	if !errors.Is(err, ErrPathTooLong) {
 		t.Fatalf("expected ErrPathTooLong, got %v (payload len=%d)", err, len(got))
 	}
@@ -56,136 +53,205 @@ func TestEncodeBookChapterReqPayloadRejectsOversizedPath(t *testing.T) {
 	}
 
 	// Boundary: a 255-byte path must still succeed (PathLen fits in 1 byte).
-	okPayload, okErr := EncodeBookChapterReqPayload(strings.Repeat("b", maxPathLen), 0)
+	okPayload, okErr := EncodeApiReqPayload(EndpointBookChapter, strings.Repeat("b", maxPathLen), 0)
 	if okErr != nil {
 		t.Fatalf("255-byte path should succeed, got %v", okErr)
 	}
-	if len(okPayload) != chapterReqFixedOverhead+maxPathLen {
-		t.Fatalf("255-byte path payload size=%d want %d", len(okPayload), chapterReqFixedOverhead+maxPathLen)
+	if len(okPayload) != apiReqFixedOverhead+maxPathLen {
+		t.Fatalf("255-byte path payload size=%d want %d", len(okPayload), apiReqFixedOverhead+maxPathLen)
 	}
 }
 
-// TestBookChapterProtocolFraming verifies the on-wire layout for a chapter
-// request: EncodeFrame wraps the payload with the 3-byte physical header
+// TestApiReqProtocolFraming verifies the on-wire layout for an API request:
+// EncodeFrame wraps the payload with the 3-byte physical header
 // (version + uint16 BE length), and the payload itself begins with a CmdID
-// byte followed by the chapter-request fields.
-func TestBookChapterProtocolFraming(t *testing.T) {
-	reqPayload, err := EncodeBookChapterReqPayload("/books/test.txt", 1)
+// byte followed by the API-request fields.
+func TestApiReqProtocolFraming(t *testing.T) {
+	reqPayload, err := EncodeApiReqPayload(EndpointBookChapter, "/books/test.txt", 1)
 	if err != nil {
-		t.Fatalf("EncodeBookChapterReqPayload returned error: %v", err)
+		t.Fatalf("EncodeApiReqPayload returned error: %v", err)
 	}
 	frame := EncodeFrame(reqPayload)
-	// Version 1, Length 2+1+15+2 = 20
 	if frame[0] != 0x01 {
 		t.Fatalf("expected version 1, got %d", frame[0])
 	}
-	cmdID, path, idx, err := DecodeBookChapterReqPayload(frame[3:])
-	if err != nil || cmdID != CmdBookChapterReq || path != "/books/test.txt" || idx != 1 {
-		t.Fatalf("decode failed cmdID=%x path=%s idx=%d err=%v", cmdID, path, idx, err)
+	endpoint, path, idx, err := DecodeApiReqPayload(frame[3:])
+	if err != nil || endpoint != EndpointBookChapter || path != "/books/test.txt" || idx != 1 {
+		t.Fatalf("decode failed endpoint=%x path=%s idx=%d err=%v", endpoint, path, idx, err)
 	}
 }
 
-// TestBookChapterChunkFraming verifies a chunk frame round-trips its five
-// fields and the chunk bytes are preserved verbatim.
-func TestBookChapterChunkFraming(t *testing.T) {
+// TestApiReqFramingAllEndpoints verifies the encode/decode round-trip for
+// every Endpoint constant mandated by spec §2.2. This guards against the
+// Endpoint byte being dropped/swapped when the layout is touched.
+func TestApiReqFramingAllEndpoints(t *testing.T) {
+	cases := []struct {
+		name     string
+		endpoint byte
+		path     string
+		index    int
+	}{
+		{"folders no path", EndpointFolders, "", 0},
+		{"browse with path", EndpointBrowseFolder, "/books/novel.txt", 0},
+		{"book chapter path+index", EndpointBookChapter, "/books/novel.txt", 42},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := EncodeApiReqPayload(tc.endpoint, tc.path, tc.index)
+			if err != nil {
+				t.Fatalf("encode err=%v", err)
+			}
+			if payload[0] != byte(CmdApiReq) {
+				t.Fatalf("cmdID=%x want %x", payload[0], CmdApiReq)
+			}
+			ep, path, idx, err := DecodeApiReqPayload(payload)
+			if err != nil {
+				t.Fatalf("decode err=%v", err)
+			}
+			if ep != tc.endpoint || path != tc.path || idx != tc.index {
+				t.Fatalf("got ep=%x path=%s idx=%d", ep, path, idx)
+			}
+		})
+	}
+}
+
+func TestApiReqRejectsPathLongerThan255(t *testing.T) {
+	longPath := strings.Repeat("a", 256)
+	_, err := EncodeApiReqPayload(EndpointBookInfo, longPath, 0)
+	if err != ErrPathTooLong {
+		t.Fatalf("expected ErrPathTooLong got %v", err)
+	}
+}
+
+// TestJsonChunkFraming verifies a chunk frame round-trips its five fields and
+// the chunk bytes are preserved verbatim.
+func TestJsonChunkFraming(t *testing.T) {
 	chunkBytes := []byte("hello-chunk")
-	payload := EncodeBookChapterChunkPayload(3, 1, 7, chunkBytes)
+	payload := EncodeJsonChunkPayload(3, 1, 7, chunkBytes)
 	frame := EncodeFrame(payload)
 
 	if frame[0] != FrameVersion {
 		t.Fatalf("expected version %d, got %d", FrameVersion, frame[0])
 	}
 
-	total, idx, totalBlocks, gotChunk, err := DecodeBookChapterChunkPayload(frame[3:])
+	total, idx, totalBytes, gotChunk, err := DecodeJsonChunkPayload(frame[3:])
 	if err != nil {
 		t.Fatalf("decode returned error: %v", err)
 	}
-	if total != 3 || idx != 1 || totalBlocks != 7 {
-		t.Fatalf("fields mismatch: total=%d idx=%d totalBlocks=%d", total, idx, totalBlocks)
+	if total != 3 || idx != 1 || totalBytes != 7 {
+		t.Fatalf("fields mismatch: total=%d idx=%d totalBytes=%d", total, idx, totalBytes)
 	}
 	if !bytes.Equal(gotChunk, chunkBytes) {
 		t.Fatalf("chunk bytes mismatch: got %q want %q", gotChunk, chunkBytes)
 	}
 }
 
-// TestChunkChapterBlocksSplitting verifies that ChunkChapterBlocks marshals the
-// blocks to JSON, splits the result into frames whose payload never exceeds
-// maxPayloadLen, and that reassembling the chunk bytes yields the same JSON.
-func TestChunkChapterBlocksSplitting(t *testing.T) {
-	// Build a block slice large enough to require multiple chunks at the
-	// 200-byte spec §1.2 cap. Each text block is ~64 bytes of JSON.
-	blocks := make([]bookparser.Block, 20)
-	for i := range blocks {
-		blocks[i] = bookparser.Block{Type: "text", Value: "padding-padding-padding-padding-padding"}
-	}
-
-	frames, totalBlocks, err := ChunkChapterBlocks(blocks)
+func TestJsonChunkRoundTripPreservesBytes(t *testing.T) {
+	jsonBytes := []byte(`[{"type":"t"},{"type":"x"}]`)
+	frames, totalBytes, err := ChunkJsonBytes(jsonBytes)
 	if err != nil {
-		t.Fatalf("ChunkChapterBlocks returned error: %v", err)
+		t.Fatalf("chunk err=%v", err)
 	}
-	if totalBlocks != len(blocks) {
-		t.Fatalf("totalBlocks=%d want %d", totalBlocks, len(blocks))
+	if totalBytes != len(jsonBytes) {
+		t.Fatalf("totalBytes=%d want %d", totalBytes, len(jsonBytes))
+	}
+	var reassembled []byte
+	for i, fr := range frames {
+		// ChunkJsonBytes returns payload bytes (no physical header); decode
+		// directly. (Stripping 3 bytes here would drop the leading CmdID.)
+		tc, ci, tb, chunk, derr := DecodeJsonChunkPayload(fr)
+		if derr != nil {
+			t.Fatalf("frame %d decode err=%v", i, derr)
+		}
+		if ci != i || tb != totalBytes {
+			t.Fatalf("frame %d ci=%d tb=%d", i, ci, tb)
+		}
+		_ = tc
+		reassembled = append(reassembled, chunk...)
+	}
+	if !bytes.Equal(reassembled, jsonBytes) {
+		t.Fatalf("reassembled mismatch")
+	}
+	for _, fr := range frames {
+		if len(fr) > maxChunkBytes {
+			t.Fatalf("frame exceeds 200B cap: %d", len(fr))
+		}
+	}
+}
+
+// TestChunkJsonBytesSplitting verifies that ChunkJsonBytes splits the input
+// into frames whose payload never exceeds maxPayloadLen or maxChunkBytes, and
+// that reassembling the chunk bytes yields the same input bytes.
+func TestChunkJsonBytesSplitting(t *testing.T) {
+	// Build a JSON byte slice large enough to require multiple chunks at the
+	// 200-byte spec §1.2 cap.
+	jsonBytes := []byte(`{"blocks":[`)
+	for i := 0; i < 20; i++ {
+		if i > 0 {
+			jsonBytes = append(jsonBytes, ',')
+		}
+		jsonBytes = append(jsonBytes, []byte(`{"type":"text","value":"padding-padding-padding-padding-padding"}`)...)
+	}
+	jsonBytes = append(jsonBytes, ']', '}')
+
+	frames, totalBytes, err := ChunkJsonBytes(jsonBytes)
+	if err != nil {
+		t.Fatalf("ChunkJsonBytes returned error: %v", err)
+	}
+	if totalBytes != len(jsonBytes) {
+		t.Fatalf("totalBytes=%d want %d", totalBytes, len(jsonBytes))
 	}
 	if len(frames) < 2 {
 		t.Fatalf("expected multiple chunks, got %d", len(frames))
 	}
 
 	var reassembled []byte
-	var sawTotal, sawTotalBlocks int
+	var sawTotal int
 	for i, fr := range frames {
-		// Spec §1.2 mandates ≤ 200 B per chunk; the stricter cap must hold in
-		// addition to the maxPayloadLen (244 B) MTU ceiling.
 		if len(fr) > maxChunkBytes {
 			t.Fatalf("frame %d payload exceeds spec §1.2 cap: %d > %d bytes", i, len(fr), maxChunkBytes)
 		}
 		if len(fr) > maxPayloadLen {
 			t.Fatalf("frame %d payload too large: %d bytes", i, len(fr))
 		}
-		total, idx, tb, chunk, derr := DecodeBookChapterChunkPayload(fr)
+		total, idx, tb, chunk, derr := DecodeJsonChunkPayload(fr)
 		if derr != nil {
 			t.Fatalf("frame %d decode error: %v", i, derr)
 		}
 		if i == 0 {
 			sawTotal = total
-			sawTotalBlocks = tb
 		} else {
 			if total != sawTotal {
 				t.Fatalf("frame %d total mismatch: %d vs %d", i, total, sawTotal)
 			}
-			if tb != sawTotalBlocks {
-				t.Fatalf("frame %d totalBlocks mismatch: %d vs %d", i, tb, sawTotalBlocks)
-			}
 		}
 		if idx != i {
 			t.Fatalf("frame %d has ChunkIndex %d", i, idx)
+		}
+		if tb != totalBytes {
+			t.Fatalf("frame %d totalBytes=%d want %d", i, tb, totalBytes)
 		}
 		reassembled = append(reassembled, chunk...)
 	}
 	if sawTotal != len(frames) {
 		t.Fatalf("TotalChunks=%d but produced %d frames", sawTotal, len(frames))
 	}
-
-	// The reassembled bytes must equal the canonical JSON encoding of blocks.
-	want, err := json.Marshal(blocks)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	if !bytes.Equal(reassembled, want) {
-		t.Fatalf("reassembled JSON mismatch:\n got %q\nwant %q", reassembled, want)
+	if !bytes.Equal(reassembled, jsonBytes) {
+		t.Fatalf("reassembled JSON mismatch:\n got %q\nwant %q", reassembled, jsonBytes)
 	}
 }
 
-// TestChunkChapterBlocksEmpty verifies the empty-input edge case still
-// produces a single chunk with TotalChunks=1, ChunkIndex=0.
-func TestChunkChapterBlocksEmpty(t *testing.T) {
-	frames, totalBlocks, err := ChunkChapterBlocks(nil)
+// TestChunkJsonBytesEmpty verifies the empty-input edge case still produces a
+// single chunk with TotalChunks=1, ChunkIndex=0.
+func TestChunkJsonBytesEmpty(t *testing.T) {
+	frames, totalBytes, err := ChunkJsonBytes(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(frames) != 1 || totalBlocks != 0 {
-		t.Fatalf("expected 1 frame / 0 blocks, got %d frames / %d blocks", len(frames), totalBlocks)
+	if len(frames) != 1 || totalBytes != 0 {
+		t.Fatalf("expected 1 frame / 0 bytes, got %d frames / %d bytes", len(frames), totalBytes)
 	}
-	total, idx, tb, _, derr := DecodeBookChapterChunkPayload(frames[0])
+	total, idx, tb, _, derr := DecodeJsonChunkPayload(frames[0])
 	if derr != nil || total != 1 || idx != 0 || tb != 0 {
 		t.Fatalf("decode mismatch: total=%d idx=%d tb=%d err=%v", total, idx, tb, derr)
 	}

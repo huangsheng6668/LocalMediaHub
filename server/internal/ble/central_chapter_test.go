@@ -2,6 +2,7 @@ package ble
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -89,8 +90,15 @@ func TestServeChapterRequestStreamsChunks(t *testing.T) {
 			provider.last.path, provider.last.idx, provider.last.ip)
 	}
 
-	// Every written frame is a valid CMD_BOOK_CHAPTER_CHUNK frame whose
-	// payload fits in the MTU and whose ChunkIndex is its position in the stream.
+	// Every written frame is a valid CMD_JSON_CHUNK frame whose payload fits
+	// in the MTU and whose ChunkIndex is its position in the stream. The third
+	// header field is TotalBytes (length of the marshalled JSON body) under the
+	// generalized protocol; legacy code still reads it via the deprecated
+	// DecodeBookChapterChunkPayload alias until Task 2 migrates central.go.
+	wantBytes, mErr := json.Marshal(blocks)
+	if mErr != nil {
+		t.Fatalf("json.Marshal: %v", mErr)
+	}
 	total := -1
 	for i, raw := range scanner.written {
 		frame, derr := DecodeFrame(raw)
@@ -100,7 +108,7 @@ func TestServeChapterRequestStreamsChunks(t *testing.T) {
 		if len(frame.Payload) > maxPayloadLen {
 			t.Fatalf("frame %d payload %d > max %d", i, len(frame.Payload), maxPayloadLen)
 		}
-		tot, cidx, totalBlocks, _, perr := DecodeBookChapterChunkPayload(frame.Payload)
+		tot, cidx, totalBytes, _, perr := DecodeBookChapterChunkPayload(frame.Payload)
 		if perr != nil {
 			t.Fatalf("frame %d chunk decode error: %v", i, perr)
 		}
@@ -112,8 +120,8 @@ func TestServeChapterRequestStreamsChunks(t *testing.T) {
 		if cidx != i {
 			t.Fatalf("frame %d has ChunkIndex %d", i, cidx)
 		}
-		if totalBlocks != len(blocks) {
-			t.Fatalf("frame %d TotalBlocks %d want %d", i, totalBlocks, len(blocks))
+		if totalBytes != len(wantBytes) {
+			t.Fatalf("frame %d TotalBytes %d want %d", i, totalBytes, len(wantBytes))
 		}
 	}
 	if total != written {
