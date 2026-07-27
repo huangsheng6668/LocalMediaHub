@@ -1,5 +1,6 @@
 package com.juziss.localmediahub.ui.screen
 
+import com.juziss.localmediahub.ui.component.BleChannelSection
 import com.juziss.localmediahub.ui.component.home.HeroCard
 import com.juziss.localmediahub.ui.component.home.EmptyHomeStateCard
 import com.juziss.localmediahub.ui.component.home.LibraryCard
@@ -213,6 +214,10 @@ fun HomeScreen(
             contentPadding = PaddingValues(start = horizontalPadding, end = horizontalPadding, top = 12.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
+            item {
+                BleChannelSection()
+            }
+
             item {
                 HeroCard(
                     uiState = uiState,
