@@ -1,116 +1,70 @@
-# BLE 降级小说阅读与传输方案设计
+# BLE 降级小说阅读与传输方案设计（修订版）
 
 **日期**: 2026-07-27
 **范围**: `server/` (Go) + `android/` (Kotlin)
-**目标**: 实现 Wi-Fi 断开时无缝降级到 BLE 物理信道，通过二进制分片协议分章节传输/下载小说文本，保障阅读体验零中断。
+**目标**: 基于现有 **PC=Central / Android=Peripheral** 拓扑，实现 Wi-Fi 断开时无缝降级到 BLE 物理信道，通过二进制 Chunk 拼包传输小说章节 Blocks，保障阅读体验零中断。
 
 ---
 
-## 1. 背景与核心定位
+## 1. 背景与角色定调
 
-LocalMediaHub 的 BLE 通道已成功调通双向 GATT 控制信道（PC Central ↔ Android Peripheral，往返延迟 ~200ms）。
-本方案解决 **Wi-Fi 掉线/不稳定时的阅读连续性问题**：
-- 当 Wi-Fi 网络连通时，小说章节与图书元数据通过标准的 HTTP/Wi-Fi 高速获取。
-- 当 Wi-Fi 断开（例如网络切换、移动到边缘信号区）时，客户端网络层自动触发 **`BleTransportFallback` 降级路由**。
-- 请求转由 BLE 物理通道发送，服务端将章节文本以二进制 Chunk 分片（每帧 ≤ 200 字节）并发/串行发送，客户端重组拼包后呈现给阅读器 UI，画面标注“BLE 降级模式”。
+### 1.1 拓扑约束（保持既有角色）
+- **PC server = BLE Central** (持有蓝牙连接，监听 Android 的 GATT Notify 特征，向 Android 的 GATT Write 特征发包)
+- **Android app = BLE Peripheral** (广播 SERVICE_UUID，提供 GATT Command 特征和 State 特征)
 
----
-
-## 2. 整体架构与分层
-
-```
-+-----------------------------------------------------------------------+
-|                         TextReaderScreen (UI)                         |
-+-----------------------------------------------------------------------+
-                                   |
-                                   v
-+-----------------------------------------------------------------------+
-|                         TextReaderViewModel                           |
-+-----------------------------------------------------------------------+
-                                   |
-                                   v
-+-----------------------------------------------------------------------+
-|                            MediaRepository                            |
-|             (HTTP First -> Failover to BleTransportFallback)          |
-+-----------------------------------------------------------------------+
-                 /                                         \
-                / (Wi-Fi Online)                            \ (Wi-Fi Drop & BLE Connected)
-               v                                             v
-  +------------------------+                     +------------------------+
-  |  Retrofit (Wi-Fi HTTP) |                     |  BleTransportFallback  |
-  +------------------------+                     +------------------------+
-               |                                             | (GATT Write/Notify Chunks)
-               v                                             v
-  +------------------------+                     +------------------------+
-  |    PC Server (Echo)    |                     |   PC Server (BLE)      |
-  +------------------------+                     +------------------------+
-```
+### 1.2 降级信道交互机制 (Wi-Fi 掉线时)
+当 Wi-Fi 网络断开且用户在 Android 手机上翻页/请求章节时：
+1. **Android (Peripheral)**：通过 GATT State 特征发出 **Notify 报文**：`CMD_CHAPTER_REQ (path, index)`。
+2. **PC (Central)**：通过 GATT Notification 回调监听到章节请求，读取本地文件并调用 `BookService.GetChapterBlocks` 生成 Block 结构。
+3. **PC (Central)**：将 Blocks JSON 切分为 N 个 Chunk 包（每帧 ≤ 200 字节），通过 GATT **Write 报文** 连续发往 Android 的 Command 特征。
+4. **Android (Peripheral)**：在 `onCharacteristicWriteRequest` 中接收并累积 Chunk 分片，拼包完成后反序列化为 `BookChapterContent`（包含文本 Block 与图片 Block 签名 URL），提交给阅读器 UI，并弹出 `[⚡ BLE 降级传输中]` Chip 提示，**展示 3 秒后自动淡出**。
 
 ---
 
-## 3. BLE 传输分帧协议 (Frame & Chunk Spec)
+## 2. 帧格式与 Wire 协议向下兼容
 
-### 3.1 扩展 Command ID
-基于现有的 7 字节帧头部 (`[Version 1B][CmdID 1B][Length 2B][Payload NB]`)：
-- `0x10` (`CMD_BOOK_INFO_REQ / RESP`): 获取图书元数据 (格式、标题、章节列表、总字数)
-- `0x11` (`CMD_BOOK_CHAPTER_REQ / RESP`): 获取单章内容 Chunk 分片
-
-### 3.2 章节请求与分片格式
-
-#### 请求包 Payload (`CMD_BOOK_CHAPTER_REQ`, CmdID = 0x11)
-```
-[PathLength 1B][Path Bytes (UTF-8)][ChapterIndex 2B (BigEndian)]
+### 2.1 物理帧头（保持 3 字节，零破环兼容）
+```text
+[0]    version (0x01)
+[1:3]  uint16 payload length (big-endian)
+[3:]   payload bytes
 ```
 
-#### 响应包 Payload (`CMD_BOOK_CHAPTER_RESP`, CmdID = 0x11)
-每帧 Payload 头部包含 Chunk 序号元数据：
-```
-+-------------------+-------------------+-------------------+-------------------+------------------+
-| TotalChunks (2B)  |  ChunkIndex (2B)  |  PayloadLen (2B)  | TotalBlocks (2B)  | Chunk Data Bytes |
-+-------------------+-------------------+-------------------+-------------------+------------------+
-```
-- `TotalChunks`: 本章总分片数
-- `ChunkIndex`: 当前分片索引 (0-based)
-- `TotalBlocks`: 本章文本 Block 块总数
-- `Chunk Data Bytes`: UTF-8 文本分片数据 (单个 Chunk Payload ≤ 200 字节，避免超过 BLE MTU 上限)
+### 2.2 Payload 应用层协议格式
+在 `payload bytes` 内，**第 0 字节固定为 `CmdID`**：
+
+| CmdID | 名称 | 方向 | 格式 |
+|---|---|---|---|
+| `0x01` | `CMD_ECHO` | 双向 | `[CmdID 1B][Echo Payload]` (现有 Ping/Pong 测试) |
+| `0x10` | `CMD_BOOK_INFO_REQ` | Android ➔ PC (Notify) | `[CmdID 1B][PathLen 1B][Path Bytes]` |
+| `0x11` | `CMD_BOOK_CHAPTER_REQ` | Android ➔ PC (Notify) | `[CmdID 1B][ChapterIndex 2B][PathLen 1B][Path Bytes]` |
+| `0x12` | `CMD_BOOK_CHAPTER_CHUNK`| PC ➔ Android (Write) | `[CmdID 1B][TotalChunks 2B][ChunkIndex 2B][TotalBlocks 2B][ChunkLen 2B][Chunk Bytes]` |
 
 ---
 
-## 4. 关键组件改动与职责
+## 3. 关键组件与职责分工
 
-### 4.1 Server 端 (Go)
-1. `server/internal/ble/protocol.go`:
-   - 增加 `CmdBookInfoReq (0x10)`, `CmdBookChapterReq (0x11)` 命令字定义。
-   - 增加 Chunk 拆包/组包 helper 函数。
-2. `server/internal/ble/central.go` & `handler/ble.go`:
-   - 处理 BLE 接收到的 `CMD_BOOK_INFO_REQ` 和 `CMD_BOOK_CHAPTER_REQ` 命令。
-   - 调用 `BookService` 读取对应章节文本，将其切分为 ≤ 200 字节的 Chunk 列表，通过 GATT Notify 连续发送回客户端。
+### 3.1 Server 端 (Go)
+- `server/internal/ble/protocol.go`:
+  - 定义 `CmdID` 枚举与 `CMD_BOOK_CHAPTER_REQ / CHUNK` 编解码器。
+- `server/internal/ble/central_adapter.go` & `central.go`:
+  - 增加长效 `EnableNotifications` 事件监听。收到 `CMD_BOOK_CHAPTER_REQ` 后，开启 goroutine 异步切分 Chunk，并通过 `WriteCommand` 连续发送 Chunk。
 
-### 4.2 Android 端 (Kotlin)
-1. `data/BleTransportFallback.kt`:
-   - 封装 BLE 降级数据传输器，管理 Chunk 接收状态机与组包 Timer/超时（单帧 3s，全章 15s）。
-   - 按 `ChunkIndex` 整理填充 ByteArray 缓冲区，接收完成后解出 UTF-8 字符串与 JSON Blocks 列表。
-2. `data/MediaRepository.kt`:
-   - 在 `getBookInfo` 和 `getBookChapter` 中加入降级逻辑：HTTP 抛出 `IOException` / `SocketTimeoutException` 且 `BleController.isConnected == true` 时，自动切入 `BleTransportFallback`。
-3. `ui/screen/TextReaderScreen.kt`:
-   - 切换到降级模式时浮动弹出 **`[⚡ BLE 降级传输中]`** 提示 Chip，**展示 3 秒后自动淡出消失**，避免持续遮挡阅读排版区域。
+### 3.2 Android 端 (Kotlin)
+- `ble/BleTransportFallback.kt`:
+  - 封装多分片缓冲器与超时控制（单帧 > 3 秒超时重发，连续 3 次失败提示异常）。
+- `data/MediaRepository.kt`:
+  - 构造函数新增 `bleController: BleController`, `bleTransportFallback: BleTransportFallback` 依赖注入。
+  - 在 `getBookChapter` 中捕捉 `IOException` / `SocketTimeoutException`；当 BLE 状态为 `CONNECTED` 时自动路由到 `BleTransportFallback.fetchChapterBlocks`，解出 `BookChapterContent`。
+- `ui/screen/TextReaderScreen.kt`:
+  - 监听 `isBleDegraded` 状态，浮动弹出 **`[⚡ BLE 降级传输中]`** 提示 Chip，并在 **3 秒后自动淡出**。
 
 ---
 
-## 5. 错误处理与降级路由规则
+## 4. 测试策略与验证
 
-1. **Wi-Fi 优先**：凡是 Wi-Fi 连通状态，100% 走 HTTP。
-2. **断网切换**：若 HTTP 发生网络超时或断开，且 BLE 通道状态为 `CONNECTED`，即刻无缝切入 BLE。
-3. **BLE 双重超时保护**：若 BLE 分片传输过程中丢包或超时（单帧 > 3 秒），自动重发该 Chunk 请求；连续失败 3 次抛出“网络与蓝牙通道均不可用”提示。
-
----
-
-## 6. 测试与验证计划
-
-### 6.1 单元测试
-- **Go 协议单元测试** (`server/internal/ble/protocol_test.go`): 验证 Chunk 切分与拼包一致性。
-- **Android 降级单元测试** (`android/.../ble/BleTransportFallbackTest.kt`): Mock 模拟分片乱序/缺失接收与重组拼包。
-
-### 6.2 真机链路验证
-- **在线切换验证**：手机打开小说阅读 ➔ 断开 Wi-Fi ➔ 点击翻下一页 ➔ 验证文字在 3-5 秒内通过 BLE 降级加载完成，界面显示 `[⚡ BLE 降级传输中]` 标识。
+1. **协议编解码单测** (`server/internal/ble/protocol_test.go`): 验证含 3 字节帧头与 `CmdID` 的分包完整性。
+2. **重组分包单测** (`android/.../ble/BleTransportFallbackTest.kt`): 模拟完整的帧头解包、Chunk 乱序/缺失、超时重试与 Block JSON 还原。
+3. **Repository 降级单测** (`android/.../data/MediaRepositoryTest.kt`): 模拟 HTTP 异常时无缝路由到 BLE。
+4. **真机链路测试**：断开 Wi-Fi 翻页测试。
 
