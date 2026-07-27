@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 
@@ -82,11 +83,13 @@ func (h *Handler) SendBLE(c echo.Context) error {
 	if len(req.Payload) > maxBLEPayload {
 		return echo.NewHTTPError(http.StatusBadRequest, "payload exceeds 244 bytes")
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 6*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 12*time.Second)
 	defer cancel()
 	echoPayload, err := h.BLECentral.Send(ctx, []byte(req.Payload))
 	if err != nil {
+		log.Printf("BLE Send error: %v", err)
 		return c.JSON(http.StatusOK, map[string]any{"echo": nil, "error": err.Error()})
 	}
+	log.Printf("BLE Send success echo=%s", string(echoPayload))
 	return c.JSON(http.StatusOK, map[string]any{"echo": string(echoPayload)})
 }

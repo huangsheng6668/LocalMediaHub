@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -46,12 +47,15 @@ class BleSettingsViewModel @Inject constructor(
     store: ServerConfigStore,
 ) : AndroidViewModel(application) {
 
-    /**
-     * The persisted user setting. Default `false` (zero-regression: BLE is
-     * off until the user explicitly opts in).
-     */
-    val bleEnabled: StateFlow<Boolean> = store.bleEnabled.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5_000), false
+    private val _optimisticBleEnabled = MutableStateFlow<Boolean?>(null)
+
+    val bleEnabled: StateFlow<Boolean> = combine(
+        store.bleEnabled,
+        _optimisticBleEnabled
+    ) { persisted, optimistic ->
+        optimistic ?: persisted
+    }.stateIn(
+        viewModelScope, SharingStarted.Eagerly, false
     )
 
     /**
@@ -72,6 +76,10 @@ class BleSettingsViewModel @Inject constructor(
     private val _scanning = MutableStateFlow(false)
     /** True while a scan is in flight (UI shows a loading indicator). */
     val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    private val _errorText = MutableStateFlow<String?>(null)
+    /** Human-readable error message from the last operation (null if clean). */
+    val errorText: StateFlow<String?> = _errorText.asStateFlow()
 
     /**
      * True iff the device has a powered, present Bluetooth adapter. Re-read
@@ -98,7 +106,69 @@ class BleSettingsViewModel @Inject constructor(
      */
     fun onBleToggle(requested: Boolean) {
         viewModelScope.launch {
-            controller.setEnabled(requested)
+            _optimisticBleEnabled.value = requested
+            _errorText.value = null
+            try {
+                controller.setEnabled(requested)
+            } finally {
+                _optimisticBleEnabled.value = null
+            }
+        }
+    }
+
+    /**
+     * One-click BLE channel connection: triggers the server scan for this device's
+     * advertisement and connects automatically.
+     */
+    fun autoConnect() {
+        viewModelScope.launch {
+            _errorText.value = null
+            _scanning.value = true
+            try {
+                when (val scanResult = api.scan()) {
+                    is NetworkResult.Success -> {
+                        val discovered = scanResult.data
+                        _devices.value = discovered
+                        if (discovered.isEmpty()) {
+                            _errorText.value = "未发现当前手机的 BLE 广播（请确保手机蓝牙已开启且距离电脑较近）"
+                            controller.markDisconnected()
+                            return@launch
+                        }
+                        val target = discovered.first()
+                        when (val connResult = api.connect(target.id)) {
+                            is NetworkResult.Success -> {
+                                if (connResult.data) {
+                                    controller.markConnected()
+                                } else {
+                                    controller.markDisconnected()
+                                    _errorText.value = "连接失败：服务端未能建立 BLE GATT 连接"
+                                }
+                            }
+                            is NetworkResult.Error -> {
+                                controller.markDisconnected()
+                                _errorText.value = "连接失败: ${connResult.message}"
+                            }
+                            else -> controller.markDisconnected()
+                        }
+                    }
+                    is NetworkResult.Error -> {
+                        _devices.value = emptyList()
+                        controller.markDisconnected()
+                        val cause = if (scanResult.message.contains("ble unavailable")) {
+                            "服务端蓝牙未就绪（请确认 PC 已配有蓝牙且服务端使用 go build -tags bluetooth 编译）"
+                        } else {
+                            scanResult.message
+                        }
+                        _errorText.value = "建立连接失败: $cause"
+                    }
+                    else -> {
+                        _devices.value = emptyList()
+                        controller.markDisconnected()
+                    }
+                }
+            } finally {
+                _scanning.value = false
+            }
         }
     }
 
@@ -110,10 +180,25 @@ class BleSettingsViewModel @Inject constructor(
      */
     fun scan() {
         viewModelScope.launch {
+            _errorText.value = null
             _scanning.value = true
             try {
                 when (val result = api.scan()) {
-                    is NetworkResult.Success -> _devices.value = result.data
+                    is NetworkResult.Success -> {
+                        _devices.value = result.data
+                        if (result.data.isEmpty()) {
+                            _errorText.value = "未扫描到可连接的 BLE 设备（请确保 PC 蓝牙已开启，并且 PC 服务端以 -tags bluetooth 编译启动）"
+                        }
+                    }
+                    is NetworkResult.Error -> {
+                        _devices.value = emptyList()
+                        val cause = if (result.message.contains("ble unavailable")) {
+                            "服务端蓝牙未就绪（请确认 PC 已配有蓝牙且服务端使用 go build -tags bluetooth 编译）"
+                        } else {
+                            result.message
+                        }
+                        _errorText.value = "扫描失败: $cause"
+                    }
                     else -> _devices.value = emptyList()
                 }
             } finally {
@@ -130,10 +215,19 @@ class BleSettingsViewModel @Inject constructor(
      */
     fun connect(device: BleDevice) {
         viewModelScope.launch {
+            _errorText.value = null
             when (val result = api.connect(device.id)) {
                 is NetworkResult.Success -> {
-                    if (result.data) controller.markConnected()
-                    else controller.markDisconnected()
+                    if (result.data) {
+                        controller.markConnected()
+                    } else {
+                        controller.markDisconnected()
+                        _errorText.value = "连接失败：PC 服务端未能与设备建立 BLE GATT 连接"
+                    }
+                }
+                is NetworkResult.Error -> {
+                    controller.markDisconnected()
+                    _errorText.value = "连接失败: ${result.message}"
                 }
                 else -> controller.markDisconnected()
             }
@@ -147,9 +241,26 @@ class BleSettingsViewModel @Inject constructor(
      */
     fun sendTest() {
         viewModelScope.launch {
+            _errorText.value = null
             when (val result = api.send("ping")) {
-                is NetworkResult.Success -> _echoResult.value = result.data
-                else -> _echoResult.value = "发送失败"
+                is NetworkResult.Success -> {
+                    if (result.data != null) {
+                        _echoResult.value = result.data
+                    } else {
+                        _echoResult.value = "发送失败"
+                        _errorText.value = "未收到 BLE GATT Echo 回声响应"
+                        controller.markDisconnected()
+                    }
+                }
+                is NetworkResult.Error -> {
+                    _echoResult.value = "发送失败"
+                    _errorText.value = "发送失败: ${result.message}"
+                    controller.markDisconnected()
+                }
+                else -> {
+                    _echoResult.value = "发送失败"
+                    controller.markDisconnected()
+                }
             }
         }
     }

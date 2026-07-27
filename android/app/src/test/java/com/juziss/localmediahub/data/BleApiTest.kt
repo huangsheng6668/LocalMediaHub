@@ -58,13 +58,13 @@ class BleApiTest {
     }
 
     @Test
-    fun scan_emptyListOnUnavailable() = runBlocking {
+    fun scan_errorOnUnavailable() = runBlocking {
         server.enqueue(
             MockResponse().setBody("""{"devices":[],"error":"ble unavailable"}"""),
         )
         val result = api.scan()
-        assertTrue("expected Success, got $result", result is NetworkResult.Success)
-        assertEquals(0, (result as NetworkResult.Success).data.size)
+        assertTrue("expected Error, got $result", result is NetworkResult.Error)
+        assertEquals("ble unavailable", (result as NetworkResult.Error).message)
     }
 
     @Test
@@ -87,7 +87,7 @@ class BleApiTest {
     fun send_nullEchoOnError() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"echo":null,"error":"timeout"}"""))
         val result = api.send("ping")
-        assertTrue("expected Success, got $result", result is NetworkResult.Success)
-        assertNull((result as NetworkResult.Success).data)
+        assertTrue("expected Error, got $result", result is NetworkResult.Error)
+        assertEquals("timeout", (result as NetworkResult.Error).message)
     }
 }

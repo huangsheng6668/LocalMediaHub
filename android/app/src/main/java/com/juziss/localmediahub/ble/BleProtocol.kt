@@ -11,9 +11,9 @@ import java.nio.ByteOrder
  *   [3:]   payload bytes
  */
 object BleProtocol {
-    const val SERVICE_UUID = "0000fc01-0000-1000-8000-00805f9b34fb"
-    const val COMMAND_CHAR_UUID = "0000fc02-0000-1000-8000-00805f9b34fb" // Write C -> S
-    const val STATE_CHAR_UUID = "0000fc03-0000-1000-8000-00805f9b34fb"   // Notify S -> C
+    const val SERVICE_UUID = "fa6a3001-8b2c-4e6f-9988-123456789abc"
+    const val COMMAND_CHAR_UUID = "fa6a3002-8b2c-4e6f-9988-123456789abc" // Write C -> S
+    const val STATE_CHAR_UUID = "fa6a3003-8b2c-4e6f-9988-123456789abc"   // Notify S -> C
 
     const val FRAME_VERSION: Byte = 0x01
     const val MAX_PAYLOAD_LEN = 244

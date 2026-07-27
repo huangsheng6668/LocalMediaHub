@@ -24,8 +24,8 @@ class BleProtocolTest {
 
     @Test
     fun uuids_areDistinctAndMatchServerContract() {
-        assertEquals("0000fc01-0000-1000-8000-00805f9b34fb", BleProtocol.SERVICE_UUID)
-        assertEquals("0000fc02-0000-1000-8000-00805f9b34fb", BleProtocol.COMMAND_CHAR_UUID)
-        assertEquals("0000fc03-0000-1000-8000-00805f9b34fb", BleProtocol.STATE_CHAR_UUID)
+        assertEquals("fa6a3001-8b2c-4e6f-9988-123456789abc", BleProtocol.SERVICE_UUID)
+        assertEquals("fa6a3002-8b2c-4e6f-9988-123456789abc", BleProtocol.COMMAND_CHAR_UUID)
+        assertEquals("fa6a3003-8b2c-4e6f-9988-123456789abc", BleProtocol.STATE_CHAR_UUID)
     }
 }

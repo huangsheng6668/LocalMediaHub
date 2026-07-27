@@ -74,6 +74,5 @@ class BleController @Inject constructor(
 
     suspend fun setEnabled(enabled: Boolean) {
         saveBleEnabled(enabled)
-        evaluateAvailability(enabled = enabled)
     }
 }

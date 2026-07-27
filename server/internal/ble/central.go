@@ -12,9 +12,9 @@ var ErrNotConnected = errors.New("ble: not connected")
 
 // Device is a discovered BLE peripheral.
 type Device struct {
-	ID   string
-	Name string
-	RSSI int
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	RSSI int    `json:"rssi"`
 }
 
 // CentralScanner abstracts the BLE Central-role stack so Central logic is

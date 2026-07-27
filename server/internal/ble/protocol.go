@@ -16,9 +16,9 @@ import (
 // UUIDs for the BLE GATT service and its characteristics. These MUST match
 // the constants in android BleProtocol.kt. 128-bit lowercase hex.
 const (
-	ServiceUUID     = "0000fc01-0000-1000-8000-00805f9b34fb"
-	CommandCharUUID = "0000fc02-0000-1000-8000-00805f9b34fb" // Write, Central -> Peripheral
-	StateCharUUID   = "0000fc03-0000-1000-8000-00805f9b34fb" // Notify, Peripheral -> Central
+	ServiceUUID     = "fa6a3001-8b2c-4e6f-9988-123456789abc"
+	CommandCharUUID = "fa6a3002-8b2c-4e6f-9988-123456789abc" // Write, Central -> Peripheral
+	StateCharUUID   = "fa6a3003-8b2c-4e6f-9988-123456789abc" // Notify, Peripheral -> Central
 )
 
 const FrameVersion byte = 0x01

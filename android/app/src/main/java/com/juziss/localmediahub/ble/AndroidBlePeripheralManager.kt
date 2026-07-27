@@ -68,7 +68,7 @@ class AndroidBlePeripheralManager @Inject constructor(
         )
         val cmd = BluetoothGattCharacteristic(
             UUID.fromString(BleProtocol.COMMAND_CHAR_UUID),
-            BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
             BluetoothGattCharacteristic.PERMISSION_WRITE,
         )
         val state = BluetoothGattCharacteristic(
@@ -93,10 +93,17 @@ class AndroidBlePeripheralManager @Inject constructor(
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setConnectable(true)
+            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
             .build()
+        // Advertise packet: Keep primary data payload strictly <= 31 bytes by putting
+        // device name into scanResponseData, preventing ADVERTISE_FAILED_DATA_TOO_LARGE (errorCode 1).
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
+            .setIncludeTxPowerLevel(false)
             .addServiceUuid(ParcelUuid(UUID.fromString(BleProtocol.SERVICE_UUID)))
+            .build()
+        val scanResponseData = AdvertiseData.Builder()
+            .setIncludeDeviceName(true)
             .build()
         val cb = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
@@ -108,7 +115,7 @@ class AndroidBlePeripheralManager @Inject constructor(
         }
         advertiserCallback = cb
         android.util.Log.i("BlePeripheral", "startAdvertising: advertiser=${ad.bluetoothLeAdvertiser != null}")
-        ad.bluetoothLeAdvertiser?.startAdvertising(settings, data, cb)
+        ad.bluetoothLeAdvertiser?.startAdvertising(settings, data, scanResponseData, cb)
     }
 
     override fun stopAdvertising() {

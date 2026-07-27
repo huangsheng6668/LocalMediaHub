@@ -1,9 +1,12 @@
 package com.juziss.localmediahub.ui.component
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -56,6 +59,7 @@ import com.juziss.localmediahub.viewmodel.BleSettingsViewModel
 fun BleChannelSection(
     bleViewModel: BleSettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
 ) {
+    val context = LocalContext.current
     // Experimental BLE channel toggle. Collected here so the card reflects
     // the persisted setting + live connection state from BleController.
     val bleEnabled by bleViewModel.bleEnabled.collectAsState()
@@ -64,6 +68,7 @@ fun BleChannelSection(
     val bleDevices by bleViewModel.devices.collectAsState()
     val bleScanning by bleViewModel.scanning.collectAsState()
     val bleEchoResult by bleViewModel.echoResult.collectAsState()
+    val bleErrorText by bleViewModel.errorText.collectAsState()
 
     // Runtime permission launcher for BLE. On Android 12+ both BLUETOOTH_SCAN
     // and BLUETOOTH_CONNECT are runtime permissions; on older API levels they
@@ -93,26 +98,33 @@ fun BleChannelSection(
         hardwareAvailable = bleHardwareAvailable,
         onCheckedChange = { requested ->
             if (!requested) {
-                // Turning off never needs a permission prompt.
                 bleViewModel.onBleToggle(requested = false)
                 return@BleExperimentalToggleCard
             }
-            // Turning on: request runtime BLE permissions first.
-            // On API < 31 the permissions are install-time, in which
-            // case the system returns granted immediately.
-            val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                arrayOf(
-                    Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_CONNECT,
-                    Manifest.permission.BLUETOOTH_ADVERTISE,
-                )
+            val hasPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
             } else {
-                arrayOf(
-                    Manifest.permission.BLUETOOTH,
-                    Manifest.permission.BLUETOOTH_ADMIN,
-                )
+                true
             }
-            blePermissionLauncher.launch(perms)
+            if (hasPermissions) {
+                bleViewModel.onBleToggle(requested = true)
+            } else {
+                val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    arrayOf(
+                        Manifest.permission.BLUETOOTH_SCAN,
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                        Manifest.permission.BLUETOOTH_ADVERTISE,
+                    )
+                } else {
+                    arrayOf(
+                        Manifest.permission.BLUETOOTH,
+                        Manifest.permission.BLUETOOTH_ADMIN,
+                    )
+                }
+                blePermissionLauncher.launch(perms)
+            }
         },
     )
 
@@ -125,8 +137,10 @@ fun BleChannelSection(
             scanning = bleScanning,
             connectionState = bleConnState,
             echoResult = bleEchoResult,
+            errorText = bleErrorText,
             onScan = { bleViewModel.scan() },
             onConnect = { bleViewModel.connect(it) },
+            onAutoConnect = { bleViewModel.autoConnect() },
             onSendTest = { bleViewModel.sendTest() },
         )
     }
@@ -232,8 +246,10 @@ internal fun BleDeviceScanCard(
     scanning: Boolean,
     connectionState: BleConnState,
     echoResult: String?,
+    errorText: String? = null,
     onScan: () -> Unit,
     onConnect: (BleDevice) -> Unit,
+    onAutoConnect: () -> Unit,
     onSendTest: () -> Unit,
 ) {
     val isConnected = connectionState == BleConnState.CONNECTED
@@ -255,19 +271,19 @@ internal fun BleDeviceScanCard(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                text = "BLE 设备",
+                text = "BLE 控制通道",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "通过 PC 服务器（Central）扫描并连接其他运行本应用的设备，验证双向 GATT 通道。",
+                text = "通过 PC 服务端建立双向低延迟蓝牙 GATT 控制通道。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Button(
-                onClick = onScan,
+                onClick = onAutoConnect,
                 enabled = !scanning && !isConnected,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
@@ -279,50 +295,23 @@ internal fun BleDeviceScanCard(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("扫描中…")
+                    Text("建立 BLE 通道中…")
+                } else if (isConnected) {
+                    Text("BLE 通道已建立")
                 } else {
                     Icon(Icons.Filled.Search, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("扫描设备")
+                    Text("一键建立 BLE 控制通道")
                 }
             }
 
-            if (devices.isNotEmpty()) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                devices.forEach { device ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onConnect(device) }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Icon(
-                            painterResource(R.drawable.ic_storage),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = device.name.ifBlank { "未命名设备" },
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                text = "${device.id} · ${device.rssi} dBm",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Text(
-                            text = "连接",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
+            if (!errorText.isNullOrBlank()) {
+                Text(
+                    text = errorText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.Medium,
+                )
             }
 
             if (isConnected) {
@@ -332,7 +321,7 @@ internal fun BleDeviceScanCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                 ) {
-                    Text("发送测试")
+                    Text("发送测试 (Ping / Pong)")
                 }
                 if (echoResult != null) {
                     Text(

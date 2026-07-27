@@ -76,16 +76,20 @@ class BleApi @Inject constructor(
                     ?: return@withContext NetworkResult.Error("Empty response body")
                 val type = object : TypeToken<Map<String, Any>>() {}.type
                 val map: Map<String, Any> = gson.fromJson(body, type) ?: emptyMap()
+                val serverErr = map["error"] as? String
+                if (!serverErr.isNullOrBlank()) {
+                    return@withContext NetworkResult.Error(serverErr)
+                }
                 @Suppress("UNCHECKED_CAST")
                 val devices = (map["devices"] as? List<Any>).orEmpty()
                 val result = devices.mapNotNull { entry ->
                     @Suppress("UNCHECKED_CAST")
                     val d = entry as? Map<String, Any> ?: return@mapNotNull null
-                    val id = d["id"] as? String ?: return@mapNotNull null
+                    val id = (d["id"] ?: d["ID"]) as? String ?: return@mapNotNull null
                     BleDevice(
                         id = id,
-                        name = d["name"] as? String ?: "",
-                        rssi = (d["rssi"] as? Number)?.toInt() ?: 0,
+                        name = ((d["name"] ?: d["Name"]) as? String) ?: "",
+                        rssi = (((d["rssi"] ?: d["RSSI"]) as? Number)?.toInt()) ?: 0,
                     )
                 }
                 NetworkResult.Success(result)
@@ -114,6 +118,10 @@ class BleApi @Inject constructor(
                     ?: return@withContext NetworkResult.Error("Empty response body")
                 val type = object : TypeToken<Map<String, Any>>() {}.type
                 val map: Map<String, Any> = gson.fromJson(text, type) ?: emptyMap()
+                val serverErr = map["error"] as? String
+                if (!serverErr.isNullOrBlank()) {
+                    return@withContext NetworkResult.Error(serverErr)
+                }
                 val connected = (map["connected"] as? Boolean) == true
                 NetworkResult.Success(connected)
             }
@@ -141,6 +149,10 @@ class BleApi @Inject constructor(
                     ?: return@withContext NetworkResult.Error("Empty response body")
                 val type = object : TypeToken<Map<String, Any>>() {}.type
                 val map: Map<String, Any> = gson.fromJson(text, type) ?: emptyMap()
+                val serverErr = map["error"] as? String
+                if (!serverErr.isNullOrBlank()) {
+                    return@withContext NetworkResult.Error(serverErr)
+                }
                 @Suppress("UNCHECKED_CAST")
                 val echo = (map["echo"] as? String)
                 NetworkResult.Success(echo)
