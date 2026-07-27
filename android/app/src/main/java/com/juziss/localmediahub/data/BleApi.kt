@@ -50,15 +50,24 @@ class BleApi @Inject constructor(
 
     private fun authHeader(): String = "Bearer ${serverConfig.getTokenSnapshot()}"
 
+    /**
+     * Returns the server base URL, or null if not configured. OkHttp throws
+     * IllegalArgumentException when the URL has no scheme (e.g. when baseUrl
+     * is empty because the user hasn't connected yet), which would crash the
+     * app — callers must check for null first and return a friendly Error.
+     */
+    private fun baseUrlOrNull(): String? = serverConfig.getBaseUrl().takeIf { it.isNotBlank() }
+
     /** GET `/api/v1/ble/scan` → list of discovered devices. Empty on server-side "unavailable". */
     suspend fun scan(): NetworkResult<List<BleDevice>> = withContext(Dispatchers.IO) {
-        val url = "${serverConfig.getBaseUrl()}/api/v1/ble/scan"
-        val req = Request.Builder()
-            .url(url)
-            .header("Authorization", authHeader())
-            .get()
-            .build()
+        val base = baseUrlOrNull()
+            ?: return@withContext NetworkResult.Error("未连接服务器")
         try {
+            val req = Request.Builder()
+                .url("$base/api/v1/ble/scan")
+                .header("Authorization", authHeader())
+                .get()
+                .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     return@withContext NetworkResult.Error("Server returned ${resp.code}", resp.code)
@@ -88,14 +97,15 @@ class BleApi @Inject constructor(
 
     /** POST `/api/v1/ble/connect` → `{"connected":true}`. Returns the boolean. */
     suspend fun connect(id: String): NetworkResult<Boolean> = withContext(Dispatchers.IO) {
-        val url = "${serverConfig.getBaseUrl()}/api/v1/ble/connect"
-        val body = """{"id":${gson.toJson(id)}}""".toRequestBody(json)
-        val req = Request.Builder()
-            .url(url)
-            .header("Authorization", authHeader())
-            .post(body)
-            .build()
+        val base = baseUrlOrNull()
+            ?: return@withContext NetworkResult.Error("未连接服务器")
         try {
+            val body = """{"id":${gson.toJson(id)}}""".toRequestBody(json)
+            val req = Request.Builder()
+                .url("$base/api/v1/ble/connect")
+                .header("Authorization", authHeader())
+                .post(body)
+                .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     return@withContext NetworkResult.Error("Server returned ${resp.code}", resp.code)
@@ -114,14 +124,15 @@ class BleApi @Inject constructor(
 
     /** POST `/api/v1/ble/send` → `{"echo":"..."}`. Returns the echo payload (may be null). */
     suspend fun send(payload: String): NetworkResult<String?> = withContext(Dispatchers.IO) {
-        val url = "${serverConfig.getBaseUrl()}/api/v1/ble/send"
-        val body = """{"payload":${gson.toJson(payload)}}""".toRequestBody(json)
-        val req = Request.Builder()
-            .url(url)
-            .header("Authorization", authHeader())
-            .post(body)
-            .build()
+        val base = baseUrlOrNull()
+            ?: return@withContext NetworkResult.Error("未连接服务器")
         try {
+            val body = """{"payload":${gson.toJson(payload)}}""".toRequestBody(json)
+            val req = Request.Builder()
+                .url("$base/api/v1/ble/send")
+                .header("Authorization", authHeader())
+                .post(body)
+                .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     return@withContext NetworkResult.Error("Server returned ${resp.code}", resp.code)

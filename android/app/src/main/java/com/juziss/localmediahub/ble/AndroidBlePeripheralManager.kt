@@ -98,13 +98,25 @@ class AndroidBlePeripheralManager @Inject constructor(
             .setIncludeDeviceName(false)
             .addServiceUuid(ParcelUuid(UUID.fromString(BleProtocol.SERVICE_UUID)))
             .build()
-        val cb = object : AdvertiseCallback() {}
+        val cb = object : AdvertiseCallback() {
+            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+                android.util.Log.i("BlePeripheral", "advertise onStartSuccess")
+            }
+            override fun onStartFailure(errorCode: Int) {
+                android.util.Log.e("BlePeripheral", "advertise onStartFailure errorCode=$errorCode")
+            }
+        }
         advertiserCallback = cb
+        android.util.Log.i("BlePeripheral", "startAdvertising: advertiser=${ad.bluetoothLeAdvertiser != null}")
         ad.bluetoothLeAdvertiser?.startAdvertising(settings, data, cb)
     }
 
     override fun stopAdvertising() {
-        adapter?.bluetoothLeAdvertiser?.stopAdvertising(advertiserCallback)
+        // Null-guard: evaluateAvailability(false) can be called before any
+        // startAdvertising() (e.g. initial bleEnabled=false emission from
+        // DataStore). BluetoothLeAdvertiser.stopAdvertising throws
+        // IllegalArgumentException when passed a null callback.
+        advertiserCallback?.let { adapter?.bluetoothLeAdvertiser?.stopAdvertising(it) }
         advertiserCallback = null
         gattServer?.close()
         gattServer = null

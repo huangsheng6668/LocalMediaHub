@@ -18,6 +18,11 @@
         android:maxSdkVersion="36" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"
         android:maxSdkVersion="36" />
+    <!-- BLUETOOTH_ADVERTISE required on API 31+ because Android now acts as
+         the BLE Peripheral (advertising). Was unnecessary last round when
+         Android was the Central (scanning only). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"
+        android:maxSdkVersion="36" />
     <!-- Legacy Bluetooth permissions for API < 31. -->
     <uses-permission android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
