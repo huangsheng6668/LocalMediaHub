@@ -2,80 +2,107 @@ package com.juziss.localmediahub.ble
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BleControllerTest {
 
-    private class FakeCentralManager : BleCentralManager {
-        var scanning = false
-        var sent: ByteArray? = null
-        override var onStateChanged: ((BleConnState) -> Unit)? = null
-        override var onPayloadReceived: ((ByteArray) -> Unit)? = null
+    private class FakePeripheralManager : BlePeripheralManager {
+        var advertising = false
+        var received: ByteArray? = null
+        var notifyResult = true
+        private var cb: ((ByteArray) -> Unit)? = null
 
-        override fun startScan() { scanning = true }
-        override fun stopScan() { scanning = false }
-        override fun send(payload: ByteArray): Boolean {
-            sent = payload
-            return true
+        override fun startAdvertising() { advertising = true }
+        override fun stopAdvertising() { advertising = false }
+        override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
+        override fun notifyPayload(payload: ByteArray): Boolean {
+            received = payload
+            return notifyResult
         }
+        override fun isAdapterUsable(): Boolean = true
+
+        // Test hook to simulate a Central write.
+        fun simulateWrite(payload: ByteArray) { cb?.invoke(payload) }
     }
 
     @Test
-    fun disabledByDefault_doesNotScan() {
+    fun disabledByDefault_doesNotAdvertise() {
         val enabledFlow = MutableStateFlow(false)
+        val mgr = FakePeripheralManager()
         val controller = BleController(
-            centralManager = FakeCentralManager(),
+            peripheralManager = mgr,
             bleEnabledFlow = enabledFlow,
             bleHardwareAvailable = { false },
-            saveBleEnabled = {}
+            saveBleEnabled = {},
         )
-        controller.evaluateAvailability(enabled = enabledFlow.value)
+        controller.evaluateAvailability(enabled = false)
         assertEquals(BleConnState.DISABLED, controller.connectionState.value)
+        assertTrue(!mgr.advertising)
     }
 
     @Test
-    fun enabledButNoHardware_staysDisabled() {
+    fun enabledWithHardware_startsAdvertising() {
         val enabledFlow = MutableStateFlow(true)
-        val fake = FakeCentralManager()
+        val mgr = FakePeripheralManager()
         val controller = BleController(
-            centralManager = fake,
-            bleEnabledFlow = enabledFlow,
-            bleHardwareAvailable = { false },
-            saveBleEnabled = {}
-        )
-        controller.evaluateAvailability(enabled = enabledFlow.value)
-        assertEquals(BleConnState.DISABLED, controller.connectionState.value)
-        assertFalse(fake.scanning)
-    }
-
-    @Test
-    fun enabledWithHardware_startsScanning() {
-        val enabledFlow = MutableStateFlow(true)
-        val fake = FakeCentralManager()
-        val controller = BleController(
-            centralManager = fake,
+            peripheralManager = mgr,
             bleEnabledFlow = enabledFlow,
             bleHardwareAvailable = { true },
-            saveBleEnabled = {}
+            saveBleEnabled = {},
         )
-        controller.evaluateAvailability(enabled = enabledFlow.value)
-        assertEquals(BleConnState.SCANNING, controller.connectionState.value)
-        assertTrue(fake.scanning)
+        controller.evaluateAvailability(enabled = true)
+        assertEquals(BleConnState.ADVERTISING, controller.connectionState.value)
+        assertTrue(mgr.advertising)
     }
 
     @Test
-    fun send_whenNotConnected_returnsFalse() {
+    fun markConnected_setsState() {
         val enabledFlow = MutableStateFlow(true)
-        val fake = FakeCentralManager()
         val controller = BleController(
-            centralManager = fake,
+            peripheralManager = FakePeripheralManager(),
             bleEnabledFlow = enabledFlow,
             bleHardwareAvailable = { true },
-            saveBleEnabled = {}
+            saveBleEnabled = {},
         )
-        controller.evaluateAvailability(enabled = enabledFlow.value) // -> SCANNING, not connected
-        assertFalse(controller.send("hi".toByteArray()))
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        assertEquals(BleConnState.CONNECTED, controller.connectionState.value)
+    }
+
+    @Test
+    fun markDisconnected_returnsToAdvertising() {
+        val enabledFlow = MutableStateFlow(true)
+        val mgr = FakePeripheralManager()
+        val controller = BleController(
+            peripheralManager = mgr,
+            bleEnabledFlow = enabledFlow,
+            bleHardwareAvailable = { true },
+            saveBleEnabled = {},
+        )
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        controller.markDisconnected()
+        assertEquals(BleConnState.ADVERTISING, controller.connectionState.value)
+    }
+
+    @Test
+    fun receivedPayload_notifiesBackViaPeripheralManager() {
+        val enabledFlow = MutableStateFlow(true)
+        val mgr = FakePeripheralManager()
+        val controller = BleController(
+            peripheralManager = mgr,
+            bleEnabledFlow = enabledFlow,
+            bleHardwareAvailable = { true },
+            saveBleEnabled = {},
+        )
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        // Simulate the Central writing "ping"; controller should echo back via notify.
+        mgr.simulateWrite("ping".toByteArray())
+        // Verify notify was called (echo logic lives in controller).
+        val sent = mgr.received
+        assertNotNull(sent)
     }
 }

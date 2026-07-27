@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	echoMw "github.com/labstack/echo/v4/middleware"
 
+	"github.com/localmediahub/server/internal/ble"
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/models"
 	"github.com/localmediahub/server/internal/server/handler"
@@ -100,6 +101,23 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// books: BookService wired in Task 8 — drives /api/v1/books/info|chapter.
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, bookService, bookSigner)
+
+	// BLE GATT wiring Task 4: construct the BLE Central non-fatally. If no
+	// Bluetooth adapter is present OR the build was compiled without the
+	// "bluetooth" tag, NewCentralScanner returns (nil, err) and we leave
+	// h.BLECentral as a true nil interface so the /api/v1/ble/* handlers'
+	// `== nil` checks route to the "ble unavailable" responses (zero-regression).
+	// CRITICAL (Gotcha 1): assign h.BLECentral ONLY when bleCentral is non-nil.
+	// Assigning a nil *ble.Central would create a non-nil interface wrapping a
+	// nil pointer, which would defeat the handlers' nil check.
+	bleScanner, bleErr := ble.NewCentralScanner()
+	if bleErr != nil {
+		fmt.Printf("BLE Central disabled; /api/v1/ble/* will report unavailable: %v\n", bleErr)
+	} else {
+		bleCentral := ble.NewCentral(bleScanner)
+		h.BLECentral = bleCentral
+		fmt.Printf("BLE Central ready (service=%s)\n", ble.ServiceUUID)
+	}
 
 	s.registerRoutes(h)
 
@@ -267,6 +285,16 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// path, manifestID). Authenticated via authMw — the endpoint itself
 	// never returns a usable URL to an unauthenticated caller.
 	books.GET("/sign-image", h.SignImage)
+
+	// BLE GATT wiring Task 4: control channel for coordinating the PC's BLE
+	// Central (scan/connect/send) from Android over Wi-Fi. Auth-gated like the
+	// other action endpoints above — the spec (§6) requires Bearer Token on
+	// /api/v1/ble/*. When BLE is unavailable the handlers return HTTP 200 with
+	// an empty/error body (zero-regression), never 500.
+	bleGroup := api.Group("/ble", authMw)
+	bleGroup.GET("/scan", h.ScanBLE)
+	bleGroup.POST("/connect", h.ConnectBLE)
+	bleGroup.POST("/send", h.SendBLE)
 
 	// Admin page
 }

@@ -7,10 +7,15 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.juziss.localmediahub.ble.BleConnState
 import com.juziss.localmediahub.ble.BleController
+import com.juziss.localmediahub.data.BleApi
+import com.juziss.localmediahub.data.BleDevice
 import com.juziss.localmediahub.data.ServerConfigStore
+import com.juziss.localmediahub.network.NetworkResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -37,6 +42,7 @@ import javax.inject.Inject
 class BleSettingsViewModel @Inject constructor(
     application: Application,
     private val controller: BleController,
+    private val api: BleApi,
     store: ServerConfigStore,
 ) : AndroidViewModel(application) {
 
@@ -52,6 +58,20 @@ class BleSettingsViewModel @Inject constructor(
      * Live BLE connection state from the controller's state machine.
      */
     val connectionState: StateFlow<BleConnState> = controller.connectionState
+
+    // --- Task 9: scan / connect / send echo state ---------------------------
+
+    private val _devices = MutableStateFlow<List<BleDevice>>(emptyList())
+    /** Devices returned by the last successful scan. Empty until [scan] runs. */
+    val devices: StateFlow<List<BleDevice>> = _devices.asStateFlow()
+
+    private val _echoResult = MutableStateFlow<String?>(null)
+    /** Last echo payload received from the server (null before first send). */
+    val echoResult: StateFlow<String?> = _echoResult.asStateFlow()
+
+    private val _scanning = MutableStateFlow(false)
+    /** True while a scan is in flight (UI shows a loading indicator). */
+    val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
 
     /**
      * True iff the device has a powered, present Bluetooth adapter. Re-read
@@ -79,6 +99,58 @@ class BleSettingsViewModel @Inject constructor(
     fun onBleToggle(requested: Boolean) {
         viewModelScope.launch {
             controller.setEnabled(requested)
+        }
+    }
+
+    /**
+     * Ask the PC server (Central) to scan for BLE peripherals advertising the
+     * shared SERVICE_UUID. On success, populates [devices]; on any error the
+     * list is cleared so the UI doesn't show stale results. [scanning] is set
+     * for the duration of the call so the UI can show a loading indicator.
+     */
+    fun scan() {
+        viewModelScope.launch {
+            _scanning.value = true
+            try {
+                when (val result = api.scan()) {
+                    is NetworkResult.Success -> _devices.value = result.data
+                    else -> _devices.value = emptyList()
+                }
+            } finally {
+                _scanning.value = false
+            }
+        }
+    }
+
+    /**
+     * Ask the PC server (Central) to connect to [device]. Drives the local
+     * controller's state machine: a confirmed `connected:true` →
+     * [BleController.markConnected]; anything else (failure or connected:false)
+     * → [BleController.markDisconnected] to keep the UI honest.
+     */
+    fun connect(device: BleDevice) {
+        viewModelScope.launch {
+            when (val result = api.connect(device.id)) {
+                is NetworkResult.Success -> {
+                    if (result.data) controller.markConnected()
+                    else controller.markDisconnected()
+                }
+                else -> controller.markDisconnected()
+            }
+        }
+    }
+
+    /**
+     * Send a fixed "ping" payload through the PC server's BLE Central and
+     * surface the echoed reply in [echoResult]. On any failure shows the
+     * localized "发送失败" sentinel so the user knows the round-trip broke.
+     */
+    fun sendTest() {
+        viewModelScope.launch {
+            when (val result = api.send("ping")) {
+                is NetworkResult.Success -> _echoResult.value = result.data
+                else -> _echoResult.value = "发送失败"
+            }
         }
     }
 }
