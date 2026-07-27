@@ -35,7 +35,7 @@ object BleProtocol {
 
     /**
      * PC → Android (GATT Write): one chunk of an arbitrary JSON byte stream.
-     * Renamed in Task 1 from `CMD_BOOK_CHAPTER_CHUNK`; the chunk layout is
+     * Task 1 renamed this from `CMD_BOOK_CHAPTER_CHUNK`; the chunk layout is
      * unchanged — only the semantics broadened (any JSON, not just chapter
      * Block arrays).
      */
@@ -51,15 +51,6 @@ object BleProtocol {
     const val ENDPOINT_BROWSE_FOLDER: Byte = 0x03
     /** Book metadata API. */
     const val ENDPOINT_BOOK_INFO: Byte = 0x04
-
-    // ---- Backward-compat aliases (deprecated; removed once Task 4 migrates
-    // MediaRepository to requestApi/fetchJson). Wire values are unchanged so
-    // these aliases are byte-identical to their renamed counterparts. ----
-    @Deprecated("Use CMD_API_REQ (Task 1 generalized endpoint routing).", ReplaceWith("CMD_API_REQ"))
-    const val CMD_BOOK_CHAPTER_REQ: Byte = CMD_API_REQ
-
-    @Deprecated("Use CMD_JSON_CHUNK (Task 1 generalized chunk semantics).", ReplaceWith("CMD_JSON_CHUNK"))
-    const val CMD_BOOK_CHAPTER_CHUNK: Byte = CMD_JSON_CHUNK
 
     /** Per-chunk payload cap (spec §1.2). Pure advisory; not enforced here. */
     const val MAX_CHUNK_PAYLOAD_BYTES = 200

@@ -18,6 +18,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
 import com.juziss.localmediahub.ble.BleConnState
 import com.juziss.localmediahub.ble.BleController
+import com.juziss.localmediahub.ble.BleProtocol
 import com.juziss.localmediahub.ble.BleTransportFallback
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -51,8 +52,9 @@ class MediaRepository @Inject constructor(
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
     // ════════════════════════════════════════════════════════════════════════
-    //  Task 3: BLE degradation signal. Flips true whenever the most recent
-    //  chapter fetch was served via the BLE fallback path (HTTP failed +
+    //  Task 3 / Task 4: BLE degradation signal. Flips true whenever the most
+    //  recent failover-capable fetch (folders / browseFolder / bookInfo /
+    //  bookChapter) was served via the BLE fallback path (HTTP failed +
     //  BLE CONNECTED). Reset to false on every successful HTTP fetch so the
     //  reader's 3-second "BLE 降级传输中" chip only surfaces while BLE is
     //  actually carrying traffic. The UI owns the auto-dismiss timer.
@@ -62,10 +64,10 @@ class MediaRepository @Inject constructor(
 
     // ════════════════════════════════════════════════════════════════════════
     //  I2 fix: one-shot BLE-degradation event stream. The boolean above is
-    //  sticky (stays true across consecutive BLE-served chapters), so a
+    //  sticky (stays true across consecutive BLE-served requests), so a
     //  LaunchedEffect(isBleDegraded) only re-fires on the value CHANGE —
     //  during a prolonged outage the badge surfaced once then never again.
-    //  This SharedFlow emits once PER BLE-served chapter so the reader can
+    //  This SharedFlow emits once PER BLE-served request so the reader can
     //  re-show + re-arm the 3-second auto-dismiss timer on every delivery
     //  (spec §1.2 step 4 implies per-delivery feedback).
     //
@@ -201,16 +203,43 @@ class MediaRepository @Inject constructor(
 
     // ── Folders ───────────────────────────────────────────────
 
-    suspend fun getFolders(): NetworkResult<List<Folder>> =
-        httpGet("$baseUrl/api/v1/folders", object : TypeToken<List<Folder>>() {}.type)
+    suspend fun getFolders(): NetworkResult<List<Folder>> {
+        val foldersType = object : TypeToken<List<Folder>>() {}.type
+        return bleFetchOrHttp<List<Folder>>(
+            httpCall = {
+                val data = httpGetRaw<List<Folder>>("$baseUrl/api/v1/folders", foldersType)
+                _isBleDegraded.value = false
+                data
+            },
+            endpoint = BleProtocol.ENDPOINT_FOLDERS,
+            path = "",
+            index = 0,
+            type = foldersType,
+        )
+    }
 
     suspend fun browseFolder(
         relativePath: String,
         forceNetwork: Boolean = false,
-    ): NetworkResult<BrowseResult> =
-        httpGet("$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/browse",
-            object : TypeToken<BrowseResult>() {}.type,
-            forceNetwork = forceNetwork)
+    ): NetworkResult<BrowseResult> {
+        val route = normalizeRoutePath(relativePath)
+        val browseType = object : TypeToken<BrowseResult>() {}.type
+        return bleFetchOrHttp<BrowseResult>(
+            httpCall = {
+                val data = httpGetRaw<BrowseResult>(
+                    "$baseUrl/api/v1/folders/$route/browse",
+                    browseType,
+                    forceNetwork = forceNetwork,
+                )
+                _isBleDegraded.value = false
+                data
+            },
+            endpoint = BleProtocol.ENDPOINT_BROWSE_FOLDER,
+            path = route,
+            index = 0,
+            type = browseType,
+        )
+    }
 
     suspend fun getFolderFilesRecursive(relativePath: String): NetworkResult<List<MediaFile>> =
         httpGet("$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/files",
@@ -312,21 +341,31 @@ class MediaRepository @Inject constructor(
     // ── Books (text-reader) ───────────────────────────────────
 
     suspend fun getBookInfo(path: String): NetworkResult<Book> =
-        httpGet(
-            "$baseUrl/api/v1/books/info?path=${URLEncoder.encode(path, "UTF-8")}",
-            Book::class.java,
+        bleFetchOrHttp<Book>(
+            httpCall = {
+                val data = httpGetRaw<Book>(
+                    "$baseUrl/api/v1/books/info?path=${URLEncoder.encode(path, "UTF-8")}",
+                    Book::class.java,
+                )
+                _isBleDegraded.value = false
+                data
+            },
+            endpoint = BleProtocol.ENDPOINT_BOOK_INFO,
+            path = path,
+            index = 0,
+            type = Book::class.java,
         )
 
     /**
      * Fetches a single chapter, transparently failing over to the BLE
      * transport when the HTTP path is unreachable.
      *
-     * Spec §3.2 / §1.2 step 4: when [httpGetRaw] throws an [IOException]
+     * Spec §3.2 / §1.2 step 4: when the HTTP call throws an [IOException]
      * (connect refused, socket timeout, broken pipe, …) AND the BLE link is
-     * [BleConnState.CONNECTED], the repository dispatches a
-     * CMD_BOOK_CHAPTER_REQ over BLE, reassembles the streamed chunks via
-     * [BleTransportFallback], maps them to [BookChapterContent], and raises
-     * [isBleDegraded] so the reader can surface the 3-second badge.
+     * [BleConnState.CONNECTED], the repository dispatches a CMD_API_REQ with
+     * [BleProtocol.ENDPOINT_BOOK_CHAPTER] over BLE, reassembles the streamed
+     * chunks via [BleTransportFallback], maps them to [BookChapterContent],
+     * and raises [isBleDegraded] so the reader can surface the 3-second badge.
      *
      * All other HTTP failures (server 4xx/5xx via [HttpStatusException], or
      * BLE not connected) bypass the failover and return the original error.
@@ -334,6 +373,16 @@ class MediaRepository @Inject constructor(
      * The caller MUST observe [isBleDegraded]; the flag is reset to false on
      * the next HTTP-served chapter so the badge only surfaces during actual
      * BLE traffic.
+     *
+     * Chapter-specific note: the BLE chunk wire format carries only the
+     * `List<Block>` JSON (spec §3.2 — `[{"type":"text","value":"…"}, …]`), NOT
+     * the full [BookChapterContent] shape, so on the BLE path the chapter
+     * title is left blank — the reader already holds it from [getBookInfo].
+     * KNOWN LIMITATION (M3 / out-of-scope I3): a future wire-format extension
+     * is needed to carry the title end-to-end. Because of this type mismatch
+     * (HTTP returns [BookChapterContent], BLE returns `List<Block>`), the
+     * chapter path does NOT reuse the generic [bleFetchOrHttp] — it keeps its
+     * own 3-branch try/catch and shares the failover behavior inline.
      */
     suspend fun getBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> {
         val url = "$baseUrl/api/v1/books/chapter" +
@@ -342,69 +391,125 @@ class MediaRepository @Inject constructor(
             val content = httpGetRaw<BookChapterContent>(url, BookChapterContent::class.java)
             _isBleDegraded.value = false
             NetworkResult.Success(content)
-        } catch (e: IOException) {
-            // Transport-level failure: candidate for BLE failover.
-            tryBleFailover(path, index, e)
         } catch (e: HttpStatusException) {
             // Server responded with a non-2xx status — NOT a transport outage,
-            // so failover does not apply. Surface the original error.
+            // so failover does not apply. Surface the original error code.
             NetworkResult.Error("Server returned ${e.code}", e.code)
+        } catch (e: IOException) {
+            // Transport-level failure: candidate for BLE failover.
+            if (bleController.connectionState.value != BleConnState.CONNECTED) {
+                NetworkResult.Error(e.toUserMessage())
+            } else {
+                val json = bleTransportFallback.fetchJson(
+                    BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index,
+                ) {
+                    bleController.requestApi(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index)
+                }
+                if (json == null) {
+                    // BLE timed out / reassembly failed — surface the original
+                    // HTTP error and DO NOT raise isBleDegraded.
+                    NetworkResult.Error(e.toUserMessage())
+                } else {
+                    val blocks = try {
+                        gson.fromJson<List<Block>>(
+                            json,
+                            object : TypeToken<List<Block>>() {}.type,
+                        )
+                    } catch (parseErr: Exception) {
+                        null
+                    }
+                    if (blocks == null) {
+                        NetworkResult.Error(e.toUserMessage())
+                    } else {
+                        _isBleDegraded.value = true
+                        _bleDegradedEvents.tryEmit(Unit)
+                        NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))
+                    }
+                }
+            }
         }
     }
 
     /**
-     * BLE failover branch of [getBookChapter]. Returns the BLE-sourced content
-     * when [BleController] reports a CONNECTED link and the fallback engine
-     * successfully reassembles a block list; otherwise returns the original
-     * HTTP error so the reader surfaces the underlying network failure.
+     * Shared BLE failover branch for the list-style failover-capable endpoints
+     * (folders / browseFolder / bookInfo). [getBookChapter] keeps its own
+     * inline copy of this logic because its BLE wire payload (`List<Block>`)
+     * differs from its HTTP return type ([BookChapterContent]).
      *
-     * Honors the Task 2 implementer's note: [BleTransportFallback] resets its
-     * `lastFrameAtMs` (seeded at singleton construction) on each cycle — that
-     * reset is now driven internally by `fetchChapterBlocks` so this method
-     * simply awaits the reassembled blocks.
+     * Behavior (preserves the prior chapter-only contract, generalized):
+     *  - Run [httpCall]; on Success, reset [isBleDegraded] (done inside
+     *    [httpCall] by each caller) and return the parsed body.
+     *  - [HttpStatusException] (server responded non-2xx): NOT a transport
+     *    outage, so failover does not apply. Surface the original error.
+     *  - [IOException] (connect refused, socket timeout, …): if the BLE link
+     *    is NOT [BleConnState.CONNECTED], surface the original error. Else
+     *    dispatch the request over BLE via [BleTransportFallback.fetchJson]
+     *    (which drives [BleController.requestApi] for the Central). Null
+     *    result (timeout) → original HTTP error, [isBleDegraded] stays false.
+     *    Non-null → Gson-parse with [type]; on success raise [isBleDegraded]
+     *    and emit one [bleDegradedEvents] per BLE-served request (I2 fix).
+     *
+     * Single-coroutine contract: [BleTransportFallback] is NOT reentrant; only
+     * one fetch cycle may be in flight at a time. The repository is the sole
+     * caller and serializes per-request.
+     *
+     * @param httpCall the HTTP path; throws [HttpStatusException] on non-2xx,
+     *   [IOException] on transport failure. MUST reset [isBleDegraded] on
+     *   success (each caller does this inline) so the badge clears when Wi-Fi
+     *   recovers.
+     * @param endpoint one of `BleProtocol.ENDPOINT_*`; advisory for the engine
+     *   but bound into the dispatch lambda so the Central's Go ApiProvider can
+     *   route to the correct handler.
+     * @param path resource path (UTF-8). Length must fit 1 byte (≤ 255).
+     * @param index pagination / chapter index (uint16 BE on the wire).
+     * @param type Gson [java.lang.reflect.Type] for deserializing the BLE JSON
+     *   (same shape as the HTTP response for these endpoints).
      */
-    private suspend fun tryBleFailover(
-        path: String,
-        index: Int,
-        httpError: IOException,
-    ): NetworkResult<BookChapterContent> {
+    private suspend fun <T> bleFetchOrHttp(
+        httpCall: suspend () -> T,
+        endpoint: Byte,
+        path: String = "",
+        index: Int = 0,
+        type: java.lang.reflect.Type,
+    ): NetworkResult<T> = try {
+        NetworkResult.Success(httpCall())
+    } catch (e: HttpStatusException) {
+        // Server responded with a non-2xx status — NOT a transport outage,
+        // so failover does not apply. Surface the original error code.
+        NetworkResult.Error("Server returned ${e.code}", e.code)
+    } catch (e: IOException) {
+        // Transport-level failure: candidate for BLE failover.
         if (bleController.connectionState.value != BleConnState.CONNECTED) {
-            return NetworkResult.Error(httpError.toUserMessage())
+            NetworkResult.Error(e.toUserMessage())
+        } else {
+            val json = bleTransportFallback.fetchJson(endpoint, path, index) {
+                bleController.requestApi(endpoint, path, index)
+            }
+            if (json == null) {
+                // BLE link was CONNECTED but no payload arrived / reassembly
+                // failed within the timeout budget. Surface the original HTTP
+                // error and DO NOT raise isBleDegraded (no traffic was served).
+                NetworkResult.Error(e.toUserMessage())
+            } else {
+                try {
+                    val parsed = gson.fromJson<T>(json, type)
+                    _isBleDegraded.value = true
+                    // I2: emit a one-shot degradation event so the reader
+                    // re-shows the 3-second badge on EVERY BLE-served request,
+                    // not just the first one after the value flips true.
+                    // tryEmit is safe here: extraBufferCapacity = 1 guarantees
+                    // no blocking; a slow consumer simply drops an emission it
+                    // has not yet collected (acceptable — the next request
+                    // re-emits).
+                    _bleDegradedEvents.tryEmit(Unit)
+                    NetworkResult.Success(parsed)
+                } catch (parseErr: Exception) {
+                    // JSON deserialization failed — surface the original HTTP
+                    // error rather than a misleading parse message.
+                    NetworkResult.Error(e.toUserMessage())
+                }
+            }
         }
-        // Suspend-bridge the BLE chunk cycle: reset + dispatch CMD_BOOK_CHAPTER_REQ
-        // + AWAIT chunk arrival on the GATT callback thread, bounded by the
-        // engine's per-frame timeout × retry budget. Returns null on timeout
-        // (preserve spec §3.2: surface the original HTTP error on BLE
-        // exhaustion rather than an empty chapter). `path`/`index` are passed
-        // for logging/diagnostics and bound into the dispatch lambda.
-        val blocks = bleTransportFallback.fetchChapterBlocks(path, index) {
-            bleController.requestChapter(path, index)
-        }
-        if (blocks == null) {
-            // BLE link was CONNECTED but no payload arrived / reassembly failed
-            // within the timeout budget. Surface the original HTTP error and
-            // DO NOT raise isBleDegraded (no traffic was actually carried).
-            return NetworkResult.Error(httpError.toUserMessage())
-        }
-        _isBleDegraded.value = true
-        // I2: emit a one-shot degradation event so the reader re-shows the
-        // 3-second badge on EVERY BLE-served chapter, not just the first one
-        // after the value flips true. tryEmit is safe here: extraBufferCapacity
-        // = 1 guarantees no blocking; a slow consumer simply drops an emission
-        // it has not yet collected (acceptable — the next chapter re-emits).
-        _bleDegradedEvents.tryEmit(Unit)
-        // BookChapterContent.title is unknown over the BLE chunk stream (the
-        // wire format carries only the Block list, per spec §3.2). The reader
-        // already has the title from getBookInfo, so empty is acceptable here.
-        //
-        // KNOWN LIMITATION (M3 / out-of-scope I3): the BLE chunk wire format
-        // does not currently carry the chapter title, so it is left blank on
-        // the BLE path. A future wire-format extension (e.g. a TitleLen +
-        // Title UTF-8 field appended to the first CMD_BOOK_CHAPTER_CHUNK, or a
-        // dedicated CMD_BOOK_INFO chunk) is needed to populate it. Until then
-        // the reader renders the chapter with the title it already holds from
-        // getBookInfo.
-        return NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))
     }
 
     /**

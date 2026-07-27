@@ -1,8 +1,5 @@
 package com.juziss.localmediahub.ble
 
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
-import com.juziss.localmediahub.data.Block
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Singleton
@@ -11,7 +8,7 @@ import javax.inject.Singleton
  * BLE fallback transport reassembly engine.
  *
  * Sits behind [BlePeripheralManager]'s write callback and reassembles the
- * chunked Block JSON that the PC (Central) streams over the GATT Command
+ * chunked JSON byte stream that the PC (Central) sends over the GATT Command
  * characteristic when Wi-Fi is down (spec §3.2 / §1.2).
  *
  * Responsibilities:
@@ -20,8 +17,9 @@ import javax.inject.Singleton
  *     `[CmdID 1B][TotalChunks 2B BE][ChunkIndex 2B BE][TotalBlocks 2B BE]
  *      [ChunkLen 2B BE][Chunk Bytes]`.
  *  3. Accumulate chunk bytes per [ChunkIndex] until all [TotalChunks] are
- *     present, then deserialize the concatenated UTF-8 bytes as a JSON array
- *     of [Block].
+ *     present, then return the concatenated UTF-8 bytes as a String via
+ *     [fetchJson] (the caller does Gson deserialization — the engine itself
+ *     is payload-format-agnostic).
  *  4. Track a 3-attempt retry budget for timed-out frames (spec §3.2:
  *     "单帧 > 3 秒超时重发，连续 3 次失败提示异常"). Time is read from the
  *     injectable [nowMs] so the timeout path is unit-testable without real
@@ -33,16 +31,16 @@ import javax.inject.Singleton
  * This class is thread-safe: all mutable state ([chunkBuffer], [totalChunks],
  * [attemptsUsed], [exhausted], [lastFrameAtMs], [completionHook]) is guarded
  * by the instance monitor (`synchronized(this)`). The suspend bridge
- * [fetchChapterBlocks] is safe to call concurrently with [onFrameReceived]
+ * [fetchJson] is safe to call concurrently with [onFrameReceived]
  * arriving on the GATT binder thread.
  *
- * Lock discipline: [fetchChapterBlocks] registers its completion hook and
- * dispatches the chapter request UNDER the lock, then RELEASES the lock
+ * Lock discipline: [fetchJson] registers its completion hook and
+ * dispatches the request UNDER the lock, then RELEASES the lock
  * before awaiting the deferred result — [onFrameReceived] only needs the lock
  * briefly to insert the chunk + invoke the hook, so the await path never
  * deadlocks waiting for the lock holder. The completion hook itself is
  * invoked OUTSIDE [onFrameReceived]'s synchronized block (it re-enters via
- * [assembleBlocks]) to avoid self-deadlock on the JVM monitor.
+ * [assembleBytes]) to avoid self-deadlock on the JVM monitor.
  *
  * @param nowMs clock used by the timeout logic. Defaults to wall-clock time;
  *   inject a deterministic value in tests.
@@ -56,14 +54,12 @@ class BleTransportFallback(
     private val frameTimeoutMs: Long = DEFAULT_FRAME_TIMEOUT_MS,
     private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
 ) {
-    private val gson = Gson()
-    private val blockListType = object : TypeToken<List<Block>>() {}.type
 
     /**
      * Guards every mutable field below. Held briefly by [onFrameReceived]
      * (decode + chunk insert + hook capture) and by the prologue/epilogue of
-     * [fetchChapterBlocks] (reset + hook registration + dispatch setup +
-     * assemble). NEVER held across `deferred.await()` — see fetchChapterBlocks.
+     * [fetchJson] (reset + hook registration + dispatch setup +
+     * assemble). NEVER held across `deferred.await()` — see fetchJson.
      * Plain JVM monitor (`synchronized(this)`) is used instead of
      * [kotlinx.coroutines.sync.Mutex] so non-suspend callers (the GATT
      * binder thread invoking [onFrameReceived]) can acquire it without a
@@ -100,14 +96,14 @@ class BleTransportFallback(
     private var exhausted: Boolean = false
 
     /**
-     * Completion hook registered by [fetchChapterBlocks] so the BLE callback
+     * Completion hook registered by [fetchJson] so the BLE callback
      * path can wake the suspending caller the moment the buffer becomes
-     * complete. Non-null only while a [fetchChapterBlocks] call is in flight.
+     * complete. Non-null only while a [fetchJson] call is in flight.
      * [onFrameReceived] invokes it after inserting a chunk if the buffer just
      * became complete (`chunkBuffer.size == totalChunks`).
      *
      * Single-threaded contract: the BLE callback and the suspend caller are
-     * expected to drive one chapter cycle at a time (see class doc).
+     * expected to drive one fetch cycle at a time (see class doc).
      */
     private var completionHook: (() -> Unit)? = null
 
@@ -117,11 +113,11 @@ class BleTransportFallback(
      * Returns silently on any decode error (bad header, wrong CmdID, length
      * mismatch, duplicate index). On a clean CHUNK the bytes are appended to
      * [chunkBuffer]; once [totalChunks] distinct indices are present the next
-     * call to [assembleBlocks] will return the full List<Block>.
+     * call to [assembleBytes] will return the full reassembled byte array.
      *
      * Thread-safety: mutable state is mutated under the instance monitor
      * ([stateLock]). The completion hook (if any) is captured under the lock
-     * and invoked OUTSIDE the lock so its body (which calls [assembleBlocks]
+     * and invoked OUTSIDE the lock so its body (which calls [assembleBytes]
      * → re-acquires the lock) stays predictable.
      */
     fun onFrameReceived(frame: ByteArray) {
@@ -141,7 +137,7 @@ class BleTransportFallback(
         if (index < 0 || index >= total) return
 
         // Capture the hook to invoke AFTER releasing the lock. Null when no
-        // [fetchChapterBlocks] is in flight, or when this frame should not
+        // [fetchJson] is in flight, or when this frame should not
         // wake the caller (incomplete buffer, no state transition).
         var hookToFire: (() -> Unit)? = null
         synchronized(stateLock) {
@@ -188,7 +184,7 @@ class BleTransportFallback(
             }
         }
         // Invoke the hook outside the lock for predictability: its body calls
-        // assembleBlocks, which re-acquires stateLock. (JVM monitors are
+        // assembleBytes, which re-acquires stateLock. (JVM monitors are
         // reentrant so this would not actually deadlock, but keeping the hook
         // invocation lock-free bounds the lock hold time.)
         hookToFire?.invoke()
@@ -196,85 +192,28 @@ class BleTransportFallback(
 
     /**
      * Once all [totalChunks] chunks have been accumulated, concatenate them in
-     * index order and deserialize the result as a JSON array of [Block].
+     * index order and return the raw reassembled bytes. Returns null when the
+     * buffer is incomplete or empty. Safe to call repeatedly; does not mutate
+     * state.
      *
-     * Returns null when the buffer is incomplete, empty, or the JSON failed to
-     * parse. Safe to call repeatedly; does not mutate state on success.
-     *
-     * Task 3: retained for backward compat with [fetchChapterBlocks] callers
-     * (MediaRepository until Task 4). New code should use [fetchJson] and
-     * deserialize at the call site.
+     * Task 4: the JSON deserialization that used to live in the deleted
+     * `assembleBlocks()` moved to the public entry point ([fetchJson] →
+     * String) so the engine is payload-format-agnostic.
      */
-    @Deprecated(
-        "Use fetchJson(...) + caller-side Gson. Removed once Task 4 migrates MediaRepository.",
-        ReplaceWith("fetchJson(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index)"),
-    )
-    fun assembleBlocks(): List<Block>? {
-        val bytes = assembleBytes() ?: return null
-        val json = String(bytes, Charsets.UTF_8)
-        return try {
-            gson.fromJson<List<Block>>(json, blockListType)
-        } catch (t: Throwable) {
-            null
-        }
-    }
+    private fun assembleBytes(): ByteArray? = synchronized(stateLock) { assembleBytesLocked() }
 
-    /**
-     * Task 3 entry point. Drives ONE complete chapter fetch cycle as a
-     * suspending call so the repository can AWAIT asynchronous chunk arrival
-     * instead of polling [assembleBlocks] synchronously (which returns null
-     * on real hardware because chunks land on the GATT callback thread some
-     * time after `requestChapter` returns).
-     *
-     * Cycle:
-     *  1. `reset()` — clear stale buffer / attempt state from any prior cycle.
-     *  2. Register an internal completion hook on this engine that fires the
-     *     moment [chunkBuffer] fills (or the engine exhausts its retry
-     *     budget). The hook completes [deferred].
-     *  3. Call [dispatch] — the repository binds this to
-     *     `bleController.requestChapter(path, index)`. The fake in unit tests
-     *     triggers [onFrameReceived] synchronously inside `dispatch`; the
-     *     production GATT callback triggers it asynchronously. Both paths
-     *     work because the hook fires from within [onFrameReceived] either way.
-     *  4. `withTimeoutOrNull(timeoutMs) { deferred.await() }` — returns null
-     *     on timeout (preserves the spec's "surface HTTP error on BLE
-     *     exhaustion" behavior). On success returns [assembleBlocks]'s result
-     *     (the reassembled `List<Block>`, or null if JSON parsing failed).
-     *
-     * Single-coroutine contract: this function is NOT reentrant; only one
-     * chapter cycle may be in flight at a time. The repository's
-     * [com.juziss.localmediahub.data.MediaRepository.tryBleFailover] is the
-     * sole caller and is itself single-threaded per chapter request.
-     *
-     * @param dispatch the side-effecting lambda that asks the Central to
-     *   stream the chapter (e.g. `bleController.requestChapter(path, index)`).
-     *   Invoked AFTER the completion hook is registered so any chunks the
-     *   Central returns — synchronously or asynchronously — are observed.
-     *   Placed LAST so callers can use trailing-lambda syntax.
-     * @param timeoutMs overall deadline. Defaults to
-     *   `frameTimeoutMs * maxAttempts` to mirror the engine's own retry
-     *   budget; coerce to at least one [frameTimeoutMs] so a misconfigured
-     *   small `maxAttempts` still leaves room for at least one frame.
-     */
-    @Deprecated(
-        "Use fetchJson(endpoint, path, index). Task 4 will migrate MediaRepository; removed afterward.",
-        ReplaceWith("fetchJson(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index)"),
-    )
-    @Suppress("UNUSED_PARAMETER")
-    suspend fun fetchChapterBlocks(
-        path: String,
-        index: Int,
-        timeoutMs: Long = (frameTimeoutMs * maxAttempts).coerceAtLeast(frameTimeoutMs),
-        dispatch: () -> Unit,
-    ): List<Block>? {
-        val bytes = fetchBytes(timeoutMs, dispatch) ?: return null
-        // Re-deserialize the UTF-8 bytes as a JSON array of Block. Errors here
-        // surface as null (caller treats it as a BLE failure).
-        return try {
-            gson.fromJson<List<Block>>(String(bytes, Charsets.UTF_8), blockListType)
-        } catch (t: Throwable) {
-            null
+    private fun assembleBytesLocked(): ByteArray? {
+        if (chunkBuffer.isEmpty() || chunkBuffer.size < totalChunks) return null
+        // Concatenate in ascending ChunkIndex order, NOT insertion order:
+        // chunks may legitimately arrive out of sequence from the radio.
+        val ordered = chunkBuffer.entries.sortedBy { it.key }
+        val assembled = ByteArray(ordered.sumOf { it.value.size })
+        var offset = 0
+        for ((_, chunk) in ordered) {
+            System.arraycopy(chunk, 0, assembled, offset, chunk.size)
+            offset += chunk.size
         }
+        return assembled
     }
 
     /**
@@ -283,10 +222,6 @@ class BleTransportFallback(
      * The caller is responsible for Gson-deserializing the returned JSON
      * (e.g. into List<Block>, Folder lists, BookInfo, …) — this layer no longer
      * hard-codes the Block type.
-     *
-     * Replaces the chapter-specific [fetchChapterBlocks] with a generalized
-     * endpoint-routed fetch. The chapter path is preserved as
-     * `fetchJson(ENDPOINT_BOOK_CHAPTER, path, index)`.
      *
      * Single-coroutine contract: this function is NOT reentrant; only one
      * fetch cycle may be in flight at a time. The repository is the sole
@@ -318,9 +253,8 @@ class BleTransportFallback(
      * Shared suspend-bridge core: reset → register completion hook → dispatch
      * → await reassembled bytes via withTimeoutOrNull. Returns the raw
      * concatenated chunk bytes, or null on timeout / dispatch failure /
-     * incomplete buffer. Both [fetchChapterBlocks] (Gson → List<Block>) and
-     * [fetchJson] (UTF-8 → String) delegate here so the lock discipline lives
-     * in exactly one place.
+     * incomplete buffer. [fetchJson] (UTF-8 → String) delegates here so the
+     * lock discipline lives in exactly one place.
      *
      * Lock discipline (unchanged from the prior concurrency fix): the
      * completion hook is registered UNDER the lock and dispatch happens
@@ -377,32 +311,6 @@ class BleTransportFallback(
         // thread) can acquire it freely to deliver the chunk that completes
         // the deferred.
         return withTimeoutOrNull(timeoutMs) { deferred.await() }
-    }
-
-    /**
-     * Concatenate the buffered chunks in ascending ChunkIndex order and return
-     * the raw reassembled bytes (no JSON parsing). Returns null when the
-     * buffer is incomplete or empty. Safe to call repeatedly; does not mutate
-     * state.
-     *
-     * Task 3 refactor: the JSON deserialization that used to live here moved
-     * to the public entry points ([fetchChapterBlocks] → List<Block>,
-     * [fetchJson] → String) so the engine is payload-format-agnostic.
-     */
-    private fun assembleBytes(): ByteArray? = synchronized(stateLock) { assembleBytesLocked() }
-
-    private fun assembleBytesLocked(): ByteArray? {
-        if (chunkBuffer.isEmpty() || chunkBuffer.size < totalChunks) return null
-        // Concatenate in ascending ChunkIndex order, NOT insertion order:
-        // chunks may legitimately arrive out of sequence from the radio.
-        val ordered = chunkBuffer.entries.sortedBy { it.key }
-        val assembled = ByteArray(ordered.sumOf { it.value.size })
-        var offset = 0
-        for ((_, chunk) in ordered) {
-            System.arraycopy(chunk, 0, assembled, offset, chunk.size)
-            offset += chunk.size
-        }
-        return assembled
     }
 
     /** True once the retry budget has been exhausted by consecutive timeouts. */
