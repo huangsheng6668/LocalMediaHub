@@ -335,9 +335,10 @@ class MediaRepository @Inject constructor(
      * successfully reassembles a block list; otherwise returns the original
      * HTTP error so the reader surfaces the underlying network failure.
      *
-     * Honors the Task 2 implementer's note: [BleTransportFallback.reset] must
-     * be invoked before each chapter request because `lastFrameAtMs` is
-     * seeded at singleton construction.
+     * Honors the Task 2 implementer's note: [BleTransportFallback] resets its
+     * `lastFrameAtMs` (seeded at singleton construction) on each cycle — that
+     * reset is now driven internally by `fetchChapterBlocks` so this method
+     * simply awaits the reassembled blocks.
      */
     private suspend fun tryBleFailover(
         path: String,
@@ -347,16 +348,19 @@ class MediaRepository @Inject constructor(
         if (bleController.connectionState.value != BleConnState.CONNECTED) {
             return NetworkResult.Error(httpError.toUserMessage())
         }
-        // Reset the reassembly engine before issuing the request — see note above.
-        bleTransportFallback.reset()
-        // Dispatch CMD_BOOK_CHAPTER_REQ over GATT. The Central streams back
-        // CHUNK frames which BleTransportFallback accumulates via its
-        // onPayloadReceived callback (wired in BleController.init).
-        bleController.requestChapter(path, index)
-        val blocks = bleTransportFallback.assembleBlocks()
+        // Suspend-bridge the BLE chunk cycle: reset + dispatch CMD_BOOK_CHAPTER_REQ
+        // + AWAIT chunk arrival on the GATT callback thread, bounded by the
+        // engine's per-frame timeout × retry budget. Returns null on timeout
+        // (preserve spec §3.2: surface the original HTTP error on BLE
+        // exhaustion rather than an empty chapter). `path`/`index` are passed
+        // for logging/diagnostics and bound into the dispatch lambda.
+        val blocks = bleTransportFallback.fetchChapterBlocks(path, index) {
+            bleController.requestChapter(path, index)
+        }
         if (blocks == null) {
-            // BLE link was CONNECTED but no payload arrived / reassembly failed.
-            // Surface the original HTTP error rather than an empty chapter.
+            // BLE link was CONNECTED but no payload arrived / reassembly failed
+            // within the timeout budget. Surface the original HTTP error and
+            // DO NOT raise isBleDegraded (no traffic was actually carried).
             return NetworkResult.Error(httpError.toUserMessage())
         }
         _isBleDegraded.value = true

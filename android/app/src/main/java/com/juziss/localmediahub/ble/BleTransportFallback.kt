@@ -3,6 +3,8 @@ package com.juziss.localmediahub.ble
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.juziss.localmediahub.data.Block
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Singleton
 
 /**
@@ -29,7 +31,8 @@ import javax.inject.Singleton
  * `server/internal/ble/protocol.go` (Task 1, commit 198da22).
  *
  * This class is not thread-safe; callers (the BLE callback) are expected to
- * dispatch to a single thread or synchronize externally.
+ * dispatch to a single thread or synchronize externally. The suspend bridge
+ * [fetchChapterBlocks] is safe to call from a single coroutine at a time.
  *
  * @param nowMs clock used by the timeout logic. Defaults to wall-clock time;
  *   inject a deterministic value in tests.
@@ -75,6 +78,18 @@ class BleTransportFallback(
     private var exhausted: Boolean = false
 
     /**
+     * Completion hook registered by [fetchChapterBlocks] so the BLE callback
+     * path can wake the suspending caller the moment the buffer becomes
+     * complete. Non-null only while a [fetchChapterBlocks] call is in flight.
+     * [onFrameReceived] invokes it after inserting a chunk if the buffer just
+     * became complete (`chunkBuffer.size == totalChunks`).
+     *
+     * Single-threaded contract: the BLE callback and the suspend caller are
+     * expected to drive one chapter cycle at a time (see class doc).
+     */
+    private var completionHook: (() -> Unit)? = null
+
+    /**
      * Ingest one raw physical frame as delivered by the GATT write callback.
      *
      * Returns silently on any decode error (bad header, wrong CmdID, length
@@ -110,6 +125,12 @@ class BleTransportFallback(
                 totalChunks = 0
                 totalBlocks = 0
                 lastFrameAtMs = now
+                // Wake the suspending caller (if any) so it observes the
+                // timeout/exhaustion rather than waiting on its own deadline.
+                // The hook is cleared first so its body cannot re-register.
+                val hook = completionHook
+                completionHook = null
+                hook?.invoke()
                 return
             }
         }
@@ -126,6 +147,13 @@ class BleTransportFallback(
 
         // De-dupe: a retransmitted index is silently dropped (idempotent).
         chunkBuffer.putIfAbsent(index, payload.copyOfRange(9, 9 + chunkLen))
+
+        // If this chunk just completed the buffer, wake the suspending caller
+        // (if any). `putIfAbsent` does not mutate size for duplicates, so this
+        // fires exactly once per complete batch.
+        if (chunkBuffer.size == totalChunks) {
+            completionHook?.invoke()
+        }
     }
 
     /**
@@ -155,14 +183,83 @@ class BleTransportFallback(
     }
 
     /**
-     * Task 3 entry point. Not implemented in this task; returns null so the
-     * repository failover can decide how to surface "no BLE data yet".
+     * Task 3 entry point. Drives ONE complete chapter fetch cycle as a
+     * suspending call so the repository can AWAIT asynchronous chunk arrival
+     * instead of polling [assembleBlocks] synchronously (which returns null
+     * on real hardware because chunks land on the GATT callback thread some
+     * time after `requestChapter` returns).
      *
-     * Real implementation will coordinate with [BleController] to emit a
-     * CMD_BOOK_CHAPTER_REQ Notify and wait for chunks to arrive here.
+     * Cycle:
+     *  1. `reset()` — clear stale buffer / attempt state from any prior cycle.
+     *  2. Register an internal completion hook on this engine that fires the
+     *     moment [chunkBuffer] fills (or the engine exhausts its retry
+     *     budget). The hook completes [deferred].
+     *  3. Call [dispatch] — the repository binds this to
+     *     `bleController.requestChapter(path, index)`. The fake in unit tests
+     *     triggers [onFrameReceived] synchronously inside `dispatch`; the
+     *     production GATT callback triggers it asynchronously. Both paths
+     *     work because the hook fires from within [onFrameReceived] either way.
+     *  4. `withTimeoutOrNull(timeoutMs) { deferred.await() }` — returns null
+     *     on timeout (preserves the spec's "surface HTTP error on BLE
+     *     exhaustion" behavior). On success returns [assembleBlocks]'s result
+     *     (the reassembled `List<Block>`, or null if JSON parsing failed).
+     *
+     * Single-coroutine contract: this function is NOT reentrant; only one
+     * chapter cycle may be in flight at a time. The repository's
+     * [com.juziss.localmediahub.data.MediaRepository.tryBleFailover] is the
+     * sole caller and is itself single-threaded per chapter request.
+     *
+     * @param dispatch the side-effecting lambda that asks the Central to
+     *   stream the chapter (e.g. `bleController.requestChapter(path, index)`).
+     *   Invoked AFTER the completion hook is registered so any chunks the
+     *   Central returns — synchronously or asynchronously — are observed.
+     *   Placed LAST so callers can use trailing-lambda syntax.
+     * @param timeoutMs overall deadline. Defaults to
+     *   `frameTimeoutMs * maxAttempts` to mirror the engine's own retry
+     *   budget; coerce to at least one [frameTimeoutMs] so a misconfigured
+     *   small `maxAttempts` still leaves room for at least one frame.
      */
     @Suppress("UNUSED_PARAMETER")
-    fun fetchChapterBlocks(path: String, index: Int): List<Block>? = null
+    suspend fun fetchChapterBlocks(
+        path: String,
+        index: Int,
+        timeoutMs: Long = (frameTimeoutMs * maxAttempts).coerceAtLeast(frameTimeoutMs),
+        dispatch: () -> Unit,
+    ): List<Block>? {
+        // Clear stale buffer/attempt state from any prior cycle and detach a
+        // leftover hook (defensive — [reset] also clears it).
+        reset()
+
+        val deferred = CompletableDeferred<List<Block>?>()
+        // Hook body runs inside onFrameReceived the moment the buffer fills
+        // or the engine exhausts its retry budget. It computes the
+        // reassembled blocks once and completes the deferred; the hook is
+        // then cleared so the next cycle starts clean.
+        completionHook = {
+            val blocks = assembleBlocks()
+            completionHook = null
+            if (!deferred.isCompleted) {
+                deferred.complete(blocks)
+            }
+        }
+
+        // Dispatch the chapter request AFTER the hook is in place so any
+        // chunk arrival — synchronous (test fake) or asynchronous (real
+        // GATT) — is observed and drives the deferred.
+        try {
+            dispatch()
+        } catch (t: Throwable) {
+            // If dispatch itself threw (e.g. BLE notify failed), unblock the
+            // deferred with null so the caller surfaces the HTTP error
+            // instead of hanging until the timeout.
+            completionHook = null
+            return null
+        }
+
+        // If dispatch completed the buffer synchronously (test path), the
+        // hook already completed the deferred — await returns immediately.
+        return withTimeoutOrNull(timeoutMs) { deferred.await() }
+    }
 
     /** True once the retry budget has been exhausted by consecutive timeouts. */
     fun isExhausted(): Boolean = exhausted
@@ -182,6 +279,9 @@ class BleTransportFallback(
         lastFrameAtMs = nowMs()
         attemptsUsed = 0
         exhausted = false
+        // Detach any in-flight completion hook so a stale suspending caller
+        // cannot be woken by a new cycle's chunk arrivals.
+        completionHook = null
     }
 
     private fun readUint16BE(buf: ByteArray, offset: Int): Int =

@@ -7,8 +7,11 @@ import com.juziss.localmediahub.ble.BleProtocol
 import com.juziss.localmediahub.ble.BleTransportFallback
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.ServerConfig
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,10 +33,19 @@ import org.junit.Test
  * an [java.io.IOException]). No HTTP mocking framework is needed. The BLE
  * path uses a [SimulatingPeripheralManager] whose `notifyPayload` (called by
  * [BleController.requestChapter] to dispatch CMD_BOOK_CHAPTER_REQ) feeds the
- * prebuilt CHUNK payloads straight back into the registered payload
- * callback, exactly as a real Central would when it responds to the request
- * over GATT. [BleController] then routes those CHUNK payloads into the same
+ * prebuilt CHUNK payloads back into the registered payload callback, exactly
+ * as a real Central would when it responds to the request over GATT.
+ * [BleController] then routes those CHUNK payloads into the same
  * [BleTransportFallback] instance the repository reads from.
+ *
+ * Async discipline (Finding #2 fix): the fake ASYNCHRONOUSLY posts each
+ * CHUNK payload to the registered callback via `scope.launch { delay(10);
+ * cb(chunk) }` — it does NOT deliver them inline inside `notifyPayload`.
+ * This mirrors real GATT hardware, where `onCharacteristicWriteRequest`
+ * fires later on the GATT callback thread. As a result this test ONLY passes
+ * if [MediaRepository.tryBleFailover] correctly AWAITS chunk arrival instead
+ * of polling synchronously (the old code called `assembleBlocks()` before
+ * any chunk could arrive and always got null).
  */
 class MediaRepositoryFailoverTest {
 
@@ -41,9 +53,25 @@ class MediaRepositoryFailoverTest {
      * Fake [BlePeripheralManager] that simulates the Central (PC server)
      * responding to a CMD_BOOK_CHAPTER_REQ notify by writing the prebuilt
      * CHUNK payloads back through the registered payload callback.
+     *
+     * Delivery is asynchronous: each chunk is dispatched to [scope] via
+     * `launch { delay(chunkDelayMs); cb(chunk) }` so the test exercises the
+     * suspend-await bridge in [MediaRepository.tryBleFailover]. A real
+     * BluetoothGattServer delivers chunks on its callback thread with
+     * indeterminate timing; modeling that here ensures the test fails on any
+     * future regression that re-introduces synchronous polling.
+     *
+     * @param scope the [runTest] scope that schedules chunk delivery. Must
+     *   outlive the `notifyPayload` call (it does: [runTest] waits for all
+     *   child coroutines to complete before returning).
+     * @param chunkDelayMs virtual-time delay before each chunk is delivered.
+     *   Default 10 ms is enough to ensure the delivery does NOT happen
+     *   inline inside `notifyPayload`.
      */
     private class SimulatingPeripheralManager(
         private val responsePayloads: List<ByteArray>,
+        private val scope: CoroutineScope,
+        private val chunkDelayMs: Long = 10L,
     ) : BlePeripheralManager {
         var advertising = false
         private var cb: ((ByteArray) -> Unit)? = null
@@ -56,11 +84,20 @@ class MediaRepositoryFailoverTest {
             // GATT (notifyPayload takes an already frame-encoded payload, per
             // the existing echo path in BleController.init). Decode it to read
             // the CmdID; on a chapter request, simulate the Central streaming
-            // back each CHUNK payload via the registered callback.
+            // back each CHUNK payload via the registered callback — but NOT
+            // inline. Real GATT hardware delivers these on a callback thread
+            // some time later, so the fake posts each chunk to the test scope
+            // with a small delay. The repository's suspend bridge must await
+            // the resulting frame arrivals.
             val decoded = BleProtocol.decodeFrame(payload)
             if (decoded != null && decoded.payload.isNotEmpty() &&
                 decoded.payload[0] == BleProtocol.CMD_BOOK_CHAPTER_REQ) {
-                responsePayloads.forEach { cb?.invoke(it) }
+                responsePayloads.forEach { chunk ->
+                    scope.launch {
+                        delay(chunkDelayMs)
+                        cb?.invoke(chunk)
+                    }
+                }
             }
             return true
         }
@@ -90,13 +127,20 @@ class MediaRepositoryFailoverTest {
         return payload
     }
 
-    /** A repository + controller whose HTTP base URL is unreachable and BLE is [state]. */
+    /**
+     * A repository + controller whose HTTP base URL is unreachable and BLE is
+     * [state]. The fake peripheral posts chunk payloads to [scope] so that
+     * delivery happens asynchronously from the `notifyPayload` call site
+     * (mirrors real GATT callback timing).
+     */
     private fun repoWithBle(
+        scope: CoroutineScope,
         state: MutableStateFlow<BleConnState>,
         responsePayloads: List<ByteArray>,
+        chunkDelayMs: Long = 10L,
+        fallback: BleTransportFallback = BleTransportFallback(),
     ): MediaRepository {
-        val fallback = BleTransportFallback()
-        val peripheral = SimulatingPeripheralManager(responsePayloads)
+        val peripheral = SimulatingPeripheralManager(responsePayloads, scope, chunkDelayMs)
         val controller = BleController(
             peripheralManager = peripheral,
             bleTransportFallback = fallback,
@@ -121,10 +165,10 @@ class MediaRepositoryFailoverTest {
     }
 
     @Test
-    fun fallsBackToBleWhenHttpFailsAndBleConnected() = runBlocking {
+    fun fallsBackToBleWhenHttpFailsAndBleConnected() = runTest {
         val json = "[{\"type\":\"text\",\"value\":\"ble-body\"}]".toByteArray(Charsets.UTF_8)
         val payloads = listOf(chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json))
-        val repo = repoWithBle(MutableStateFlow(BleConnState.CONNECTED), payloads)
+        val repo = repoWithBle(this, MutableStateFlow(BleConnState.CONNECTED), payloads)
 
         val result = repo.getBookChapter(path = "/book.txt", index = 0)
 
@@ -136,10 +180,10 @@ class MediaRepositoryFailoverTest {
     }
 
     @Test
-    fun doesNotFailOverWhenBleDisconnected() = runBlocking {
+    fun doesNotFailOverWhenBleDisconnected() = runTest {
         val json = "[{\"type\":\"text\",\"value\":\"ble-body\"}]".toByteArray(Charsets.UTF_8)
         val payloads = listOf(chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json))
-        val repo = repoWithBle(MutableStateFlow(BleConnState.DISCONNECTED), payloads)
+        val repo = repoWithBle(this, MutableStateFlow(BleConnState.DISCONNECTED), payloads)
 
         val result = repo.getBookChapter(path = "/book.txt", index = 0)
 
@@ -147,6 +191,45 @@ class MediaRepositoryFailoverTest {
         assertTrue("expected Error result when failover skipped, got $result",
             result is NetworkResult.Error)
         assertFalse("isBleDegraded must stay false when failover did not fire",
+            repo.isBleDegraded.value)
+    }
+
+    /**
+     * Finding #2 timeout contract: when BLE is CONNECTED but the Central
+     * never streams any chunk back (empty payload list), the suspend bridge
+     * in [BleTransportFallback.fetchChapterBlocks] must time out and the
+     * repository must surface the ORIGINAL HTTP error (not an empty chapter,
+     * not Success). The degradation flag must also stay false because no BLE
+     * traffic was actually served.
+     *
+     * Uses a real wall-clock timeout (not runTest's virtual time) by
+     * constructing [BleTransportFallback] with a small per-frame timeout and
+     * small max-attempts so the test stays fast while still exercising the
+     * production timeout math (`frameTimeoutMs * maxAttempts`).
+     */
+    @Test
+    fun returnsOriginalHttpErrorWhenBleChunksNeverArrive() = runTest {
+        // No response payloads — the Central never answers. Use a short
+        // per-frame timeout + small retry budget so the test stays fast
+        // while still exercising the production timeout math
+        // (`frameTimeoutMs * maxAttempts`).
+        val fallback = BleTransportFallback(
+            frameTimeoutMs = 100L,
+            maxAttempts = 1,
+        )
+        val repo = repoWithBle(
+            scope = this,
+            state = MutableStateFlow(BleConnState.CONNECTED),
+            responsePayloads = emptyList(),
+            fallback = fallback,
+        )
+
+        val result = repo.getBookChapter(path = "/book.txt", index = 0)
+
+        assertFalse("must NOT return Success when BLE times out", result is NetworkResult.Success)
+        assertTrue("expected Error result when BLE timed out, got $result",
+            result is NetworkResult.Error)
+        assertFalse("isBleDegraded must stay false when BLE timed out",
             repo.isBleDegraded.value)
     }
 }
