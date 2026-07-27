@@ -13,12 +13,24 @@ import (
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/models"
 	"github.com/localmediahub/server/internal/service"
+	"github.com/localmediahub/server/internal/service/bookparser"
 )
 
 // ErrUnknownEndpoint is returned by bleApiProvider.HandleBleRequest when the
 // decoded endpoint byte does not match any of the Endpoint* constants defined
 // in protocol.go.
 var ErrUnknownEndpoint = errors.New("ble: unknown endpoint")
+
+// bookService is the narrow interface bleApiProvider consumes from
+// service.BookService. Declared as an interface (not the concrete pointer) so
+// unit tests can inject a recording stub and assert the path-validation gate
+// runs BEFORE BookService is consulted. The production *service.BookService
+// satisfies this interface; NewBleApiProvider accepts the concrete type to
+// keep its call site in server.go unchanged.
+type bookService interface {
+	GetBook(path string) (*bookparser.Book, error)
+	GetChapterBlocks(ctx context.Context, path string, idx int, clientIP string) ([]bookparser.Block, error)
+}
 
 // bleApiProvider adapts existing service/handler data-assembly logic into the
 // BLE ApiProvider contract. It returns each endpoint's payload as raw JSON
@@ -41,13 +53,20 @@ var ErrUnknownEndpoint = errors.New("ble: unknown endpoint")
 //     handler for full-fidelity browsing.
 type bleApiProvider struct {
 	cfg   *config.Config
-	books *service.BookService
+	books bookService
 }
 
 // NewBleApiProvider wires the provider with the injected config (for roots +
 // extension lists) and BookService (for EndpointBookChapter / EndpointBookInfo).
 // Both arguments must be non-nil.
 func NewBleApiProvider(cfg *config.Config, books *service.BookService) ApiProvider {
+	return newBleApiProvider(cfg, books)
+}
+
+// newBleApiProvider is the test-friendly constructor that accepts the
+// bookService interface directly, so unit tests can inject a recording stub
+// and assert the path-validation gate runs before BookService is consulted.
+func newBleApiProvider(cfg *config.Config, books bookService) ApiProvider {
 	return &bleApiProvider{cfg: cfg, books: books}
 }
 
@@ -59,7 +78,11 @@ func NewBleApiProvider(cfg *config.Config, books *service.BookService) ApiProvid
 func (p *bleApiProvider) HandleBleRequest(ctx context.Context, endpoint byte, path string, index int) ([]byte, error) {
 	switch endpoint {
 	case EndpointBookChapter:
-		blocks, err := p.books.GetChapterBlocks(ctx, path, index, "")
+		resolved, err := p.validateBookPath(path)
+		if err != nil {
+			return nil, err
+		}
+		blocks, err := p.books.GetChapterBlocks(ctx, resolved, index, "")
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +105,11 @@ func (p *bleApiProvider) HandleBleRequest(ctx context.Context, endpoint byte, pa
 		}
 		return json.Marshal(result)
 	case EndpointBookInfo:
-		book, err := p.books.GetBook(path)
+		resolved, err := p.validateBookPath(path)
+		if err != nil {
+			return nil, err
+		}
+		book, err := p.books.GetBook(resolved)
 		if err != nil {
 			return nil, err
 		}
@@ -90,6 +117,31 @@ func (p *bleApiProvider) HandleBleRequest(ctx context.Context, endpoint byte, pa
 	default:
 		return nil, ErrUnknownEndpoint
 	}
+}
+
+// validateBookPath applies the same security gate the echo GetBookInfo /
+// GetBookChapter handlers apply: service.ValidateAccessibleMediaPath with the
+// configured scan roots, system allowed roots, and the text-extension
+// allow-list. A path outside roots (traversal or absolute-outside) or a path
+// whose extension is not in cfg.Scan.TextExtensions yields a wrapped error and
+// the caller MUST NOT consult BookService (no file is opened, no metadata is
+// leaked). On success the cleaned, resolved absolute path is returned so the
+// BookService reads exactly the path that was validated.
+func (p *bleApiProvider) validateBookPath(path string) (string, error) {
+	// Copy the slice defensively: ValidateAccessibleMediaPath may mutate the
+	// allowedExtensions argument in some future revision; mirroring the echo
+	// handler's append([]string{}, ...) keeps the shared config slice pristine.
+	allowedExts := append([]string{}, p.cfg.Scan.TextExtensions...)
+	resolved, err := service.ValidateAccessibleMediaPath(
+		path,
+		p.cfg.Scan.GetRoots(),
+		p.cfg.GetSystemAllowedRoots(),
+		allowedExts,
+	)
+	if err != nil {
+		return "", fmt.Errorf("ble: path not accessible: %w", err)
+	}
+	return resolved, nil
 }
 
 // BrowseFolderData resolves path against the configured scan roots, lists the

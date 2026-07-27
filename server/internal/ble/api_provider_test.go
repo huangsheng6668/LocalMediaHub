@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/localmediahub/server/internal/config"
+	"github.com/localmediahub/server/internal/service/bookparser"
 )
 
 // stubApiProvider is a minimal ApiProvider for unit testing the routing layer
@@ -50,7 +53,7 @@ func TestServeApiRequestRoutesEndpointToProvider(t *testing.T) {
 	c, scanner := newCentralWithProvider(stub)
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
 
-	n, err := c.ServeApiRequest(context.Background(), payload, "127.0.0.1")
+	n, err := c.ServeApiRequest(context.Background(), payload)
 	if err != nil {
 		t.Fatalf("ServeApiRequest: %v", err)
 	}
@@ -107,7 +110,7 @@ func TestServeApiRequestRoutesAllEndpoints(t *testing.T) {
 			stub := &stubApiProvider{response: []byte(`{}`)}
 			c, _ := newCentralWithProvider(stub)
 			payload, _ := EncodeApiReqPayload(tc.endpoint, tc.path, tc.index)
-			if _, err := c.ServeApiRequest(context.Background(), payload, "1.2.3.4"); err != nil {
+			if _, err := c.ServeApiRequest(context.Background(), payload); err != nil {
 				t.Fatalf("ServeApiRequest: %v", err)
 			}
 			if len(stub.calls) != 1 {
@@ -129,7 +132,7 @@ func TestServeApiRequestProviderErrorIsSurfaced(t *testing.T) {
 	stub := &stubApiProvider{err: errors.New("boom")}
 	c, scanner := newCentralWithProvider(stub)
 	payload, _ := EncodeApiReqPayload(EndpointBookInfo, "/p", 0)
-	n, err := c.ServeApiRequest(context.Background(), payload, "127.0.0.1")
+	n, err := c.ServeApiRequest(context.Background(), payload)
 	if err == nil {
 		t.Fatalf("expected error surfaced, got nil (n=%d)", n)
 	}
@@ -148,7 +151,7 @@ func TestServeApiRequestRequiresProvider(t *testing.T) {
 	c := NewCentral(scanner)
 	_ = c.Connect(context.Background(), "AA:BB")
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
-	_, err := c.ServeApiRequest(context.Background(), payload, "")
+	_, err := c.ServeApiRequest(context.Background(), payload)
 	if err != ErrNoApiProvider {
 		t.Fatalf("expected ErrNoApiProvider, got %v", err)
 	}
@@ -161,7 +164,7 @@ func TestServeApiRequestRequiresConnection(t *testing.T) {
 	c, _ := newCentralWithProvider(&stubApiProvider{response: []byte(`[]`)})
 	c.Disconnect()
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
-	_, err := c.ServeApiRequest(context.Background(), payload, "")
+	_, err := c.ServeApiRequest(context.Background(), payload)
 	if err != ErrNotConnected {
 		t.Fatalf("expected ErrNotConnected, got %v", err)
 	}
@@ -175,7 +178,7 @@ func TestServeApiRequestRejectsMalformedPayload(t *testing.T) {
 	c, _ := newCentralWithProvider(stub)
 	bad, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
 	bad[0] = byte(CmdEcho) // wrong leading CmdID
-	_, err := c.ServeApiRequest(context.Background(), bad, "")
+	_, err := c.ServeApiRequest(context.Background(), bad)
 	if err != ErrBadCmdID {
 		t.Fatalf("expected ErrBadCmdID, got %v", err)
 	}
@@ -196,7 +199,7 @@ func TestServeApiRequestLargeResponseSplitsChunks(t *testing.T) {
 	stub := &stubApiProvider{response: body}
 	c, scanner := newCentralWithProvider(stub)
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
-	n, err := c.ServeApiRequest(context.Background(), payload, "")
+	n, err := c.ServeApiRequest(context.Background(), payload)
 	if err != nil {
 		t.Fatalf("ServeApiRequest: %v", err)
 	}
@@ -250,7 +253,7 @@ func TestServeApiRequestAbortsOnFirstWriteError(t *testing.T) {
 	_ = c.Connect(context.Background(), "AA:BB")
 
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
-	n, err := c.ServeApiRequest(context.Background(), payload, "")
+	n, err := c.ServeApiRequest(context.Background(), payload)
 	if err == nil {
 		t.Fatalf("expected write error surfaced, got nil (n=%d)", n)
 	}
@@ -267,7 +270,7 @@ func TestServeApiRequestEmptyBodyStillEmitsOneChunk(t *testing.T) {
 	stub := &stubApiProvider{response: []byte{}}
 	c, scanner := newCentralWithProvider(stub)
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
-	n, err := c.ServeApiRequest(context.Background(), payload, "")
+	n, err := c.ServeApiRequest(context.Background(), payload)
 	if err != nil {
 		t.Fatalf("ServeApiRequest: %v", err)
 	}
@@ -276,5 +279,91 @@ func TestServeApiRequestEmptyBodyStillEmitsOneChunk(t *testing.T) {
 	}
 	if len(scanner.written) != 1 {
 		t.Fatalf("expected 1 frame written, got %d", len(scanner.written))
+	}
+}
+
+// recordingBookService is a minimal bookService stub that records every call
+// and fails the test if invoked. Used by the path-traversal rejection tests to
+// prove the validation gate runs BEFORE BookService is consulted.
+type recordingBookService struct {
+	calls int
+}
+
+func (r *recordingBookService) GetBook(string) (*bookparser.Book, error) {
+	r.calls++
+	return nil, errors.New("recordingBookService: GetBook must not be called")
+}
+
+func (r *recordingBookService) GetChapterBlocks(context.Context, string, int, string) ([]bookparser.Block, error) {
+	r.calls++
+	return nil, errors.New("recordingBookService: GetChapterBlocks must not be called")
+}
+
+// newBleProviderWithBooks wires a bleApiProvider against a temporary roots
+// directory + recording book service. Returns the provider and the recorder so
+// the test can assert the BookService was not consulted.
+func newBleProviderWithBooks(t *testing.T, books bookService) (*bleApiProvider, *recordingBookService) {
+	t.Helper()
+	if books == nil {
+		books = &recordingBookService{}
+	}
+	cfg := &config.Config{}
+	cfg.Scan.Roots = []string{t.TempDir()}
+	cfg.Scan.TextExtensions = []string{".txt", ".epub"}
+	rec := &recordingBookService{}
+	p := newBleApiProvider(cfg, rec).(*bleApiProvider)
+	return p, rec
+}
+
+// TestBleApiProviderRejectsBookPathOutsideRoots verifies the security gate
+// added for the path-traversal finding: EndpointBookInfo / EndpointBookChapter
+// MUST validate path against scan roots + text-extension allow-list (the same
+// gate the echo GetBookInfo / GetBookChapter handlers apply) BEFORE calling
+// BookService. A traversal like ../../etc/passwd must yield a wrapped error and
+// the BookService must not be invoked at all.
+func TestBleApiProviderRejectsBookPathOutsideRoots(t *testing.T) {
+	cases := []struct {
+		name     string
+		endpoint byte
+		path     string
+		index    int
+	}{
+		{"book_info_traversal", EndpointBookInfo, "../../etc/passwd", 0},
+		{"book_info_absolute_outside", EndpointBookInfo, "/etc/shadow", 0},
+		{"book_chapter_traversal", EndpointBookChapter, "../../../../etc/passwd", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, rec := newBleProviderWithBooks(t, nil)
+			_, err := p.HandleBleRequest(context.Background(), tc.endpoint, tc.path, tc.index)
+			if err == nil {
+				t.Fatalf("expected path-traversal rejection for %q, got nil error", tc.path)
+			}
+			if rec.calls != 0 {
+				t.Fatalf("BookService must NOT be called for rejected path; got %d call(s)", rec.calls)
+			}
+		})
+	}
+}
+
+// TestBleApiProviderRejectsBookPathWrongExtension verifies the allow-list half
+// of the gate: a path inside roots but with a non-text extension must also be
+// rejected, mirroring the echo handler's text-extension allow-list.
+func TestBleApiProviderRejectsBookPathWrongExtension(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Scan.Roots = []string{root}
+	cfg.Scan.TextExtensions = []string{".txt", ".epub"}
+	rec := &recordingBookService{}
+	p := newBleApiProvider(cfg, rec).(*bleApiProvider)
+
+	// An absolute path inside root with a non-text extension. The validation
+	// gate must reject it before BookService is consulted.
+	_, err := p.HandleBleRequest(context.Background(), EndpointBookInfo, root+"/secret.bin", 0)
+	if err == nil {
+		t.Fatalf("expected extension-rejection, got nil error")
+	}
+	if rec.calls != 0 {
+		t.Fatalf("BookService must NOT be called for rejected extension; got %d call(s)", rec.calls)
 	}
 }

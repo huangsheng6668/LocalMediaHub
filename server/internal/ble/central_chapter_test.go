@@ -77,7 +77,7 @@ func TestServeApiRequestStreamsMultipleChunks(t *testing.T) {
 	if encErr != nil {
 		t.Fatalf("EncodeApiReqPayload: %v", encErr)
 	}
-	written, err := c.ServeApiRequest(context.Background(), req, "10.0.0.5")
+	written, err := c.ServeApiRequest(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ServeApiRequest: %v", err)
 	}

@@ -139,7 +139,7 @@ func (c *Central) State() string {
 // observe a partial response. WriteCommand errors mid-stream return the count
 // written so far plus the error; the receiver is expected to time out and
 // re-request.
-func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte, clientIP string) (int, error) {
+func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (int, error) {
 	// DecodeApiReqPayload's contract: any malformed payload (short, or leading
 	// byte != CmdApiReq) yields a non-nil error with zero return values. The
 	// error return below is the sole validation gate.
@@ -147,10 +147,6 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte, cli
 	if err != nil {
 		return 0, err
 	}
-	_ = clientIP // reserved: the BLE ApiProvider resolves the client IP itself
-	// (the Android Central's address is not meaningful on the PC Peripheral
-	// side). Kept in the signature for symmetry with the legacy chapter path
-	// and future per-request scoping.
 
 	c.mu.Lock()
 	provider := c.apiProvider
@@ -287,7 +283,7 @@ func (c *Central) runApiListener(ctx context.Context, retryBackoff time.Duration
 		// ErrNotConnected).
 		payload := append([]byte(nil), frame.Payload...)
 		go func() {
-			n, sErr := c.ServeApiRequest(ctx, payload, "")
+			n, sErr := c.ServeApiRequest(ctx, payload)
 			if sErr != nil {
 				slog.Warn("BLE API listener: ServeApiRequest failed", "error", sErr, "written", n)
 			}
