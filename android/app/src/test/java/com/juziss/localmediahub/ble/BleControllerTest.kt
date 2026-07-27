@@ -33,6 +33,7 @@ class BleControllerTest {
         val mgr = FakePeripheralManager()
         val controller = BleController(
             peripheralManager = mgr,
+            bleTransportFallback = BleTransportFallback(),
             bleEnabledFlow = enabledFlow,
             bleHardwareAvailable = { false },
             saveBleEnabled = {},
@@ -48,6 +49,7 @@ class BleControllerTest {
         val mgr = FakePeripheralManager()
         val controller = BleController(
             peripheralManager = mgr,
+            bleTransportFallback = BleTransportFallback(),
             bleEnabledFlow = enabledFlow,
             bleHardwareAvailable = { true },
             saveBleEnabled = {},
@@ -62,6 +64,7 @@ class BleControllerTest {
         val enabledFlow = MutableStateFlow(true)
         val controller = BleController(
             peripheralManager = FakePeripheralManager(),
+            bleTransportFallback = BleTransportFallback(),
             bleEnabledFlow = enabledFlow,
             bleHardwareAvailable = { true },
             saveBleEnabled = {},
@@ -77,6 +80,7 @@ class BleControllerTest {
         val mgr = FakePeripheralManager()
         val controller = BleController(
             peripheralManager = mgr,
+            bleTransportFallback = BleTransportFallback(),
             bleEnabledFlow = enabledFlow,
             bleHardwareAvailable = { true },
             saveBleEnabled = {},
@@ -93,6 +97,7 @@ class BleControllerTest {
         val mgr = FakePeripheralManager()
         val controller = BleController(
             peripheralManager = mgr,
+            bleTransportFallback = BleTransportFallback(),
             bleEnabledFlow = enabledFlow,
             bleHardwareAvailable = { true },
             saveBleEnabled = {},

@@ -4,13 +4,20 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
+import com.juziss.localmediahub.ble.BleConnState
+import com.juziss.localmediahub.ble.BleController
+import com.juziss.localmediahub.ble.BleTransportFallback
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.net.URLEncoder
 import javax.inject.Inject
 import com.juziss.localmediahub.network.NetworkResult
@@ -29,6 +36,8 @@ import com.juziss.localmediahub.network.ServerConfig
 class MediaRepository @Inject constructor(
     private val http: OkHttpClient,
     private val serverConfig: ServerConfig,
+    private val bleController: BleController,
+    private val bleTransportFallback: BleTransportFallback,
 ) {
 
     private val baseUrl
@@ -37,6 +46,16 @@ class MediaRepository @Inject constructor(
     private val gson = Gson()
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Task 3: BLE degradation signal. Flips true whenever the most recent
+    //  chapter fetch was served via the BLE fallback path (HTTP failed +
+    //  BLE CONNECTED). Reset to false on every successful HTTP fetch so the
+    //  reader's 3-second "BLE 降级传输中" chip only surfaces while BLE is
+    //  actually carrying traffic. The UI owns the auto-dismiss timer.
+    // ════════════════════════════════════════════════════════════════════════
+    private val _isBleDegraded = MutableStateFlow(false)
+    val isBleDegraded: StateFlow<Boolean> = _isBleDegraded.asStateFlow()
 
     // ════════════════════════════════════════════════════════════════════════
     //  Core: raw HTTP GET / POST / DELETE that return parsed JSON via TypeToken
@@ -56,24 +75,36 @@ class MediaRepository @Inject constructor(
         type: java.lang.reflect.Type,
         forceNetwork: Boolean = false,
     ): NetworkResult<T> =
-        withContext(Dispatchers.IO) {
-            try {
-                val builder = Request.Builder().url(url).get()
-                if (forceNetwork) builder.header("Cache-Control", "no-cache")
-                val request = builder.build()
-                http.newCall(request).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string()
-                        val parsed = gson.fromJson<T>(body, type)
-                        NetworkResult.Success(parsed)
-                    } else {
-                        NetworkResult.Error("Server returned ${resp.code}", resp.code)
-                    }
-                }
-            } catch (e: Exception) {
-                NetworkResult.Error(e.toUserMessage())
-            }
+        try {
+            val result = httpGetRaw<T>(url, type, forceNetwork = forceNetwork)
+            NetworkResult.Success(result)
+        } catch (e: Exception) {
+            NetworkResult.Error(e.toUserMessage())
         }
+
+    /**
+     * Same as [httpGet] but throws on transport / server errors so callers
+     * that need to discriminate between "any HTTP failure" and "success"
+     * (e.g. [getBookChapter]'s BLE failover path) can catch a typed
+     * [IOException]. Non-IO failures throw [HttpStatusException]. Both
+     * inherit from [Exception]; the failover gate catches [IOException] only.
+     */
+    private suspend fun <T> httpGetRaw(
+        url: String,
+        type: java.lang.reflect.Type,
+        forceNetwork: Boolean = false,
+    ): T = withContext(Dispatchers.IO) {
+        val builder = Request.Builder().url(url).get()
+        if (forceNetwork) builder.header("Cache-Control", "no-cache")
+        val request = builder.build()
+        http.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                throw HttpStatusException(resp.code)
+            }
+            val body = resp.body?.string()
+            gson.fromJson<T>(body, type)
+        }
+    }
 
     /** Generic POST with a JSON body. */
     private suspend fun <T> httpPost(url: String, jsonBody: String, type: java.lang.reflect.Type): NetworkResult<T> =
@@ -263,11 +294,77 @@ class MediaRepository @Inject constructor(
             Book::class.java,
         )
 
-    suspend fun getBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> =
-        httpGet(
-            "$baseUrl/api/v1/books/chapter?path=${URLEncoder.encode(path, "UTF-8")}&index=$index",
-            BookChapterContent::class.java,
-        )
+    /**
+     * Fetches a single chapter, transparently failing over to the BLE
+     * transport when the HTTP path is unreachable.
+     *
+     * Spec §3.2 / §1.2 step 4: when [httpGetRaw] throws an [IOException]
+     * (connect refused, socket timeout, broken pipe, …) AND the BLE link is
+     * [BleConnState.CONNECTED], the repository dispatches a
+     * CMD_BOOK_CHAPTER_REQ over BLE, reassembles the streamed chunks via
+     * [BleTransportFallback], maps them to [BookChapterContent], and raises
+     * [isBleDegraded] so the reader can surface the 3-second badge.
+     *
+     * All other HTTP failures (server 4xx/5xx via [HttpStatusException], or
+     * BLE not connected) bypass the failover and return the original error.
+     *
+     * The caller MUST observe [isBleDegraded]; the flag is reset to false on
+     * the next HTTP-served chapter so the badge only surfaces during actual
+     * BLE traffic.
+     */
+    suspend fun getBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> {
+        val url = "$baseUrl/api/v1/books/chapter" +
+            "?path=${URLEncoder.encode(path, "UTF-8")}&index=$index"
+        return try {
+            val content = httpGetRaw<BookChapterContent>(url, BookChapterContent::class.java)
+            _isBleDegraded.value = false
+            NetworkResult.Success(content)
+        } catch (e: IOException) {
+            // Transport-level failure: candidate for BLE failover.
+            tryBleFailover(path, index, e)
+        } catch (e: HttpStatusException) {
+            // Server responded with a non-2xx status — NOT a transport outage,
+            // so failover does not apply. Surface the original error.
+            NetworkResult.Error("Server returned ${e.code}", e.code)
+        }
+    }
+
+    /**
+     * BLE failover branch of [getBookChapter]. Returns the BLE-sourced content
+     * when [BleController] reports a CONNECTED link and the fallback engine
+     * successfully reassembles a block list; otherwise returns the original
+     * HTTP error so the reader surfaces the underlying network failure.
+     *
+     * Honors the Task 2 implementer's note: [BleTransportFallback.reset] must
+     * be invoked before each chapter request because `lastFrameAtMs` is
+     * seeded at singleton construction.
+     */
+    private suspend fun tryBleFailover(
+        path: String,
+        index: Int,
+        httpError: IOException,
+    ): NetworkResult<BookChapterContent> {
+        if (bleController.connectionState.value != BleConnState.CONNECTED) {
+            return NetworkResult.Error(httpError.toUserMessage())
+        }
+        // Reset the reassembly engine before issuing the request — see note above.
+        bleTransportFallback.reset()
+        // Dispatch CMD_BOOK_CHAPTER_REQ over GATT. The Central streams back
+        // CHUNK frames which BleTransportFallback accumulates via its
+        // onPayloadReceived callback (wired in BleController.init).
+        bleController.requestChapter(path, index)
+        val blocks = bleTransportFallback.assembleBlocks()
+        if (blocks == null) {
+            // BLE link was CONNECTED but no payload arrived / reassembly failed.
+            // Surface the original HTTP error rather than an empty chapter.
+            return NetworkResult.Error(httpError.toUserMessage())
+        }
+        _isBleDegraded.value = true
+        // BookChapterContent.title is unknown over the BLE chunk stream (the
+        // wire format carries only the Block list, per spec §3.2). The reader
+        // already has the title from getBookInfo, so empty is acceptable here.
+        return NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))
+    }
 
     /**
      * Streaming variant of [getBookInfo]: returns the raw JSON [ResponseBody]
@@ -304,8 +401,18 @@ class MediaRepository @Inject constructor(
 
     private fun Exception.toUserMessage(): String = when (this) {
         is java.net.ConnectException -> "Cannot connect to server. Check IP and port."
-        is java.net.SocketTimeoutException -> "Connection timed out."
+        is SocketTimeoutException -> "Connection timed out."
         is java.net.UnknownHostException -> "Unknown host. Check the server address."
+        is HttpStatusException -> "Server returned ${this.code}"
         else -> message ?: "An unexpected error occurred."
     }
 }
+
+/**
+ * Internal signal from [MediaRepository.httpGetRaw] that the server responded
+ * with a non-2xx HTTP status. Carries no message of its own — the repository
+ * formats the user-facing string via [MediaRepository.toUserMessage]. This is
+ * NOT an [IOException]; the BLE failover gate must not fire on it because the
+ * transport is fine and re-sending the request would only repeat the failure.
+ */
+private class HttpStatusException(val code: Int) : Exception("HTTP $code")

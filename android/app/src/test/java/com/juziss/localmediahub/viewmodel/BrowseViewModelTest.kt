@@ -7,6 +7,8 @@ import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
+import com.juziss.localmediahub.ble.BleTransportFallback
+import com.juziss.localmediahub.ble.TestBleFixtures
 import com.juziss.localmediahub.network.ServerConfig
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.CoroutineScope
@@ -29,7 +31,12 @@ class BrowseViewModelTest {
         val httpClient = OkHttpClient()
         // Round 29: ServerConfig no longer takes httpClient (Hilt cycle break).
         val serverConfig = ServerConfig()
-        val repository = MediaRepository(httpClient, serverConfig)
+        val repository = MediaRepository(
+            httpClient,
+            serverConfig,
+            TestBleFixtures.disabledBleController(),
+            BleTransportFallback(),
+        )
         val downloadManager = DownloadManager(appContext)
         val viewModel = BrowseViewModel(
             appContext = appContext,

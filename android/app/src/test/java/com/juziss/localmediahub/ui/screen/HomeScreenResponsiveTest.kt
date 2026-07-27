@@ -8,6 +8,8 @@ import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.ServerConfigStore
+import com.juziss.localmediahub.ble.BleTransportFallback
+import com.juziss.localmediahub.ble.TestBleFixtures
 import com.juziss.localmediahub.network.ServerConfig
 import com.juziss.localmediahub.ui.theme.LocalMediaHubTheme
 import com.juziss.localmediahub.viewmodel.HomeViewModel
@@ -55,7 +57,12 @@ class HomeScreenResponsiveTest {
             recentActivityStore = RecentActivityStore(ctx),
             serverConfigStore = ServerConfigStore(ctx),
             serverConfig = ServerConfig(),
-            repository = MediaRepository(okhttp3.OkHttpClient(), ServerConfig()),
+            repository = MediaRepository(
+                okhttp3.OkHttpClient(),
+                ServerConfig(),
+                TestBleFixtures.disabledBleController(),
+                BleTransportFallback(),
+            ),
         )
 
         composeRule.setContent {

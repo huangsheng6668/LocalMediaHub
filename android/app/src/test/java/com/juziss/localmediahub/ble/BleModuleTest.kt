@@ -25,6 +25,7 @@ class BleModuleTest {
     fun bleController_constructsWithPeripheralManagerDeps() {
         val controller = BleController(
             peripheralManager = NoopPeripheralManager(),
+            bleTransportFallback = BleTransportFallback(),
             bleEnabledFlow = MutableStateFlow(false),
             bleHardwareAvailable = { false },
             saveBleEnabled = {},

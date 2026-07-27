@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -55,6 +56,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -123,6 +125,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkToast by viewModel.bookmarkToast.collectAsState()
     val chromeVisible by viewModel.chromeVisible.collectAsState()
+    val isBleDegraded by viewModel.isBleDegraded.collectAsState()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -130,6 +133,18 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
     var tocTab by remember { mutableStateOf(0) } // 0 = 目录, 1 = 书签
+
+    // Task 3: BLE 降级徽标。isBleDegraded 由仓库在 BLE 兜底成功后置 true；
+    // 这里用本地 showBadge 复制一份并启动 3 秒定时器自动消失，即使
+    // isBleDegraded 仍为 true 也会在 3s 后隐藏（spec §1.2 step 4）。
+    var showBleBadge by remember { mutableStateOf(false) }
+    LaunchedEffect(isBleDegraded) {
+        if (isBleDegraded) {
+            showBleBadge = true
+            delay(3000)
+            showBleBadge = false
+        }
+    }
 
     // 当前阅读模式
     val isScrollMode = settings.readingMode == ReadingMode.SCROLL
@@ -538,6 +553,26 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                             modifier = Modifier.align(Alignment.Center).padding(16.dp),
                             color = MaterialTheme.colorScheme.error,
                         )
+                    }
+                    // Task 3: BLE 降级传输徽标（3 秒自动消失，文本不可改动 —— spec §1.2 step 4）
+                    AnimatedVisibility(
+                        visible = showBleBadge,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp),
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            shape = RoundedCornerShape(50),
+                            tonalElevation = 3.dp,
+                        ) {
+                            Text(
+                                text = "[⚡ BLE 降级传输中]",
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
                     }
                     if (error == null && !isLoading) {
                         // 宽屏下限制内容列宽，避免行过长影响阅读体验

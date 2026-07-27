@@ -8,6 +8,8 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.PlaybackProgressEntry
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.ServerConfigStore
+import com.juziss.localmediahub.ble.BleTransportFallback
+import com.juziss.localmediahub.ble.TestBleFixtures
 import com.juziss.localmediahub.network.ServerConfig
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.CoroutineScope
@@ -78,7 +80,12 @@ class HomeViewModelTest {
             recentActivityStore = RecentActivityStore(context),
             serverConfigStore = serverConfigStore,
             serverConfig = serverConfig,
-            repository = MediaRepository(httpClient, serverConfig),
+            repository = MediaRepository(
+                httpClient,
+                serverConfig,
+                TestBleFixtures.disabledBleController(),
+                BleTransportFallback(),
+            ),
         )
 
         advanceUntilIdle()

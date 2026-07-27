@@ -3,7 +3,6 @@ package com.juziss.localmediahub.ble
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.juziss.localmediahub.data.Block
-import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
@@ -39,7 +38,7 @@ import javax.inject.Singleton
  * @param maxAttempts number of consecutive timeouts before the engine gives up.
  */
 @Singleton
-class BleTransportFallback @Inject constructor(
+class BleTransportFallback(
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val frameTimeoutMs: Long = DEFAULT_FRAME_TIMEOUT_MS,
     private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,

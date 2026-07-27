@@ -5,6 +5,7 @@ import android.content.Context
 import com.juziss.localmediahub.ble.AndroidBlePeripheralManager
 import com.juziss.localmediahub.ble.BleController
 import com.juziss.localmediahub.ble.BlePeripheralManager
+import com.juziss.localmediahub.ble.BleTransportFallback
 import com.juziss.localmediahub.data.ServerConfigStore
 import dagger.Module
 import dagger.Provides
@@ -33,6 +34,7 @@ object BleModule {
     @Singleton
     fun provideBleController(
         peripheralManager: AndroidBlePeripheralManager,
+        bleTransportFallback: BleTransportFallback,
         store: ServerConfigStore,
         @ApplicationContext context: Context,
         @ApplicationScope appScope: kotlinx.coroutines.CoroutineScope,
@@ -43,6 +45,7 @@ object BleModule {
         }
         val controller = BleController(
             peripheralManager = peripheralManager,
+            bleTransportFallback = bleTransportFallback,
             bleEnabledFlow = store.bleEnabled,
             bleHardwareAvailable = hardwareAvailable,
             saveBleEnabled = { enabled -> store.saveBleEnabled(enabled) },
@@ -65,4 +68,18 @@ object BleModule {
         }
         return controller
     }
+
+    /**
+     * Task 3: provides the BLE fallback reassembly engine as a Hilt singleton.
+     *
+     * [BleTransportFallback]'s constructor has all-default parameters so tests
+     * can inject deterministic clocks; annotating that constructor `@Inject`
+     * made Kotlin's synthetic no-arg constructor ALSO injectable, which Hilt
+     * rejected ("may only contain one injected constructor"). Providing it
+     * here keeps the test-friendly defaults while giving Hilt exactly one
+     * binding to use in production.
+     */
+    @Provides
+    @Singleton
+    fun provideBleTransportFallback(): BleTransportFallback = BleTransportFallback()
 }

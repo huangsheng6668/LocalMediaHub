@@ -51,6 +51,11 @@ class TextReaderViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    // Task 3: BLE degradation signal forwarded from MediaRepository. True when
+    // the most recent chapter was served via the BLE fallback path. The UI
+    // shows a 3-second auto-dismissing chip while this is true.
+    val isBleDegraded: StateFlow<Boolean> = repo.isBleDegraded
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
