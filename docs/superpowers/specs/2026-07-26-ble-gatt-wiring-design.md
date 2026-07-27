@@ -222,3 +222,48 @@ Android 用户点"发送测试"按钮
 - 设置项触发权限请求的策略
 
 上期 spec §10 的"留作下一期"清单中，**本期完成"真实 GATT 硬件接线"**这一项；其余（业务信令、文本降级、Wi-Fi 探针）仍留后续。
+
+---
+
+## 11. 实施完成状态（2026-07-26）
+
+**已完成（本期）：**
+
+- **server**（Go，PC 当 Central）：
+  - `ble.Central`（Scan/Connect/Send 状态机，mutex 串行化，ctx 超时）+ `CentralScanner` 接口。
+  - `tinygo.org/x/bluetooth` v0.15.0 Central adapter（`bluetooth` build tag）+ stub（默认构建）。3 处 v0.15.0 API 适配（`ServiceUUIDs` 是方法、`Address` 嵌套 `MACAddress`、`DisableNotifications` 不存在）。
+  - `/api/v1/ble/scan|connect|send` HTTP handler（挂在 `api.Group("/ble", authMw)`，复用 Bearer Token；超时 4s/11s/6s；payload ≤244 字节）。
+  - 删除上期 Peripheral 代码（`peripheral.go`/`tinygo_adapter*.go`）。
+- **Android**（Kotlin，当 Peripheral）：
+  - `BlePeripheralManager` 接口 + `AndroidBlePeripheralManager`（`BluetoothGattServer` + `BluetoothLeAdvertiser`：广播 SERVICE_UUID，Command Write + State Notify + CCCD；echo 用 `notifyCharacteristicChanged`）。
+  - `BleController` 重构（Peripheral 语义，`markConnected`/`markDisconnected` public，echo via notifyPayload，无 send 方法）。
+  - `BleApi`（HTTP 调 `/api/v1/ble/*`，Bearer header，Gason 解析）。
+  - `BleSettingsViewModel` 扩展（`devices`/`echoResult`/`scanning` StateFlow + `scan`/`connect`/`sendTest`）。
+  - `ConnectionScreen` 加 `BleDeviceScanCard`（扫描按钮 + 设备列表 + 选中连接 + 发送测试 + echo 回显）。
+  - 删除上期 Central 骨架；状态机 `SCANNING`→`ADVERTISING`，`onDisconnected` 返回 ADVERTISING（Peripheral 可被重新发现）。
+- **测试**：server 10 + Android 24 = **34 个 BLE 测试，全绿**；server default + `-tags bluetooth` 构建通过；Android assembleDebug 通过。
+
+**留作下一期（spec §9 边界）：**
+
+- 业务信令语义（播放控制/进度/选书——需先决策 server 角色）
+- 文本降级传输（分章 + 优先级队列 + 断点续传）
+- Wi-Fi 健康探针 + 自动降级路由
+- 断线自动重连
+- MTU 协商优化
+- Linux 适配（BlueZ 双角色都成熟，到时无需角色反转）
+- BluetoothAdapter 运行时状态监听（当前快照式，YAGNI）
+
+**已知 API 限制（非缺陷，v0.15.0 约束）：**
+
+- server Central 的 `Connect`/`WriteCommand` 不传播 ctx（tinygo v0.15.0 API 无 ctx 参数；靠 handler 层超时兜底）。
+- `WaitNotify` 每次 Send 重新订阅（v0.15.0 无 `DisableNotifications`），长连接多次 Send 会累积订阅 handler——MVP 单次 echo 不触发，下期优化。
+
+**手动真机验证清单（需 Windows PC + Android 13 真机）：**
+
+- [ ] PC server 以 `go build -tags bluetooth` 构建，启动后日志显示 "BLE Central ready"。
+- [ ] Android 开"BLE 实验性通道"开关 → 授权蓝牙权限 → 状态"广播中"。
+- [ ] Android 点"扫描设备" → 列表显示自己的设备（带 SERVICE_UUID）。
+- [ ] 选中设备 → POST /connect → 状态变"已连接"。
+- [ ] 点"发送测试" → UI 显示"收到回声：pong"（验证双向 GATT 通）。
+- [ ] 关开关 → 广播停，PC 端连接断开，现有功能不受影响（零退化）。
+- [ ] PC 无蓝牙模块或未启 `bluetooth` tag → 3 个 endpoint 返回明确错误，server 不崩。

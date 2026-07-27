@@ -27,7 +27,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `security_headers.go` — CSP / XFO / nosniff / Referrer-Policy（**必须在 CORS 之前挂载**）
   - `ratelimit.go` — per-route rate limit（挂在 scan trigger + delete）+ **LRU 容量上限**（默认 4096，防伪造 `X-Forwarded-For` 内存膨胀；确定性淘汰：expired-first → oldest lastSeen → insertion seq）
   - `private_net.go` — 私网/loopback 限制（pprof 用）
-- **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）/ `server/internal/ble/`（**实验性** BLE GATT 控制通道：`protocol.go` 帧 codec + `peripheral.go` 状态机 + `tinygo_adapter.go`（`bluetooth` build tag）/ `tinygo_adapter_stub.go`（默认构建 fallback）。非致命启动，BLE 不可用 server 继续 Wi-Fi/HTTP。详见 [spec §10](docs/superpowers/specs/2026-07-26-ble-control-channel-design.md)）
+- **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）/ `server/internal/ble/`（**实验性** BLE GATT 控制通道，**server=Central**：`protocol.go` 帧 codec + `central.go`（Scan/Connect/Send 状态机）+ `central_adapter.go`（`bluetooth` build tag）/ `central_adapter_stub.go`（默认构建 fallback）。`/api/v1/ble/scan|connect|send` HTTP handler 在 `internal/server/handler/ble.go`（复用 Bearer Token）。非致命启动，BLE 不可用 server 继续 Wi-Fi/HTTP。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)）
 - **配置**：`server/config.yaml`（运行时）/ `server/config.example.yaml`（模板）
 
 ### Android (Kotlin / Compose)
@@ -54,7 +54,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `ServerConfigStore.kt`（含 `authToken`）
   - `RoutePath.kt`（浏览路径与系统/库模式标记）
 - **Network**（`network/`）：Retrofit 接口 + OkHttp + `AuthInterceptor`（注入 Bearer Token）
-- **BLE**（`ble/`，**实验性**，默认关闭）：`BleProtocol`（与 server 对称的帧 codec）/ `BleConnectionStateMachine`（纯逻辑状态机）/ `BleController`（@Singleton 门控，开关+硬件可用性→状态机）/ `BleCentralManager` 接口 + `AndroidBleCentralManager`（BluetoothManager 骨架，GATT 接线 TODO）/ `BleToggleRule`。设置入口在 `ConnectionScreen`，状态经 `BleSettingsViewModel`。蓝牙不可用时完全退回 Wi-Fi/HTTP（零退化）。真实 GATT 收发待硬件接线，详见 [spec §10](docs/superpowers/specs/2026-07-26-ble-control-channel-design.md)
+- **BLE**（`ble/`，**实验性**，默认关闭，**Android=Peripheral**）：`BleProtocol`（与 server 对称的帧 codec）/ `BleConnectionStateMachine`（纯逻辑状态机，含 ADVERTISING）/ `BleController`（@Singleton 门控，开关+硬件可用性→状态机；`markConnected`/`markDisconnected` 由 HTTP 协调结果驱动）/ `BlePeripheralManager` 接口 + `AndroidBlePeripheralManager`（`BluetoothGattServer` + advertiser，Command Write + State Notify + CCCD）/ `BleToggleRule`。`data/BleApi.kt` 通过 Wi-Fi/HTTP 调 server 的 `/api/v1/ble/*` 协调连接。设置入口在 `ConnectionScreen`（开关 + 扫描列表 + 选设备连接 + 发送测试 + echo），状态经 `BleSettingsViewModel`。角色反转原因：Windows winrt Peripheral 不稳，PC 当 Central。蓝牙不可用时完全退回 Wi-Fi/HTTP（零退化）。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)
 - **Native**（`native/`）：`NativeImageDecoder.kt` / `NativeExif.kt` / `NaturalSorter.kt` / `NativeDecoderFactory.kt`（Coil 集成）
 - **Native libs**：`app/src/main/jniLibs/arm64-v8a/`（`liblocalmedia_native.so` Rust 输出 + `libffmpeg.so` 预编译）
 - **构建**：`app/build.gradle.kts` 注册 `buildRustNative` task（详见 [Rust 原生解码](#rust-原生解码)）
