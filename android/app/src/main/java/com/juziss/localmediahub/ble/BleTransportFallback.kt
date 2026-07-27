@@ -30,9 +30,19 @@ import javax.inject.Singleton
  * All multi-byte integer fields are BIG-ENDIAN to match the Go encoder in
  * `server/internal/ble/protocol.go` (Task 1, commit 198da22).
  *
- * This class is not thread-safe; callers (the BLE callback) are expected to
- * dispatch to a single thread or synchronize externally. The suspend bridge
- * [fetchChapterBlocks] is safe to call from a single coroutine at a time.
+ * This class is thread-safe: all mutable state ([chunkBuffer], [totalChunks],
+ * [attemptsUsed], [exhausted], [lastFrameAtMs], [completionHook]) is guarded
+ * by the instance monitor (`synchronized(this)`). The suspend bridge
+ * [fetchChapterBlocks] is safe to call concurrently with [onFrameReceived]
+ * arriving on the GATT binder thread.
+ *
+ * Lock discipline: [fetchChapterBlocks] registers its completion hook and
+ * dispatches the chapter request UNDER the lock, then RELEASES the lock
+ * before awaiting the deferred result — [onFrameReceived] only needs the lock
+ * briefly to insert the chunk + invoke the hook, so the await path never
+ * deadlocks waiting for the lock holder. The completion hook itself is
+ * invoked OUTSIDE [onFrameReceived]'s synchronized block (it re-enters via
+ * [assembleBlocks]) to avoid self-deadlock on the JVM monitor.
  *
  * @param nowMs clock used by the timeout logic. Defaults to wall-clock time;
  *   inject a deterministic value in tests.
@@ -48,6 +58,18 @@ class BleTransportFallback(
 ) {
     private val gson = Gson()
     private val blockListType = object : TypeToken<List<Block>>() {}.type
+
+    /**
+     * Guards every mutable field below. Held briefly by [onFrameReceived]
+     * (decode + chunk insert + hook capture) and by the prologue/epilogue of
+     * [fetchChapterBlocks] (reset + hook registration + dispatch setup +
+     * assemble). NEVER held across `deferred.await()` — see fetchChapterBlocks.
+     * Plain JVM monitor (`synchronized(this)`) is used instead of
+     * [kotlinx.coroutines.sync.Mutex] so non-suspend callers (the GATT
+     * binder thread invoking [onFrameReceived]) can acquire it without a
+     * coroutine context.
+     */
+    private val stateLock = Any()
 
     /** Chunk bytes keyed by [ChunkIndex]; sorted by key on reassembly. */
     private val chunkBuffer: MutableMap<Int, ByteArray> = LinkedHashMap()
@@ -96,6 +118,11 @@ class BleTransportFallback(
      * mismatch, duplicate index). On a clean CHUNK the bytes are appended to
      * [chunkBuffer]; once [totalChunks] distinct indices are present the next
      * call to [assembleBlocks] will return the full List<Block>.
+     *
+     * Thread-safety: mutable state is mutated under the instance monitor
+     * ([stateLock]). The completion hook (if any) is captured under the lock
+     * and invoked OUTSIDE the lock so its body (which calls [assembleBlocks]
+     * → re-acquires the lock) stays predictable.
      */
     fun onFrameReceived(frame: ByteArray) {
         val payload = BleProtocol.decodeFrame(frame)?.payload ?: return
@@ -113,47 +140,58 @@ class BleTransportFallback(
         if (chunkLen != payload.size - 9) return // length field must match bytes present
         if (index < 0 || index >= total) return
 
-        val now = nowMs()
-        if (now - lastFrameAtMs > frameTimeoutMs) {
-            // Frame arrived after the per-frame deadline → consume one retry.
-            attemptsUsed++
-            if (attemptsUsed >= maxAttempts) {
-                // Give up: drop the in-flight buffer but keep the sticky
-                // exhaustion flag set so the caller can surface the failure.
-                exhausted = true
-                chunkBuffer.clear()
-                totalChunks = 0
-                totalBlocks = 0
-                lastFrameAtMs = now
-                // Wake the suspending caller (if any) so it observes the
-                // timeout/exhaustion rather than waiting on its own deadline.
-                // The hook is cleared first so its body cannot re-register.
-                val hook = completionHook
-                completionHook = null
-                hook?.invoke()
-                return
+        // Capture the hook to invoke AFTER releasing the lock. Null when no
+        // [fetchChapterBlocks] is in flight, or when this frame should not
+        // wake the caller (incomplete buffer, no state transition).
+        var hookToFire: (() -> Unit)? = null
+        synchronized(stateLock) {
+            val now = nowMs()
+            if (now - lastFrameAtMs > frameTimeoutMs) {
+                // Frame arrived after the per-frame deadline → consume one retry.
+                attemptsUsed++
+                if (attemptsUsed >= maxAttempts) {
+                    // Give up: drop the in-flight buffer but keep the sticky
+                    // exhaustion flag set so the caller can surface the failure.
+                    exhausted = true
+                    chunkBuffer.clear()
+                    totalChunks = 0
+                    totalBlocks = 0
+                    lastFrameAtMs = now
+                    // Wake the suspending caller (if any) so it observes the
+                    // timeout/exhaustion rather than waiting on its own
+                    // deadline. Cleared first so its body cannot re-register.
+                    hookToFire = completionHook
+                    completionHook = null
+                    return
+                }
+            }
+            lastFrameAtMs = now
+
+            if (chunkBuffer.isEmpty()) {
+                totalChunks = total
+                totalBlocks = blocks
+            } else {
+                // Defensive: if the server restarted mid-stream with a different
+                // TotalChunks, drop the stale buffer and start the new batch.
+                if (total != totalChunks) resetLocked(totalChunksFallback = total, blocksFallback = blocks)
+            }
+
+            // De-dupe: a retransmitted index is silently dropped (idempotent).
+            val wasMissing = !chunkBuffer.containsKey(index)
+            chunkBuffer.putIfAbsent(index, payload.copyOfRange(9, 9 + chunkLen))
+
+            // If this chunk just completed the buffer, wake the suspending
+            // caller (if any). Guard on wasMissing so duplicate frames do not
+            // re-fire the hook once the batch is already complete.
+            if (wasMissing && chunkBuffer.size == totalChunks) {
+                hookToFire = completionHook
             }
         }
-        lastFrameAtMs = now
-
-        if (chunkBuffer.isEmpty()) {
-            totalChunks = total
-            totalBlocks = blocks
-        } else {
-            // Defensive: if the server restarted mid-stream with a different
-            // TotalChunks, drop the stale buffer and start the new batch.
-            if (total != totalChunks) reset(totalChunksFallback = total, blocksFallback = blocks)
-        }
-
-        // De-dupe: a retransmitted index is silently dropped (idempotent).
-        chunkBuffer.putIfAbsent(index, payload.copyOfRange(9, 9 + chunkLen))
-
-        // If this chunk just completed the buffer, wake the suspending caller
-        // (if any). `putIfAbsent` does not mutate size for duplicates, so this
-        // fires exactly once per complete batch.
-        if (chunkBuffer.size == totalChunks) {
-            completionHook?.invoke()
-        }
+        // Invoke the hook outside the lock for predictability: its body calls
+        // assembleBlocks, which re-acquires stateLock. (JVM monitors are
+        // reentrant so this would not actually deadlock, but keeping the hook
+        // invocation lock-free bounds the lock hold time.)
+        hookToFire?.invoke()
     }
 
     /**
@@ -163,7 +201,9 @@ class BleTransportFallback(
      * Returns null when the buffer is incomplete, empty, or the JSON failed to
      * parse. Safe to call repeatedly; does not mutate state on success.
      */
-    fun assembleBlocks(): List<Block>? {
+    fun assembleBlocks(): List<Block>? = synchronized(stateLock) { assembleBlocksLocked() }
+
+    private fun assembleBlocksLocked(): List<Block>? {
         if (chunkBuffer.isEmpty() || chunkBuffer.size < totalChunks) return null
         // Concatenate in ascending ChunkIndex order, NOT insertion order:
         // chunks may legitimately arrive out of sequence from the radio.
@@ -233,46 +273,61 @@ class BleTransportFallback(
         val deferred = CompletableDeferred<List<Block>?>()
         // Hook body runs inside onFrameReceived the moment the buffer fills
         // or the engine exhausts its retry budget. It computes the
-        // reassembled blocks once and completes the deferred; the hook is
+        // reassembled blocks once (re-acquiring stateMutex inside
+        // assembleBlocks — safe because onFrameReceived invokes the hook
+        // OUTSIDE its own lock hold) and completes the deferred; the hook is
         // then cleared so the next cycle starts clean.
-        completionHook = {
+        val hook: () -> Unit = {
+            // Clear the hook under the lock so a concurrent cycle cannot
+            // observe a stale reference. assembleBlocks re-acquires the lock
+            // on its own.
+            synchronized(stateLock) { completionHook = null }
             val blocks = assembleBlocks()
-            completionHook = null
             if (!deferred.isCompleted) {
                 deferred.complete(blocks)
             }
         }
 
-        // Dispatch the chapter request AFTER the hook is in place so any
-        // chunk arrival — synchronous (test fake) or asynchronous (real
-        // GATT) — is observed and drives the deferred.
+        // Register the hook UNDER the lock; dispatch happens AFTER releasing
+        // it so a synchronous test-fake callback (or a same-thread GATT
+        // callback) can re-enter onFrameReceived without surprises. The JVM
+        // monitor is reentrant so a same-thread re-entry would not deadlock
+        // either, but keeping dispatch outside the lock bounds its hold time.
+        synchronized(stateLock) {
+            completionHook = hook
+        }
+
+        // Dispatch OUTSIDE the lock.
         try {
             dispatch()
         } catch (t: Throwable) {
             // If dispatch itself threw (e.g. BLE notify failed), unblock the
             // deferred with null so the caller surfaces the HTTP error
             // instead of hanging until the timeout.
-            completionHook = null
+            synchronized(stateLock) { completionHook = null }
             return null
         }
 
         // If dispatch completed the buffer synchronously (test path), the
         // hook already completed the deferred — await returns immediately.
+        // The lock is NOT held here: onFrameReceived (on the GATT binder
+        // thread) can acquire it freely to deliver the chunk that completes
+        // the deferred.
         return withTimeoutOrNull(timeoutMs) { deferred.await() }
     }
 
     /** True once the retry budget has been exhausted by consecutive timeouts. */
-    fun isExhausted(): Boolean = exhausted
+    fun isExhausted(): Boolean = synchronized(stateLock) { exhausted }
 
     /** Number of retry attempts consumed so far. Exposed for tests/diagnostics. */
-    fun attemptsUsed(): Int = attemptsUsed
+    fun attemptsUsed(): Int = synchronized(stateLock) { attemptsUsed }
 
     /** Clear all chunk state and retry counters (e.g. on chapter change). */
     fun reset() {
-        reset(totalChunksFallback = 0, blocksFallback = 0)
+        synchronized(stateLock) { resetLocked(totalChunksFallback = 0, blocksFallback = 0) }
     }
 
-    private fun reset(totalChunksFallback: Int, blocksFallback: Int) {
+    private fun resetLocked(totalChunksFallback: Int, blocksFallback: Int) {
         chunkBuffer.clear()
         totalChunks = totalChunksFallback
         totalBlocks = blocksFallback

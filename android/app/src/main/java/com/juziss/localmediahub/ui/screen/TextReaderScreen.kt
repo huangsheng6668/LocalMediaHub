@@ -125,6 +125,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkToast by viewModel.bookmarkToast.collectAsState()
     val chromeVisible by viewModel.chromeVisible.collectAsState()
+    @Suppress("unused")
     val isBleDegraded by viewModel.isBleDegraded.collectAsState()
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -134,15 +135,27 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     var showSettings by remember { mutableStateOf(false) }
     var tocTab by remember { mutableStateOf(0) } // 0 = 目录, 1 = 书签
 
-    // Task 3: BLE 降级徽标。isBleDegraded 由仓库在 BLE 兜底成功后置 true；
-    // 这里用本地 showBadge 复制一份并启动 3 秒定时器自动消失，即使
-    // isBleDegraded 仍为 true 也会在 3s 后隐藏（spec §1.2 step 4）。
+    // Task 3 / I2: BLE 降级徽标。驱动源是仓库的 bleDegradedEvents
+    // SharedFlow —— 它在 *每个* BLE 兜底成功的章节上都发射一次（而非只在
+    // 布尔翻转时），所以长时间 BLE 降级期间徽标会在每次新章节送达时重新
+    // 显示并重新启动 3 秒自动消失计时器（spec §1.2 step 4 要求 per-delivery
+    // 反馈）。旧的 LaunchedEffect(isBleDegraded) 只在布尔值变化时重跑，导致
+    // 连续 BLE 章节期间徽标只在第一次出现，之后再也不显示 —— 已弃用。
     var showBleBadge by remember { mutableStateOf(false) }
-    LaunchedEffect(isBleDegraded) {
-        if (isBleDegraded) {
+    // token 守护：每次发射递增；只有最近这次发射的 token 仍有效时才隐藏
+    // 徽标。这避免了"第一次发射的 3s 计时器到期后清掉第二次发射刚刚显示
+    // 的徽标"的竞态（连续 BLE 章节间隔 < 3s 时会发生）。
+    var badgeToken by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        viewModel.bleDegradedEvents.collect {
+            val myToken = ++badgeToken
             showBleBadge = true
             delay(3000)
-            showBleBadge = false
+            // 只有当这次发射仍是最近的一次时才隐藏 —— 否则更新的发射已
+            // 接管徽标生命周期，让它继续显示。
+            if (myToken == badgeToken) {
+                showBleBadge = false
+            }
         }
     }
 

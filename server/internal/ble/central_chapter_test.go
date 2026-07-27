@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/localmediahub/server/internal/service/bookparser"
 )
@@ -156,5 +157,142 @@ func TestServeChapterRequestRejectsWrongCmdID(t *testing.T) {
 	_, err := c.ServeChapterRequest(context.Background(), bad, "")
 	if err != ErrBadCmdID {
 		t.Fatalf("expected ErrBadCmdID, got %v", err)
+	}
+}
+
+// scriptedScanner is a CentralScanner fake whose WaitNotify returns a fixed
+// sequence of prebuilt frames, then blocks until the test unblocks it (or the
+// listener ctx is cancelled, which it surfaces to RunChapterListener as
+// context.Canceled so the loop exits cleanly).
+type scriptedScanner struct {
+	collectScanner
+	frames    [][]byte // prebuilt physical frames WaitNotify returns in order
+	nextIdx   int
+	doneCh    chan struct{} // closed by WaitNotify once frames are exhausted
+	unblockCh chan struct{} // test closes this to unblock the final WaitNotify
+}
+
+func (s *scriptedScanner) WaitNotify(ctx context.Context) ([]byte, error) {
+	if s.nextIdx < len(s.frames) {
+		f := s.frames[s.nextIdx]
+		s.nextIdx++
+		return f, nil
+	}
+	// Frames exhausted: signal the test, then block until either the test
+	// unblocks us or the listener ctx is cancelled (RunChapterListener's
+	// caller cancels ctx on shutdown). Returning context.Canceled makes the
+	// loop's WaitNotify-error path re-check ctx.Err() and exit cleanly.
+	select {
+	case <-s.doneCh:
+	default:
+		close(s.doneCh)
+	}
+	select {
+	case <-s.unblockCh:
+		return nil, context.Canceled
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// TestRunChapterListenerDispatchesChapterRequests exercises the long-lived
+// listener loop (spec §3.1) end-to-end: a stub scanner yields two
+// CMD_BOOK_CHAPTER_REQ frames; RunChapterListener must decode each and hand
+// it to ServeChapterRequest, which writes the expected CMD_BOOK_CHAPTER_CHUNK
+// frames via WriteCommand. Verifies the multi-goroutine dispatch path and the
+// non-chapter frame ignore path.
+func TestRunChapterListenerDispatchesChapterRequests(t *testing.T) {
+	blocks := []bookparser.Block{
+		{Type: "text", Value: "hello-listener"},
+	}
+	provider := &stubChapterProvider{blocks: blocks}
+	scanner := &scriptedScanner{
+		doneCh:    make(chan struct{}),
+		unblockCh: make(chan struct{}),
+	}
+	// Build two physical chapter-request frames (encoded as the Android
+	// Peripheral would notify them) plus one non-chapter frame the listener
+	// MUST silently ignore.
+	req1, _ := EncodeBookChapterReqPayload("/books/a.txt", 1)
+	req2, _ := EncodeBookChapterReqPayload("/books/b.txt", 2)
+	echo := EncodeFrame([]byte{byte(CmdEcho), 0xAA})
+	scanner.frames = [][]byte{
+		EncodeFrame(req1),
+		echo,
+		EncodeFrame(req2),
+	}
+
+	c := NewCentral(scanner)
+	c.SetChapterProvider(provider)
+	_ = c.Connect(context.Background(), "AA:BB")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	listenerDone := make(chan struct{})
+	go func() {
+		_ = c.RunChapterListener(ctx)
+		close(listenerDone)
+	}()
+
+	// Wait until the scanner has yielded all scripted frames.
+	<-scanner.doneCh
+	// The listener dispatched each chapter request in its own goroutine; wait
+	// for BOTH ServeChapterRequest calls to finish writing their chunk frames
+	// before cancelling. Cancelling mid-dispatch would abort an in-flight
+	// WriteCommand and under-count writes (the production listener detaches
+	// each request so a shutdown doesn't truncate a chapter mid-stream).
+	waitForWrites := func(n int) {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			scanner.collectScanner.mu.Lock()
+			got := len(scanner.collectScanner.written)
+			scanner.collectScanner.mu.Unlock()
+			if got >= n {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitForWrites(2)
+	// Allow the listener's final WaitNotify to return (so the goroutine can
+	// exit once ctx is cancelled).
+	defer close(scanner.unblockCh)
+	cancel()
+	<-listenerDone
+
+	// The listener must have dispatched both chapter requests to
+	// ServeChapterRequest, which writes the chunk frames via WriteCommand.
+	// The echo frame must NOT produce any write (the listener ignores it).
+	scanner.collectScanner.mu.Lock()
+	written := len(scanner.collectScanner.written)
+	scanner.collectScanner.mu.Unlock()
+	if written < 2 {
+		t.Fatalf("expected >=2 chunk writes (one per chapter req), got %d", written)
+	}
+
+	// Every written frame must be a CMD_BOOK_CHAPTER_CHUNK payload.
+	for i, raw := range scanner.collectScanner.written {
+		frame, derr := DecodeFrame(raw)
+		if derr != nil {
+			t.Fatalf("frame %d decode: %v", i, derr)
+		}
+		_, _, _, _, perr := DecodeBookChapterChunkPayload(frame.Payload)
+		if perr != nil {
+			t.Fatalf("frame %d chunk decode: %v", i, perr)
+		}
+	}
+}
+
+// TestRunChapterListenerRequiresProvider verifies the startup gate: with no
+// ChapterProvider injected, RunChapterListener refuses to start.
+func TestRunChapterListenerRequiresProvider(t *testing.T) {
+	scanner := &scriptedScanner{
+		doneCh:    make(chan struct{}),
+		unblockCh: make(chan struct{}),
+	}
+	c := NewCentral(scanner)
+	_ = c.Connect(context.Background(), "AA:BB")
+	if err := c.RunChapterListener(context.Background()); err != ErrNoChapterProvider {
+		t.Fatalf("expected ErrNoChapterProvider, got %v", err)
 	}
 }

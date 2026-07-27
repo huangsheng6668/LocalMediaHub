@@ -4,8 +4,11 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -56,6 +59,26 @@ class MediaRepository @Inject constructor(
     // ════════════════════════════════════════════════════════════════════════
     private val _isBleDegraded = MutableStateFlow(false)
     val isBleDegraded: StateFlow<Boolean> = _isBleDegraded.asStateFlow()
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  I2 fix: one-shot BLE-degradation event stream. The boolean above is
+    //  sticky (stays true across consecutive BLE-served chapters), so a
+    //  LaunchedEffect(isBleDegraded) only re-fires on the value CHANGE —
+    //  during a prolonged outage the badge surfaced once then never again.
+    //  This SharedFlow emits once PER BLE-served chapter so the reader can
+    //  re-show + re-arm the 3-second auto-dismiss timer on every delivery
+    //  (spec §1.2 step 4 implies per-delivery feedback).
+    //
+    //  replay = 0 so a consumer attaching mid-stream does NOT replay a stale
+    //  emission; extraBufferCapacity = 1 so a slow consumer does not drop the
+    //  emission on suspend (the reader collects on the main scope, which is
+    //  never suspended long enough to matter in practice).
+    // ════════════════════════════════════════════════════════════════════════
+    private val _bleDegradedEvents = MutableSharedFlow<Unit>(
+        replay = 0,
+        extraBufferCapacity = 1,
+    )
+    val bleDegradedEvents: SharedFlow<Unit> = _bleDegradedEvents.asSharedFlow()
 
     // ════════════════════════════════════════════════════════════════════════
     //  Core: raw HTTP GET / POST / DELETE that return parsed JSON via TypeToken
@@ -364,9 +387,23 @@ class MediaRepository @Inject constructor(
             return NetworkResult.Error(httpError.toUserMessage())
         }
         _isBleDegraded.value = true
+        // I2: emit a one-shot degradation event so the reader re-shows the
+        // 3-second badge on EVERY BLE-served chapter, not just the first one
+        // after the value flips true. tryEmit is safe here: extraBufferCapacity
+        // = 1 guarantees no blocking; a slow consumer simply drops an emission
+        // it has not yet collected (acceptable — the next chapter re-emits).
+        _bleDegradedEvents.tryEmit(Unit)
         // BookChapterContent.title is unknown over the BLE chunk stream (the
         // wire format carries only the Block list, per spec §3.2). The reader
         // already has the title from getBookInfo, so empty is acceptable here.
+        //
+        // KNOWN LIMITATION (M3 / out-of-scope I3): the BLE chunk wire format
+        // does not currently carry the chapter title, so it is left blank on
+        // the BLE path. A future wire-format extension (e.g. a TitleLen +
+        // Title UTF-8 field appended to the first CMD_BOOK_CHAPTER_CHUNK, or a
+        // dedicated CMD_BOOK_INFO chunk) is needed to populate it. Until then
+        // the reader renders the chapter with the title it already holds from
+        // getBookInfo.
         return NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))
     }
 

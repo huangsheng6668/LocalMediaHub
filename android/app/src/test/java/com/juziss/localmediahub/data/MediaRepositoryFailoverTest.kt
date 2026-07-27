@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -82,16 +83,44 @@ class MediaRepositoryFailoverTest {
         override fun notifyPayload(payload: ByteArray): Boolean {
             // The controller just dispatched a CMD_BOOK_CHAPTER_REQ frame over
             // GATT (notifyPayload takes an already frame-encoded payload, per
-            // the existing echo path in BleController.init). Decode it to read
-            // the CmdID; on a chapter request, simulate the Central streaming
-            // back each CHUNK payload via the registered callback — but NOT
-            // inline. Real GATT hardware delivers these on a callback thread
-            // some time later, so the fake posts each chunk to the test scope
-            // with a small delay. The repository's suspend bridge must await
-            // the resulting frame arrivals.
+            // the existing echo path in BleController.init). Decode it using the
+            // SAME Go-spec §2.2 layout the real Go decoder
+            // (DecodeBookChapterReqPayload) expects:
+            //   [CmdID 1B][ChapterIndex 2B BE][PathLen 1B][Path Bytes]
+            // so the fake asserts wire-format parity on every test run. On a
+            // chapter request, simulate the Central streaming back each CHUNK
+            // payload via the registered callback — but NOT inline. Real GATT
+            // hardware delivers these on a callback thread some time later, so
+            // the fake posts each chunk to the test scope with a small delay.
+            // The repository's suspend bridge must await the resulting frame
+            // arrivals.
             val decoded = BleProtocol.decodeFrame(payload)
             if (decoded != null && decoded.payload.isNotEmpty() &&
                 decoded.payload[0] == BleProtocol.CMD_BOOK_CHAPTER_REQ) {
+                // Go-spec decode: verify the layout the Central's decoder will
+                // see. Payload layout mirrors server EncodeBookChapterReqPayload:
+                // [0]=CmdID [1:3]=ChapterIndex(BE) [3]=PathLen [4:]=Path.
+                val p = decoded.payload
+                require(p.size >= 4) {
+                    "chapter req payload too short: ${p.size}"
+                }
+                val decodedIndex = ((p[1].toInt() and 0xFF) shl 8) or (p[2].toInt() and 0xFF)
+                val pathLen = p[3].toInt() and 0xFF
+                require(p.size == 4 + pathLen) {
+                    "chapter req PathLen=$pathLen but payload has ${p.size - 4} path bytes"
+                }
+                val decodedPath = String(p, 4, pathLen, Charsets.UTF_8)
+                // Sanity-check the decoded args so a future wire-layout
+                // regression in BleController.requestChapter surfaces here, not
+                // as an opaque test failure downstream. The path is constant
+                // across all tests; the index varies per fetch (0, 1, …), so
+                // only assert it is non-negative and fits uint16.
+                require(decodedPath == "/book.txt") {
+                    "decoded path mismatch: $decodedPath"
+                }
+                require(decodedIndex in 0..0xFFFF) {
+                    "decoded index out of uint16 range: $decodedIndex"
+                }
                 responsePayloads.forEach { chunk ->
                     scope.launch {
                         delay(chunkDelayMs)
@@ -231,5 +260,54 @@ class MediaRepositoryFailoverTest {
             result is NetworkResult.Error)
         assertFalse("isBleDegraded must stay false when BLE timed out",
             repo.isBleDegraded.value)
+    }
+
+    /**
+     * I2: the degradation badge must re-trigger on EVERY BLE-served chapter,
+     * not just the first one. The sticky boolean [MediaRepository.isBleDegraded]
+     * flips true on the first BLE chapter and stays true, so a consumer that
+     * keys off the boolean's value-change (LaunchedEffect(isBleDegraded))
+     * would only fire once during a prolonged outage. The
+     * [MediaRepository.bleDegradedEvents] SharedFlow emits once PER BLE-served
+     * chapter; this test fetches two chapters back-to-back and asserts the
+     * flow emits at least twice — locking the per-delivery feedback contract.
+     */
+    @Test
+    fun bleDegradedEvents_emitsOncePerBleServedChapter() = runTest {
+        val json = "[{\"type\":\"text\",\"value\":\"ble-body\"}]".toByteArray(Charsets.UTF_8)
+        // SimulatingPeripheralManager replays the same payload list on every
+        // notify; BleTransportFallback.reset() between cycles makes each fetch
+        // independent, so a single-chunk list suffices for both fetches.
+        val singleChapterPayloads = listOf(
+            chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json),
+        )
+        val repo = repoWithBle(this, MutableStateFlow(BleConnState.CONNECTED), singleChapterPayloads)
+
+        // Collector that counts emissions across both fetches. Launched in
+        // backgroundScope so runTest keeps it alive until the test body returns.
+        val emissions = java.util.concurrent.atomic.AtomicInteger(0)
+        val collectorJob = backgroundScope.launch {
+            repo.bleDegradedEvents.collect { emissions.incrementAndGet() }
+        }
+
+        // First BLE-served chapter.
+        val r1 = repo.getBookChapter(path = "/book.txt", index = 0)
+        assertTrue("first fetch must succeed via BLE, got $r1", r1 is NetworkResult.Success)
+        // Flush any pending SharedFlow collector resumptions so emission #1 is
+        // counted before the second fetch.
+        runCurrent()
+
+        // Second BLE-served chapter — the sticky boolean is ALREADY true, so
+        // only the event-stream contract can re-trigger the badge.
+        val r2 = repo.getBookChapter(path = "/book.txt", index = 1)
+        assertTrue("second fetch must succeed via BLE, got $r2", r2 is NetworkResult.Success)
+        runCurrent()
+
+        collectorJob.cancel()
+
+        assertTrue(
+            "bleDegradedEvents must emit once per BLE-served chapter (expected >=2, got ${emissions.get()})",
+            emissions.get() >= 2,
+        )
     }
 }

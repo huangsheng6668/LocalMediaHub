@@ -181,3 +181,76 @@ func (c *Central) ServeChapterRequest(ctx context.Context, notifyPayload []byte,
 	}
 	return written, nil
 }
+
+// RunChapterListener is the long-lived CMD_BOOK_CHAPTER_REQ dispatcher
+// mandated by spec §3.1. It loops over the scanner's one-shot WaitNotify,
+// decodes each notified frame, and — when the leading CmdID is
+// CmdBookChapterReq (0x11) — hands the payload to ServeChapterRequest in a
+// goroutine so one slow chapter fetch cannot stall the next request.
+//
+// The loop returns when ctx is cancelled, when WaitNotify returns a
+// non-context error (logged and the loop continues — the adapter's
+// EnableNotifications contract is one-shot per call, so we just retry), or
+// when no ChapterProvider is configured at startup (returns
+// ErrNoChapterProvider immediately — without a provider there is nothing to
+// serve).
+//
+// This method does NOT own the BLE connection lifecycle: the caller (server
+// startup) Connects once before invoking RunChapterListener, and Disconnects
+// on shutdown via ctx cancellation. The listener is intentionally minimal —
+// no subscription abstraction, no per-request routing table — matching the
+// existing WaitNotify one-shot contract in central_adapter.go.
+func (c *Central) RunChapterListener(ctx context.Context) error {
+	c.mu.Lock()
+	provider := c.chapters
+	c.mu.Unlock()
+	if provider == nil {
+		return ErrNoChapterProvider
+	}
+
+	slog.Info("BLE chapter listener started")
+	for {
+		if err := ctx.Err(); err != nil {
+			slog.Info("BLE chapter listener exiting (ctx cancelled)", "error", err)
+			return err
+		}
+		raw, err := c.scanner.WaitNotify(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				slog.Info("BLE chapter listener exiting (ctx cancelled during WaitNotify)", "error", err)
+				return ctx.Err()
+			}
+			// Transient error (adapter reset, transient GATT fault). Log and
+			// retry on the next iteration — the adapter's WaitNotify is
+			// one-shot, so a retry simply re-arms EnableNotifications.
+			slog.Warn("BLE chapter listener WaitNotify error; retrying", "error", err)
+			continue
+		}
+		frame, ferr := DecodeFrame(raw)
+		if ferr != nil {
+			slog.Warn("BLE chapter listener: dropped undecodable frame", "error", ferr)
+			continue
+		}
+		if len(frame.Payload) == 0 {
+			continue
+		}
+		if CmdID(frame.Payload[0]) != CmdBookChapterReq {
+			// Non-chapter notifications (e.g. echo replies from the
+			// connectivity loop) are ignored by the listener; the
+			// connection-verification path uses Send() directly.
+			continue
+		}
+		// Dispatch in a goroutine so a slow chapter fetch (large book, disk
+		// I/O) does not block subsequent requests on the same notify stream.
+		// ServeChapterRequest re-checks connection + provider state under the
+		// Central lock, so racing a Disconnect is safe (it returns
+		// ErrNotConnected).
+		payload := append([]byte(nil), frame.Payload...)
+		go func() {
+			n, sErr := c.ServeChapterRequest(ctx, payload, "")
+			if sErr != nil {
+				slog.Warn("BLE chapter listener: ServeChapterRequest failed", "error", sErr, "written", n)
+			}
+		}()
+	}
+}

@@ -56,6 +56,13 @@ class TextReaderViewModel @Inject constructor(
     // shows a 3-second auto-dismissing chip while this is true.
     val isBleDegraded: StateFlow<Boolean> = repo.isBleDegraded
 
+    // I2: one-shot BLE-degradation event stream. Emits once PER BLE-served
+    // chapter so the UI can re-show + re-arm the 3-second auto-dismiss timer
+    // on every delivery, not just the first emission after the sticky boolean
+    // flips true. The boolean above is kept for any consumer that wants the
+    // current degradation state; the badge trigger comes from this flow.
+    val bleDegradedEvents: kotlinx.coroutines.flow.SharedFlow<Unit> = repo.bleDegradedEvents
+
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 

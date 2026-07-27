@@ -34,6 +34,11 @@ type Server struct {
 	preGenCtx    context.Context
 	preGenCancel context.CancelFunc
 	preGenMu     sync.Mutex
+	// bleListenerCtx is cancelled on Stop() to terminate the long-lived
+	// CMD_BOOK_CHAPTER_REQ dispatcher (ble.Central.RunChapterListener). Nil
+	// when BLE is unavailable or no provider was wired.
+	bleListenerCtx    context.Context
+	bleListenerCancel context.CancelFunc
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -115,8 +120,27 @@ func New(cfg *config.Config) (*Server, error) {
 		fmt.Printf("BLE Central disabled; /api/v1/ble/* will report unavailable: %v\n", bleErr)
 	} else {
 		bleCentral := ble.NewCentral(bleScanner)
+		// Spec §3.1: inject the BookService as the chapter source so the
+		// long-lived listener can serve CMD_BOOK_CHAPTER_REQ frames out of the
+		// box. BookService.GetChapterBlocks satisfies ble.ChapterProvider
+		// structurally (same signature).
+		bleCentral.SetChapterProvider(bookService)
 		h.BLECentral = bleCentral
-		fmt.Printf("BLE Central ready (service=%s)\n", ble.ServiceUUID)
+		// Start the long-lived chapter-request dispatcher in a goroutine tied
+		// to server lifetime. RunChapterListener loops over WaitNotify +
+		// dispatches each CMD_BOOK_CHAPTER_REQ to ServeChapterRequest. It exits
+		// cleanly when bleListenerCtx is cancelled in Stop(). The listener is
+		// intentionally best-effort: if it errors (e.g. adapter reset), the
+		// goroutine logs and returns — the HTTP server keeps serving and the
+		// Android client simply re-requests over HTTP once Wi-Fi recovers.
+		s.bleListenerCtx, s.bleListenerCancel = context.WithCancel(context.Background())
+		go func() {
+			if err := bleCentral.RunChapterListener(s.bleListenerCtx); err != nil &&
+				s.bleListenerCtx.Err() == nil {
+				fmt.Printf("BLE chapter listener exited: %v\n", err)
+			}
+		}()
+		fmt.Printf("BLE Central ready (service=%s); chapter listener started\n", ble.ServiceUUID)
 	}
 
 	s.registerRoutes(h)
@@ -314,6 +338,11 @@ func (s *Server) Start() error {
 func (s *Server) Stop() error {
 	// Cancel any in-flight background scan so it doesn't keep walking the FS.
 	s.Scanner.Shutdown()
+	// Stop the BLE chapter-request listener (no-op when BLE was unavailable
+	// at startup — bleListenerCancel is nil in that case).
+	if s.bleListenerCancel != nil {
+		s.bleListenerCancel()
+	}
 	// Close tags database connection
 	if err := s.Tags.Close(); err != nil {
 		fmt.Printf("Warning: failed to close tags database: %v\n", err)

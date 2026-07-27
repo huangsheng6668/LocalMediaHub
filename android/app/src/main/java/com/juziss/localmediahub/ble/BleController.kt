@@ -92,25 +92,37 @@ class BleController @Inject constructor(
      * [BleTransportFallback] reassembles.
      *
      * Returns true when a GATT subscriber was actually notified; false when
-     * there is no subscriber (the Central has not yet enabled notifications).
+     * there is no subscriber (the Central has not yet enabled notifications),
+     * or when [path] exceeds the 255-byte PathLen ceiling (the request is
+     * dropped silently — the chapter will surface as a BLE timeout upstream,
+     * matching the Go encoder's `ErrPathTooLong` rejection).
      *
-     * Wire format of the application payload:
-     * `[CmdID 1B = CMD_BOOK_CHAPTER_REQ][PathLen 2B BE][Path UTF-8 bytes]
-     *  [Index 4B BE]`
+     * Wire format (spec §2.2; MUST match server
+     * `EncodeBookChapterReqPayload` / `DecodeBookChapterReqPayload` exactly):
+     * `[CmdID 1B = CMD_BOOK_CHAPTER_REQ][ChapterIndex 2B BE][PathLen 1B]
+     *  [Path UTF-8 bytes]`
+     *
+     * Cross-side parity is locked by [BleControllerTest.requestChapter_emitsGoSpecWireLayout]:
+     * it hand-builds the exact byte sequence the Go encoder produces for a
+     * known (path, index) and asserts the bytes reaching the peripheral
+     * manager are byte-identical.
      */
     fun requestChapter(path: String, index: Int): Boolean {
         val pathBytes = path.toByteArray(Charsets.UTF_8)
-        val payload = ByteArray(1 + 2 + pathBytes.size + 4)
+        // PathLen is a single byte (max 255); a longer path cannot be encoded
+        // without truncation, which would make the server fetch a wrong chapter.
+        // Match the Go encoder's ErrPathTooLong rejection: drop the request.
+        if (pathBytes.size > 0xFF) return false
+        val payload = ByteArray(1 + 2 + 1 + pathBytes.size)
         var p = 0
         payload[p++] = BleProtocol.CMD_BOOK_CHAPTER_REQ
-        payload[p++] = ((pathBytes.size shr 8) and 0xFF).toByte()
-        payload[p++] = (pathBytes.size and 0xFF).toByte()
-        System.arraycopy(pathBytes, 0, payload, p, pathBytes.size); p += pathBytes.size
-        // Chapter index as 4-byte big-endian (positive; chapter indices fit easily).
-        payload[p++] = ((index shr 24) and 0xFF).toByte()
-        payload[p++] = ((index shr 16) and 0xFF).toByte()
+        // ChapterIndex as uint16 big-endian (high byte first) — matches Go's
+        // binary.BigEndian.PutUint16. Negative indices are programmer error and
+        // are masked to their low 16 bits (chapter indices are always >= 0).
         payload[p++] = ((index shr 8) and 0xFF).toByte()
         payload[p++] = (index and 0xFF).toByte()
+        payload[p++] = (pathBytes.size and 0xFF).toByte()
+        System.arraycopy(pathBytes, 0, payload, p, pathBytes.size)
         return peripheralManager.notifyPayload(BleProtocol.encodeFrame(payload))
     }
 
