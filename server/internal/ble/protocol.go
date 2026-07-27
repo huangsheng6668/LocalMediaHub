@@ -43,6 +43,11 @@ const (
 	// maxPathLen is the largest Path string accepted on decode. The PathLen
 	// field is a single byte (max 255), so the wire-format hard ceiling is 255.
 	maxPathLen = 255
+	// maxChunkBytes is the binding per-chunk payload ceiling mandated by spec
+	// §1.2 ("≤ 200 字节"). It is stricter than maxPayloadLen (244 B, the MTU
+	// ceiling) and is honored here so both the spec constraint and the wire
+	// layout are satisfied simultaneously.
+	maxChunkBytes = 200
 )
 
 // UUIDs for the BLE GATT service and its characteristics. These MUST match
@@ -64,6 +69,11 @@ var (
 	// ErrBadCmdID is returned by a payload decoder when the leading CmdID byte
 	// does not match the command the decoder was asked to interpret.
 	ErrBadCmdID = errors.New("ble: unexpected CmdID")
+	// ErrPathTooLong is returned by EncodeBookChapterReqPayload when the path
+	// length exceeds the PathLen field's 1-byte ceiling (255 B). Returning an
+	// error rather than silently truncating avoids the server fetching a wrong
+	// chapter path.
+	ErrPathTooLong = errors.New("ble: chapter request path exceeds 255 bytes")
 )
 
 type Frame struct {
@@ -97,31 +107,39 @@ func DecodeFrame(data []byte) (Frame, error) {
 
 // EncodeBookChapterReqPayload builds the payload for CMD_BOOK_CHAPTER_REQ:
 //   [CmdID 1B][ChapterIndex 2B BE][PathLen 1B][Path Bytes]
-// Path is truncated to maxPathLen bytes if longer; callers should validate
-// the path length before calling if truncation would be a correctness bug.
-func EncodeBookChapterReqPayload(path string, chapterIndex int) []byte {
+// Returns (nil, ErrPathTooLong) if len(path) exceeds the PathLen field's
+// 1-byte ceiling (maxPathLen, 255 B). The caller MUST surface this error —
+// silently truncating the path would cause the server to fetch the wrong
+// chapter.
+func EncodeBookChapterReqPayload(path string, chapterIndex int) ([]byte, error) {
 	pb := []byte(path)
 	if len(pb) > maxPathLen {
-		pb = pb[:maxPathLen]
+		return nil, ErrPathTooLong
 	}
 	out := make([]byte, chapterReqFixedOverhead+len(pb))
 	out[0] = byte(CmdBookChapterReq)
 	binary.BigEndian.PutUint16(out[1:3], uint16(chapterIndex))
 	out[3] = byte(len(pb))
 	copy(out[4:], pb)
-	return out
+	return out, nil
 }
 
 // DecodeBookChapterReqPayload parses a CMD_BOOK_CHAPTER_REQ payload (the
 // bytes after the 3-byte physical header). Returns the decoded CmdID, path
 // and chapter index, or an error if the payload is malformed.
+//
+// Contract: on ANY error path the returned CmdID is the zero value (0). The
+// caller therefore MUST treat a non-nil error as terminal and must not act on
+// the returned CmdID. Returning the offending byte on CmdID-mismatch was an
+// earlier inconsistency that tempted callers to re-check CmdID after the
+// error return (dead code given this contract).
 func DecodeBookChapterReqPayload(payload []byte) (CmdID, string, int, error) {
 	if len(payload) < chapterReqFixedOverhead {
 		return 0, "", 0, ErrTruncated
 	}
 	cmd := CmdID(payload[0])
 	if cmd != CmdBookChapterReq {
-		return cmd, "", 0, ErrBadCmdID
+		return 0, "", 0, ErrBadCmdID
 	}
 	idx := int(binary.BigEndian.Uint16(payload[1:3]))
 	pathLen := int(payload[3])
@@ -171,9 +189,10 @@ func DecodeBookChapterChunkPayload(payload []byte) (int, int, int, []byte, error
 
 // ChunkChapterBlocks marshals blocks to JSON (encoding/json) and splits the
 // result into N CMD_BOOK_CHAPTER_CHUNK payload frames, each no larger than
-// maxPayloadLen so a single frame fits in one BLE write. totalBlocks is the
-// number of source blocks (carried by every chunk so receivers can size UI
-// buffers without waiting for the full reassembly).
+// maxChunkBytes (the spec §1.2 "≤ 200 字节" cap, which is stricter than the
+// 244 B MTU ceiling). totalBlocks is the number of source blocks (carried by
+// every chunk so receivers can size UI buffers without waiting for the full
+// reassembly).
 //
 // The returned frames are payloads (no physical header); callers wrap each
 // with EncodeFrame before writing to the Command characteristic. The slice is
@@ -185,26 +204,34 @@ func ChunkChapterBlocks(blocks []bookparser.Block) ([][]byte, int, error) {
 	}
 	totalBlocks := len(blocks)
 
-	maxChunk := maxPayloadLen - chunkFixedOverhead
+	// Per-chunk payload capacity = min(MTU ceiling, spec §1.2 ceiling) minus
+	// the fixed chunk header. Honoring the stricter 200 B cap satisfies both
+	// the wire layout (≤ maxPayloadLen) and the spec's operational constraint.
+	maxChunk := maxChunkBytes
+	if maxPayloadLen < maxChunk {
+		maxChunk = maxPayloadLen
+	}
+	maxChunk -= chunkFixedOverhead
 	if maxChunk <= 0 {
 		return nil, 0, ErrTooLarge
 	}
 
 	totalChunks := (len(jsonBytes) + maxChunk - 1) / maxChunk
+	// Always emit at least one chunk so the receiver observes a response even
+	// when the JSON body is empty (blocks == nil/[]).
 	if totalChunks == 0 {
-		// Always emit at least one chunk so the receiver observes a response.
 		totalChunks = 1
 	}
 
 	frames := make([][]byte, 0, totalChunks)
-	for offset, idx := 0, 0; offset < len(jsonBytes) || idx == 0; idx++ {
+	for idx := 0; idx < totalChunks; idx++ {
+		offset := idx * maxChunk
 		end := offset + maxChunk
 		if end > len(jsonBytes) {
 			end = len(jsonBytes)
 		}
 		chunk := jsonBytes[offset:end]
 		frames = append(frames, EncodeBookChapterChunkPayload(totalChunks, idx, totalBlocks, chunk))
-		offset = end
 	}
 	return frames, totalBlocks, nil
 }

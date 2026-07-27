@@ -67,7 +67,10 @@ func TestServeChapterRequestStreamsChunks(t *testing.T) {
 	c.SetChapterProvider(provider)
 	_ = c.Connect(context.Background(), "AA:BB")
 
-	req := EncodeBookChapterReqPayload("/books/novel.txt", 4)
+	req, encErr := EncodeBookChapterReqPayload("/books/novel.txt", 4)
+	if encErr != nil {
+		t.Fatalf("EncodeBookChapterReqPayload: %v", encErr)
+	}
 	written, err := c.ServeChapterRequest(context.Background(), req, "10.0.0.5")
 	if err != nil {
 		t.Fatalf("ServeChapterRequest: %v", err)
@@ -121,7 +124,7 @@ func TestServeChapterRequestRequiresProvider(t *testing.T) {
 	scanner := &collectScanner{}
 	c := NewCentral(scanner)
 	_ = c.Connect(context.Background(), "AA:BB")
-	req := EncodeBookChapterReqPayload("/books/x", 0)
+	req, _ := EncodeBookChapterReqPayload("/books/x", 0)
 	_, err := c.ServeChapterRequest(context.Background(), req, "")
 	if err != ErrNoChapterProvider {
 		t.Fatalf("expected ErrNoChapterProvider, got %v", err)
@@ -132,7 +135,7 @@ func TestServeChapterRequestRequiresConnection(t *testing.T) {
 	scanner := &collectScanner{}
 	c := NewCentral(scanner)
 	c.SetChapterProvider(&stubChapterProvider{})
-	req := EncodeBookChapterReqPayload("/books/x", 0)
+	req, _ := EncodeBookChapterReqPayload("/books/x", 0)
 	_, err := c.ServeChapterRequest(context.Background(), req, "")
 	if err != ErrNotConnected {
 		t.Fatalf("expected ErrNotConnected, got %v", err)
@@ -145,8 +148,10 @@ func TestServeChapterRequestRejectsWrongCmdID(t *testing.T) {
 	c.SetChapterProvider(&stubChapterProvider{})
 	_ = c.Connect(context.Background(), "AA:BB")
 	// A well-formed chapter-request payload (satisfies the length check) but
-	// whose leading byte is not CmdBookChapterReq.
-	bad := EncodeBookChapterReqPayload("/x", 0)
+	// whose leading byte is not CmdBookChapterReq. The decoder returns the
+	// zero CmdID and ErrBadCmdID; ServeChapterRequest surfaces the error
+	// without re-checking cmdID (that re-check was dead code, now removed).
+	bad, _ := EncodeBookChapterReqPayload("/x", 0)
 	bad[0] = byte(CmdEcho)
 	_, err := c.ServeChapterRequest(context.Background(), bad, "")
 	if err != ErrBadCmdID {

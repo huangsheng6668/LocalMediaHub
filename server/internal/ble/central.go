@@ -132,13 +132,16 @@ func (c *Central) State() string {
 // owns the BLE notification handler, not to this serialized facade. Returns
 // the number of chunk frames written.
 func (c *Central) ServeChapterRequest(ctx context.Context, notifyPayload []byte, clientIP string) (int, error) {
+	// DecodeBookChapterReqPayload's contract: any malformed payload (short,
+	// or leading byte != CmdBookChapterReq) yields a non-nil error and a zero
+	// CmdID. The error return below is the sole validation gate — a separate
+	// `cmdID != CmdBookChapterReq` re-check used to live here but was dead
+	// code (unreachable after the err != nil return).
 	cmdID, path, idx, err := DecodeBookChapterReqPayload(notifyPayload)
 	if err != nil {
 		return 0, err
 	}
-	if cmdID != CmdBookChapterReq {
-		return 0, ErrBadCmdID
-	}
+	_ = cmdID // validated inside the decoder; nothing to re-check here
 
 	c.mu.Lock()
 	provider := c.chapters

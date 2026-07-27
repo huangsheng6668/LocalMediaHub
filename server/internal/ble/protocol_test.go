@@ -3,6 +3,8 @@ package ble
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/localmediahub/server/internal/service/bookparser"
@@ -39,12 +41,39 @@ func TestUUIDsAreDistinct(t *testing.T) {
 	}
 }
 
+// TestEncodeBookChapterReqPayloadRejectsOversizedPath verifies the encoder
+// returns ErrPathTooLong instead of silently truncating when the path exceeds
+// the 255-byte PathLen ceiling. Silent truncation would cause the server to
+// fetch the wrong chapter path — a correctness footgun.
+func TestEncodeBookChapterReqPayloadRejectsOversizedPath(t *testing.T) {
+	longPath := strings.Repeat("a", 256)
+	got, err := EncodeBookChapterReqPayload(longPath, 0)
+	if !errors.Is(err, ErrPathTooLong) {
+		t.Fatalf("expected ErrPathTooLong, got %v (payload len=%d)", err, len(got))
+	}
+	if got != nil {
+		t.Fatalf("expected nil payload on error, got %d bytes", len(got))
+	}
+
+	// Boundary: a 255-byte path must still succeed (PathLen fits in 1 byte).
+	okPayload, okErr := EncodeBookChapterReqPayload(strings.Repeat("b", maxPathLen), 0)
+	if okErr != nil {
+		t.Fatalf("255-byte path should succeed, got %v", okErr)
+	}
+	if len(okPayload) != chapterReqFixedOverhead+maxPathLen {
+		t.Fatalf("255-byte path payload size=%d want %d", len(okPayload), chapterReqFixedOverhead+maxPathLen)
+	}
+}
+
 // TestBookChapterProtocolFraming verifies the on-wire layout for a chapter
 // request: EncodeFrame wraps the payload with the 3-byte physical header
 // (version + uint16 BE length), and the payload itself begins with a CmdID
 // byte followed by the chapter-request fields.
 func TestBookChapterProtocolFraming(t *testing.T) {
-	reqPayload := EncodeBookChapterReqPayload("/books/test.txt", 1)
+	reqPayload, err := EncodeBookChapterReqPayload("/books/test.txt", 1)
+	if err != nil {
+		t.Fatalf("EncodeBookChapterReqPayload returned error: %v", err)
+	}
 	frame := EncodeFrame(reqPayload)
 	// Version 1, Length 2+1+15+2 = 20
 	if frame[0] != 0x01 {
@@ -84,7 +113,7 @@ func TestBookChapterChunkFraming(t *testing.T) {
 // maxPayloadLen, and that reassembling the chunk bytes yields the same JSON.
 func TestChunkChapterBlocksSplitting(t *testing.T) {
 	// Build a block slice large enough to require multiple chunks at the
-	// 244-byte payload cap. Each text block is ~64 bytes of JSON.
+	// 200-byte spec §1.2 cap. Each text block is ~64 bytes of JSON.
 	blocks := make([]bookparser.Block, 20)
 	for i := range blocks {
 		blocks[i] = bookparser.Block{Type: "text", Value: "padding-padding-padding-padding-padding"}
@@ -104,6 +133,11 @@ func TestChunkChapterBlocksSplitting(t *testing.T) {
 	var reassembled []byte
 	var sawTotal, sawTotalBlocks int
 	for i, fr := range frames {
+		// Spec §1.2 mandates ≤ 200 B per chunk; the stricter cap must hold in
+		// addition to the maxPayloadLen (244 B) MTU ceiling.
+		if len(fr) > maxChunkBytes {
+			t.Fatalf("frame %d payload exceeds spec §1.2 cap: %d > %d bytes", i, len(fr), maxChunkBytes)
+		}
 		if len(fr) > maxPayloadLen {
 			t.Fatalf("frame %d payload too large: %d bytes", i, len(fr))
 		}
