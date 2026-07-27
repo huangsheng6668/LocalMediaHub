@@ -816,8 +816,8 @@ private fun StatusCard(
  *
  * MVP scope: flipping the switch to ON requests BLUETOOTH_SCAN/BLUETOOTH_CONNECT
  * runtime permission and then calls [BleSettingsViewModel.onBleToggle]; the
- * actual scan/connect wiring is the deferred hardware-integration TODO in
- * `AndroidBleCentralManager` (Task 8). Wi-Fi/HTTP behavior is entirely
+ * actual advertising/GATT wiring is backed by `AndroidBlePeripheralManager`
+ * (Android now acts as the BLE Peripheral). Wi-Fi/HTTP behavior is entirely
  * unaffected regardless of this switch's state.
  */
 @Composable
@@ -832,7 +832,7 @@ private fun BleExperimentalToggleCard(
     val statusText = when (connectionState) {
         BleConnState.DISABLED -> if (hardwareAvailable) "关闭" else "此设备不支持"
         BleConnState.IDLE -> "待机"
-        BleConnState.SCANNING -> "搜索中…"
+        BleConnState.ADVERTISING -> "广播中…"
         BleConnState.CONNECTING -> "连接中…"
         BleConnState.CONNECTED -> "已连接"
         BleConnState.DISCONNECTED -> "已断开"

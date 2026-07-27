@@ -2,9 +2,9 @@ package com.juziss.localmediahub.di
 
 import android.bluetooth.BluetoothManager
 import android.content.Context
-import com.juziss.localmediahub.ble.AndroidBleCentralManager
-import com.juziss.localmediahub.ble.BleCentralManager
+import com.juziss.localmediahub.ble.AndroidBlePeripheralManager
 import com.juziss.localmediahub.ble.BleController
+import com.juziss.localmediahub.ble.BlePeripheralManager
 import com.juziss.localmediahub.data.ServerConfigStore
 import dagger.Module
 import dagger.Provides
@@ -20,19 +20,19 @@ object BleModule {
 
     @Provides
     @Singleton
-    fun provideCentralManager(
-        @ApplicationContext context: Context
-    ): AndroidBleCentralManager = AndroidBleCentralManager(context)
+    fun providePeripheralManager(
+        @ApplicationContext context: Context,
+    ): AndroidBlePeripheralManager = AndroidBlePeripheralManager(context)
 
     @Provides
-    fun provideCentralManagerInterface(
-        impl: AndroidBleCentralManager
-    ): BleCentralManager = impl
+    fun providePeripheralManagerInterface(
+        impl: AndroidBlePeripheralManager,
+    ): BlePeripheralManager = impl
 
     @Provides
     @Singleton
     fun provideBleController(
-        centralManager: AndroidBleCentralManager,
+        peripheralManager: AndroidBlePeripheralManager,
         store: ServerConfigStore,
         @ApplicationContext context: Context,
         @ApplicationScope appScope: kotlinx.coroutines.CoroutineScope,
@@ -42,13 +42,13 @@ object BleModule {
             mgr?.adapter?.isEnabled == true
         }
         val controller = BleController(
-            centralManager = centralManager,
+            peripheralManager = peripheralManager,
             bleEnabledFlow = store.bleEnabled,
             bleHardwareAvailable = hardwareAvailable,
             saveBleEnabled = { enabled -> store.saveBleEnabled(enabled) },
         )
         // Drive the controller from the persisted setting. Each emission
-        // re-evaluates whether BLE should be scanning/idle/disabled. Without
+        // re-evaluates whether BLE should be advertising/disabled. Without
         // this the controller stays in IDLE forever at runtime — the
         // BleController itself does not observe the flow.
         //
@@ -65,15 +65,4 @@ object BleModule {
         }
         return controller
     }
-
-    /** Test-only factory mirroring provideBleController wiring. */
-    fun provideBleControllerForTest(
-        centralManager: BleCentralManager,
-        bleHardwareAvailable: () -> Boolean,
-    ): BleController = BleController(
-        centralManager = centralManager,
-        bleEnabledFlow = kotlinx.coroutines.flow.MutableStateFlow(false),
-        bleHardwareAvailable = bleHardwareAvailable,
-        saveBleEnabled = {},
-    )
 }

@@ -23,13 +23,16 @@ class BleConnectionStateMachineTest {
     }
 
     @Test
-    fun connected_toDisconnected_returnsToIdle() {
+    fun connected_toDisconnected_resumesAdvertising() {
+        // Peripheral semantics: after the Central disconnects we resume
+        // advertising (rather than going IDLE) so the Central can rediscover
+        // + reconnect. See BleConnectionStateMachine.onDisconnected.
         val sm = BleConnectionStateMachine()
         sm.onStartAdvertising()
         sm.onConnecting()
         sm.onConnected()
         sm.onDisconnected()
-        assertEquals(BleConnState.IDLE, sm.state.value)
+        assertEquals(BleConnState.ADVERTISING, sm.state.value)
     }
 
     @Test

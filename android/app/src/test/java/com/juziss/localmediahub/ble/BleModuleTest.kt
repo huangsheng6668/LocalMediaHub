@@ -1,23 +1,33 @@
 package com.juziss.localmediahub.ble
 
-import com.juziss.localmediahub.di.BleModule
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 
+/**
+ * Smoke test that the production wiring shape (constructor + DI-style assembly)
+ * produces a non-null controller. The real Hilt provider lives in
+ * [com.juziss.localmediahub.di.BleModule]; this test mirrors its construction
+ * using a fake [BlePeripheralManager] so no Android framework BLE stack is
+ * required.
+ */
 class BleModuleTest {
 
+    private class NoopPeripheralManager : BlePeripheralManager {
+        override fun startAdvertising() {}
+        override fun stopAdvertising() {}
+        override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) {}
+        override fun notifyPayload(payload: ByteArray): Boolean = false
+        override fun isAdapterUsable(): Boolean = false
+    }
+
     @Test
-    fun provideBleController_returnsNonNull() {
-        val central = object : BleCentralManager {
-            override fun startScan() {}
-            override fun stopScan() {}
-            override fun send(payload: ByteArray) = false
-            override var onStateChanged: ((BleConnState) -> Unit)? = null
-            override var onPayloadReceived: ((ByteArray) -> Unit)? = null
-        }
-        val controller = BleModule.provideBleControllerForTest(
-            centralManager = central,
-            bleHardwareAvailable = { false }
+    fun bleController_constructsWithPeripheralManagerDeps() {
+        val controller = BleController(
+            peripheralManager = NoopPeripheralManager(),
+            bleEnabledFlow = MutableStateFlow(false),
+            bleHardwareAvailable = { false },
+            saveBleEnabled = {},
         )
         assertNotNull(controller)
     }

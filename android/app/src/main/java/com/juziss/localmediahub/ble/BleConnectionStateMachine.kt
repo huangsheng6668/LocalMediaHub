@@ -42,9 +42,15 @@ class BleConnectionStateMachine {
         _state.value = BleConnState.CONNECTED
     }
 
+    /**
+     * Central (PC) disconnected, or a /connect attempt failed. As a Peripheral
+     * we resume advertising so the Central can rediscover + reconnect, rather
+     * than going silent (IDLE). The machine's transitions guard DISABLED so a
+     * disabled device never silently re-arms advertising.
+     */
     fun onDisconnected() {
         if (_state.value == BleConnState.DISABLED) return
-        _state.value = BleConnState.IDLE
+        _state.value = BleConnState.ADVERTISING
     }
 
     fun onError() {

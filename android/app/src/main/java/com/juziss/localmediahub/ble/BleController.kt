@@ -6,23 +6,31 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Hilt singleton aggregating BLE policy: setting flag + hardware availability
- * drive the connection state machine. When BLE is off or unavailable, the
- * controller stays [BleConnState.DISABLED] and existing Wi-Fi/HTTP behavior
- * is entirely unaffected (zero-regression principle).
+ * Hilt singleton aggregating BLE policy for the Peripheral role.
  *
- * @param bleEnabledFlow the persisted user setting (default false). Observed
- *   by the Task 8 Hilt module, which calls [evaluateAvailability] on each
- *   emission with the latest value.
+ * When enabled + hardware available: starts advertising (state ADVERTISING).
+ * HTTP coordination (Task 9 BleApi via the VM) drives [markConnected] /
+ * [markDisconnected] based on the Central's connect/disconnect responses.
+ *
+ * When the Central writes to the Command characteristic, [BlePeripheralManager]
+ * invokes the registered callback with the decoded payload; this controller
+ * echoes it back via [BlePeripheralManager.notifyPayload] (re-encoded frame)
+ * so the connectivity loop can be verified end-to-end.
+ *
+ * Zero-regression: when disabled or hardware unavailable, state is DISABLED
+ * and no advertising occurs; Wi-Fi/HTTP behavior is entirely unaffected.
+ *
+ * @param peripheralManager the hardware seam (real impl: [AndroidBlePeripheralManager]).
+ * @param bleEnabledFlow the persisted user setting (default false). Observed by
+ *   the Hilt module, which calls [evaluateAvailability] on each emission.
  * @param bleHardwareAvailable returns true only if the device has a powered,
- *   authorized Bluetooth adapter. Production wires this to BluetoothAdapter;
- *   tests inject a lambda.
+ *   authorized Bluetooth adapter.
  * @param saveBleEnabled persists the toggle (DataStore in production).
  */
 @Singleton
 class BleController @Inject constructor(
-    private val centralManager: BleCentralManager,
-    private val bleEnabledFlow: Flow<Boolean>,
+    private val peripheralManager: BlePeripheralManager,
+    @Suppress("unused") private val bleEnabledFlow: Flow<Boolean>,
     private val bleHardwareAvailable: () -> Boolean,
     private val saveBleEnabled: suspend (Boolean) -> Unit,
 ) {
@@ -30,49 +38,42 @@ class BleController @Inject constructor(
     val connectionState: StateFlow<BleConnState> = machine.state
 
     init {
-        // Bridge central-manager callbacks into the state machine.
-        centralManager.onStateChanged = { incoming ->
-            when (incoming) {
-                BleConnState.CONNECTING -> machine.onConnecting()
-                BleConnState.CONNECTED -> machine.onConnected()
-                BleConnState.DISCONNECTED -> machine.onDisconnected()
-                BleConnState.IDLE -> machine.onError()
-                BleConnState.DISABLED -> machine.onBleDisabled()
-                BleConnState.SCANNING -> machine.onStartScan()
-            }
+        // Echo: re-encode and notify back. (Minimal connectivity verification.)
+        peripheralManager.setOnPayloadReceived { payload ->
+            peripheralManager.notifyPayload(BleProtocol.encodeFrame(payload))
         }
     }
 
     /**
      * Re-evaluate whether BLE should be active based on the current setting
-     * + hardware. Called when the setting changes or bluetooth state changes.
+     * + hardware. Called by the Hilt module on each [bleEnabledFlow] emission.
      *
-     * The current enabled value is passed explicitly by the caller (the Task
-     * 8 Hilt module collects [bleEnabledFlow] and forwards each emission here)
-     * rather than read off the flow internally, so the contract works against
-     * any `Flow<Boolean>` — not just `MutableStateFlow`.
+     * When enabling, the machine unconditionally transitions to ADVERTISING
+     * (start advertising); the hardware guard short-circuits to DISABLED when
+     * no usable adapter is present.
      */
     fun evaluateAvailability(enabled: Boolean) {
         if (!enabled || !bleHardwareAvailable()) {
             machine.onBleDisabled()
-            centralManager.stopScan()
+            peripheralManager.stopAdvertising()
             return
         }
-        machine.onStartScan()
-        centralManager.startScan()
+        machine.onStartAdvertising()
+        peripheralManager.startAdvertising()
+    }
+
+    /** Called by BleApi (Task 9 VM) when the Central reports a successful /connect. */
+    fun markConnected() {
+        machine.onConnected()
+    }
+
+    /** Called by BleApi (Task 9 VM) when the Central reports disconnect or connect failure. */
+    fun markDisconnected() {
+        machine.onDisconnected()
     }
 
     suspend fun setEnabled(enabled: Boolean) {
         saveBleEnabled(enabled)
         evaluateAvailability(enabled = enabled)
-    }
-
-    /**
-     * Send a raw payload over the Command characteristic. Returns false if
-     * not currently connected (caller falls back to Wi-Fi).
-     */
-    fun send(payload: ByteArray): Boolean {
-        if (connectionState.value != BleConnState.CONNECTED) return false
-        return centralManager.send(BleProtocol.encodeFrame(payload))
     }
 }
