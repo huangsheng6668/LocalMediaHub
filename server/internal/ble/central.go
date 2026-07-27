@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/localmediahub/server/internal/service/bookparser"
 )
@@ -182,18 +183,31 @@ func (c *Central) ServeChapterRequest(ctx context.Context, notifyPayload []byte,
 	return written, nil
 }
 
+// chapterListenerRetryBackoff is the production retry cadence for
+// RunChapterListener's WaitNotify loop. In production the listener is started
+// in server.New() BEFORE any BLE client connects, so tinyGoCentralScanner's
+// WaitNotify returns errNoStateChar immediately (non-blocking) on every call
+// until a client POSTs /api/v1/ble/connect. Without a backoff the goroutine
+// would busy-spin, flooding logs and burning CPU from startup until first
+// connect. One second is cheap on CPU, bounded on log volume (~1 line/s), and
+// well below the user-perceived connect latency once a client actually shows
+// up (the loop exits the retry path on the first successful WaitNotify).
+const chapterListenerRetryBackoff = 1 * time.Second
+
 // RunChapterListener is the long-lived CMD_BOOK_CHAPTER_REQ dispatcher
 // mandated by spec §3.1. It loops over the scanner's one-shot WaitNotify,
 // decodes each notified frame, and — when the leading CmdID is
 // CmdBookChapterReq (0x11) — hands the payload to ServeChapterRequest in a
 // goroutine so one slow chapter fetch cannot stall the next request.
 //
-// The loop returns when ctx is cancelled, when WaitNotify returns a
-// non-context error (logged and the loop continues — the adapter's
-// EnableNotifications contract is one-shot per call, so we just retry), or
-// when no ChapterProvider is configured at startup (returns
-// ErrNoChapterProvider immediately — without a provider there is nothing to
-// serve).
+// The loop returns when ctx is cancelled, when no ChapterProvider is
+// configured at startup (returns ErrNoChapterProvider immediately — without a
+// provider there is nothing to serve), or when WaitNotify returns a
+// non-context transient error (logged at Debug and retried after a
+// chapterListenerRetryBackoff sleep — the adapter's EnableNotifications
+// contract is one-shot per call, so a retry simply re-arms it; the backoff
+// keeps the goroutine from busy-spinning/log-flooding before the first
+// client connects).
 //
 // This method does NOT own the BLE connection lifecycle: the caller (server
 // startup) Connects once before invoking RunChapterListener, and Disconnects
@@ -201,6 +215,16 @@ func (c *Central) ServeChapterRequest(ctx context.Context, notifyPayload []byte,
 // no subscription abstraction, no per-request routing table — matching the
 // existing WaitNotify one-shot contract in central_adapter.go.
 func (c *Central) RunChapterListener(ctx context.Context) error {
+	return c.runChapterListener(ctx, chapterListenerRetryBackoff)
+}
+
+// runChapterListener is the testable core of RunChapterListener: identical to
+// RunChapterListener but with the retry backoff injected so unit tests can
+// exercise the sleep path with a real-but-tiny value instead of waiting a
+// full second per iteration. The backoff applies ONLY to the transient-error
+// (retry) branch; the success path, the frame-decode continue paths, and the
+// ctx-cancelled exit path all return/retry immediately, unchanged.
+func (c *Central) runChapterListener(ctx context.Context, retryBackoff time.Duration) error {
 	c.mu.Lock()
 	provider := c.chapters
 	c.mu.Unlock()
@@ -220,10 +244,20 @@ func (c *Central) RunChapterListener(ctx context.Context) error {
 				slog.Info("BLE chapter listener exiting (ctx cancelled during WaitNotify)", "error", err)
 				return ctx.Err()
 			}
-			// Transient error (adapter reset, transient GATT fault). Log and
-			// retry on the next iteration — the adapter's WaitNotify is
-			// one-shot, so a retry simply re-arms EnableNotifications.
-			slog.Warn("BLE chapter listener WaitNotify error; retrying", "error", err)
+			// Transient error (adapter reset, transient GATT fault, or — the
+			// common production case — no Central connected yet, so
+			// EnableNotifications reports errNoStateChar). Debug, not Warn: at
+			// startup this fires once per retryBackoff until a client connects,
+			// and a Warn line per second is noise the operator cannot act on.
+			// The retryBackoff sleep below is load-bearing: without it the
+			// goroutine would busy-spin and flood logs/CPU from server.New()
+			// until the first BLE client POSTs /api/v1/ble/connect.
+			slog.Debug("BLE chapter listener WaitNotify error; retrying", "error", err)
+			select {
+			case <-time.After(retryBackoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			continue
 		}
 		frame, ferr := DecodeFrame(raw)

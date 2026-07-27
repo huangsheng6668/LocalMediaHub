@@ -296,3 +296,79 @@ func TestRunChapterListenerRequiresProvider(t *testing.T) {
 		t.Fatalf("expected ErrNoChapterProvider, got %v", err)
 	}
 }
+
+// transientErrorScanner is a CentralScanner fake whose WaitNotify always
+// returns a transient error (mirroring the pre-connect production state where
+// tinyGoCentralScanner.WaitNotify returns errNoStateChar immediately, non-
+// blocking). It counts WaitNotify calls so a test can assert the listener is
+// NOT busy-spinning (i.e. the retry backoff is in effect).
+type transientErrorScanner struct {
+	collectScanner
+	callsMu sync.Mutex
+	calls   int
+}
+
+func (s *transientErrorScanner) WaitNotify(context.Context) ([]byte, error) {
+	s.callsMu.Lock()
+	s.calls++
+	s.callsMu.Unlock()
+	return nil, errors.New("ble: state characteristic not found")
+}
+
+func (s *transientErrorScanner) callCount() int {
+	s.callsMu.Lock()
+	defer s.callsMu.Unlock()
+	return s.calls
+}
+
+// TestRunChapterListenerBacksOffOnTransientError verifies the Important fix
+// from the final re-review: when WaitNotify returns a transient error in a
+// tight loop (the production pre-connect state), RunChapterListener must NOT
+// busy-spin. A stub whose WaitNotify always errors is run for a fixed wall-
+// clock window with a real-but-tiny injected retry backoff; the call count
+// over that window must be bounded (roughly window/backoff plus a small
+// margin), proving the goroutine sleeps between retries instead of hammering
+// EnableNotifications and flooding logs from server startup until first
+// connect.
+func TestRunChapterListenerBacksOffOnTransientError(t *testing.T) {
+	scanner := &transientErrorScanner{}
+	c := NewCentral(scanner)
+	c.SetChapterProvider(&stubChapterProvider{})
+	_ = c.Connect(context.Background(), "AA:BB")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Inject a small but real backoff so the test exercises the actual sleep
+	// path without slowing the suite. With a 20ms backoff, a busy-spinning
+	// loop would rack up thousands of calls in 100ms; a backed-off loop
+	// manages at most ~5-6 (100ms/20ms + 1 for the final cancelled iteration).
+	const backoff = 20 * time.Millisecond
+	const window = 100 * time.Millisecond
+
+	listenerDone := make(chan struct{})
+	go func() {
+		_ = c.runChapterListener(ctx, backoff)
+		close(listenerDone)
+	}()
+
+	// Sample call count after the wall-clock window elapses.
+	time.Sleep(window)
+	got := scanner.callCount()
+	cancel()
+	<-listenerDone
+
+	// Upper bound: window/backoff + a generous margin for scheduler jitter
+	// and the final post-cancel iteration. A busy-spin (no backoff) would
+	// blow past this by 2-3 orders of magnitude.
+	maxAllowed := int(window/backoff) + 2
+	if got > maxAllowed {
+		t.Fatalf("RunChapterListener busy-spun on transient error: %d WaitNotify calls in %s "+
+			"(backoff=%s, expected <= %d)", got, window, backoff, maxAllowed)
+	}
+	// Lower bound sanity: at least one retry must have happened (otherwise the
+	// goroutine never entered the loop or crashed before sleeping).
+	if got < 2 {
+		t.Fatalf("RunChapterListener did not retry WaitNotify at all: %d calls", got)
+	}
+}
