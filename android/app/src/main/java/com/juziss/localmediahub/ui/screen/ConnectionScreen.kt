@@ -74,6 +74,7 @@ import com.juziss.localmediahub.viewmodel.ConnectionViewModel
 import com.juziss.localmediahub.viewmodel.DiscoveredServer
 import com.juziss.localmediahub.viewmodel.DiscoveryState
 import com.juziss.localmediahub.viewmodel.shouldAttemptAutoConnect
+import com.juziss.localmediahub.data.BleDevice
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -105,6 +106,9 @@ fun ConnectionScreen(
     val bleEnabled by bleViewModel.bleEnabled.collectAsState()
     val bleConnState by bleViewModel.connectionState.collectAsState()
     val bleHardwareAvailable by remember { mutableStateOf(bleViewModel.hardwareAvailable()) }
+    val bleDevices by bleViewModel.devices.collectAsState()
+    val bleScanning by bleViewModel.scanning.collectAsState()
+    val bleEchoResult by bleViewModel.echoResult.collectAsState()
 
     // Runtime permission launcher for BLE. On Android 12+ both BLUETOOTH_SCAN
     // and BLUETOOTH_CONNECT are runtime permissions; on older API levels they
@@ -308,6 +312,21 @@ fun ConnectionScreen(
                     blePermissionLauncher.launch(perms)
                 },
             )
+
+            // BLE device scan + connect + echo card. Only shown once the user
+            // has opted in to the experimental BLE channel; the inner buttons
+            // are further gated on the live connection state.
+            if (bleEnabled) {
+                BleDeviceScanCard(
+                    devices = bleDevices,
+                    scanning = bleScanning,
+                    connectionState = bleConnState,
+                    echoResult = bleEchoResult,
+                    onScan = { bleViewModel.scan() },
+                    onConnect = { bleViewModel.connect(it) },
+                    onSendTest = { bleViewModel.sendTest() },
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -884,6 +903,139 @@ private fun BleExperimentalToggleCard(
                 enabled = canToggle,
                 onCheckedChange = onCheckedChange,
             )
+        }
+    }
+}
+
+/**
+ * Scan / connect / send-test card for the experimental BLE channel (Task 9).
+ *
+ * Surfaces three interactions, gated on the live [connectionState]:
+ *  - 扫描设备 button: asks the PC server's BLE Central to scan; disabled
+ *    while a scan is in flight or while already connected.
+ *  - Device list: each discovered device is a clickable row → [onConnect].
+ *  - 发送测试 button: only shown when CONNECTED; sends "ping" and shows the
+ *    echoed reply in [echoResult] (null until the first send completes).
+ *
+ * MVP scope (YAGNI): no auto-scan, no retry, no disconnect button.
+ */
+@Composable
+private fun BleDeviceScanCard(
+    devices: List<BleDevice>,
+    scanning: Boolean,
+    connectionState: BleConnState,
+    echoResult: String?,
+    onScan: () -> Unit,
+    onConnect: (BleDevice) -> Unit,
+    onSendTest: () -> Unit,
+) {
+    val isConnected = connectionState == BleConnState.CONNECTED
+
+    ElevatedCard(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.border(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(16.dp)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = "BLE 设备",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "通过 PC 服务器（Central）扫描并连接其他运行本应用的设备，验证双向 GATT 通道。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Button(
+                onClick = onScan,
+                enabled = !scanning && !isConnected,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                if (scanning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("扫描中…")
+                } else {
+                    Icon(Icons.Filled.Search, contentDescription = null)
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("扫描设备")
+                }
+            }
+
+            if (devices.isNotEmpty()) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                devices.forEach { device ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onConnect(device) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_storage),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = device.name.ifBlank { "未命名设备" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = "${device.id} · ${device.rssi} dBm",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            text = "连接",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+
+            if (isConnected) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Button(
+                    onClick = onSendTest,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text("发送测试")
+                }
+                if (echoResult != null) {
+                    Text(
+                        text = "收到回声：$echoResult",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
         }
     }
 }
