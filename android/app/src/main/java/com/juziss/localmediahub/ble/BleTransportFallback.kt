@@ -340,7 +340,11 @@ class BleTransportFallback(
         ((buf[offset].toInt() and 0xFF) shl 8) or (buf[offset + 1].toInt() and 0xFF)
 
     private companion object {
-        const val DEFAULT_FRAME_TIMEOUT_MS = 3_000L
-        const val DEFAULT_MAX_ATTEMPTS = 3
+        // Tuned for stability over BLE's narrow/flaky throughput: each frame
+        // gets more time to arrive, and the engine tolerates one extra
+        // consecutive timeout before giving up. Overall per-request budget
+        // rises from 9s (3s×3) to 20s (5s×4).
+        const val DEFAULT_FRAME_TIMEOUT_MS = 5_000L
+        const val DEFAULT_MAX_ATTEMPTS = 4
     }
 }
