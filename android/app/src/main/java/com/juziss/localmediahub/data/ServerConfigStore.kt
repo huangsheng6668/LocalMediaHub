@@ -24,7 +24,7 @@ data class KnownServer(
     val lastConnected: Long = System.currentTimeMillis(),
 )
 
-class ServerConfigStore @Inject constructor(@ApplicationContext private val context: Context) {
+open class ServerConfigStore @Inject constructor(@ApplicationContext private val context: Context) {
 
     companion object {
         private val KEY_SERVER_URL = stringPreferencesKey("server_url")
@@ -38,7 +38,7 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
 
     private val gson = Gson()
 
-    val serverUrl: Flow<String> = context.dataStore.data.map { prefs ->
+    open val serverUrl: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_SERVER_URL] ?: ""
     }
 
@@ -58,7 +58,7 @@ class ServerConfigStore @Inject constructor(@ApplicationContext private val cont
         prefs[KEY_APP_THEME] ?: "AUTO"
     }
 
-    val bleEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+    open val bleEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_BLE_ENABLED] ?: false
     }
 

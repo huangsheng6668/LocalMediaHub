@@ -12,7 +12,9 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Module
@@ -82,4 +84,14 @@ object BleModule {
     @Provides
     @Singleton
     fun provideBleTransportFallback(): BleTransportFallback = BleTransportFallback()
+
+    /**
+     * Task 2: exposes the persisted `bleEnabled` flag as a qualified `Flow`
+     * for [com.juziss.localmediahub.viewmodel.BleSettingsViewModel]'s
+     * three-signal auto-connect trigger. Qualifier avoids colliding with
+     * [provideBleController]'s unqualified `Flow<Boolean>` parameter.
+     */
+    @Provides
+    @Named("bleEnabled")
+    fun provideBleEnabledFlow(store: ServerConfigStore): Flow<Boolean> = store.bleEnabled
 }
