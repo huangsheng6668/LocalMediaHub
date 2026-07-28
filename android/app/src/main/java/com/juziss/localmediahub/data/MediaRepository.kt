@@ -18,6 +18,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
 import com.juziss.localmediahub.ble.BleConnState
 import com.juziss.localmediahub.ble.BleController
+import com.juziss.localmediahub.ble.BleDegradedState
 import com.juziss.localmediahub.ble.BleProtocol
 import com.juziss.localmediahub.ble.BleTransportFallback
 import java.io.IOException
@@ -81,6 +82,22 @@ class MediaRepository @Inject constructor(
         extraBufferCapacity = 1,
     )
     val bleDegradedEvents: SharedFlow<Unit> = _bleDegradedEvents.asSharedFlow()
+
+    /**
+     * Task 5: single funnel for flipping [isBleDegraded]. Mirrors the new
+     * value into the process-wide [BleDegradedState] holder so the Coil
+     * image-loader (built before Hilt finishes, no MediaRepository access)
+     * can short-circuit image requests to a placeholder while BLE is
+     * carrying traffic — see `LocalMediaHubApplication.newImageLoader`.
+     *
+     * Centralizing the write here keeps every flip in sync with the global
+     * holder; callers MUST use this instead of `_isBleDegraded.value = ...`
+     * so the mirror never drifts.
+     */
+    private fun setBleDegraded(value: Boolean) {
+        _isBleDegraded.value = value
+        BleDegradedState.setBleDegraded(value)
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     //  Core: raw HTTP GET / POST / DELETE that return parsed JSON via TypeToken
@@ -208,7 +225,7 @@ class MediaRepository @Inject constructor(
         return bleFetchOrHttp<List<Folder>>(
             httpCall = {
                 val data = httpGetRaw<List<Folder>>("$baseUrl/api/v1/folders", foldersType)
-                _isBleDegraded.value = false
+                setBleDegraded(false)
                 data
             },
             endpoint = BleProtocol.ENDPOINT_FOLDERS,
@@ -231,7 +248,7 @@ class MediaRepository @Inject constructor(
                     browseType,
                     forceNetwork = forceNetwork,
                 )
-                _isBleDegraded.value = false
+                setBleDegraded(false)
                 data
             },
             endpoint = BleProtocol.ENDPOINT_BROWSE_FOLDER,
@@ -347,7 +364,7 @@ class MediaRepository @Inject constructor(
                     "$baseUrl/api/v1/books/info?path=${URLEncoder.encode(path, "UTF-8")}",
                     Book::class.java,
                 )
-                _isBleDegraded.value = false
+                setBleDegraded(false)
                 data
             },
             endpoint = BleProtocol.ENDPOINT_BOOK_INFO,
@@ -389,7 +406,7 @@ class MediaRepository @Inject constructor(
             "?path=${URLEncoder.encode(path, "UTF-8")}&index=$index"
         return try {
             val content = httpGetRaw<BookChapterContent>(url, BookChapterContent::class.java)
-            _isBleDegraded.value = false
+            setBleDegraded(false)
             NetworkResult.Success(content)
         } catch (e: HttpStatusException) {
             // Server responded with a non-2xx status — NOT a transport outage,
@@ -421,7 +438,7 @@ class MediaRepository @Inject constructor(
                     if (blocks == null) {
                         NetworkResult.Error(e.toUserMessage())
                     } else {
-                        _isBleDegraded.value = true
+                        setBleDegraded(true)
                         _bleDegradedEvents.tryEmit(Unit)
                         NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))
                     }
@@ -493,7 +510,7 @@ class MediaRepository @Inject constructor(
             } else {
                 try {
                     val parsed = gson.fromJson<T>(json, type)
-                    _isBleDegraded.value = true
+                    setBleDegraded(true)
                     // I2: emit a one-shot degradation event so the reader
                     // re-shows the 3-second badge on EVERY BLE-served request,
                     // not just the first one after the value flips true.

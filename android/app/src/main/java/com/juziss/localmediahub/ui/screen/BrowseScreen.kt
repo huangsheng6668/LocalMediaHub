@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
@@ -54,6 +56,7 @@ import com.juziss.localmediahub.ui.component.browse.BrowseContentState
 import com.juziss.localmediahub.ui.component.browse.BrowseStateContent
 import com.juziss.localmediahub.ui.component.browse.BrowseTopBar
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
  
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,6 +72,10 @@ fun BrowseScreen(
 ) {
     val browseState by viewModel.browseState.collectAsState()
     val currentPath by viewModel.currentPath.collectAsState()
+    // Task 5: BLE degraded flag — drives the video-disabled UX (greyed cards +
+    // Snackbar on click) and is read by the Coil placeholder interceptor via
+    // the process-wide BleDegradedState mirror.
+    val isBleDegraded by viewModel.isBleDegraded.collectAsState()
     val isSystemBrowse by viewModel.isSystemBrowse.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchState by viewModel.searchState.collectAsState()
@@ -87,6 +94,20 @@ fun BrowseScreen(
     var selectionMode by remember { mutableStateOf(false) }
     val selectedFiles = remember { mutableStateListOf<MediaFile>() }
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
+
+    // Task 5: Snackbar host for the BLE-degraded "video disabled" message.
+    // Launched in a coroutine scope by onVideoDisabledClick below.
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val videoDisabledMessage = stringResource(R.string.ble_video_disabled_message)
+    val onVideoDisabledClick = remember(scope, videoDisabledMessage) {
+        {
+            scope.launch {
+                snackbarHostState.showSnackbar(videoDisabledMessage)
+            }
+            Unit
+        }
+    }
 
     LaunchedEffect(currentPath) {
         selectionMode = false
@@ -138,6 +159,7 @@ fun BrowseScreen(
  
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (selectionMode) {
                 TopAppBar(
@@ -515,6 +537,10 @@ fun BrowseScreen(
                 getThumbnailUrl = viewModel::getThumbnailUrl,
                 innerPadding = innerPadding,
                 isSelected = { path -> selectedFiles.any { it.relativePath == path } },
+                // Task 5: video cards render greyed + intercept click to the
+                // Snackbar while BLE degraded mode is active.
+                videoEnabled = !isBleDegraded,
+                onVideoDisabledClick = onVideoDisabledClick,
             )
         }
     }

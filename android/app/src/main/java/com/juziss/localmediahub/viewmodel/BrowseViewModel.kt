@@ -79,6 +79,14 @@ class BrowseViewModel @Inject constructor(
     val browseState: StateFlow<BrowseState>
         get() = sharedState.browseState.asStateFlow()
 
+    // Task 5: surfaces MediaRepository.isBleDegraded to the browse UI so video
+    // list items can render greyed + intercept clicks (Snackbar) while the
+    // list is being served over the BLE fallback transport. The underlying
+    // StateFlow is the repository's; exposing it here lets BrowseScreen
+    // collectAsState() without grabbing the repository directly.
+    val isBleDegraded: StateFlow<Boolean>
+        get() = repository.isBleDegraded
+
     val currentPath: StateFlow<String>
         get() = sharedState.currentPath.asStateFlow()
 

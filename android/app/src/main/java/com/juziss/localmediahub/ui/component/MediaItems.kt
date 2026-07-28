@@ -17,7 +17,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -127,13 +130,39 @@ internal fun VideoCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isSelected: Boolean = false,
+    /**
+     * Task 5 §1.3: when false (BLE degraded mode is active), the card renders
+     * greyed (alpha 0.4) and its click is routed to [onDisabledClick] instead
+     * of [onClick]. The screen wires [onDisabledClick] to a Snackbar showing
+     * [R.string.ble_video_disabled_message]. Defaults to true so all existing
+     * call sites keep the pre-Task-5 behavior.
+     */
+    enabled: Boolean = true,
+    onDisabledClick: () -> Unit = {},
 ) {
+    // Spec message is read unconditionally so the string lookup is stable
+    // across recompositions; it's only attached to the semantics tree when
+    // the card is actually disabled (avoids noise on enabled cards).
+    val disabledMessage = stringResource(R.string.ble_video_disabled_message)
+    val cardClick: () -> Unit = if (enabled) onClick else onDisabledClick
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
+            // Grey-out the entire card (thumbnail + text + favorite toggle)
+            // when BLE degraded mode is active — spec §1.3.
+            .alpha(if (enabled) 1f else 0.4f)
             .combinedClickable(
-                onClick = onClick,
+                onClick = cardClick,
                 onLongClick = onLongClick,
+            )
+            .then(
+                if (enabled) Modifier
+                else Modifier.semantics {
+                    // Doubles as the screen-reader announcement AND the
+                    // Compose-test hook (the degraded test finds the card by
+                    // this contentDescription and performs click on it).
+                    contentDescription = disabledMessage
+                }
             ),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(

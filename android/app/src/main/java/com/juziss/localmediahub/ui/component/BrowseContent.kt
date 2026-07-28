@@ -230,6 +230,15 @@ internal fun BrowseContent(
     getThumbnailUrl: (file: MediaFile) -> String,
     modifier: Modifier = Modifier,
     isSelected: (String) -> Boolean = { false },
+    /**
+     * Task 5: when false (BLE degraded mode active), video cards render greyed
+     * and their click is routed to [onVideoDisabledClick] (the screen wires
+     * that to a "BLE 模式下暂不支持播放视频" Snackbar). Non-video items stay
+     * clickable. Defaults to true for backward-compat with callers that don't
+     * care about degraded mode.
+     */
+    videoEnabled: Boolean = true,
+    onVideoDisabledClick: () -> Unit = {},
 ) {
     val folderSortOrder = state.folderSort
     val fileSortOrder = state.fileSort
@@ -331,6 +340,11 @@ internal fun BrowseContent(
                             onClick = remember(file, onVideoClick) { { onVideoClick(file) } },
                             onLongClick = longClick,
                             isSelected = isSelected(file.relativePath),
+                            // Task 5: degraded-mode UX is plumbed here so the
+                            // main browse grid (the primary list surface)
+                            // honors BLE degraded mode end-to-end.
+                            enabled = videoEnabled,
+                            onDisabledClick = onVideoDisabledClick,
                         )
                         "image" -> ImageCard(
                             file = file,

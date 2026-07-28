@@ -11,6 +11,7 @@ import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.CachePolicy
 import coil3.request.crossfade
+import com.juziss.localmediahub.ble.BleDegradedImageInterceptor
 import com.juziss.localmediahub.native.NativeDecoderFactory
 import com.juziss.localmediahub.util.cleanupOldEntries
 import dagger.hilt.android.HiltAndroidApp
@@ -97,6 +98,15 @@ class LocalMediaHubApplication : Application(), SingletonImageLoader.Factory {
                 // not respect Cache-Control by default — see the note on
                 // `okHttpClient` above.
                 add(OkHttpNetworkFetcherFactory(callFactory = { okHttpClient }))
+                // Task 5 §1.3: short-circuit image requests to a local
+                // placeholder while the media list is being served over the
+                // BLE fallback transport. The interceptor reads
+                // BleDegradedState (mirrored from MediaRepository.isBleDegraded)
+                // on every request and rewrites HTTP(S) URLs to the placeholder
+                // drawable so the OkHttp fetcher is bypassed entirely.
+                // Registered LAST so it runs FIRST in the chain (Coil runs
+                // interceptors in registration order for outbound requests).
+                add(BleDegradedImageInterceptor())
             }
             .fetcherCoroutineContext(limiter)
             .decoderCoroutineContext(limiter)

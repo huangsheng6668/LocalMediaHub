@@ -180,6 +180,13 @@
     <string name="media_video_ext">视频 · %1$s</string>
     <string name="media_image_ext">图片 · %1$s</string>
 
+    <!-- ── BLE degraded mode (Task 5) ─────────────────────── -->
+    <!-- Surfaced as a Snackbar when the user taps a video item while the list
+         is being served over the BLE fallback transport. Video playback over
+         BLE is not supported (the protocol carries JSON only, not media
+         bytes); the message tells the user why the click did nothing. -->
+    <string name="ble_video_disabled_message">BLE 模式下暂不支持播放视频</string>
+
     <!-- ── Tag components ─────────────────────────────────── -->
     <string name="tag_title">文件标签</string>
     <string name="tag_list_title">%1$s 的标签列表</string>
