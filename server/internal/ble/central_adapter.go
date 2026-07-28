@@ -213,11 +213,26 @@ func (t *tinyGoCentralScanner) Disconnect() {
 }
 
 // disconnectLocked is the unlocked body. Caller MUST hold t.opMu.
+//
+// It deliberately does NOT call any method on the prior device — not
+// Disconnect, not Connected, nothing. tinygo-org/bluetooth v0.15.0 on Windows
+// (via winrt-go + go-ole) leaves BOTH the Go-side BluetoothLEDevice AND
+// GattSession COM pointers dangling once the remote peer (Android) tears the
+// GATT link down (e.g. the app is killed). ANY method call on those objects
+// (GattSession.Close, BluetoothLEDevice.GetConnectionStatus, ...) routes
+// through go-ole queryInterface, dereferences the freed IUnknown*, and raises
+// signal 0xc0000005 — a fatal fault the Go runtime cannot recover (recover
+// only catches panics, not faults), taking the whole server down.
+//
+// The only safe action is to drop our Go-side reference and let the
+// runtime/COM finalizers reclaim the objects. Trade-off: the WinRT-side
+// session lingers briefly until GC, which can make the immediately-following
+// Connect's DiscoverServices fail ("async operation failed with status 2");
+// the Android auto-connect retry succeeds on a later attempt once the stale
+// session clears. A brief reconnect failure is strictly better than a hard
+// server crash (which also takes down Wi-Fi for all clients).
 func (t *tinyGoCentralScanner) disconnectLocked() {
-	if t.device != nil {
-		_ = t.device.Disconnect()
-		t.device = nil
-	}
+	t.device = nil
 	t.cmdChar = nil
 	t.stateChar = nil
 }
