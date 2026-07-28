@@ -1,7 +1,10 @@
 package com.juziss.localmediahub.ble
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,6 +47,18 @@ class BleController @Inject constructor(
     private val machine = BleConnectionStateMachine()
     val connectionState: StateFlow<BleConnState> = machine.state
 
+    /**
+     * Task 1: emits `true` when the peripheral's AdvertiseCallback reports
+     * onStartSuccess (the device is now actually discoverable) and `false` on
+     * onStartFailure. Task 2's auto-connect trigger MUST wait on this signal
+     * (spec method B) so it never fires before the advertiser is ready.
+     *
+     * `extraBufferCapacity = 8` ensures back-pressure never drops an emission
+     * under transient slow-collector conditions.
+     */
+    private val _advertisingStarted = MutableSharedFlow<Boolean>(extraBufferCapacity = 8)
+    val advertisingStarted: SharedFlow<Boolean> = _advertisingStarted.asSharedFlow()
+
     init {
         // Route CHUNK frames into the fallback engine; echo everything else so
         // the connectivity-loop verification (Central write → Notify back) still
@@ -54,6 +69,11 @@ class BleController @Inject constructor(
             } else {
                 peripheralManager.notifyPayload(BleProtocol.encodeFrame(payload))
             }
+        }
+        // Surface the advertising-started signal so callers (Task 2 auto-connect)
+        // can defer triggering until the peripheral is actually discoverable.
+        peripheralManager.setOnAdvertisingStarted { success ->
+            _advertisingStarted.tryEmit(success)
         }
     }
 

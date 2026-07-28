@@ -14,6 +14,14 @@ interface BlePeripheralManager {
     fun startAdvertising()
     /** Stop advertising + close the GATT server. */
     fun stopAdvertising()
+    /**
+     * Register callback invoked when advertising actually starts
+     * (AdvertiseCallback.onStartSuccess → true) or fails
+     * (AdvertiseCallback.onStartFailure → false). Used by [BleController] to
+     * surface a "broadcast ready" signal so callers do not attempt BLE
+     * connect before the peripheral is discoverable (spec method B).
+     */
+    fun setOnAdvertisingStarted(cb: (success: Boolean) -> Unit)
     /** Register callback invoked when the Central writes to the Command characteristic. */
     fun setOnPayloadReceived(cb: (ByteArray) -> Unit)
     /** Send payload via the State characteristic (Notify). Returns false if no subscriber. */

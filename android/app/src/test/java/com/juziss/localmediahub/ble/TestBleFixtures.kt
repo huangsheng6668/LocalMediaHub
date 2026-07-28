@@ -17,6 +17,7 @@ object TestBleFixtures {
     class NoopPeripheralManager : BlePeripheralManager {
         override fun startAdvertising() = Unit
         override fun stopAdvertising() = Unit
+        override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) = Unit
         override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) = Unit
         override fun notifyPayload(payload: ByteArray): Boolean = false
         override fun isAdapterUsable(): Boolean = false

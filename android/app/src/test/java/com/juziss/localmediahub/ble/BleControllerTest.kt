@@ -1,6 +1,9 @@
 package com.juziss.localmediahub.ble
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -14,10 +17,14 @@ class BleControllerTest {
         var received: ByteArray? = null
         var notifyResult = true
         private var cb: ((ByteArray) -> Unit)? = null
+        private var onAdvertisingStarted: ((Boolean) -> Unit)? = null
 
         override fun startAdvertising() { advertising = true }
         override fun stopAdvertising() { advertising = false }
         override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
+        override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {
+            onAdvertisingStarted = cb
+        }
         override fun notifyPayload(payload: ByteArray): Boolean {
             received = payload
             return notifyResult
@@ -26,6 +33,12 @@ class BleControllerTest {
 
         // Test hook to simulate a Central write.
         fun simulateWrite(payload: ByteArray) { cb?.invoke(payload) }
+
+        // Test hook simulating the AdvertiseCallback's onStartSuccess(true) /
+        // onStartFailure(false). Backs the Task 1 advertising-started signal.
+        fun fireAdvertisingStarted(success: Boolean) {
+            onAdvertisingStarted?.invoke(success)
+        }
     }
 
     @Test
@@ -257,5 +270,31 @@ class BleControllerTest {
             "no frame should be sent for an over-length path",
             null, mgr.received,
         )
+    }
+
+    /**
+     * Task 1: the advertising-start signal from the peripheral manager
+     * (AdvertiseCallback.onStartSuccess) MUST flow out through
+     * [BleController.advertisingStarted] so callers can defer any
+     * auto-connect trigger until the peripheral is actually discoverable
+     * (spec method B; auto-trigger itself is Task 2).
+     */
+    @Test
+    fun advertisingStarted_emitsTrueOnPeripheralStartSuccess() = runTest {
+        val fake = FakePeripheralManager()
+        val controller = BleController(
+            peripheralManager = fake,
+            bleTransportFallback = BleTransportFallback(),
+            bleEnabledFlow = MutableStateFlow(true),
+            bleHardwareAvailable = { true },
+            saveBleEnabled = {},
+        )
+        val collected = mutableListOf<Boolean>()
+        val job = launch { controller.advertisingStarted.collect { collected.add(it) } }
+        runCurrent()
+        fake.fireAdvertisingStarted(true)
+        runCurrent()
+        job.cancel()
+        assertEquals(listOf(true), collected)
     }
 }

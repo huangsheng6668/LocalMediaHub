@@ -97,6 +97,7 @@ class MediaRepositoryFailoverTest {
 
         override fun startAdvertising() { advertising = true }
         override fun stopAdvertising() { advertising = false }
+        override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {}
         override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
         override fun notifyPayload(payload: ByteArray): Boolean {
             // The controller just dispatched a CMD_API_REQ frame over GATT

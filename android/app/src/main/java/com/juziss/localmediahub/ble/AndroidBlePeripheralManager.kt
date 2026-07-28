@@ -50,11 +50,16 @@ class AndroidBlePeripheralManager @Inject constructor(
     private var stateChar: BluetoothGattCharacteristic? = null
     private var subscriberDevice: BluetoothDevice? = null
     private var onPayloadReceived: ((ByteArray) -> Unit)? = null
+    private var onAdvertisingStarted: ((Boolean) -> Unit)? = null
 
     override fun isAdapterUsable(): Boolean = adapter?.isEnabled == true
 
     override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) {
         onPayloadReceived = cb
+    }
+
+    override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {
+        onAdvertisingStarted = cb
     }
 
     override fun startAdvertising() {
@@ -108,9 +113,11 @@ class AndroidBlePeripheralManager @Inject constructor(
         val cb = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
                 android.util.Log.i("BlePeripheral", "advertise onStartSuccess")
+                onAdvertisingStarted?.invoke(true)
             }
             override fun onStartFailure(errorCode: Int) {
                 android.util.Log.e("BlePeripheral", "advertise onStartFailure errorCode=$errorCode")
+                onAdvertisingStarted?.invoke(false)
             }
         }
         advertiserCallback = cb
