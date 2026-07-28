@@ -144,6 +144,29 @@ class BleSettingsViewModelTest {
     }
 
     /**
+     * Regression: the "BLE toggle was on BEFORE connecting server" ordering.
+     * advertisingStarted is a transient SharedFlow; without folding it into a
+     * sticky state, the early advertising burst is consumed while serverUrl is
+     * still blank, and the later server connect has no signal to react to — so
+     * auto-connect never fires. The sticky-StateFlow combine must re-evaluate
+     * when the server signal arrives last.
+     */
+    @Test
+    fun autoConnect_firesWhenServerConnectsAfterAdvertisingStarted() = runTest {
+        val api = fakeApi(scanFailCount = 0)
+        // server NOT configured yet; BLE already on.
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
+        runCurrent()
+        // Advertising starts (BLE was toggled on) — but server not configured,
+        // so no trigger yet.
+        vm.fireAdvertisingReady(true); runCurrent()
+        assertEquals(0, api.scanCallCount)
+        // Now the user connects the server — the triple completes.
+        vm.connectServerPostHoc(); runCurrent()
+        assertEquals("server-connected-last must still trigger auto-connect", 1, api.scanCallCount)
+    }
+
+    /**
      * Regression guard for the concurrent-double-loop race (final review
      * Important finding): a second `advertisingStarted=true` burst arriving
      * while the first retry loop is mid-`delay(3_000)` MUST NOT spawn a second
@@ -262,6 +285,8 @@ class BleSettingsViewModelTest {
     private class VmFixtures(
         val fakeController: BleController,
         val peripheral: FakePeripheralManager,
+        val serverUrlFlow: MutableStateFlow<String>,
+        val serverConfig: ServerConfig,
     )
 
     /**
@@ -311,7 +336,7 @@ class BleSettingsViewModelTest {
             serverConfig = serverConfig,
             bleEnabledFlow = bleEnabledFlow,
         )
-        lastFixtures = VmFixtures(fakeController, peripheral)
+        lastFixtures = VmFixtures(fakeController, peripheral, serverUrlFlow, serverConfig)
         return vm
     }
 
@@ -325,4 +350,17 @@ class BleSettingsViewModelTest {
     /** The fake controller backing this VM (for state-machine drives in tests). */
     private val BleSettingsViewModel.fakeController: BleController
         get() = lastFixtures!!.fakeController
+
+    /**
+     * Simulates the user connecting to a server AFTER the VM was already built
+     * (serverUrl + baseUrl both populated). Used to test the "BLE toggle was on
+     * before connecting server" ordering — the regression that motivated
+     * folding advertisingStarted into a sticky StateFlow.
+     */
+    private fun BleSettingsViewModel.connectServerPostHoc() {
+        val f = lastFixtures!!
+        val url = "http://192.168.1.10:8000"
+        f.serverUrlFlow.value = url
+        f.serverConfig.setBaseUrl(url)
+    }
 }

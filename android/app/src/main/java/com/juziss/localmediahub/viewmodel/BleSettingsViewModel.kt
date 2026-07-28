@@ -240,42 +240,48 @@ class BleSettingsViewModel @Inject constructor(
     }
 
     init {
-        // Three-signal auto-connect (spec §1.1): fires only when (server
-        // configured) AND (BLE toggle on) AND (advertising started) all hold.
-        // The combine below watches the *precondition* signals so a drop resets
-        // autoConnectArmed; the advertisingStarted collector fires the actual
-        // retry loop. We deliberately do NOT run an HTTP healthCheck here —
-        // Wi-Fi may be down (the whole point of the BLE failover channel).
+        // Auto-connect trigger (spec §1.1): fires when (server configured)
+        // AND (BLE toggle on) AND (advertising started) AND (not already
+        // CONNECTED) all hold. advertisingStarted is a transient SharedFlow
+        // (replay=0); fold it + the connection state into sticky StateFlows
+        // so the combine re-evaluates when a LATER signal completes the
+        // predicate — e.g. the server connects AFTER BLE was toggled on, or
+        // the BLE link drops (→ not CONNECTED) while the other three remain
+        // true, re-arming a fresh retry loop. We deliberately do NOT run an
+        // HTTP healthCheck here — Wi-Fi may be down (the whole point of the
+        // BLE failover channel).
+        val advertisingReady = MutableStateFlow(false)
+        viewModelScope.launch {
+            controller.advertisingStarted.collect { started ->
+                advertisingReady.value = started
+            }
+        }
         viewModelScope.launch {
             val serverConfigured = combine(
                 store.serverUrl,
                 serverConfig.baseUrl,
             ) { url, base -> url.isNotBlank() && base.isNotBlank() }
-            combine(serverConfigured, bleEnabledFlow) { srv, ble -> srv to ble }
+            // 4-tuple; trigger only on the rising edge of (srv && ble && ready
+            // && !connected). distinctUntilChanged guarantees we fire once per
+            // distinct state; autoConnectLoopActive prevents overlapping loops.
+            combine(
+                serverConfigured,
+                bleEnabledFlow,
+                advertisingReady,
+                controller.connectionState,
+            ) { srv, ble, ready, conn ->
+                srv && ble && ready && conn != BleConnState.CONNECTED
+            }
                 .distinctUntilChanged()
-                .collect { (srv, ble) ->
-                    if (!srv || !ble) {
-                        // A precondition dropped: allow the next advertising
-                        // burst to start a fresh retry loop.
+                .collect { shouldTrigger ->
+                    if (!shouldTrigger) {
+                        // Predicate false: preconditions dropped or we reached
+                        // CONNECTED — allow a future rising edge to re-arm.
                         autoConnectArmed = false
+                    } else {
+                        autoConnectWithRetry()
                     }
                 }
-        }
-        viewModelScope.launch {
-            controller.advertisingStarted.collect { started ->
-                if (started &&
-                    store.serverUrl.first().isNotBlank() &&
-                    serverConfig.baseUrl.value.isNotBlank() &&
-                    bleEnabledFlow.first()
-                ) {
-                    autoConnectWithRetry()
-                }
-            }
-        }
-        viewModelScope.launch {
-            controller.connectionState.collect { st ->
-                if (st != BleConnState.CONNECTED) autoConnectArmed = false
-            }
         }
     }
 
