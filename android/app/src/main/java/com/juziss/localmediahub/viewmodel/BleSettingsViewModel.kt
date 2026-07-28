@@ -186,27 +186,55 @@ class BleSettingsViewModel @Inject constructor(
      * reset to false when a precondition drops (server URL blanked, BLE toggle
      * off) or when the connection leaves CONNECTED, so a subsequent
      * `advertisingStarted == true` can re-arm a fresh retry loop.
+     *
+     * NOTE: this flag is the *precondition gate* (rearmable). It is NOT a
+     * reliable "loop is running" mutex — a real BLE disconnect mid-retry-delay
+     * drives the state machine CONNECTED→ADVERTISING, the
+     * `connectionState.collect` collector observes that distinct non-CONNECTED
+     * value and resets `autoConnectArmed = false` WHILE the first loop is
+     * still mid-`delay(3_000)`. The next advertising-started burst then sees
+     * `autoConnectArmed == false` and would spawn a SECOND concurrent retry
+     * loop without the [autoConnectLoopActive] gate below (final review
+     * Important finding).
      */
     private var autoConnectArmed: Boolean = false
 
     /**
+     * Active-loop gate: true while a [autoConnectWithRetry] loop is mid-flight
+     * (including its `delay(3_000)` windows), false once it returns. Unlike
+     * [autoConnectArmed] this is NOT resettable by the connection-state
+     * collector, so it reliably prevents a second concurrent loop from
+     * starting while the first is still running. Cleared in the launched
+     * coroutine's `finally` block so it always releases, even on exception.
+     */
+    private var autoConnectLoopActive: Boolean = false
+
+    /**
      * Runs [doAutoConnectOnce] up to 3 times, 3s apart, stopping early on
-     * CONNECTED. Deduped by [autoConnectArmed]; cleared by the precondition
-     * and connection-state collectors in [init].
+     * CONNECTED. Deduped by BOTH [autoConnectArmed] (precondition gate,
+     * rearmable) and [autoConnectLoopActive] (active-loop mutex, NOT
+     * rearmable while a loop is running); cleared by the precondition and
+     * connection-state collectors in [init].
      */
     private fun autoConnectWithRetry() {
+        if (autoConnectLoopActive) return  // a loop is already running — don't start a second
         if (autoConnectArmed) return
         autoConnectArmed = true
+        autoConnectLoopActive = true
         viewModelScope.launch {
-            repeat(3) {
-                if (controller.connectionState.value == BleConnState.CONNECTED) return@launch
-                if (doAutoConnectOnce()) return@launch
-                delay(3_000)
-            }
-            // Retries exhausted without a connection: surface a soft hint so the
-            // user knows the degraded channel is not yet usable and can retry.
-            if (controller.connectionState.value != BleConnState.CONNECTED) {
-                _errorText.value = "BLE 自动连接失败，降级通道暂不可用（可手动重试）"
+            try {
+                repeat(3) {
+                    if (controller.connectionState.value == BleConnState.CONNECTED) return@launch
+                    if (doAutoConnectOnce()) return@launch
+                    delay(3_000)
+                }
+                // Retries exhausted without a connection: surface a soft hint so the
+                // user knows the degraded channel is not yet usable and can retry.
+                if (controller.connectionState.value != BleConnState.CONNECTED) {
+                    _errorText.value = "BLE 自动连接失败，降级通道暂不可用（可手动重试）"
+                }
+            } finally {
+                autoConnectLoopActive = false
             }
         }
     }

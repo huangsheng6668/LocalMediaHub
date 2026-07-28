@@ -143,18 +143,73 @@ class BleSettingsViewModelTest {
         assertEquals(2, api.scanCallCount)
     }
 
+    /**
+     * Regression guard for the concurrent-double-loop race (final review
+     * Important finding): a second `advertisingStarted=true` burst arriving
+     * while the first retry loop is mid-`delay(3_000)` MUST NOT spawn a second
+     * concurrent loop. With both loops running, scan attempts would double (3
+     * per loop → up to 6 total). The single-loop budget is 3, so we assert
+     * scanCallCount == 3 after settling.
+     *
+     * Reproduction of the race window the original `autoConnectArmed`-only
+     * dedup failed to close. In production a real BLE disconnect event can
+     * arrive during the retry delay (Android re-emits onStartSuccess after
+     * advertising restarts); that drives the state machine CONNECTED→ADVERTISING,
+     * a DISTINCT non-CONNECTED value that the `connectionState` collector
+     * observes, resetting `autoConnectArmed = false` WHILE the first loop is
+     * still mid-`delay`. The next advertising-started burst then sees
+     * `autoConnectArmed == false` and (without the fix) launches a second
+     * concurrent retry loop.
+     *
+     * To make this deterministic under the fake state machine, the test
+     * simulates the production "disconnect mid-delay" event by briefly driving
+     * the controller CONNECTED then back to ADVERTISING during the delay
+     * window, then fires the second burst. Without the `autoConnectLoopActive`
+     * gate the second loop spawns and scanCallCount exceeds 3; with the gate
+     * it stays at the single-loop budget.
+     */
+    @Test
+    fun autoConnect_doesNotStartSecondLoopDuringRetryDelay() = runTest {
+        val api = fakeApi(scanFailCount = 0, connectFails = true)
+        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        runCurrent()  // let init collectors subscribe to advertisingStarted
+        vm.fireAdvertisingReady(true); runCurrent()
+        // Attempt 1 has run: scan() succeeded, connect() returned false, loop
+        // is now in delay(3_000) before attempt 2.
+        advanceTimeBy(1_000); runCurrent()
+        // Simulate a real BLE disconnect arriving mid-delay: the state machine
+        // briefly visits CONNECTED then drops back to ADVERTISING (a distinct
+        // non-CONNECTED emission), which the connectionState collector observes
+        // and resets autoConnectArmed = false.
+        vm.fakeController.markConnected(); runCurrent()
+        vm.fakeController.markDisconnected(); runCurrent()
+        // Second advertising-started burst arrives mid-delay. Without the
+        // active-loop gate this launches a second concurrent retry loop.
+        vm.fireAdvertisingReady(true); runCurrent()
+        advanceTimeBy(10_000); runCurrent()  // let everything settle
+        // Single loop budget = 3 scan attempts. A duplicate loop would push
+        // this past 3.
+        assertEquals(
+            "second burst must not spawn a concurrent retry loop",
+            3, api.scanCallCount
+        )
+    }
+
     // --- Test helpers ------------------------------------------------------
 
     /**
      * Builds a mockk [BleApi] whose `scan()` fails the first [scanFailCount]
-     * calls then returns one device whose `connect()` succeeds. `send` echoes
-     * "pong". Each scan call increments [scanCallCount] so tests can assert how
-     * many attempts the retry loop made.
+     * calls then returns one device; `connect()` succeeds unless [connectFails]
+     * is true, in which case it returns Success(false) on every call (drives
+     * the retry loop through all 3 attempts). `send` echoes "pong". Each scan
+     * call increments [scanCallCount] so tests can assert how many attempts the
+     * retry loop made.
      */
-    private fun fakeApi(scanFailCount: Int): FakeApi = FakeApi(scanFailCount)
+    private fun fakeApi(scanFailCount: Int, connectFails: Boolean = false): FakeApi =
+        FakeApi(scanFailCount, connectFails)
 
     /** Wrapper around a mockk BleApi that counts scan() calls. */
-    private class FakeApi(scanFailCount: Int) {
+    private class FakeApi(scanFailCount: Int, connectFails: Boolean) {
         val api: BleApi = mockk()
         var scanCallCount: Int = 0; private set
         private val failRemaining = scanFailCount
@@ -168,7 +223,9 @@ class BleSettingsViewModelTest {
                     NetworkResult.Success(listOf(BleDevice("AA:BB", "Pixel", -50)))
                 }
             }
-            coEvery { api.connect(any()) } returns NetworkResult.Success(true)
+            coEvery { api.connect(any()) } returns
+                if (connectFails) NetworkResult.Success(false)
+                else NetworkResult.Success(true)
             coEvery { api.send(any()) } returns NetworkResult.Success("pong")
         }
 
