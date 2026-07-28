@@ -59,3 +59,5 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	tinygo.org/x/bluetooth v0.15.0 // indirect
 )
+
+replace tinygo.org/x/bluetooth => ./third_party/bluetooth

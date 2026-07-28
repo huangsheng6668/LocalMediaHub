@@ -152,21 +152,46 @@ func (t *tinyGoCentralScanner) connectLocked(ctx context.Context, id string) err
 		return err
 	}
 
-	device, err := t.adapter.Connect(
-		bluetooth.Address{MACAddress: bluetooth.MACAddress{MAC: addr}},
-		bluetooth.ConnectionParams{},
-	)
+	// Retry the adapter.Connect + DiscoverServices pair. After the remote peer
+	// (Android app) is killed, the WinRT BLE stack keeps a residual GATT
+	// session that makes the immediately-following DiscoverServices fail with
+	// "async operation failed with status 2". Re-Enable-ing the adapter and
+	// waiting a moment lets WinRT tear the stale session down, after which a
+	// fresh Connect succeeds. Recover the device ref only after both steps
+	// succeed so a failed attempt never leaves a dangling t.device behind.
+	var device bluetooth.Device
+	var svcs []bluetooth.DeviceService
+	err = nil
+	for attempt := 1; attempt <= 3; attempt++ {
+		// Drop any residual adapter state before each attempt. Re-Enable on
+		// Windows just re-runs the LE watcher setup; it does not fault.
+		_ = t.adapter.Enable()
+		device, err = t.adapter.Connect(
+			bluetooth.Address{MACAddress: bluetooth.MACAddress{MAC: addr}},
+			bluetooth.ConnectionParams{},
+		)
+		if err != nil {
+			log.Printf("BLE adapter.Connect err (attempt %d)=%v", attempt, err)
+		} else {
+			svcs, err = device.DiscoverServices(nil)
+			if err == nil {
+				break // success
+			}
+			log.Printf("BLE Connect DiscoverServices err (attempt %d)=%v", attempt, err)
+		}
+		// Back off so WinRT can reclaim the stale session before retrying.
+		if attempt < 3 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
+		}
+	}
 	if err != nil {
-		log.Printf("BLE adapter.Connect err=%v", err)
 		return err
 	}
 	t.device = &device
-
-	svcs, err := device.DiscoverServices(nil)
-	if err != nil {
-		log.Printf("BLE Connect DiscoverServices err=%v", err)
-		return err
-	}
 
 	for i := range svcs {
 		uStr := svcs[i].UUID().String()
