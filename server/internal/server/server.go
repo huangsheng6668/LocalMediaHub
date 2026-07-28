@@ -39,6 +39,13 @@ type Server struct {
 	// unavailable or no provider was wired.
 	bleListenerCtx    context.Context
 	bleListenerCancel context.CancelFunc
+	// bleScanner is the concrete Central-role scanner built in New (nil when
+	// BLE is unavailable or the build lacks the bluetooth tag). Exposed via
+	// BleScanner() so main.go can inject a ConnectRecorder (BleHealthMonitor)
+	// for stuck-detection auto-restart without re-threading the recorder
+	// through New's construction order (the recorder needs *Server for the
+	// restarter, so it can only be built AFTER New returns).
+	bleScanner ble.CentralScanner
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -119,6 +126,7 @@ func New(cfg *config.Config) (*Server, error) {
 	if bleErr != nil {
 		fmt.Printf("BLE Central disabled; /api/v1/ble/* will report unavailable: %v\n", bleErr)
 	} else {
+		s.bleScanner = bleScanner
 		bleCentral := ble.NewCentral(bleScanner)
 		// Spec §3.1: inject the bleApiProvider so the long-lived listener can
 		// serve CMD_API_REQ frames for every endpoint (book chapter, folders,
@@ -154,6 +162,14 @@ func New(cfg *config.Config) (*Server, error) {
 		// WriteTimeout intentionally 0: video streams and folder-zip downloads can
 		// run for minutes-to-hours; a global write deadline would cut them off.
 	}
+
+	// BLE stuck-detection auto-restart (spec §3): parse LMH_BLE_RESTART_TS for
+	// cooldown, build the self-restarter + health monitor, and inject the
+	// monitor as the BLE scanner's ConnectRecorder. No-op when BLE is
+	// unavailable or the build is not windows && bluetooth (stub method).
+	// Done at the end of New so the restarter's *Server ref is fully
+	// constructed; both the headless and GUI entry points inherit it for free.
+	s.wireBleAutoRestart()
 
 	return s, nil
 }

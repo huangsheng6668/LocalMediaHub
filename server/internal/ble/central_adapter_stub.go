@@ -41,3 +41,12 @@ func (stubCentralScanner) WriteCommand(context.Context, []byte) error {
 func (stubCentralScanner) WaitNotify(context.Context) ([]byte, error) {
 	return nil, errors.New("ble: unavailable")
 }
+
+// SetConnectRecorder is a no-op on the stub: without a Bluetooth stack no
+// Connect round ever runs, so there is nothing to observe. The method exists
+// only to satisfy the CentralScanner interface so server.New compiles in
+// both the bluetooth and non-bluetooth builds. The recorder itself is only
+// constructed on windows && bluetooth (the BleHealthMonitor type is
+// build-tag-guarded), so this stub path is never reached with a non-nil
+// recorder.
+func (stubCentralScanner) SetConnectRecorder(ConnectRecorder) {}

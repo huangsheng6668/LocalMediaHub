@@ -61,6 +61,12 @@ func (f *fakeScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 	return f.notifyResp, nil
 }
 
+// SetConnectRecorder is a no-op: fakeScanner drives Central logic only and
+// never exercises the connectLocked recorder path (that lives in the
+// bluetooth-tagged tinyGoCentralScanner). Required to satisfy the
+// CentralScanner interface after the recorder seam was added.
+func (f *fakeScanner) SetConnectRecorder(ConnectRecorder) {}
+
 func TestCentralScanReturnsDevices(t *testing.T) {
 	fs := &fakeScanner{devices: []Device{{ID: "AA:BB", Name: "Pixel", RSSI: -45}}}
 	c := NewCentral(fs)

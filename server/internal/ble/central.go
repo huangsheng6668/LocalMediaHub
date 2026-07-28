@@ -23,6 +23,20 @@ type Device struct {
 	RSSI int    `json:"rssi"`
 }
 
+// ConnectRecorder observes the outcome of each Connect round (one
+// connectLocked invocation = one round). The bluetooth build's scanner calls
+// RecordConnect(true) on success and RecordConnect(false) on failure; main.go
+// injects a *BleHealthMonitor (windows && bluetooth build) so the monitor can
+// trigger a self-restart after ConnectFailThreshold consecutive failures.
+//
+// The interface lives here (no build tag) so it can be referenced uniformly by
+// the real scanner, the non-bluetooth stub, and callers — only the concrete
+// *BleHealthMonitor implementation is windows && bluetooth guarded (ble_health.go).
+// This keeps the non-bluetooth build compiling without dragging the monitor in.
+type ConnectRecorder interface {
+	RecordConnect(ok bool)
+}
+
 // CentralScanner abstracts the BLE Central-role stack so Central logic is
 // unit-testable without hardware. Production impl lives in central_adapter.go
 // (bluetooth build tag).
@@ -32,6 +46,14 @@ type CentralScanner interface {
 	Disconnect()
 	WriteCommand(ctx context.Context, payload []byte) error
 	WaitNotify(ctx context.Context) ([]byte, error)
+
+	// SetConnectRecorder injects a ConnectRecorder that observes each Connect
+	// round's outcome. The real (bluetooth) scanner wires the recorder into
+	// connectLocked's deferred path; the stub is a no-op (no Connect ever
+	// succeeds without a Bluetooth stack). nil recorder = observe nothing.
+	// Safe to call before or after Connect; the scanner holds the reference
+	// and guards nil internally.
+	SetConnectRecorder(r ConnectRecorder)
 }
 
 // Central owns the BLE Central-role lifecycle: scan, connect, send.

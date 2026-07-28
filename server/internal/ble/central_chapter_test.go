@@ -36,6 +36,9 @@ func (c *collectScanner) WaitNotify(context.Context) ([]byte, error) {
 	return nil, errors.New("not used in this test")
 }
 
+// SetConnectRecorder is a no-op test double stub (see fakeScanner note).
+func (c *collectScanner) SetConnectRecorder(ConnectRecorder) {}
+
 // jsonBlockProvider is a minimal ApiProvider that always returns a fixed JSON
 // body, recording the last (path, idx, ip) it was called with. Used to exercise
 // ServeApiRequest's multi-chunk stream path without depending on service.BookService.
@@ -163,6 +166,9 @@ func (s *scriptedScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 	}
 }
 
+// SetConnectRecorder is a no-op test double stub (see fakeScanner note).
+func (s *scriptedScanner) SetConnectRecorder(ConnectRecorder) {}
+
 // TestRunApiListenerDispatchesApiRequests exercises the long-lived listener
 // loop (spec §3.1) end-to-end: a stub scanner yields two CMD_API_REQ frames;
 // RunApiListener must decode each and hand it to ServeApiRequest, which writes
@@ -278,6 +284,9 @@ func (s *transientErrorScanner) WaitNotify(context.Context) ([]byte, error) {
 	s.callsMu.Unlock()
 	return nil, errors.New("ble: state characteristic not found")
 }
+
+// SetConnectRecorder is a no-op test double stub (see fakeScanner note).
+func (s *transientErrorScanner) SetConnectRecorder(ConnectRecorder) {}
 
 func (s *transientErrorScanner) callCount() int {
 	s.callsMu.Lock()

@@ -28,6 +28,14 @@ type tinyGoCentralScanner struct {
 	cmdChar   *bluetooth.DeviceCharacteristic
 	stateChar *bluetooth.DeviceCharacteristic
 
+	// recorder observes each Connect round's outcome (ok/fail) so the server
+	// can inject a *BleHealthMonitor that triggers a self-restart after
+	// ConnectFailThreshold consecutive failures (windows && bluetooth build).
+	// nil = observe nothing. Set once via SetConnectRecorder and only read
+	// inside connectLocked (which runs under opMu), so no extra
+	// synchronization is required.
+	recorder ConnectRecorder
+
 	// opMu serializes Scan / Connect / Disconnect. tinygo-org/bluetooth v0.15.0
 	// on Windows (via winrt-go + go-ole) crashes the whole process with a
 	// native fault when two of these race — a concurrent Scan yields
@@ -138,10 +146,31 @@ func (t *tinyGoCentralScanner) Connect(ctx context.Context, id string) error {
 	return t.connectLocked(ctx, id)
 }
 
+// SetConnectRecorder injects a ConnectRecorder (typically a *BleHealthMonitor
+// built in server.New's wireBleAutoRestart) that observes each connectLocked
+// round's outcome. The recorder is read only inside connectLocked, which runs
+// under opMu, so the write here does not need its own lock — the caller
+// invokes this exactly once, before the first Connect. nil is treated as
+// "observe nothing" by the deferred call in connectLocked.
+func (t *tinyGoCentralScanner) SetConnectRecorder(r ConnectRecorder) {
+	t.recorder = r
+}
+
 // connectLocked is the unlocked body of Connect. Caller MUST hold t.opMu.
 // Split out so Connect's own Disconnect call does not re-acquire the lock
 // (sync.Mutex is non-reentrant → deadlock).
-func (t *tinyGoCentralScanner) connectLocked(ctx context.Context, id string) error {
+//
+// The named return err is captured by the deferred recorder call so the
+// outcome (ok = err == nil) is reported on EVERY exit path — early MAC-parse
+// failure, retry-loop exhaustion, missing-characteristic failure, and
+// success alike. Exactly one RecordConnect fires per invocation, matching the
+// BleHealthMonitor "one Connect round = one record" contract (spec §1.1).
+func (t *tinyGoCentralScanner) connectLocked(ctx context.Context, id string) (err error) {
+	defer func() {
+		if t.recorder != nil {
+			t.recorder.RecordConnect(err == nil)
+		}
+	}()
 	t.disconnectLocked()
 	t.cmdChar = nil
 	t.stateChar = nil
