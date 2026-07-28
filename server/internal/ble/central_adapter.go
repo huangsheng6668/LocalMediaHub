@@ -13,6 +13,7 @@ import (
 	"log"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"tinygo.org/x/bluetooth"
@@ -26,6 +27,16 @@ type tinyGoCentralScanner struct {
 	device    *bluetooth.Device
 	cmdChar   *bluetooth.DeviceCharacteristic
 	stateChar *bluetooth.DeviceCharacteristic
+
+	// opMu serializes Scan / Connect / Disconnect. tinygo-org/bluetooth v0.15.0
+	// on Windows (via winrt-go + go-ole) crashes the whole process with a
+	// native fault when two of these race — a concurrent Scan yields
+	// "a scan is already in progress" and a Disconnect racing a dying GATT
+	// session dereferences a freed COM IUnknown* inside GattSession.Close
+	// (signal 0xc0000005). The auto-connect retry path in the Android client
+	// can fire a second scan+connect while the first is still winding down, so
+	// the Central MUST handle these operations strictly one at a time.
+	opMu sync.Mutex
 }
 
 // NewCentralScanner enables the default Bluetooth adapter and returns a
@@ -44,6 +55,9 @@ func NewCentralScanner() (CentralScanner, error) {
 // (or until ctx is cancelled, whichever is first). Returns the deduplicated
 // list of advertising devices. Never blocks forever.
 func (t *tinyGoCentralScanner) Scan(ctx context.Context, serviceUUID string) ([]Device, error) {
+	t.opMu.Lock()
+	defer t.opMu.Unlock()
+
 	uuid, err := bluetooth.ParseUUID(serviceUUID)
 	if err != nil {
 		return nil, err
@@ -119,7 +133,16 @@ func (t *tinyGoCentralScanner) Scan(ctx context.Context, serviceUUID string) ([]
 // characteristics on SERVICE_UUID. On success, device + characteristic
 // pointers are cached for subsequent WriteCommand / WaitNotify calls.
 func (t *tinyGoCentralScanner) Connect(ctx context.Context, id string) error {
-	t.Disconnect()
+	t.opMu.Lock()
+	defer t.opMu.Unlock()
+	return t.connectLocked(ctx, id)
+}
+
+// connectLocked is the unlocked body of Connect. Caller MUST hold t.opMu.
+// Split out so Connect's own Disconnect call does not re-acquire the lock
+// (sync.Mutex is non-reentrant → deadlock).
+func (t *tinyGoCentralScanner) connectLocked(ctx context.Context, id string) error {
+	t.disconnectLocked()
 	t.cmdChar = nil
 	t.stateChar = nil
 
@@ -184,6 +207,13 @@ func (t *tinyGoCentralScanner) Connect(ctx context.Context, id string) error {
 // Disconnect drops the GATT connection and clears cached characteristics.
 // Safe to call when already disconnected (no-op).
 func (t *tinyGoCentralScanner) Disconnect() {
+	t.opMu.Lock()
+	defer t.opMu.Unlock()
+	t.disconnectLocked()
+}
+
+// disconnectLocked is the unlocked body. Caller MUST hold t.opMu.
+func (t *tinyGoCentralScanner) disconnectLocked() {
 	if t.device != nil {
 		_ = t.device.Disconnect()
 		t.device = nil
