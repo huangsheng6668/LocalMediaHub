@@ -133,6 +133,37 @@ func TestCentralScanTimeout(t *testing.T) {
 	}
 }
 
+// TestNewCentralScannerDoesNotPanic asserts the central construction contract
+// that server.New depends on: NewCentralScanner must NEVER panic when the
+// Bluetooth adapter is missing, disabled, or built without the bluetooth tag.
+// Instead it returns (nil, err) and callers continue without BLE. This file
+// has no build tag, so the test runs in BOTH builds: under the default build
+// it exercises the stub path (central_adapter_stub.go), and under -tags
+// bluetooth it exercises the real tinygo path (central_adapter.go) which calls
+// adapter.Enable() — on any host without a usable radio Enable fails and
+// returns (nil, err) rather than faulting. A recover guard double-checks the
+// no-panic invariant even if a future regression raises a native fault.
+func TestNewCentralScannerDoesNotPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("NewCentralScanner panicked: %v", r)
+		}
+	}()
+	scanner, err := NewCentralScanner()
+	if err != nil {
+		// Error is expected on hosts without BLE; the contract is "no panic",
+		// not "success". A nil scanner with an error is the documented
+		// unavailable-adapter outcome.
+		if scanner != nil {
+			t.Fatalf("NewCentralScanner returned non-nil scanner WITH error: %v (scanner=%T)", err, scanner)
+		}
+		return
+	}
+	if scanner == nil {
+		t.Fatal("NewCentralScanner returned (nil, nil) — caller would dereference nil")
+	}
+}
+
 func TestCentralConnectSerializesConcurrentCalls(t *testing.T) {
 	// Two concurrent Connect calls: second must wait for first (no panic, no race).
 	fs := &fakeScanner{}

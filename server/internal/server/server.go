@@ -40,11 +40,12 @@ type Server struct {
 	bleListenerCtx    context.Context
 	bleListenerCancel context.CancelFunc
 	// bleScanner is the concrete Central-role scanner built in New (nil when
-	// BLE is unavailable or the build lacks the bluetooth tag). Exposed via
-	// BleScanner() so main.go can inject a ConnectRecorder (BleHealthMonitor)
-	// for stuck-detection auto-restart without re-threading the recorder
-	// through New's construction order (the recorder needs *Server for the
-	// restarter, so it can only be built AFTER New returns).
+	// BLE is unavailable or the build lacks the bluetooth tag). It is consumed
+	// internally by the build-tag-guarded wireBleAutoRestart method
+	// (windows && bluetooth), which injects a ConnectRecorder (BleHealthMonitor)
+	// for stuck-detection auto-restart. The recorder is wired inside New AFTER
+	// this field is set, because the BleHealthMonitor needs *Server for the
+	// restarter, so it can only be built once the Server is constructible.
 	bleScanner ble.CentralScanner
 }
 

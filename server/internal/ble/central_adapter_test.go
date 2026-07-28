@@ -19,9 +19,11 @@ type recordingRecorder struct {
 
 func (r *recordingRecorder) RecordConnect(ok bool) { r.records = append(r.records, ok) }
 
-// TestNewCentralScannerDoesNotPanic (kept in the build-tag-agnostic
-// central_test.go file originally) is intentionally NOT duplicated here; this
-// file is the bluetooth-tagged companion that exercises the recorder seam.
+// TestNewCentralScannerDoesNotPanic lives in the build-tag-agnostic
+// central_test.go and runs in BOTH builds (stub path here, real tinygo path
+// under -tags bluetooth). It is intentionally NOT duplicated in this file;
+// central_adapter_test.go is the bluetooth-tagged companion that exercises
+// the recorder seam only.
 
 // TestConnectLocked_RecordsOutcomeOnRecorder verifies that connectLocked
 // reports its outcome to the injected recorder exactly once per call. The test
