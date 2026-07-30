@@ -50,8 +50,7 @@ class BleController @Inject constructor(
     /**
      * Task 1: emits `true` when the peripheral's AdvertiseCallback reports
      * onStartSuccess (the device is now actually discoverable) and `false` on
-     * onStartFailure. Task 2's auto-connect trigger MUST wait on this signal
-     * (spec method B) so it never fires before the advertiser is ready.
+     * onStartFailure.
      *
      * `extraBufferCapacity = 8` ensures back-pressure never drops an emission
      * under transient slow-collector conditions.
@@ -70,8 +69,8 @@ class BleController @Inject constructor(
                 peripheralManager.notifyPayload(BleProtocol.encodeFrame(payload))
             }
         }
-        // Surface the advertising-started signal so callers (Task 2 auto-connect)
-        // can defer triggering until the peripheral is actually discoverable.
+        // Surface the advertising-started signal so callers can observe
+        // when the peripheral is actually discoverable.
         peripheralManager.setOnAdvertisingStarted { success ->
             _advertisingStarted.tryEmit(success)
         }

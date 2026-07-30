@@ -29,8 +29,8 @@ import org.junit.Test
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 /**
- * Unit tests for the BLE scan/connect/sendTest flows (Task 9) and the Task 2
- * automatic connect trigger + 3x retry wiring.
+ * Unit tests for the BLE scan/connect/sendTest flows (Task 9) and the manual
+ * connection flow (`autoConnect()`).
  *
  * Each VM is constructed with:
  *  - a real [BleController] backed by a [FakePeripheralManager], so the
@@ -43,8 +43,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
  *    so each test seeds `serverConfigured` and `bleEnabled` directly.
  *
  * `Dispatchers.setMain(StandardTestDispatcher())` puts `viewModelScope.launch`
- * under runTest's controlled scheduler so the auto-connect `delay(3_000)` is
- * observable via [advanceTimeBy]; simple tests call [runCurrent] to flush.
+ * under runTest's controlled scheduler; simple tests call [runCurrent] to flush.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class BleSettingsViewModelTest {
@@ -86,136 +85,41 @@ class BleSettingsViewModelTest {
         assertEquals("pong", vm.echoResult.value)
     }
 
-    // --- Task 2: retry + trigger -------------------------------------------
+    // --- Manual autoConnect flow -------------------------------------------
 
     @Test
-    fun autoConnect_retriesThenSucceeds() = runTest {
-        // First 2 scan() return Error, 3rd returns Success + connect Success.
-        val api = fakeApi(scanFailCount = 2)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
-        runCurrent()  // let init collectors subscribe to advertisingStarted
-        vm.fireAdvertisingReady(true); runCurrent()
-        // advance through 2 retry delays (3s each)
-        advanceTimeBy(3_001); runCurrent()
-        advanceTimeBy(3_001); runCurrent()
-        assertEquals(BleConnState.CONNECTED, vm.connectionState.value)
-        assertTrue("scanCallCount=${api.scanCallCount} expected >= 3", api.scanCallCount >= 3)
-    }
-
-    @Test
-    fun autoConnect_notTriggeredWhenBleDisabled() = runTest {
+    fun bleEnabled_doesNotTriggerAutoConnect() = runTest {
         val api = fakeApi(scanFailCount = 0)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = false)
+        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
         runCurrent()
-        vm.fireAdvertisingReady(true); runCurrent(); advanceTimeBy(10_000); runCurrent()
+        vm.fireAdvertisingReady(true); runCurrent()
+        advanceTimeBy(10_000); runCurrent()
         assertEquals(0, api.scanCallCount)
     }
 
     @Test
-    fun autoConnect_notTriggeredWhenServerNotConfigured() = runTest {
-        val api = fakeApi(scanFailCount = 0)
-        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
-        runCurrent()
-        vm.fireAdvertisingReady(true); runCurrent(); advanceTimeBy(10_000); runCurrent()
-        assertEquals(0, api.scanCallCount)
-    }
-
-    @Test
-    fun autoConnect_dedupesRepeatedAdvertisingReady() = runTest {
+    fun autoConnect_manualCall_triggersSingleScanAndConnect() = runTest {
         val api = fakeApi(scanFailCount = 0)
         val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
         runCurrent()
-        vm.fireAdvertisingReady(true); runCurrent()
-        vm.fireAdvertisingReady(true); runCurrent()
-        vm.fireAdvertisingReady(true); runCurrent()
-        assertEquals("armed -> only one attempt path starts", 1, api.scanCallCount)
-    }
 
-    @Test
-    fun autoConnect_rearmsAfterBleDisconnect() = runTest {
-        val api = fakeApi(scanFailCount = 0)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
-        runCurrent()
-        vm.fireAdvertisingReady(true); runCurrent()
+        vm.autoConnect(); runCurrent()
+
         assertEquals(1, api.scanCallCount)
-        vm.fakeController.markDisconnected(); runCurrent()  // resets armed
-        vm.fireAdvertisingReady(true); runCurrent()
-        assertEquals(2, api.scanCallCount)
+        assertEquals(BleConnState.CONNECTED, vm.connectionState.value)
     }
 
-    /**
-     * Regression: the "BLE toggle was on BEFORE connecting server" ordering.
-     * advertisingStarted is a transient SharedFlow; without folding it into a
-     * sticky state, the early advertising burst is consumed while serverUrl is
-     * still blank, and the later server connect has no signal to react to — so
-     * auto-connect never fires. The sticky-StateFlow combine must re-evaluate
-     * when the server signal arrives last.
-     */
     @Test
-    fun autoConnect_firesWhenServerConnectsAfterAdvertisingStarted() = runTest {
-        val api = fakeApi(scanFailCount = 0)
-        // server NOT configured yet; BLE already on.
-        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
-        runCurrent()
-        // Advertising starts (BLE was toggled on) — but server not configured,
-        // so no trigger yet.
-        vm.fireAdvertisingReady(true); runCurrent()
-        assertEquals(0, api.scanCallCount)
-        // Now the user connects the server — the triple completes.
-        vm.connectServerPostHoc(); runCurrent()
-        assertEquals("server-connected-last must still trigger auto-connect", 1, api.scanCallCount)
-    }
-
-    /**
-     * Regression guard for the concurrent-double-loop race (final review
-     * Important finding): a second `advertisingStarted=true` burst arriving
-     * while the first retry loop is mid-`delay(3_000)` MUST NOT spawn a second
-     * concurrent loop. With both loops running, scan attempts would double (3
-     * per loop → up to 6 total). The single-loop budget is 3, so we assert
-     * scanCallCount == 3 after settling.
-     *
-     * Reproduction of the race window the original `autoConnectArmed`-only
-     * dedup failed to close. In production a real BLE disconnect event can
-     * arrive during the retry delay (Android re-emits onStartSuccess after
-     * advertising restarts); that drives the state machine CONNECTED→ADVERTISING,
-     * a DISTINCT non-CONNECTED value that the `connectionState` collector
-     * observes, resetting `autoConnectArmed = false` WHILE the first loop is
-     * still mid-`delay`. The next advertising-started burst then sees
-     * `autoConnectArmed == false` and (without the fix) launches a second
-     * concurrent retry loop.
-     *
-     * To make this deterministic under the fake state machine, the test
-     * simulates the production "disconnect mid-delay" event by briefly driving
-     * the controller CONNECTED then back to ADVERTISING during the delay
-     * window, then fires the second burst. Without the `autoConnectLoopActive`
-     * gate the second loop spawns and scanCallCount exceeds 3; with the gate
-     * it stays at the single-loop budget.
-     */
-    @Test
-    fun autoConnect_doesNotStartSecondLoopDuringRetryDelay() = runTest {
-        val api = fakeApi(scanFailCount = 0, connectFails = true)
+    fun autoConnect_manualCall_handlesScanFailureCleanly() = runTest {
+        val api = fakeApi(scanFailCount = 1)
         val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
-        runCurrent()  // let init collectors subscribe to advertisingStarted
-        vm.fireAdvertisingReady(true); runCurrent()
-        // Attempt 1 has run: scan() succeeded, connect() returned false, loop
-        // is now in delay(3_000) before attempt 2.
-        advanceTimeBy(1_000); runCurrent()
-        // Simulate a real BLE disconnect arriving mid-delay: the state machine
-        // briefly visits CONNECTED then drops back to ADVERTISING (a distinct
-        // non-CONNECTED emission), which the connectionState collector observes
-        // and resets autoConnectArmed = false.
-        vm.fakeController.markConnected(); runCurrent()
-        vm.fakeController.markDisconnected(); runCurrent()
-        // Second advertising-started burst arrives mid-delay. Without the
-        // active-loop gate this launches a second concurrent retry loop.
-        vm.fireAdvertisingReady(true); runCurrent()
-        advanceTimeBy(10_000); runCurrent()  // let everything settle
-        // Single loop budget = 3 scan attempts. A duplicate loop would push
-        // this past 3.
-        assertEquals(
-            "second burst must not spawn a concurrent retry loop",
-            3, api.scanCallCount
-        )
+        runCurrent()
+
+        vm.autoConnect(); runCurrent()
+
+        assertEquals(1, api.scanCallCount)
+        assertEquals(BleConnState.ADVERTISING, vm.connectionState.value)
+        assertTrue(vm.errorText.value?.contains("建立连接失败") == true)
     }
 
     // --- Test helpers ------------------------------------------------------

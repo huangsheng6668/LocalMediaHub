@@ -57,18 +57,31 @@ import com.juziss.localmediahub.viewmodel.BleSettingsViewModel
  */
 @Composable
 fun BleChannelSection(
-    bleViewModel: BleSettingsViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+    bleViewModel: BleSettingsViewModel? = null,
 ) {
     val context = LocalContext.current
+    val isHiltAvailable = remember(context) {
+        context is dagger.hilt.internal.GeneratedComponentManager<*> ||
+        context is dagger.hilt.internal.GeneratedComponent ||
+        (context as? android.app.Activity) is dagger.hilt.internal.GeneratedComponentManager<*> ||
+        (context as? android.app.Activity) is dagger.hilt.internal.GeneratedComponent
+    }
+
+    val viewModel: BleSettingsViewModel = when {
+        bleViewModel != null -> bleViewModel
+        isHiltAvailable -> androidx.hilt.navigation.compose.hiltViewModel()
+        else -> return
+    }
+
     // Experimental BLE channel toggle. Collected here so the card reflects
     // the persisted setting + live connection state from BleController.
-    val bleEnabled by bleViewModel.bleEnabled.collectAsState()
-    val bleConnState by bleViewModel.connectionState.collectAsState()
-    val bleHardwareAvailable by remember { mutableStateOf(bleViewModel.hardwareAvailable()) }
-    val bleDevices by bleViewModel.devices.collectAsState()
-    val bleScanning by bleViewModel.scanning.collectAsState()
-    val bleEchoResult by bleViewModel.echoResult.collectAsState()
-    val bleErrorText by bleViewModel.errorText.collectAsState()
+    val bleEnabled by viewModel.bleEnabled.collectAsState()
+    val bleConnState by viewModel.connectionState.collectAsState()
+    val bleHardwareAvailable by remember { mutableStateOf(viewModel.hardwareAvailable()) }
+    val bleDevices by viewModel.devices.collectAsState()
+    val bleScanning by viewModel.scanning.collectAsState()
+    val bleEchoResult by viewModel.echoResult.collectAsState()
+    val bleErrorText by viewModel.errorText.collectAsState()
 
     // Runtime permission launcher for BLE. On Android 12+ both BLUETOOTH_SCAN
     // and BLUETOOTH_CONNECT are runtime permissions; on older API levels they
@@ -83,12 +96,12 @@ fun BleChannelSection(
         // (or considered already-granted, which appears as `true` here).
         val granted = result.values.all { it }
         if (granted) {
-            bleViewModel.onBleToggle(requested = true)
+            viewModel.onBleToggle(requested = true)
         } else if (!bleEnabled) {
             // User denied and the switch was off: make sure we don't leave
             // the persisted setting on. Calling with false is a no-op when
             // already off but keeps state honest if it was on.
-            bleViewModel.onBleToggle(requested = false)
+            viewModel.onBleToggle(requested = false)
         }
     }
 
@@ -98,7 +111,7 @@ fun BleChannelSection(
         hardwareAvailable = bleHardwareAvailable,
         onCheckedChange = { requested ->
             if (!requested) {
-                bleViewModel.onBleToggle(requested = false)
+                viewModel.onBleToggle(requested = false)
                 return@BleExperimentalToggleCard
             }
             val hasPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -109,7 +122,7 @@ fun BleChannelSection(
                 true
             }
             if (hasPermissions) {
-                bleViewModel.onBleToggle(requested = true)
+                viewModel.onBleToggle(requested = true)
             } else {
                 val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     arrayOf(
@@ -138,10 +151,10 @@ fun BleChannelSection(
             connectionState = bleConnState,
             echoResult = bleEchoResult,
             errorText = bleErrorText,
-            onScan = { bleViewModel.scan() },
-            onConnect = { bleViewModel.connect(it) },
-            onAutoConnect = { bleViewModel.autoConnect() },
-            onSendTest = { bleViewModel.sendTest() },
+            onScan = { viewModel.scan() },
+            onConnect = { viewModel.connect(it) },
+            onAutoConnect = { viewModel.autoConnect() },
+            onSendTest = { viewModel.sendTest() },
         )
     }
 }
