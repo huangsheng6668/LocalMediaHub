@@ -310,7 +310,6 @@ func (t *tinyGoCentralScanner) WriteCommand(_ context.Context, payload []byte) e
 
 func (t *tinyGoCentralScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 	if t.stateChar == nil {
-		log.Printf("BLE WaitNotify failed: stateChar is nil")
 		return nil, errNoStateChar
 	}
 
