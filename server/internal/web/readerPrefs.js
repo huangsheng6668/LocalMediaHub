@@ -17,6 +17,8 @@ export const FONT_FAMILIES = {
     SYSTEM: '-apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif',
     SERIF: '"Noto Serif SC", "Songti SC", "SimSun", serif',
     KAITI: '"LXGW WenKai", "Kaiti SC", "STKaiti", cursive',
+    HEITI: '"Heiti SC", "Microsoft YaHei", "PingFang SC", sans-serif',
+    MONO: '"Cascadia Mono", Consolas, "Courier New", monospace',
 };
 
 // 内容宽度滑块范围（px）。Android 在屏幕 dp 上有等价 clamp。
@@ -50,6 +52,10 @@ export const DEFAULT_SETTINGS = {
     immersiveMode: false,
     autoScrollSpeed: 5,
     readingMode: 'chapter', // 'chapter' | 'scroll'
+    letterSpacing: 0, // 0..1 em，步进 0.05
+    customBg: null,   // #RRGGBB，仅 theme=CUSTOM 时生效
+    customFg: null,
+    customMuted: null,
 };
 
 // migrateV1toV2: 接受任何形状（包括 null/undefined/坏字段），输出 V2 形状。
@@ -72,7 +78,7 @@ export function migrateV1toV2(old) {
         out.lineHeight = clampFloat(old.lineHeight, LINE_HEIGHT_RANGE.MIN, LINE_HEIGHT_RANGE.MAX);
     }
 
-    if (typeof old.theme === 'string' && THEME_PRESETS.hasOwnProperty(old.theme)) {
+    if (typeof old.theme === 'string' && (THEME_PRESETS.hasOwnProperty(old.theme) || old.theme === 'CUSTOM')) {
         out.theme = old.theme;
     }
 
@@ -94,11 +100,21 @@ export function migrateV1toV2(old) {
         out.readingMode = old.readingMode;
     }
 
+    // 排版打磨（2026-08-01）：新字段。注意步进 0.05，不能复用 clampFloat（步进 0.1）
+    if (typeof old.letterSpacing === 'number' && Number.isFinite(old.letterSpacing)) {
+        out.letterSpacing = clampLetterSpacing(old.letterSpacing);
+    }
+    if (typeof old.customBg === 'string' && HEX6.test(old.customBg)) out.customBg = old.customBg;
+    if (typeof old.customFg === 'string' && HEX6.test(old.customFg)) out.customFg = old.customFg;
+    if (typeof old.customMuted === 'string' && HEX6.test(old.customMuted)) out.customMuted = old.customMuted;
+
     return out;
 }
 
 function clampInt(n, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(n))); }
 function clampFloat(n, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(n * 10) / 10)); }
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
+function clampLetterSpacing(n) { return Math.max(0, Math.min(1, Math.round(n * 20) / 20)); }
 
 const EVENT = 'reader-prefs-changed';
 
