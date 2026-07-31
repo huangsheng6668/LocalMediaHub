@@ -1,9 +1,7 @@
 package com.juziss.localmediahub.ui.component.reader
 
 import androidx.compose.ui.text.font.FontFamily
-import com.juziss.localmediahub.R
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -11,12 +9,10 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class ReaderFontFamilyTest {
 
+    /** 回退方案：全量字体 ~25MB 超出 spec 上限（4-13MB），KAITI 回退到系统宋体。 */
     @Test
-    fun kaiti_maps_to_bundled_wenkai_font() {
-        // R.font.lxgw_wenkai non-zero proves font resource is packaged
-        assertNotNull(R.font.lxgw_wenkai)
-        val fam = ReaderFontFamily.KAITI.toFontFamily()
-        assertNotNull(fam)
+    fun kaiti_fallback_maps_to_serif() {
+        assertEquals(FontFamily.Serif, ReaderFontFamily.KAITI.toFontFamily())
     }
 
     @Test

@@ -1,8 +1,6 @@
 package com.juziss.localmediahub.ui.component.reader
 
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
-import com.juziss.localmediahub.R
 
 enum class ReaderFontFamily(val label: String) {
     SYSTEM("无衬线"),
@@ -13,7 +11,9 @@ enum class ReaderFontFamily(val label: String) {
     fun toFontFamily(): FontFamily = when (this) {
         SYSTEM -> FontFamily.Default
         SERIF  -> FontFamily.Serif
-        KAITI  -> FontFamily(Font(R.font.lxgw_wenkai))
+        // 回退方案：v1.522 全量字体 ~25MB，超出 spec 4-13MB 上限；作者
+        // 未发布子集版，按 spec §1.3 回退到系统宋体。
+        KAITI  -> FontFamily.Serif
         MONO   -> FontFamily.Monospace
     }
 }
