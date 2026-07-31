@@ -132,7 +132,7 @@ CHAPTER 模式下，所有**相邻切章**入口统一接入新的翻页动画�
 
 **Android**（Robolectric）：
 - `ReaderSettingsMigrationTest`：旧 JSON 无 `pageTurnStyle` → NONE；带字段读取正确
-- `PageTurnControllerTest`（新建）：`turnTo('next')` 进度 0→1 完成回调触发；非法方向 no-op；并发 turnTo 后者取消前者
+- `PageTurnControllerTest`（新建）：`turnTo` 边界校验（首/末章返回失败、load 失败返回失败）；**并发时第二次调用被拒绝**（busy 互斥，非取消前者）；动画由 UI 层驱动（controller 只返回目标章 index）
 - `ReaderSettingsSheetTest`：翻页 chips 渲染、SCROLL 置灰、点击触发 onChange
 - 手势判定纯函数单测（DRAG 阈值判定逻辑抽为纯函数便于测）
 
@@ -149,5 +149,6 @@ CHAPTER 模式下，所有**相邻切章**入口统一接入新的翻页动画�
 ## 风险与回退
 
 1. **SIMULATION 自绘成本**：Compose Canvas + Web clip-path 双端实现复杂度高。若实施中发现某一端无法在合理工时内达到可接受视觉效果，SIMULATION 可临时降级为"COVER + 卷曲阴影伪元素"近似，并在 commit/报告中注明；NONE/COVER/DRAG 不受影响先行落地。
+   - **首版视觉简化（plan 已定）**：Web 用线性 polygon（矩形 clip）近似卷曲边界，贝塞尔采样点多边形为视觉增强，留手动验证后迭代；Android 首版顶层不裁剪（直接显示），PageTurnSimulator 作为阴影层覆盖，若视觉验证不佳再按 clipPath 方案裁剪顶层。此取舍不改变"卷走"语义与方向。
 2. **DRAG 手势冲突**：与章内垂直滚动、长按书签、点击热区共存易踩坑。手势判定逻辑抽为纯函数（`resolveGesture(dx, dy, style, threshold)`）先行单测，再接入 UI。
 3. **Web pointer 事件兼容**：`pointerdown/move/up` 在旧浏览器需 `touchstart/move/end` 回退。首版假定现代浏览器（项目 Web 端已用 ES modules + matchMedia，无 IE 兼容负担）；若测试发现需回退再加。

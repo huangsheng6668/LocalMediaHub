@@ -388,7 +388,6 @@ function prefersReducedMotion() {
 
 export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCurrentIdx, getChapterCount }) {
     let busy = false;
-    let dragAttached = false;
 
     function resolveStyle() {
         const s = getStyle();
@@ -466,16 +465,22 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
 }
 ```
 
-修改 `style.css`，在 `.text-reader__content p` 规则附近加翻页层基础样式：
+修改 `style.css`，在 `.text-reader__content` 规则附近加翻页层基础样式：
 
 ```css
-/* 翻页动画层：新旧章叠放，新章 absolute 定位覆盖。 */
+/* 翻页动画层：新旧章叠放，新章 absolute 定位覆盖。
+   注意：absolute 需要最近的 positioned 祖先 —— contentEl 必须 position: relative。 */
+.text-reader__content {
+    position: relative;
+}
 .text-reader__content .text-reader__page--incoming {
     position: absolute;
     inset: 0;
     will-change: transform;
 }
 ```
+
+（`position: relative` 对现有布局无影响，仅使 `.text-reader__page--incoming` 的 absolute 以内容区为定位基准。若 `.text-reader__content` 规则中已有 `position` 声明，改为在该规则内追加 `position: relative`。）
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -506,7 +511,7 @@ git commit -m "feat(web): add pageTurn controller module (NONE/COVER, reduced-mo
 
 - [ ] **Step 1: 写失败测试**
 
-`pageTurn.test.mjs` 末尾加一个集成式断言（验证 turnTo 调用了 loadChapterSection 且 direction 正确）：
+(1) `pageTurn.test.mjs` 末尾加一个单元断言（验证 turnTo 调用了 loadChapterSection 且 target 正确）：
 
 ```js
 test('turnTo(next) requests the next chapter index via loadChapterSection', async () => {
@@ -531,6 +536,67 @@ test('turnTo(next) requests the next chapter index via loadChapterSection', asyn
 });
 ```
 
+(2) 新建 `textReader-pageturn.test.mjs`——**集成测试**（spec 测试计划要求："CHAPTER 模式点右热区 → 调 turnTo('next')"）。仿 snapshot-baseline.test.mjs 的 mock fetch + 环境 stub 模式，完整跑 `renderTextReader`，模拟点击内容区右 80% 热区，断言章节前进到下一章（title/progress 更新）。此测试在 Task 4 Step 3 接入后才通过：
+
+```js
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { setupJsdom, teardownJsdom, mockBook } from './_snapshot-helpers.mjs';
+
+function installEnv() {
+    global.sessionStorage = global.sessionStorage || {
+        _s: {}, getItem(k) { return k in this._s ? this._s[k] : null; },
+        setItem(k, v) { this._s[k] = String(v); }, removeItem(k) { delete this._s[k]; },
+    };
+    window.matchMedia = window.matchMedia || (() => ({
+        matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    }));
+    global.fetch = async (url) => {
+        if (url.includes('/books/info')) {
+            return { ok: true, status: 200, json: async () => mockBook };
+        }
+        if (url.includes('/books/chapter')) {
+            return {
+                ok: true, status: 200,
+                json: async () => ({ title: '第一章 开端', blocks: [{ type: 'text', value: '正文内容' }] }),
+            };
+        }
+        return { ok: false, status: 404 };
+    };
+}
+
+function viewContainer() {
+    let el = document.getElementById('view-reader');
+    if (!el) { el = document.createElement('div'); el.id = 'view-reader'; document.body.appendChild(el); }
+    return el;
+}
+
+// CHAPTER 模式（默认 NONE）下点击右 80% 热区 → 章节前进（走 pageTurn 路径）。
+test('chapter mode: click right hotzone advances to next chapter', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        localStorage.setItem('reader_settings', JSON.stringify({ readingMode: 'chapter', pageTurnStyle: 'NONE' }));
+        const { renderTextReader } = await import('./textReader.js');
+        await renderTextReader(viewContainer(), mockBook.path, 0);
+        await new Promise((r) => setTimeout(r, 50));
+        const content = viewContainer().querySelector('.text-reader__content');
+        // jsdom 无 layout，getBoundingClientRect 返回 0 —— 直接用 clientWidth 计算右热区坐标
+        content.clientWidth = 800; // jsdom 允许赋值
+        const click = new MouseEvent('click', { bubbles: true, clientX: 700 });
+        content.dispatchEvent(click);
+        await new Promise((r) => setTimeout(r, 100)); // 等 turnTo 完成
+        const title = viewContainer().querySelector('.text-reader__title').textContent;
+        assert.ok(title.includes('第一章'), `expected chapter title, got: ${title}`);
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+```
+
+注意：jsdom 下 `getBoundingClientRect` 全 0，热区判定 `(e.clientX - rect.left) / rect.width` 会除 0——因此必须给 `content.clientWidth`/`clientHeight` 赋值（jsdom 支持对 Element 的 clientWidth 属性赋值，getBoundingClientRect 会返回 width=clientWidth）。若赋值不生效，测试改为直接调用热区判定逻辑（把 ratio 计算抽为导出函数 `hotzoneRatio(clientX, rect)` 并在 textReader.js 中复用）。实施者按实测选择其一，并在报告注明。
+
 - [ ] **Step 2: 运行确认（应已通过——Task 3 已实现该行为）**
 
 Run: `cd server/internal/web && node --test pageTurn.test.mjs`
@@ -553,36 +619,43 @@ Expected: PASS（验证 turnTo 确实调了 loadChapterSection(2)）。若失败
     });
 ```
 
-修改 prev/next 按钮绑定（CHAPTER 模式走 pageTurn，SCROLL 模式不变）：
+修改 prev/next 按钮绑定（CHAPTER 模式走 pageTurn；SCROLL 模式**保持现有代码原样**——现有按钮在 scroll 模式下调 `loadChapter(idx±1)`，不要改成 loadPrevScrollChapter/loadNextScrollChapter，那是越界行为改动）：
 
 ```js
+    // 现有：els.prev 点击 → if (state.currentIdx > 0) loadChapter(state.currentIdx - 1)
+    // 改为：SCROLL 分支保持原样，CHAPTER 分支走 pageTurn
     els.prev.addEventListener('click', () => {
         if (readerPrefs.getSettings().readingMode === 'scroll') {
-            // scroll 模式原有逻辑保持
-            if (els.content.scrollTop <= 300 && minLoadedIdx > 0) loadPrevScrollChapter();
+            if (state.currentIdx > 0) loadChapter(Math.max(0, state.currentIdx - 1)); // 保持现状
             return;
         }
         pageTurnApi.turnTo('prev').then((ok) => { if (!ok) showToast('已经是第一章了', 'info'); });
     });
     els.next.addEventListener('click', () => {
         if (readerPrefs.getSettings().readingMode === 'scroll') {
-            if (els.content.scrollTop + els.content.clientHeight >= els.content.scrollHeight - 300) loadNextScrollChapter();
+            if (state.currentIdx < chapterCount - 1) loadChapter(Math.min(chapterCount - 1, state.currentIdx + 1)); // 保持现状
             return;
         }
         pageTurnApi.turnTo('next').then((ok) => { if (!ok) showToast('已经是最后一章了', 'info'); });
     });
 ```
 
+修改内容区 click 热区（现有 `els.content.addEventListener('click', ...)` 的 CHAPTER 分支）：把 `loadChapter(state.currentIdx ± 1)` 替换为 `pageTurnApi.turnTo('prev'|'next')`。**保留**现有 `if (readingMode === 'scroll') return;` 守卫（scroll 模式点击不翻章）。
+
 修改内容区 click 热区（现有 `els.content.addEventListener('click', ...)` 的 CHAPTER 分支）：把 `loadChapter(state.currentIdx ± 1)` 替换为 `pageTurnApi.turnTo('prev'|'next')`。
 
 修改章末 ❖（renderBlocks 内 end 的 click CHAPTER 分支）：`loadChapter(state.currentIdx + 1)` → `pageTurnApi.turnTo('next')`。
+
+**DRAG 样式下的点击入口**：`pageTurnStyle === 'DRAG'` 时，点击热区/按钮/❖ 仍调 `pageTurnApi.turnTo(...)`（不跟手——无拖动时直接走 COVER 式滑入动画；跟手只发生在实际水平拖动时，见 Task 6）。即入口代码不区分样式，`turnTo` 内部按 `resolveStyle()` 决定动画。
 
 **目录/书签跳转 `onNavigate` 不改**——仍走 `loadChapter(idx)`（瞬时 + fade）。
 
 cleanup（`container._cleanupReader`）加 `pageTurnApi.dispose()`。
 
-- [ ] **Step 4: 回归（snapshot-baseline e2e 必须仍绿）+ 提交**
+- [ ] **Step 4: 回归（snapshot-baseline e2e + 新集成测试必须绿）+ 提交**
 
+Run: `cd server/internal/web && node --test textReader-pageturn.test.mjs`
+Expected: 集成测试 PASS（点右热区 → 章节前进；若 jsdom 的 clientWidth 赋值不生效，按 Step 1 的备选方案抽 `hotzoneRatio` 纯函数）
 Run: `cd server/internal/web && npm test`
 Expected: 全绿（snapshot-baseline e2e 验证初始 render 不变；翻页是交互行为，不破坏初始快照）
 
@@ -670,22 +743,28 @@ Expected: PASS（回退路径覆盖）。Task 5 的工作是把回退替换为�
             }
 ```
 
-style.css 加卷曲 clip-path keyframes（next 方向；prev 由 `data-curl-sign` 反向）：
+style.css 加卷曲 clip-path keyframes。**方向语义**：clip-path polygon 4 点 (x1,y1),(x2,y2),(x3,y3),(x4,y4) 定义可见矩形。next = 从全屏卷到**左边缘线**（右边界 100%→0，从右往左卷）；prev = 从全屏卷到**右边缘线**（左边界 0→100%，从左往右卷）。
 
 ```css
 @keyframes text-reader-curl-next {
     from { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
     to   { clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); }
 }
+@keyframes text-reader-curl-prev {
+    from { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+    to   { clip-path: polygon(100% 0, 100% 0, 100% 100%, 100% 100%); }
+}
 .text-reader__page--curling[data-curl-sign="1"] {
     animation: text-reader-curl-next var(--reader-curl-ms, 400ms) ease-in-out forwards;
 }
 .text-reader__page--curling[data-curl-sign="-1"] {
-    animation: text-reader-curl-next var(--reader-curl-ms, 400ms) ease-in-out forwards reverse;
+    animation: text-reader-curl-prev var(--reader-curl-ms, 400ms) ease-in-out forwards;
 }
 ```
 
-（首版用矩形 clip 近似卷曲边界；贝塞尔采样点多边形是视觉增强，首版用线性 polygon 满足"卷走"语义，视觉打磨留手动验证后迭代。）
+**不要用 `animation-direction: reverse`**——CSS reverse 是时间反转（从 to 播放到 from），with `forwards` 最终停在 from（全屏），动画过程中从 to（一条线）开始展开，视觉与期望完全相反。prev 必须用独立的 `text-reader-curl-prev` keyframes + normal 方向。
+
+（首版用线性 polygon（矩形 clip）近似卷曲边界；贝塞尔采样点多边形是视觉增强，首版满足"卷走"语义即可，视觉打磨留手动验证后迭代。此取舍已在 spec 风险节注明。）
 
 - [ ] **Step 4: 运行测试 + 回归**
 
@@ -717,17 +796,20 @@ git commit -m "feat(web): add SIMULATION page-turn (clip-path curl with shadow)"
 ```js
 test('resolveDragOutcome classifies by threshold and direction', () => {
     const { resolveDragOutcome } = await import('./pageTurn.js'); // 或顶层 import
-    // dx>0 = 从右往左拉 = prev 意图（手指向右拖露出上一章）；dx<0 = next 意图
-    // |dx|/width > 0.25 → commit, else revert
-    assert.equal(resolveDragOutcome(0.30, 1.0).action, 'commit');
-    assert.equal(resolveDragOutcome(0.30, 1.0).direction, 'next'); // dx<0
-    assert.equal(resolveDragOutcome(-0.30, 1.0).direction, 'prev'); // dx>0
-    assert.equal(resolveDragOutcome(0.10, 1.0).action, 'revert');
-    assert.equal(resolveDragOutcome(0.10, 1.0).direction, null);
+    // sign 约定：dxRatio = (pointer.x − start.x) / width，带符号。
+    // dxRatio<0（手指向左拖）= next 意图（中文从右往左翻）；dxRatio>0 = prev 意图。
+    // |dxRatio| > 0.25 → commit，否则 revert。
+    assert.equal(resolveDragOutcome(-0.30).action, 'commit');
+    assert.equal(resolveDragOutcome(-0.30).direction, 'next');   // 向左拖 → next
+    assert.equal(resolveDragOutcome(0.30).action, 'commit');
+    assert.equal(resolveDragOutcome(0.30).direction, 'prev');    // 向右拖 → prev
+    assert.equal(resolveDragOutcome(0.10).action, 'revert');
+    assert.equal(resolveDragOutcome(-0.10).action, 'revert');
+    assert.equal(resolveDragOutcome(0.10).direction, null);
 });
 ```
 
-注意 sign 约定：plan 里以 `dx`（pointer 当前 x − 起点 x）为输入。dx<0（手指向左拖）= next 意图（中文从右往左翻）；dx>0 = prev 意图。
+注意：`resolveDragOutcome` 是**单参数**（dxRatio），不要传第二个参数（旧草稿传了 `(dxRatio, width)` 与实现不一致）。
 
 - [ ] **Step 2: 运行确认失败**
 
@@ -753,10 +835,11 @@ export function resolveDragOutcome(dxRatio) {
 - `pointerdown`：记录起点 x、y、时间，置 `dragging=true`，不阻止默认（让垂直滚动仍可发生）。
 - `pointermove`：若 `dragging` 且 `|dx| > |dy|` 且 `|dx| > 8px` 且 style===DRAG → 标记为水平拖动接管，预加载并叠放目标章（按 dx 符号决定 next/prev），实时设 translateX = dx；否则不接管（垂直滚动继续）。
 - `pointerup`：若接管了水平拖动 → `resolveDragOutcome(dx/width)`；commit → 用 animateCover 把剩余距离滑到位（同方向）；revert → animateCover 回弹归零。若未接管 → 视为 tap（交回现有 click 热区逻辑，不在 pointer 里处理 tap）。
+- **Web 端 DOM 模型天然支持 revert**：拖动期间 oldSection 仍在 DOM 中（未被移除），revert 只需把它移回原位（动画回弹），无需重新加载——与 Android 的状态驱动模型不同（Android 的 revert 恢复见 Task 12）。
 
 DRAG 接管时需 `preventDefault` 阻止滚动仅作用于水平拖动期间；垂直拖动不 preventDefault。
 
-dispose 解绑 pointer 监听。
+dispose 解绑 pointer 监听（pointerdown/move/up 三个监听器）。
 
 - [ ] **Step 4: 运行测试 + 回归**
 
@@ -953,8 +1036,12 @@ git commit -m "feat(android): add page-turn style chips to reader settings (disa
 - Create: `android/app/src/test/java/com/juziss/localmediahub/ui/component/reader/PageTurnControllerTest.kt`
 
 **Interfaces:**
-- Produces: `class PageTurnController` 持有 `Animatable<Float>`；`suspend fun turnTo(direction: PageTurnDirection, load: suspend (Int) -> Boolean, onProgress: (Float, PageTurnStyle, PageTurnDirection) -> Unit, onDone: (Int) -> Unit): Boolean`。SIMULATION/DRAG 在 Task 10/11 扩展。
+- Produces: `class PageTurnController`（**纯逻辑，不持有 Compose 状态**）：
+  - `suspend fun turnTo(direction: PageTurnDirection, load: suspend (targetIdx: Int) -> Boolean): Int?`
+  - 返回：成功 = 目标章 index（已 load 成功）；失败 = `null`（越界 / load 失败 / 并发被拒）。
+  - **动画不在此类**：controller 只做校验 + load + busy 互斥；动画由 UI 层在拿到返回值后自行 `Animatable.animateTo` 驱动（时长按 style 决定：COVER 280ms / SIMULATION 400ms）。这避免了"controller 内部分 10 步推进进度 = 10 帧跳变"的假动画问题。
 - `enum class PageTurnDirection { NEXT, PREV }`
+- Task 10 的 UI 层依赖此签名：`val target = controller.turnTo(NEXT) { viewModel.loadChapter(it, resetScroll = true) }`。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -963,67 +1050,81 @@ git commit -m "feat(android): add page-turn style chips to reader settings (disa
 ```kotlin
 package com.juziss.localmediahub.ui.component.reader
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PageTurnControllerTest {
 
     @Test
-    fun turnTo_next_invokes_load_with_next_index_and_returns_true() = runBlocking {
+    fun turnTo_next_invokes_load_with_next_index_and_returns_target() = runBlocking {
         val controller = PageTurnController(currentIdx = 0, chapterCount = 3)
         var loadedIdx: Int? = null
-        var doneIdx: Int? = null
-        val ok = controller.turnTo(
+        val target = controller.turnTo(
             direction = PageTurnDirection.NEXT,
-            style = PageTurnStyle.NONE,
             load = { idx -> loadedIdx = idx; true },
-            onProgress = { _, _, _ -> },
-            onDone = { idx -> doneIdx = idx },
         )
-        assertTrue(ok)
+        assertEquals(1, target)
         assertEquals(1, loadedIdx)
-        assertEquals(1, doneIdx)
     }
 
     @Test
-    fun turnTo_prev_at_first_returns_false_and_no_load() = runBlocking {
+    fun turnTo_prev_at_first_returns_null_and_no_load() = runBlocking {
         val controller = PageTurnController(currentIdx = 0, chapterCount = 3)
         var loaded = false
-        val ok = controller.turnTo(
+        val target = controller.turnTo(
             direction = PageTurnDirection.PREV,
-            style = PageTurnStyle.NONE,
             load = { loaded = true; true },
-            onProgress = { _, _, _ -> },
-            onDone = {},
         )
-        assertFalse(ok)
+        assertNull(target)
         assertFalse(loaded)
     }
 
     @Test
-    fun turnTo_next_at_last_returns_false() = runBlocking {
+    fun turnTo_next_at_last_returns_null() = runBlocking {
         val controller = PageTurnController(currentIdx = 2, chapterCount = 3)
-        val ok = controller.turnTo(
-            direction = PageTurnDirection.NEXT,
-            style = PageTurnStyle.NONE,
-            load = { true },
-            onProgress = { _, _, _ -> },
-            onDone = {},
-        )
-        assertFalse(ok)
+        val target = controller.turnTo(PageTurnDirection.NEXT, load = { true })
+        assertNull(target)
     }
 
     @Test
-    fun turnTo_concurrent_second_call_returns_false_while_busy() = runBlocking {
+    fun turnTo_load_failure_returns_null() = runBlocking {
         val controller = PageTurnController(currentIdx = 0, chapterCount = 3)
-        // 模拟 load 阻塞，使 busy=true 期间第二次调用被拒
-        // （简单单测：先调一次 NONE 完成后再调，验证 busy 已复位）
-        controller.turnTo(PageTurnDirection.NEXT, PageTurnStyle.NONE, { true }, { _: Float, _: PageTurnStyle, _: PageTurnDirection -> }, {})
-        val ok2 = controller.turnTo(PageTurnDirection.NEXT, PageTurnStyle.NONE, { true }, { _: Float, _: PageTurnStyle, _: PageTurnDirection -> }, {})
-        assertTrue(ok2) // 复位后第二次成功
+        val target = controller.turnTo(PageTurnDirection.NEXT, load = { false })
+        assertNull(target)
+    }
+
+    /** 真实并发：第一个 turnTo 的 load 挂起期间，第二个调用被 busy 互斥拒绝。 */
+    @Test
+    fun turnTo_rejects_second_call_while_busy() = runBlocking {
+        val controller = PageTurnController(currentIdx = 0, chapterCount = 3)
+        val loadStarted = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val first = launch {
+            controller.turnTo(PageTurnDirection.NEXT, load = {
+                loadStarted.complete(Unit)
+                release.await() // 挂起，保持 busy
+                true
+            })
+        }
+        loadStarted.await()
+        val secondTarget = controller.turnTo(PageTurnDirection.NEXT, load = { true })
+        assertNull(secondTarget) // busy 期间第二个被拒
+        release.complete(Unit)
+        first.join()
+    }
+
+    @Test
+    fun turnTo_accepts_after_previous_completes() = runBlocking {
+        val controller = PageTurnController(currentIdx = 0, chapterCount = 3)
+        assertTrue(controller.turnTo(PageTurnDirection.NEXT, load = { true }) != null)
+        // busy 已复位，第二次可正常翻页
+        assertEquals(2, controller.turnTo(PageTurnDirection.NEXT, load = { true }))
     }
 }
 ```
@@ -1045,11 +1146,11 @@ enum class PageTurnDirection { NEXT, PREV }
 
 /**
  * 章级翻页控制器。CHAPTER 模式内容区通过 [turnTo] 发起带方向的翻页：
- * 校验目标章合法 → 调 [load] 加载 → 按 [style] 通过 [onProgress] 驱动动画
- * → 完成后 [onDone] 切换显示。SIMULATION/DRAG 的进度曲线差异由 style 分支决定。
+ * 校验目标章合法 → 调 [load] 加载 → 返回目标章 index（由 UI 层驱动动画）。
  *
- * 本类不持有任何 Compose 状态，纯逻辑 + 协程，便于 Robolectric 单测。
- * UI 层把 Animatable 的 animateTo 包成 onProgress 回调传入。
+ * 本类只负责"逻辑"（边界校验、加载编排、busy 互斥），**不持有动画状态**——
+ * 动画由 UI 层用 Animatable.animateTo 驱动（时长按 pageTurnStyle 决定）。
+ * 纯逻辑 + 协程，便于 Robolectric 单测。
  */
 class PageTurnController(
     private val currentIdx: () -> Int,
@@ -1060,33 +1161,19 @@ class PageTurnController(
 
     private val mutex = Mutex()
 
+    /** @return 成功 = 已加载的目标章 index；失败（越界/load 失败/并发被拒）= null */
     suspend fun turnTo(
         direction: PageTurnDirection,
-        style: PageTurnStyle,
         load: suspend (targetIdx: Int) -> Boolean,
-        onProgress: (progress: Float, style: PageTurnStyle, direction: PageTurnDirection) -> Unit,
-        onDone: (targetIdx: Int) -> Unit,
-    ): Boolean {
-        if (!mutex.tryLock()) return false
+    ): Int? {
+        if (!mutex.tryLock()) return null
         try {
             val target = when (direction) {
                 PageTurnDirection.NEXT -> currentIdx() + 1
                 PageTurnDirection.PREV -> currentIdx() - 1
             }
-            if (target < 0 || target >= chapterCount()) return false
-            val ok = load(target)
-            if (!ok) return false
-            // 推进进度 0→1；NONE 直接跳到 1（无动画）。
-            if (style == PageTurnStyle.NONE) {
-                onProgress(1f, style, direction)
-            } else {
-                // 实际 UI 用 Animatable.animateTo；这里分 10 步同步推进供逻辑测试。
-                for (i in 0..10) {
-                    onProgress(i / 10f, style, direction)
-                }
-            }
-            onDone(target)
-            return true
+            if (target < 0 || target >= chapterCount()) return null
+            return if (load(target)) target else null
         } finally {
             mutex.unlock()
         }
@@ -1097,7 +1184,7 @@ class PageTurnController(
 - [ ] **Step 4: 运行测试 + 回归**
 
 Run: `cd android && powershell -Command ".\gradlew.bat :app:testDebugUnitTest --tests 'com.juziss.localmediahub.ui.component.reader.PageTurnControllerTest' 2>&1 | Select-Object -Last 12"`
-Expected: 4 PASS
+Expected: 6 PASS
 
 - [ ] **Step 5: 提交**
 
@@ -1108,20 +1195,18 @@ git commit -m "feat(android): add PageTurnController (NONE/COVER, mutex-guarded,
 
 ---
 
-### Task 10: Android 接入 + COVER 渲染 — TextReaderScreen CHAPTER 分支
+### Task 10: Android 接入 — TextReaderScreen CHAPTER 分支走 PageTurnController（NONE 行为）
 
 **Files:**
 - Modify: `android/app/src/main/java/com/juziss/localmediahub/ui/screen/TextReaderScreen.kt`
 
 **Interfaces:**
-- Consumes: Task 9 的 `PageTurnController`。替换 `AnimatedContent` fade 为双层渲染（旧章 + 进入的新章），由 `Animatable<Float>` 进度驱动 `graphicsLayer { translationX }`。
-- SIMULATION/DRAG 接入在 Task 11/12。
+- Consumes: Task 9 的 `PageTurnController`（`turnTo(direction, load): Int?`）。
+- Produces: CHAPTER 模式相邻切章入口（热区/按钮/❖）统一走 `turn(direction)`；`AnimatedContent` fade 移除（NONE 行为由 blocks 状态自然刷新）。**双层渲染与动画（COVER/SIMULATION）在 Task 11 实现**——本任务只打通入口 + 控制器 + NONE 行为。
 
-- [ ] **Step 1: 无独立测试（UI 接入，靠现有 TextReaderScreenThemeTest 回归 + 手动验证）**
+- [ ] **Step 1: 无独立测试（UI 编排，行为正确性由 Task 9 控制器单测 + 现有回归保证）**
 
-跳过 Step 1-2 的失败测试先行；本任务是 UI 编排，行为正确性由 Task 9 的控制器单测 + 现有回归保证。若实施者认为有必要可加 smoke 测试（章 key 变化触发渲染），但非阻塞。
-
-- [ ] **Step 2:（同上，跳过）**
+- [ ] **Step 2:（跳过）**
 
 - [ ] **Step 3: 实现**
 
@@ -1130,63 +1215,44 @@ git commit -m "feat(android): add PageTurnController (NONE/COVER, mutex-guarded,
 (1) CHAPTER 分支（约 612-628 行）把 `AnimatedContent { ... ChapterModeContent(...) }` 替换为：
 
 ```kotlin
-                                // ===== 分章模式：翻页控制器驱动的双层渲染 =====
+                                // ===== 分章模式：翻页控制器 =====
                                 val controller = remember(settings.readingMode) {
                                     PageTurnController(
                                         currentIdx = { idx },
                                         chapterCount = { totalChaptersCount },
                                     )
                                 }
-                                val progress = remember { Animatable(1f) }
                                 val scope = rememberCoroutineScope()
-                                var incomingIdx by remember { mutableStateOf<Int?>(null) }
-                                val style = settings.pageTurnStyle
 
                                 fun turn(direction: PageTurnDirection) {
                                     scope.launch {
-                                        controller.turnTo(
-                                            direction = direction,
-                                            style = style,
-                                            load = { target ->
-                                                viewModel.loadChapter(target, resetScroll = true)
-                                            },
-                                            onProgress = { p, _, _ ->
-                                                // NONE 跳到 1 时直接显示新章
-                                                scope.launch { progress.snapTo(p) }
-                                            },
-                                            onDone = { target ->
-                                                incomingIdx = null
-                                                progress.snapTo(1f)
-                                            },
-                                        )
+                                        val target = controller.turnTo(direction) { t ->
+                                            viewModel.loadChapter(t, resetScroll = true)
+                                        }
+                                        // NONE 行为：loadChapter 已更新 blocks/currentIndex 状态，
+                                        // 下方 ChapterModeContent 随状态自然刷新。
+                                        // COVER/SIMULATION 动画在 Task 11 加（此处按 style 决定是否驱动动画）。
+                                        if (target == null && direction == PageTurnDirection.NEXT) {
+                                            // 边界提示保持与旧行为一致（可选，参照旧 toast/无操作）
+                                        }
                                     }
-                                }
-                                // 双层 Box：当前章 + 进入章
-                                Box(Modifier.fillMaxSize()) {
-                                    ChapterModeContent(
-                                        blocks = blocks, idx = idx, book = book, settings = settings,
-                                        contentDp = contentDp, listState = listState, context = context,
-                                        viewModel = viewModel,
-                                    )
-                                    // 进入层（incomingIdx 非空时）— graphicsLayer translationX 由 progress 驱动
-                                    // 完整实现包含 COVER 的 translationX = (1-progress)*sign*100%；SIMULATION/DRAG 在后续任务
                                 }
 ```
 
 (2) 翻页入口改为调 `turn(PageTurnDirection.NEXT/PREV)`：
-- 热区 `pointerInput`（约 533-546 行）：`ratio < 0.20f -> turn(PREV)`、`ratio > 0.80f -> turn(NEXT)`
+- 热区 `pointerInput`（约 533-546 行）：`ratio < 0.20f -> turn(PREV)`、`ratio > 0.80f -> turn(NEXT)`、中间仍 `viewModel.toggleChrome()`
 - 底栏上一章/下一章按钮（约 525-526 行）：`viewModel.prevChapter()` → `turn(PREV)`、`viewModel.nextChapter()` → `turn(NEXT)`
 - 章末 ❖（约 773 行）：`viewModel.nextChapter()` → `turn(NEXT)`
-- 目录/书签跳转（drawer 的 onClick）不改，仍走 `viewModel.loadChapter`。
+- 目录/书签跳转（drawer 的 onClick）不改，仍走 `viewModel.loadChapter`（瞬时 + fade 保持现状）。
 
-(3) `remember` import 加 `androidx.compose.animation.core.Animatable`。
+(3) import 加 `com.juziss.localmediahub.ui.component.reader.PageTurnController`、`PageTurnDirection`。`AnimatedContent`/`togetherWith`/`fadeIn`/`fadeOut` 若不再使用则移除相应 import。
 
-注意：COVER 的双层 `graphicsLayer` 渲染、SIMULATION 的 clip、DRAG 的拖动分别由 Task 11/12 完成。本任务先把"控制器接入 + NONE 行为（直接显示新章）"打通，保证翻页入口不再走旧 fade、行为回归绿。
+注意：`viewModel.loadChapter` 成功后内部会更新 `_currentIndex` 与 `_chapterBlocks`——NONE 行为下 UI 自动刷新为新区内容，与旧 fade 的最终状态一致。Task 11 在 `turn()` 里按 `settings.pageTurnStyle` 分支添加动画驱动。
 
 - [ ] **Step 4: 回归**
 
 Run: `cd android && powershell -Command ".\gradlew.bat :app:testDebugUnitTest --tests 'com.juziss.localmediahub.ui.screen.TextReaderScreenThemeTest' --tests 'com.juziss.localmediahub.ui.component.reader.*' 2>&1 | Select-Object -Last 12"`
-Expected: 全绿（ParagraphItem 等不变；TextReaderScreenThemeTest 用的是 ReaderThemeScope 直测，不受 AnimatedContent 移除影响）
+Expected: 全绿（TextReaderScreenThemeTest 用 ReaderThemeScope 直测，不受 CHAPTER 分支改动影响）
 
 - [ ] **Step 5: 提交**
 
@@ -1212,27 +1278,101 @@ git commit -m "feat(android): wire CHAPTER-mode turn paths to PageTurnController
 
 - [ ] **Step 3: 实现**
 
-(1) `TextReaderScreen.kt` COVER 渲染：在 Task 10 的双层 Box 基础上，incoming 层用：
+**关键：动画期间两个章的内容来源（状态驱动模型）**。`viewModel.loadChapter` 会把 `_chapterBlocks` 覆盖为新章内容（单一状态）。因此动画前必须**保存当前 blocks 快照作为顶层（旧章）**，loadChapter 后 `blocks` 作为底层（新章）——顺序不能反：
 
-```kotlin
-incomingIdx?.let { target ->
-    val tx by remember(style, idx) {
-        derivedStateOf {
-            val sign = if (target > idx) 1f else -1f
-            (1f - progress.value) * sign
-        }
-    }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .graphicsLayer { translationX = tx * size.width }
-    ) {
-        // 渲染目标章内容（复用 ChapterModeContent，blocks 来自 viewModel 预加载或 incomingBlocks 状态）
-    }
+```
+turn(direction) {
+    val oldBlocks = blocks          // ① 保存当前章快照（顶层，被卷走/移出）
+    val target = controller.turnTo(direction) { loadChapter(it, true) }  // ② blocks 变为新章（底层）
+    if (target == null) return
+    incoming = Incoming(blocks = oldBlocks, target = target, direction = direction)  // ③ 记录动画层
+    progress.snapTo(0f)
+    progress.animateTo(1f, tween(durationMs(style)))   // ④ 驱动动画
+    incoming = null                  // ⑤ 动画完移除顶层，显示底层（blocks = 新章）
 }
 ```
 
-(2) `PageTurnSimulator.kt`：`Canvas` 接收 `progress`、`direction`、内容 lambda，用 `Path` 贝塞尔 clip 顶层 + `Brush.linearGradient` 画阴影：
+(1) `TextReaderScreen.kt`：
+
+在 CHAPTER 分支加状态：
+
+```kotlin
+                                val progress = remember { Animatable(1f) }
+                                var incoming by remember { mutableStateOf<IncomingPage?>(null) }
+
+                                // 动画层描述：顶层是旧章快照，随 progress 移出/卷走
+                                data class IncomingPage(
+                                    val topBlocks: List<com.juziss.localmediahub.data.Block>,
+                                    val topIdx: Int,
+                                    val targetIdx: Int,
+                                    val direction: PageTurnDirection,
+                                )
+```
+
+`turn(direction)` 扩展为按 style 分支：
+
+```kotlin
+                                fun turn(direction: PageTurnDirection) {
+                                    scope.launch {
+                                        val style = settings.pageTurnStyle
+                                        val oldBlocks = blocks
+                                        val target = controller.turnTo(direction) { t ->
+                                            viewModel.loadChapter(t, resetScroll = true)
+                                        }
+                                        if (target == null) return@launch
+                                        when (style) {
+                                            PageTurnStyle.NONE -> Unit // blocks 已刷新，直接显示新章
+                                            PageTurnStyle.COVER, PageTurnStyle.SIMULATION -> {
+                                                incoming = IncomingPage(oldBlocks, idx, target, direction)
+                                                progress.snapTo(0f)
+                                                val ms = if (style == PageTurnStyle.COVER) 280 else 400
+                                                progress.animateTo(1f, tween(ms, easing = if (style == PageTurnStyle.COVER) FastOutSlowInEasing else FastOutSlowInEasing))
+                                                incoming = null
+                                            }
+                                            PageTurnStyle.DRAG -> Unit // 手势路径在 Task 12
+                                        }
+                                    }
+                                }
+```
+
+渲染：底层 = `blocks`（新章，正常 ChapterModeContent），顶层 = `incoming` 存在时渲染旧章快照 + 动画层：
+
+```kotlin
+                                Box(Modifier.fillMaxSize()) {
+                                    // 底层：当前 blocks（loadChapter 后的新章）
+                                    ChapterModeContent(
+                                        blocks = blocks, idx = idx, book = book, settings = settings,
+                                        contentDp = contentDp, listState = listState, context = context,
+                                        viewModel = viewModel,
+                                    )
+                                    // 顶层：动画层（旧章快照）
+                                    incoming?.let { inc ->
+                                        val topTx by remember(inc, progress) {
+                                            derivedStateOf {
+                                                val sign = if (inc.direction == PageTurnDirection.NEXT) -1f else 1f
+                                                (1f - progress.value) * sign // 顶层从 0 移到 ±100%（露出底层）
+                                            }
+                                        }
+                                        Box(
+                                            Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer { translationX = topTx * size.width }
+                                        ) {
+                                            ChapterModeContent(
+                                                blocks = inc.topBlocks, idx = inc.topIdx, book = book,
+                                                settings = settings, contentDp = contentDp,
+                                                listState = listState, context = context, viewModel = viewModel,
+                                            )
+                                        }
+                                    }
+                                }
+```
+
+注意：顶层 `translationX = (1-progress) * sign`：progress=0 → 顶层原位（全盖住新章）；progress=1 → 顶层移出（next 向左 -1 → 露出右侧底层）。next 时 sign=-1（顶层向左退出、新章从右进入）✓；prev 时 sign=+1 ✓。**顶层是旧章快照、底层是新章**——与 Web 端 DOM 模型（oldSection 顶层 + newSection 底层）语义一致。
+
+`ChapterModeContent` 顶层复用会创建独立 LazyColumn（自己的 listState 冲突）——顶层内容仅动画期间存在，可用 `remember(inc.topIdx) { LazyListState() }` 独立 listState，或顶层改用静态 Column 渲染段落（动画期间滚动被禁用，顶层无需可滚动）。**推荐**：顶层用静态 `Column` + `ParagraphItem` 列表渲染（动画 280-400ms 内不需要滚动交互），避免与底层共享 listState 的复杂化。
+
+(2) `PageTurnSimulator.kt`：`Canvas` 接收 `progress`、`reverse`，用 `Path` 贝塞尔 clip 顶层 + `Brush.linearGradient` 画阴影：
 
 ```kotlin
 package com.juziss.localmediahub.ui.component.reader
@@ -1241,17 +1381,21 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.drawscope.clipPath
 
 /**
- * 仿真翻页：顶层（当前章）用贝塞尔 Path 裁剪，随 [progress]（0..1）
- * 从右向左卷起；卷曲边界处画一道渐变阴影模拟折痕。底层显示下一章（由调用方叠放）。
+ * 仿真翻页：顶层（当前章）用贝塞尔 Path 裁剪，随 [progress]（0..1）卷走。
+ * 卷曲边界处画一道渐变阴影模拟折痕。底层显示下一章（由调用方叠放）。
  *
- * progress=0 → 顶层完整覆盖；progress=1 → 顶层完全卷走。
+ * 可见区语义：
+ *  - [reverse]=false（NEXT）：可见区 = 左侧矩形（0 .. edge），edge 从 w 扫到 0
+ *    → 从右往左卷走（下一章从右侧进入）。progress=0 全屏；progress=1 空。
+ *  - [reverse]=true（PREV）：可见区 = 右侧矩形（w-edge .. w），w-edge 从 w 扫到 0
+ *    → 从左往右卷走（下一章从左侧进入）。progress=0 全屏；progress=1 空。
  */
 @Composable
 fun PageTurnSimulator(
@@ -1262,28 +1406,42 @@ fun PageTurnSimulator(
     Canvas(modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
-        // 卷曲边界 x：从 w（progress=0）扫到 0（progress=1）；reverse 时镜像
-        val edge = (1f - progress) * w
-        val p = Path().apply {
-            moveTo(0f, 0f)
-            lineTo(if (reverse) w - edge else edge, 0f)
-            // 贝塞尔弧边
-            cubicTo(
-                (if (reverse) w - edge else edge) + 30f, h * 0.33f,
-                (if (reverse) w - edge else edge) - 30f, h * 0.66f,
-                if (reverse) w - edge else edge, h,
-            )
-            lineTo(0f, h)
-            close()
+        val edge = (1f - progress) * w // 卷曲边界 x（next 时是可见区右边界；prev 时是可见区左边界）
+        val p = if (reverse) {
+            // PREV：可见区在右侧 (w-edge .. w)，贝塞尔弧在左边界 w-edge
+            Path().apply {
+                moveTo(w - edge, 0f)
+                lineTo(w, 0f)
+                lineTo(w, h)
+                cubicTo(
+                    (w - edge) + 30f, h * 0.66f,
+                    (w - edge) - 30f, h * 0.33f,
+                    w - edge, h,
+                )
+                close()
+            }
+        } else {
+            // NEXT：可见区在左侧 (0 .. edge)，贝塞尔弧在右边界 edge
+            Path().apply {
+                moveTo(0f, 0f)
+                lineTo(edge, 0f)
+                cubicTo(
+                    edge + 30f, h * 0.33f,
+                    edge - 30f, h * 0.66f,
+                    edge, h,
+                )
+                lineTo(0f, h)
+                close()
+            }
         }
         clipPath(p) {
-            // 阴影带：在 edge 附近画窄渐变
+            // 阴影带：画在卷曲边界（next=右边界 edge；prev=左边界 w-edge）附近
             val shadowEdge = if (reverse) w - edge else edge
             drawRect(
                 brush = Brush.linearGradient(
                     colors = listOf(Color.Black.copy(alpha = 0.18f), Color.Transparent),
-                    start = androidx.compose.ui.geometry.Offset(shadowEdge - 24f, 0f),
-                    end = androidx.compose.ui.geometry.Offset(shadowEdge + 24f, 0f),
+                    start = Offset(shadowEdge - 24f, 0f),
+                    end = Offset(shadowEdge + 24f, 0f),
                 ),
             )
         }
@@ -1291,14 +1449,14 @@ fun PageTurnSimulator(
 }
 ```
 
-`TextReaderScreen` SIMULATION 分支在 incoming 层叠放 `PageTurnSimulator`。
+`TextReaderScreen` SIMULATION 分支：顶层 Box 用 `clipPath` 裁剪的 `PageTurnSimulator` 叠在顶层之上（或顶层 Box 的 `graphicsLayer`/`drawWithContent` 组合）。首版简化：顶层内容（旧章）外包一层 `Modifier.drawWithContent { }` 不裁剪（直接显示），用 `PageTurnSimulator` 作为覆盖在顶层的阴影层 + 底层新章直接可见——若视觉验证不佳，再按 clipPath 方案裁剪顶层。
 
-(3) 控制器 `onProgress` 已驱动 `progress.snapTo`；COVER/SIMULATION 都复用该进度。
+(3) `durationMs(style)` = COVER 280 / SIMULATION 400（常量 `ANIM_MS` 与 Web 端一致）。
 
 - [ ] **Step 4: 回归 + 手动验证提示**
 
 Run: `cd android && powershell -Command ".\gradlew.bat :app:testDebugUnitTest 2>&1 | Select-Object -Last 12"`
-Expected: 全绿（视觉验证由人工在真机/模拟器跑 app 完成：选 COVER/SIMULATION 样式，点右热区看翻页动画）
+Expected: 全绿（视觉验证由人工在真机/模拟器跑 app 完成：选 COVER/SIMULATION 样式，点右热区看翻页动画——重点验证：next 从右进入、prev 从左进入、动画结束无残留层）
 
 - [ ] **Step 5: 提交**
 
@@ -1365,12 +1523,29 @@ fun resolveDragOutcome(dxRatio: Float): DragOutcome {
 enum class DragOutcome { COMMIT, REVERT }
 ```
 
-(2) `TextReaderScreen.kt` CHAPTER 模式 `pointerInput` 加 DRAG 检测（与 `detectTapGestures` 同 `pointerInput` 内用 `awaitPointerEventScope` 协作，或并排两个 `pointerInput`）。实现：`detectHorizontalDragGestures(onDragStart, onDragEnd, onHorizontalDrag)`：
-- onDragStart 记录起点
-- onHorizontalDrag：若 `shouldDragTakeOver`，按 dx/width 设 `progress.snapTo`（0..1，覆盖比例）
-- onDragEnd：`resolveDragOutcome(dx/width)`；COMMIT → `controller.turnTo(...)` 完成剩余；REVERT → `progress.animateTo(1f)` 回弹
+(2) `TextReaderScreen.kt` CHAPTER 模式 `pointerInput` 加 DRAG 检测（与 `detectTapGestures` 并排两个 `pointerInput`，互不干扰——tap 只在无位移时触发，drag 只在水平位移时触发）。实现：`detectHorizontalDragGestures(onDragStart, onDragEnd, onHorizontalDrag)`。
 
-DRAG 仅在 `settings.pageTurnStyle == DRAG` 时接管；否则保持现有 tap 热区逻辑。
+**DRAG 渲染模型（与 COVER 同构，进度由手指驱动）**：
+
+```
+onDragStart: 记录起点；若 style==DRAG，保存当前 blocks 快照（顶层）
+onHorizontalDrag(dx, dy):
+    若 style!=DRAG → 不接管（垂直滚动继续）
+    若 !shouldDragTakeOver(dx, dy, 8dp) → 不接管
+    接管：按 dx 符号确定方向（dx<0 = NEXT）
+    目标章尚未加载 → controller.turnTo(direction) { loadChapter(it, true) } 预加载
+        （loadChapter 后 blocks = 目标章 = 底层；快照 = 旧章 = 顶层）
+    progress.snapTo(|dx| / width)   // 0..1，顶层随手指移出
+onDragEnd(dx):
+    若未接管 → 无操作（tap 走现有 click 热区）
+    resolveDragOutcome(dx / width):
+        COMMIT → progress.animateTo(1f)   // 顶层滑出，露出底层（blocks 已是目标章）；完成
+        REVERT → progress.animateTo(0f); viewModel.loadChapter(旧 idx, true)  // 顶层回位
+```
+
+**REVERT 恢复关键**：回弹后 `blocks` 已被预加载的目标章覆盖——必须重新 `loadChapter(旧 idx, true)` 恢复当前章内容（或保存旧 blocks 快照用于回填；二选一，推荐重新 loadChapter——代码简单、状态单一来源）。**不要**用 `controller.turnTo(...)` 完成剩余动画——turnTo 会重新 load（重复加载）且从 0 开始动画，与已拖动的进度冲突。COMMIT/REVERT 的收尾动画直接用 `progress.animateTo`（目标章已预加载，无需再调 turnTo）。
+
+DRAG 仅在 `settings.pageTurnStyle == DRAG` 时接管；否则保持现有 tap 热区逻辑（点击入口在 Task 4/10 已接 controller.turnTo，DRAG 样式下点击热区翻章走 COVER 式滑动，见 Task 4 说明）。
 
 - [ ] **Step 4: 运行测试 + 双端全量**
 
@@ -1398,3 +1573,13 @@ git commit -m "feat(android): add DRAG page-turn gesture + drag-outcome pure fun
 **Placeholder 注意**：Task 10/11 的 UI 接入部分是视觉行为，无独立单测，靠回归 + 手动验证——这是 plan 明确的取舍，非占位符。实施者应在 commit message 注明手动验证结果。
 
 **类型一致性**：`PageTurnStyle`（Task 7 定义）/`PageTurnDirection`（Task 9 定义）/`resolveDragOutcome`（Web Task 6 + Android Task 12 各定义同名，语义一致，跨端名相同便于对齐）。
+
+**审核修正记录（2026-08-01 用户要求审核 plan 后）**：
+- Task 3：删死变量 `dragAttached`；补 `.text-reader__content { position: relative }`（absolute incoming 需要 positioned 祖先）。
+- Task 4：prev/next 按钮 SCROLL 分支保持现有 `loadChapter` 行为（原稿误引入 loadPrevScrollChapter 越界改动）；补集成测试 `textReader-pageturn.test.mjs`（点右热区 → 章节前进，spec 测试计划要求）；明确 DRAG 样式下点击入口走 COVER 式滑动。
+- Task 5：**方向 bug 修正**——`animation-direction: reverse` 时间反转语义导致 prev 视觉反了，改为独立 `text-reader-curl-prev` keyframes（全屏→右线）+ normal 方向。
+- Task 6：`resolveDragOutcome` 测试与实现/注释矛盾修正（单参数、方向断言与注释一致：dx<0=next、dx>0=prev）。
+- Task 9：**假动画重构**——controller 去掉 onProgress/onDone 与"分 10 步推进"（10 帧跳变），`turnTo` 改为返回 `Int?`，动画由 UI 层 `Animatable.animateTo` 驱动；并发测试改为真实并发（load 挂起期间第二个被拒）。
+- Task 10：接入代码与新签名一致，移除假动画 snapTo 段；双层渲染与动画明确移交 Task 11。
+- Task 11：**clipPath 方向 bug 修正**——reverse（PREV）时可见区在右侧 (w-edge..w)（原稿画成左侧矩形，方向反了）；补"动画前保存当前 blocks 快照作为顶层"关键顺序（loadChapter 覆盖 blocks 单一状态）；顶层改用静态 Column 渲染避免 listState 冲突；删除过时的"onProgress 驱动 snapTo"。
+- Task 12：**DRAG 渲染模型补全**——拖动时先 `controller.turnTo` 预加载目标章（底层）+ 旧章快照（顶层）；COMMIT/REVERT 收尾用 `progress.animateTo` 而非重复 turnTo；REVERT 必须重新 loadChapter(旧 idx) 恢复（blocks 已被预加载覆盖）。
