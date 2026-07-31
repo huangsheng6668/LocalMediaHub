@@ -891,6 +891,7 @@ private fun BlockItem(
             text = block.value ?: "",
             fontSizeSp = settings.fontSizeSp.sp,
             lineHeightSp = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
+            letterSpacingSp = (settings.fontSizeSp * settings.letterSpacing).sp,
             fontFamily = settings.fontFamily.toFontFamily(),
             firstLineIndent = settings.firstLineIndent,
             paragraphGapEm = if (settings.paragraphSpacing) 1.6f else 1.2f,
@@ -937,6 +938,7 @@ internal fun ParagraphItem(
     text: String,
     fontSizeSp: TextUnit,
     lineHeightSp: TextUnit,
+    letterSpacingSp: TextUnit = 0.sp,
     fontFamily: FontFamily,
     firstLineIndent: Boolean,
     paragraphGapEm: Float,  // 1.2f or 1.6f
@@ -976,6 +978,7 @@ internal fun ParagraphItem(
                 fontSize = fontSizeSp,
                 lineHeight = lineHeightSp,
                 fontFamily = fontFamily,
+                letterSpacing = letterSpacingSp,
                 textIndent = if (firstLineIndent) TextIndent(firstLine = 2.em) else TextIndent.None,
             ),
         )

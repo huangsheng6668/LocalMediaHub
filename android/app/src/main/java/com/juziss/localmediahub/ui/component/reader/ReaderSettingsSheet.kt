@@ -2,6 +2,7 @@ package com.juziss.localmediahub.ui.component.reader
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -117,6 +118,20 @@ fun ReaderSettingsSheetContent(
         )
         Spacer(Modifier.size(8.dp))
 
+        if (settings.theme == ReaderTheme.CUSTOM) {
+            Text("自定义颜色", style = MaterialTheme.typography.labelMedium)
+            CustomColorRow("背景", settings.customBg, "customBgHex") {
+                onChange(settings.copy(customBg = it))
+            }
+            CustomColorRow("正文", settings.customFg, "customFgHex") {
+                onChange(settings.copy(customFg = it))
+            }
+            CustomColorRow("次要", settings.customMuted, "customMutedHex") {
+                onChange(settings.copy(customMuted = it))
+            }
+            Spacer(Modifier.size(8.dp))
+        }
+
         // 背景图片
         val context = androidx.compose.ui.platform.LocalContext.current
         Text("背景图片", style = MaterialTheme.typography.labelMedium)
@@ -202,6 +217,22 @@ fun ReaderSettingsSheetContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("contentWidthSlider"),
+        )
+        Spacer(Modifier.size(8.dp))
+
+        // 字间距 Slider 0..1 step 0.05（20 档 -> steps = 19），吸附到 0.05 步进
+        Text(
+            "字间距 ${String.format(java.util.Locale.US, "%.2f", settings.letterSpacing)}",
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Slider(
+            value = settings.letterSpacing,
+            onValueChange = { onChange(settings.copy(letterSpacing = (it * 20).roundToInt() / 20f)) },
+            valueRange = 0f..1f,
+            steps = 19,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("letterSpacingSlider"),
         )
 
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
@@ -324,5 +355,67 @@ private fun ThemeSwatch(theme: ReaderTheme) {
         Box(base.background(Brush.linearGradient(listOf(ReaderTheme.DAY.bg, ReaderTheme.NIGHT.bg))))
     } else {
         Box(base.background(theme.bg))
+    }
+}
+
+/** 常用阅读背景/文字色预设（每行各 12 色）。 */
+private val PRESET_COLORS = listOf(
+    "#FAF8F3", "#FFFFFF", "#F4ECD8", "#B9C7B6", "#EFE6D2", "#1A1A1F",
+    "#000000", "#2B2B2B", "#3D3D3D", "#5B4636", "#1F2E20", "#C9C9CE",
+)
+
+/**
+ * 一行自定义颜色控件：12 色预设色板 + hex 文本输入。
+ * 仅当输入匹配 #RRGGBB 时提交；否则不触发 onChange。
+ */
+@Composable
+private fun CustomColorRow(
+    label: String,
+    value: String?,
+    inputTag: String,
+    onCommit: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(48.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.weight(1f),
+        ) {
+            PRESET_COLORS.forEach { hex ->
+                val selected = value.equals(hex, ignoreCase = true)
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(androidx.compose.ui.graphics.Color(0xFF000000L or (hex.removePrefix("#").toLongOrNull(16) ?: 0L)))
+                        .border(
+                            width = if (selected) 2.dp else 1.dp,
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            shape = CircleShape,
+                        )
+                        .clickable { onCommit(hex) },
+                )
+            }
+        }
+    }
+    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("hex", style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(48.dp))
+        androidx.compose.material3.OutlinedTextField(
+            value = value ?: "",
+            onValueChange = { input ->
+                val v = input.trim().uppercase()
+                if (v.isEmpty()) onCommit("")
+                else if (Regex("^#[0-9A-Fa-f]{6}$").matches(v)) onCommit(v)
+            },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(inputTag),
+            textStyle = MaterialTheme.typography.bodySmall,
+        )
     }
 }
