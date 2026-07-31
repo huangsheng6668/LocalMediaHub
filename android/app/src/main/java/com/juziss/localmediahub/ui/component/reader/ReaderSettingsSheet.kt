@@ -351,10 +351,14 @@ private fun ThemeSwatch(theme: ReaderTheme) {
         .size(12.dp)
         .clip(CircleShape)
         .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-    if (theme == ReaderTheme.AUTO) {
-        Box(base.background(Brush.linearGradient(listOf(ReaderTheme.DAY.bg, ReaderTheme.NIGHT.bg))))
-    } else {
-        Box(base.background(theme.bg))
+    when (theme) {
+        // AUTO: half-light/half-dark gradient (bg/fg are Transparent placeholders
+        // until resolved by ReaderThemeScope).
+        ReaderTheme.AUTO -> Box(base.background(Brush.linearGradient(listOf(ReaderTheme.DAY.bg, ReaderTheme.NIGHT.bg))))
+        // CUSTOM: bg/fg are Transparent placeholders — render a DAY.bg→DAY.fg
+        // gradient mirroring Web's linear-gradient(135deg, #FAF8F3 0 50%, #2B2B2B 50% 100%).
+        ReaderTheme.CUSTOM -> Box(base.background(Brush.linearGradient(listOf(ReaderTheme.DAY.bg, ReaderTheme.DAY.fg))))
+        else -> Box(base.background(theme.bg))
     }
 }
 
@@ -366,14 +370,14 @@ private val PRESET_COLORS = listOf(
 
 /**
  * 一行自定义颜色控件：12 色预设色板 + hex 文本输入。
- * 仅当输入匹配 #RRGGBB 时提交；否则不触发 onChange。
+ * 仅当输入匹配 #RRGGBB 时提交；空输入提交 null（与 Web 的 null 语义一致）；其余不触发 onChange。
  */
 @Composable
 private fun CustomColorRow(
     label: String,
     value: String?,
     inputTag: String,
-    onCommit: (String) -> Unit,
+    onCommit: (String?) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -408,7 +412,7 @@ private fun CustomColorRow(
             value = value ?: "",
             onValueChange = { input ->
                 val v = input.trim().uppercase()
-                if (v.isEmpty()) onCommit("")
+                if (v.isEmpty()) onCommit(null)
                 else if (Regex("^#[0-9A-Fa-f]{6}$").matches(v)) onCommit(v)
             },
             singleLine = true,
