@@ -2036,6 +2036,7 @@ body[data-active-tab="read"] .text-reader {
 .text-reader__content p {
     position: relative;
     margin-bottom: 1.2em;
+    letter-spacing: var(--reader-letter-spacing, 0em);
 }
 .text-reader__content p.indent-on  { text-indent: 2em; }
 .text-reader__content p.indent-off { text-indent: 0; }

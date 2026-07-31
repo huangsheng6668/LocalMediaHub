@@ -103,10 +103,26 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         const s = state.settings;
         const root = document.documentElement;
         let themeKey = s.theme;
+        let theme;
         if (themeKey === 'AUTO') {
             themeKey = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'NIGHT' : 'DAY';
+            theme = readerPrefs.THEME_PRESETS[themeKey];
+        } else if (themeKey === 'CUSTOM') {
+            const fb = readerPrefs.THEME_PRESETS[
+                window.matchMedia('(prefers-color-scheme: dark)').matches ? 'NIGHT' : 'DAY'
+            ];
+            // 三色自定义；null 回退到系统深浅对应预设。chrome/border 从三色派生。
+            theme = {
+                bg: s.customBg || fb.bg,
+                fg: s.customFg || fb.fg,
+                chromeBg: s.customBg || fb.chromeBg,
+                chromeFg: s.customFg || fb.chromeFg,
+                muted: s.customMuted || fb.muted,
+                border: s.customMuted || fb.border,
+            };
+        } else {
+            theme = readerPrefs.THEME_PRESETS[themeKey];
         }
-        const theme = readerPrefs.THEME_PRESETS[themeKey];
         const setVar = (k, v) => root.style.setProperty(k, v);
         setVar('--reader-bg', theme.bg);
         setVar('--reader-fg', theme.fg);
@@ -118,6 +134,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         setVar('--reader-line-height', String(s.lineHeight));
         setVar('--reader-font-family', readerPrefs.FONT_FAMILIES[s.fontFamily] || readerPrefs.FONT_FAMILIES.SYSTEM);
         setVar('--reader-content-width', s.contentWidth + 'px');
+        setVar('--reader-letter-spacing', s.letterSpacing + 'em');
         document.body.dataset.readerTheme = themeKey;
         if (els.autoscrollSpeedVal) els.autoscrollSpeedVal.textContent = s.autoScrollSpeed;
         updateParagraphClasses();
