@@ -108,6 +108,26 @@ class ReaderSettingsMigrationTest {
         store.saveReaderSettings(original)
         assertEquals(original, store.readerSettingsFlow.first())
     }
+
+    @Test
+    fun v2_without_new_fields_falls_back_to_defaults() = runBlocking {
+        injectRawSettings("""{"theme":"NIGHT"}""")
+        val s = store.readerSettingsFlow.first()
+        assertEquals(0f, s.letterSpacing, 0.0001f)
+        assertEquals(null, s.customBg)
+        assertEquals(null, s.customFg)
+        assertEquals(null, s.customMuted)
+    }
+
+    @Test
+    fun v2_with_new_fields_reads_correctly() = runBlocking {
+        injectRawSettings("""{"letterSpacing":0.25,"customBg":"#ABCDEF","customFg":"#112233","customMuted":"#445566"}""")
+        val s = store.readerSettingsFlow.first()
+        assertEquals(0.25f, s.letterSpacing, 0.0001f)
+        assertEquals("#ABCDEF", s.customBg)
+        assertEquals("#112233", s.customFg)
+        assertEquals("#445566", s.customMuted)
+    }
 }
 
 

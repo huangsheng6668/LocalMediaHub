@@ -95,6 +95,7 @@ import com.juziss.localmediahub.data.ScrollModeChapter
 import com.juziss.localmediahub.ui.component.reader.ReaderScrollbar
 import com.juziss.localmediahub.ui.component.reader.ReaderSettingsSheet
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
+import com.juziss.localmediahub.ui.component.reader.toCustomReaderColors
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
@@ -288,7 +289,11 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
             }
     }
 
-    ReaderThemeWrapper(theme = settings.theme, bgImageUri = settings.bgImageUri) {
+    ReaderThemeWrapper(
+        theme = settings.theme,
+        bgImageUri = settings.bgImageUri,
+        customColors = settings.toCustomReaderColors(),
+    ) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
