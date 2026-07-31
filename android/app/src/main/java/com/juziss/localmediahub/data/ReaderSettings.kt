@@ -26,6 +26,10 @@ data class ReaderSettings(
     val autoScrollSpeed: Int = 5,  // 1..10
     val readingMode: ReadingMode = ReadingMode.CHAPTER,
     val bgImageUri: String? = null,
+    val letterSpacing: Float = 0f,      // 字间距，em 单位，0..1，步进 0.05
+    val customBg: String? = null,       // #RRGGBB，仅 theme=CUSTOM 生效
+    val customFg: String? = null,
+    val customMuted: String? = null,
 )
 
 /**
@@ -88,6 +92,12 @@ enum class ReaderTheme(
         chromeBg = Color.Transparent, chromeFg = Color.Transparent,
         muted = Color.Transparent, border = Color.Transparent,
         label = "跟随系统",
+    ),
+    CUSTOM(
+        bg = Color.Transparent, fg = Color.Transparent,
+        chromeBg = Color.Transparent, chromeFg = Color.Transparent,
+        muted = Color.Transparent, border = Color.Transparent,
+        label = "自定义",
     );
 
     companion object {

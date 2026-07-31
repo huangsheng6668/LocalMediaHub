@@ -95,6 +95,7 @@ import com.juziss.localmediahub.data.ScrollModeChapter
 import com.juziss.localmediahub.ui.component.reader.ReaderScrollbar
 import com.juziss.localmediahub.ui.component.reader.ReaderSettingsSheet
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
+import com.juziss.localmediahub.ui.component.reader.toCustomReaderColors
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
@@ -288,7 +289,11 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
             }
     }
 
-    ReaderThemeWrapper(theme = settings.theme, bgImageUri = settings.bgImageUri) {
+    ReaderThemeWrapper(
+        theme = settings.theme,
+        bgImageUri = settings.bgImageUri,
+        customColors = settings.toCustomReaderColors(),
+    ) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             drawerContent = {
@@ -886,6 +891,7 @@ private fun BlockItem(
             text = block.value ?: "",
             fontSizeSp = settings.fontSizeSp.sp,
             lineHeightSp = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
+            letterSpacingSp = (settings.fontSizeSp * settings.letterSpacing).sp,
             fontFamily = settings.fontFamily.toFontFamily(),
             firstLineIndent = settings.firstLineIndent,
             paragraphGapEm = if (settings.paragraphSpacing) 1.6f else 1.2f,
@@ -932,6 +938,7 @@ internal fun ParagraphItem(
     text: String,
     fontSizeSp: TextUnit,
     lineHeightSp: TextUnit,
+    letterSpacingSp: TextUnit = 0.sp,
     fontFamily: FontFamily,
     firstLineIndent: Boolean,
     paragraphGapEm: Float,  // 1.2f or 1.6f
@@ -971,6 +978,7 @@ internal fun ParagraphItem(
                 fontSize = fontSizeSp,
                 lineHeight = lineHeightSp,
                 fontFamily = fontFamily,
+                letterSpacing = letterSpacingSp,
                 textIndent = if (firstLineIndent) TextIndent(firstLine = 2.em) else TextIndent.None,
             ),
         )

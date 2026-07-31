@@ -2036,6 +2036,7 @@ body[data-active-tab="read"] .text-reader {
 .text-reader__content p {
     position: relative;
     margin-bottom: 1.2em;
+    letter-spacing: var(--reader-letter-spacing, 0em);
 }
 .text-reader__content p.indent-on  { text-indent: 2em; }
 .text-reader__content p.indent-off { text-indent: 0; }
@@ -2717,9 +2718,27 @@ body[data-reader-immersive="on"] .text-reader__content {
 .reader-settings__theme-swatch[data-theme="AUTO"] {
     background: linear-gradient(135deg, #FAF8F3 0 50%, #1A1A1F 50% 100%);
 }
+.reader-settings__theme-swatch[data-theme="CUSTOM"] {
+    background: linear-gradient(135deg, #FAF8F3 0 50%, #2B2B2B 50% 100%);
+}
 .reader-settings__theme-label {
     color: var(--reader-fg, var(--text-main));
 }
+.reader-settings__color-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+.reader-settings__color-row input[type="color"] {
+    width: 40px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--reader-border, var(--border-color));
+    border-radius: 4px;
+    background: none;
+}
+.reader-settings__color-row span { min-width: 2.5em; }
 
 /* 整体覆盖 App 变量：当 body 有 data-reader-theme 属性时（不限值），
    阅读器子树内的 --bg-card / --text-main / --text-muted / --border-color

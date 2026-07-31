@@ -5,7 +5,11 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
 import org.junit.Assert.assertEquals
@@ -209,5 +213,68 @@ class ReaderSettingsSheetTest {
         ReaderFontFamily.entries.forEach { ff ->
             composeRule.onNodeWithText(ff.label).assertExists()
         }
+    }
+
+    @Test
+    fun letter_spacing_slider_renders_and_fires_onchange() {
+        var captured: ReaderSettings? = null
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = { captured = it },
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("字间距 0.00").assertExists()
+        // Drive the Slider via its SetProgress semantics action (the
+        // accessibility action Material3 Slider exposes). The brief's
+        // `performSemantics { setProgress(...) }` helper is not on this
+        // classpath (Compose UI 1.11 / BOM 2024.06.00), so we invoke the
+        // same underlying action via performSemanticsAction.
+        composeRule.onNodeWithTag("letterSpacingSlider").performSemanticsAction(
+            SemanticsActions.SetProgress,
+        ) { it(0.25f) }
+        composeRule.waitForIdle()
+        assertEquals(0.25f, captured?.letterSpacing ?: -1f, 0.0001f)
+    }
+
+    @Test
+    fun custom_theme_shows_color_section() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(theme = ReaderTheme.CUSTOM),
+                onChange = {},
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("自定义颜色").assertExists()
+        composeRule.onNodeWithTag("customBgHex").assertExists()
+    }
+
+    @Test
+    fun non_custom_theme_hides_color_section() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = {},
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("自定义颜色").assertDoesNotExist()
+    }
+
+    @Test
+    fun hex_input_commits_valid_color_and_ignores_invalid() {
+        var captured: ReaderSettings? = null
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(theme = ReaderTheme.CUSTOM),
+                onChange = { captured = it },
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("customBgHex").performTextInput("#ABCDEF")
+        composeRule.waitForIdle()
+        assertEquals("#ABCDEF", captured?.customBg)
     }
 }

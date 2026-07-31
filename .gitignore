@@ -68,3 +68,4 @@ server/=*
 # OS
 Thumbs.db
 Desktop.ini
+android/app/src/main/res/font/*.ttf

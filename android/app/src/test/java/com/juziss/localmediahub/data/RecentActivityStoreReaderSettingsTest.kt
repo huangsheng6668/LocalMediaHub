@@ -79,4 +79,17 @@ class RecentActivityStoreReaderSettingsTest {
         val s = store.readerSettingsFlow.first()
         assertEquals(5, s.autoScrollSpeed)
     }
+
+    @Test
+    fun save_with_new_fields_round_trips() = runBlocking {
+        val updated = ReaderSettings(
+            theme = ReaderTheme.CUSTOM,
+            letterSpacing = 0.3f,
+            customBg = "#111111",
+            customFg = "#eeeeee",
+            customMuted = "#888888",
+        )
+        store.saveReaderSettings(updated)
+        assertEquals(updated, store.readerSettingsFlow.first())
+    }
 }

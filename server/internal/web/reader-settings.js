@@ -14,7 +14,9 @@ import { emit, EVT } from './bus.js';
 const FONT_OPTIONS = [
     ['SYSTEM', '无衬线'],
     ['SERIF', '宋体'],
-    ['KAITI', '楷体'],
+    ['KAITI', '文楷'],
+    ['HEITI', '黑体'],
+    ['MONO', '等宽'],
 ];
 
 // 主题 radio 选项（THEME_PRESETS 的 key + AUTO 跟随系统）。
@@ -27,6 +29,7 @@ const THEME_OPTIONS = [
     ['NIGHT', '夜间·深空'],
     ['NIGHT_BLACK', '夜间·纯黑'],
     ['AUTO', '跟随系统'],
+    ['CUSTOM', '自定义'],
 ];
 
 const READING_MODE_OPTIONS = [
@@ -88,6 +91,11 @@ export function renderSettings(container) {
                         <input type="range" name="contentWidthSlider" min="600" max="1400" step="10" value="720">
                         <output data-bind="contentWidthLabel">720 px</output>
                     </label>
+                    <label class="reader-settings__slider-row">
+                        <span>字间距</span>
+                        <input type="range" name="letterSpacingSlider" min="0" max="1" step="0.05" value="0">
+                        <output data-bind="letterSpacingLabel">0.00 em</output>
+                    </label>
                 </section>
 
                 <section class="reader-settings__group">
@@ -120,6 +128,25 @@ export function renderSettings(container) {
                         <span>自动滚动速度</span>
                         <input type="range" name="autoScrollSpeed" min="1" max="10" value="5">
                         <output data-bind="speedLabel">5</output>
+                    </label>
+                </section>
+
+                <section class="reader-settings__group reader-settings__custom-colors" hidden>
+                    <h4>自定义颜色</h4>
+                    <label class="reader-settings__color-row">
+                        <span>背景</span>
+                        <input type="color" name="customBg" value="#FAF8F3">
+                        <output data-bind="customBgLabel">#FAF8F3</output>
+                    </label>
+                    <label class="reader-settings__color-row">
+                        <span>正文</span>
+                        <input type="color" name="customFg" value="#2B2B2B">
+                        <output data-bind="customFgLabel">#2B2B2B</output>
+                    </label>
+                    <label class="reader-settings__color-row">
+                        <span>次要</span>
+                        <input type="color" name="customMuted" value="#7A7A78">
+                        <output data-bind="customMutedLabel">#7A7A78</output>
                     </label>
                 </section>
 
@@ -165,6 +192,19 @@ export function renderSettings(container) {
         if (speedSlider) speedSlider.value = s.autoScrollSpeed;
         const speedLabel = dialog.querySelector('[data-bind="speedLabel"]');
         if (speedLabel) speedLabel.textContent = s.autoScrollSpeed;
+
+        const lsSlider = dialog.querySelector('input[name="letterSpacingSlider"]');
+        if (lsSlider) lsSlider.value = String(s.letterSpacing);
+        const lsLabel = dialog.querySelector('[data-bind="letterSpacingLabel"]');
+        if (lsLabel) lsLabel.textContent = s.letterSpacing.toFixed(2) + ' em';
+        ['customBg', 'customFg', 'customMuted'].forEach((name) => {
+            const input = dialog.querySelector(`input[name="${name}"]`);
+            if (input) input.value = s[name] || '#000000';
+            const out = dialog.querySelector(`[data-bind="${name}Label"]`);
+            if (out) out.textContent = s[name] || '未设置';
+        });
+        const customSection = dialog.querySelector('.reader-settings__custom-colors');
+        if (customSection) customSection.hidden = s.theme !== 'CUSTOM';
     }
     syncControlsFromSettings();
 
@@ -192,6 +232,12 @@ export function renderSettings(container) {
             saveAndEmit({ fontFamily: t.value });
         } else if (t.name === 'autoScrollSpeed') {
             saveAndEmit({ autoScrollSpeed: parseInt(t.value, 10) });
+        } else if (t.name === 'letterSpacingSlider') {
+            saveAndEmit({ letterSpacing: parseFloat(t.value) });
+        } else if (t.name === 'theme') {
+            saveAndEmit({ theme: t.value });
+            const customSection = dialog.querySelector('.reader-settings__custom-colors');
+            if (customSection) customSection.hidden = t.value !== 'CUSTOM';
         } else if (t.name === 'readingMode') {
             saveAndEmit({ readingMode: t.value });
         } else {
