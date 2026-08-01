@@ -2033,6 +2033,15 @@ body[data-active-tab="read"] .text-reader {
     transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* 翻页动画层：新旧章叠放，新章 absolute 定位覆盖。
+   注意：absolute 需要最近的 positioned 祖先 —— contentEl 的
+   position: relative 已在上方规则中声明（不复述，避免特异性冲突）。 */
+.text-reader__content .text-reader__page--incoming {
+    position: absolute;
+    inset: 0;
+    will-change: transform;
+}
+
 .text-reader__content p {
     position: relative;
     margin-bottom: 1.2em;
