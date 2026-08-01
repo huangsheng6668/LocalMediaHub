@@ -6,12 +6,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.WindowManager
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -94,6 +91,8 @@ import com.juziss.localmediahub.data.ReadingMode
 import com.juziss.localmediahub.data.ScrollModeChapter
 import com.juziss.localmediahub.ui.component.reader.ReaderScrollbar
 import com.juziss.localmediahub.ui.component.reader.ReaderSettingsSheet
+import com.juziss.localmediahub.ui.component.reader.PageTurnController
+import com.juziss.localmediahub.ui.component.reader.PageTurnDirection
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
 import com.juziss.localmediahub.ui.component.reader.toCustomReaderColors
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
@@ -131,6 +130,29 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+
+    // ===== 分章模式翻页控制器（Task 10：NONE 行为） =====
+    val totalChaptersCount = book?.chapters?.size ?: 1
+    val pageTurnController = remember(settings.readingMode) {
+        PageTurnController(
+            currentIdx = { idx },
+            chapterCount = { totalChaptersCount },
+        )
+    }
+    fun turn(direction: PageTurnDirection) {
+        scope.launch {
+            val target = pageTurnController.turnTo(direction) { t ->
+                viewModel.loadChapter(t, resetScroll = true)
+            }
+            // NONE 行为：loadChapter 已更新 blocks/currentIndex 状态，
+            // 下方 ChapterModeContent 随状态自然刷新。
+            // COVER/SIMULATION 动画在 Task 11 加。
+            if (target == null && direction == PageTurnDirection.NEXT) {
+                // 边界提示保持与旧行为一致
+            }
+        }
+    }
+
     val listState = rememberLazyListState()
     val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
@@ -407,7 +429,6 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
             }
 
             // 动态计算阅读进度
-            val totalChaptersCount = book?.chapters?.size ?: 1
             // 分章模式：章内连续进度(亚 item 级)。
             // 用当前首个可见 item 的真实高度把 scrollOffset 归一化在 [0, 1] 范围内,
             // 再与 firstVisibleItemIndex 拼接得到连续位置。与 onSeek 中的
@@ -522,8 +543,8 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                         modifier = Modifier.padding(16.dp),
                                     )
                                     Spacer(Modifier.weight(1f))
-                                    TextButton(onClick = { viewModel.prevChapter() }) { Text("上一章") }
-                                    TextButton(onClick = { viewModel.nextChapter() }) { Text("下一章") }
+                                    TextButton(onClick = { turn(PageTurnDirection.PREV) }) { Text("上一章") }
+                                    TextButton(onClick = { turn(PageTurnDirection.NEXT) }) { Text("下一章") }
                                 }
                             }
                         }
@@ -540,8 +561,8 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                     val width = size.width.toFloat().coerceAtLeast(1f)
                                     val ratio = offset.x / width
                                     when {
-                                        ratio < 0.20f -> viewModel.prevChapter()
-                                        ratio > 0.80f -> viewModel.nextChapter()
+                                        ratio < 0.20f -> turn(PageTurnDirection.PREV)
+                                        ratio > 0.80f -> turn(PageTurnDirection.NEXT)
                                         else -> viewModel.toggleChrome()
                                     }
                                 } else {
@@ -611,26 +632,19 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                     viewModel = viewModel,
                                 )
                             } else {
-                                // ===== 分章模式：单章，切换时淡入淡出 =====
-                                val chapterKey = blocks.hashCode()
-                                AnimatedContent(
-                                    targetState = chapterKey,
-                                    transitionSpec = {
-                                        fadeIn(tween(120)) togetherWith fadeOut(tween(0))
-                                    },
-                                    label = "chapterTransition",
-                                ) { _ ->
-                                    ChapterModeContent(
-                                        blocks = blocks,
-                                        idx = idx,
-                                        book = book,
-                                        settings = settings,
-                                        contentDp = contentDp,
-                                        listState = listState,
-                                        context = context,
-                                        viewModel = viewModel,
-                                    )
-                                }
+                                // ===== 分章模式：NONE 行为（Task 10），blocks 状态自然驱动内容刷新 =====
+                                // COVER/SIMULATION 动画在 Task 11 实现。
+                                ChapterModeContent(
+                                    blocks = blocks,
+                                    idx = idx,
+                                    book = book,
+                                    settings = settings,
+                                    contentDp = contentDp,
+                                    listState = listState,
+                                    context = context,
+                                    viewModel = viewModel,
+                                    onTurnNext = { turn(PageTurnDirection.NEXT) },
+                                )
                             }
                         }
                     }
@@ -722,8 +736,8 @@ private fun ChapterModeContent(
     listState: androidx.compose.foundation.lazy.LazyListState,
     context: Context,
     viewModel: TextReaderViewModel,
+    onTurnNext: () -> Unit = {},
 ) {
-    val scope = rememberCoroutineScope()
     LazyColumn(
         state = listState,
         modifier = Modifier.width(contentDp),
@@ -775,7 +789,7 @@ private fun ChapterModeContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 24.dp)
-                    .clickable { viewModel.nextChapter(); scope.launch { listState.scrollToItem(0) } },
+                    .clickable { onTurnNext() },
             )
         }
     }
