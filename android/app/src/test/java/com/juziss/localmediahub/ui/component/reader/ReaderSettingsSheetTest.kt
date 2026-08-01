@@ -303,7 +303,19 @@ class ReaderSettingsSheetTest {
             )
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText(com.juziss.localmediahub.data.PageTurnStyle.COVER.label).performClick()
+        // The page-turn chips live near the bottom of a vertically-scrolled
+        // Column in ReaderSettingsSheetContent. Under Robolectric, performClick()
+        // uses input injection that only reaches nodes inside the current scroll
+        // viewport; the font/theme chip tests pass because those chips sit at the
+        // top (initial viewport), but the page-turn chips are below the fold, so
+        // the injected click never reaches the FilterChip's onClick. The canonical
+        // Robolectric-safe fix is to invoke the OnClick semantics action directly,
+        // which bypasses input/viewport dispatch and exercises the real onClick
+        // lambda (the same lambda a real tap would fire). This is the documented
+        // approach for driving clickable Compose nodes in unit tests
+        // (androidx.compose.ui.test SemanticsActions.OnClick).
+        composeRule.onNodeWithText(com.juziss.localmediahub.data.PageTurnStyle.COVER.label)
+            .performSemanticsAction(SemanticsActions.OnClick)
         assertEquals(com.juziss.localmediahub.data.PageTurnStyle.COVER, captured?.pageTurnStyle)
     }
 
