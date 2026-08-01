@@ -38,6 +38,9 @@ export const THEME_PRESETS = {
     AUTO:           null,
 };
 
+// 翻页动画样式（Task 2/3 依赖）
+export const PAGE_TURN_STYLES = ['NONE', 'COVER', 'SIMULATION', 'DRAG'];
+
 export const FONT_SIZE_RANGE = { MIN: 12, MAX: 28, STEP: 1 };
 export const LINE_HEIGHT_RANGE = { MIN: 1.3, MAX: 2.5, STEP: 0.1 };
 
@@ -56,6 +59,7 @@ export const DEFAULT_SETTINGS = {
     customBg: null,   // #RRGGBB，仅 theme=CUSTOM 时生效
     customFg: null,
     customMuted: null,
+    pageTurnStyle: 'NONE', // NONE/COVER/SIMULATION/DRAG，仅 chapter 模式生效
 };
 
 // migrateV1toV2: 接受任何形状（包括 null/undefined/坏字段），输出 V2 形状。
@@ -107,6 +111,11 @@ export function migrateV1toV2(old) {
     if (typeof old.customBg === 'string' && HEX6.test(old.customBg)) out.customBg = old.customBg;
     if (typeof old.customFg === 'string' && HEX6.test(old.customFg)) out.customFg = old.customFg;
     if (typeof old.customMuted === 'string' && HEX6.test(old.customMuted)) out.customMuted = old.customMuted;
+
+    // 翻页动画（2026-08-01）：新字段
+    if (typeof old.pageTurnStyle === 'string' && PAGE_TURN_STYLES.includes(old.pageTurnStyle)) {
+        out.pageTurnStyle = old.pageTurnStyle;
+    }
 
     return out;
 }
