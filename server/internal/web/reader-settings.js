@@ -37,6 +37,15 @@ const READING_MODE_OPTIONS = [
     ['scroll', '全文滚动'],
 ];
 
+// 翻页动画 radio 选项（PAGE_TURN_STYLES 的 key 子集，标签本地化）。
+// 仅 chapter 模式生效；scroll 模式下置灰。
+const PAGE_TURN_OPTIONS = [
+    ['NONE', '无'],
+    ['COVER', '覆盖'],
+    ['SIMULATION', '仿真'],
+    ['DRAG', '拖动'],
+];
+
 // 渲染设置 dialog 到 container，返回控制器 { open, dispose }。
 // settings 变更后 emit SETTINGS_CHANGED，payload 为最新 settings 快照。
 export function renderSettings(container) {
@@ -117,6 +126,14 @@ export function renderSettings(container) {
                         <div class="reader-settings__font-row">
                             ${READING_MODE_OPTIONS.map(([v, label]) =>
                                 `<label><input type="radio" name="readingMode" value="${v}"> ${label}</label>`
+                            ).join('')}
+                        </div>
+                    </div>
+                    <div class="reader-settings__row" style="margin-bottom: 8px;">
+                        <span>翻页动画</span>
+                        <div class="reader-settings__font-row" id="pageTurnRow">
+                            ${PAGE_TURN_OPTIONS.map(([v, label]) =>
+                                `<label><input type="radio" name="pageTurnStyle" value="${v}"> ${label}</label>`
                             ).join('')}
                         </div>
                     </div>
@@ -205,6 +222,11 @@ export function renderSettings(container) {
         });
         const customSection = dialog.querySelector('.reader-settings__custom-colors');
         if (customSection) customSection.hidden = s.theme !== 'CUSTOM';
+
+        // 翻页动画仅 chapter 模式可用；scroll 模式置灰（无翻页语义）。
+        setRadio('pageTurnStyle', s.pageTurnStyle);
+        const isScroll = s.readingMode === 'scroll';
+        dialog.querySelectorAll('input[name="pageTurnStyle"]').forEach((r) => { r.disabled = isScroll; });
     }
     syncControlsFromSettings();
 
@@ -240,6 +262,8 @@ export function renderSettings(container) {
             if (customSection) customSection.hidden = t.value !== 'CUSTOM';
         } else if (t.name === 'readingMode') {
             saveAndEmit({ readingMode: t.value });
+            const isScroll = t.value === 'scroll';
+            dialog.querySelectorAll('input[name="pageTurnStyle"]').forEach((r) => { r.disabled = isScroll; });
         } else {
             saveAndEmit({ [t.name]: t.value });
         }
