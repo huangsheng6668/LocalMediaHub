@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
@@ -100,12 +101,16 @@ import com.juziss.localmediahub.ui.component.reader.PageTurnController
 import com.juziss.localmediahub.ui.component.reader.PageTurnDirection
 import com.juziss.localmediahub.ui.component.reader.PageTurnSimulator
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
+import com.juziss.localmediahub.ui.component.reader.DragOutcome
+import com.juziss.localmediahub.ui.component.reader.shouldDragTakeOver
+import com.juziss.localmediahub.ui.component.reader.resolveDragOutcome
 import com.juziss.localmediahub.ui.component.reader.toCustomReaderColors
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -160,20 +165,26 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
         scope.launch {
             val style = settings.pageTurnStyle
             val oldBlocks = blocks
+            val oldIdx = idx // 必须在 loadChapter 前捕获，避免 overlay 标题显示为新章标题
             val target = pageTurnController.turnTo(direction) { t ->
                 viewModel.loadChapter(t, resetScroll = true)
             }
             if (target == null) return@launch
             when (style) {
                 PageTurnStyle.NONE -> Unit // blocks 已刷新，直接显示新章
-                PageTurnStyle.COVER, PageTurnStyle.SIMULATION -> {
-                    incoming = IncomingPage(oldBlocks, idx, target, direction)
+                PageTurnStyle.COVER, PageTurnStyle.DRAG -> {
+                    // DRAG 样式下点击热区/按钮/❖ 走 COVER 式滑动
+                    incoming = IncomingPage(oldBlocks, oldIdx, target, direction)
                     progress.snapTo(0f)
-                    val ms = if (style == PageTurnStyle.COVER) 280 else 400
-                    progress.animateTo(1f, tween(ms, easing = FastOutSlowInEasing))
+                    progress.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
                     incoming = null
                 }
-                PageTurnStyle.DRAG -> Unit // 手势路径在 Task 12
+                PageTurnStyle.SIMULATION -> {
+                    incoming = IncomingPage(oldBlocks, oldIdx, target, direction)
+                    progress.snapTo(0f)
+                    progress.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
+                    incoming = null
+                }
             }
         }
     }
@@ -182,6 +193,23 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
     var tocTab by remember { mutableStateOf(0) } // 0 = 目录, 1 = 书签
+
+    // ===== Task 12: DRAG 手势状态 =====
+    // 使用 remember 对象避免 drag 位移更新触发无意义 recomposition；
+    // incoming/progress 由 Animatable 驱动顶层渲染。
+    val density = LocalDensity.current
+    val dragSlopPx = remember(density) { with(density) { 8.dp.toPx() } }
+    val drag = remember {
+        object {
+            var takenOver = false
+            var preloaded = false
+            var totalDx = 0f
+            var totalDy = 0f
+            var direction: PageTurnDirection? = null
+            var oldIdx = 0
+            var oldBlocks: List<com.juziss.localmediahub.data.Block> = emptyList()
+        }
+    }
 
     // Task 3 / I2: BLE 降级徽标。驱动源是仓库的 bleDegradedEvents
     // SharedFlow —— 它在 *每个* BLE 兜底成功的章节上都发射一次（而非只在
@@ -594,6 +622,90 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                     viewModel.toggleChrome()
                                 }
                             }
+                        }
+                        // Task 12: DRAG 翻页手势（与上述 detectTapGestures 并排 —— 无位移时走 tap，位移时走 drag）
+                        .pointerInput(settings.pageTurnStyle) {
+                            if (settings.pageTurnStyle != PageTurnStyle.DRAG || isScrollMode) return@pointerInput
+                            detectDragGestures(
+                                onDragStart = {
+                                    drag.takenOver = false
+                                    drag.preloaded = false
+                                    drag.totalDx = 0f
+                                    drag.totalDy = 0f
+                                    drag.direction = null
+                                    drag.oldIdx = idx
+                                    drag.oldBlocks = blocks
+                                },
+                                onDrag = { _, amount ->
+                                    drag.totalDx += amount.x
+                                    drag.totalDy += amount.y
+
+                                    if (!drag.takenOver) {
+                                        if (!shouldDragTakeOver(drag.totalDx, drag.totalDy, dragSlopPx)) {
+                                            // 尚未达到接管阈值，继续等待
+                                        } else {
+                                            // 接管：按 dx 符号确定方向
+                                            drag.takenOver = true
+                                            drag.direction = if (drag.totalDx < 0) PageTurnDirection.NEXT else PageTurnDirection.PREV
+                                            // 预加载目标章（底层），旧章快照已在 onDragStart 保存（顶层）
+                                            scope.launch {
+                                                val d = drag.direction ?: return@launch
+                                                val target = pageTurnController.turnTo(d) { t ->
+                                                    viewModel.loadChapter(t, resetScroll = true)
+                                                }
+                                                if (target == null) {
+                                                    drag.takenOver = false
+                                                    return@launch
+                                                }
+                                                drag.preloaded = true
+                                                incoming = IncomingPage(drag.oldBlocks, drag.oldIdx, target, d)
+                                                // 以预加载完成时的进度设置初始 overlay 位置
+                                                val w = size.width.toFloat().coerceAtLeast(1f)
+                                                progress.snapTo((abs(drag.totalDx) / w).coerceIn(0f, 1f))
+                                            }
+                                        }
+                                    }
+
+                                    if (drag.preloaded && incoming != null) {
+                                        scope.launch {
+                                            val w = size.width.toFloat().coerceAtLeast(1f)
+                                            progress.snapTo((abs(drag.totalDx) / w).coerceIn(0f, 1f))
+                                        }
+                                    }
+                                },
+                                onDragEnd = {
+                                    if (drag.takenOver && drag.preloaded && incoming != null) {
+                                        val w = size.width.toFloat().coerceAtLeast(1f)
+                                        val outcome = resolveDragOutcome(drag.totalDx / w)
+                                        when (outcome) {
+                                            DragOutcome.COMMIT -> scope.launch {
+                                                progress.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
+                                                incoming = null
+                                                drag.takenOver = false
+                                                drag.preloaded = false
+                                            }
+                                            DragOutcome.REVERT -> scope.launch {
+                                                progress.animateTo(0f, tween(280, easing = FastOutSlowInEasing))
+                                                // 恢复当前章：预加载时 blocks 已被目标章覆盖
+                                                viewModel.loadChapter(drag.oldIdx, resetScroll = true)
+                                                incoming = null
+                                                drag.takenOver = false
+                                                drag.preloaded = false
+                                            }
+                                        }
+                                    }
+                                },
+                                onDragCancel = {
+                                    if (drag.takenOver) {
+                                        scope.launch {
+                                            incoming = null
+                                            viewModel.loadChapter(drag.oldIdx, resetScroll = true)
+                                        }
+                                        drag.takenOver = false
+                                        drag.preloaded = false
+                                    }
+                                },
+                            )
                         }
                 ) {
                     // 沉浸模式下底部微光进度条

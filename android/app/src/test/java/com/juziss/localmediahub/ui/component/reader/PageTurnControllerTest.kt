@@ -78,4 +78,56 @@ class PageTurnControllerTest {
         // Second NEXT reads idx=1 from the live lambda → target 2 (mirrors ViewModel updating idx after load).
         assertEquals(2, controller.turnTo(PageTurnDirection.NEXT, load = { newIdx -> idx = newIdx; true }))
     }
+
+    // ===== Task 12: 拖拽判定纯函数 =====
+
+    @Test
+    fun shouldDragTakeOver_horizontal_dominant_over_threshold() {
+        assertTrue(shouldDragTakeOver(20f, 5f, 8f))
+        assertTrue(shouldDragTakeOver(-20f, 5f, 8f))
+    }
+
+    @Test
+    fun shouldDragTakeOff_vertical_dominant_returns_false() {
+        assertFalse(shouldDragTakeOver(5f, 30f, 8f))
+    }
+
+    @Test
+    fun shouldDragTakeOver_under_slop_returns_false() {
+        assertFalse(shouldDragTakeOver(5f, 2f, 8f))
+    }
+
+    @Test
+    fun shouldDragTakeOver_exact_slop_returns_false() {
+        // 必须在触摸阈值**之上**才接管；等于阈值不算接管。
+        assertFalse(shouldDragTakeOver(8f, 0f, 8f))
+        assertTrue(shouldDragTakeOver(8.01f, 0f, 8f))
+    }
+
+    // ===== Task 12: 松手判定纯函数 =====
+
+    @Test
+    fun resolveDragOutcome_commit_on_25_percent() {
+        assertEquals(DragOutcome.COMMIT, resolveDragOutcome(0.25f))
+        assertEquals(DragOutcome.COMMIT, resolveDragOutcome(-0.25f))
+        assertEquals(DragOutcome.COMMIT, resolveDragOutcome(0.5f))
+        assertEquals(DragOutcome.COMMIT, resolveDragOutcome(-0.9f))
+    }
+
+    @Test
+    fun resolveDragOutcome_revert_under_25_percent() {
+        assertEquals(DragOutcome.REVERT, resolveDragOutcome(0.249f))
+        assertEquals(DragOutcome.REVERT, resolveDragOutcome(-0.249f))
+        assertEquals(DragOutcome.REVERT, resolveDragOutcome(0f))
+        assertEquals(DragOutcome.REVERT, resolveDragOutcome(0.1f))
+        assertEquals(DragOutcome.REVERT, resolveDragOutcome(-0.1f))
+    }
+
+    @Test
+    fun resolveDragOutcome_symmetric() {
+        // 正负对称：同绝对值阈值判定一致。
+        for (r in listOf(0f, 0.1f, 0.24f, 0.25f, 0.5f, 1f)) {
+            assertEquals(resolveDragOutcome(r), resolveDragOutcome(-r))
+        }
+    }
 }

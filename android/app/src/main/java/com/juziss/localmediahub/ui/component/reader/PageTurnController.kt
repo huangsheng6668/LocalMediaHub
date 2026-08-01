@@ -39,3 +39,27 @@ class PageTurnController(
         }
     }
 }
+
+// ===== Task 12: 拖拽判定纯函数 =====
+
+/** 拖动接管阈值（屏宽 25%），与 Web 端对齐。 */
+const val DRAG_THRESHOLD = 0.25f
+
+/** 松手判定结果：commit = 完成翻页，revert = 回弹。 */
+enum class DragOutcome { COMMIT, REVERT }
+
+/**
+ * 判定水平拖动是否应由翻页接管：水平位移 > 垂直位移 且 > 触摸阈值。
+ * 注意：|dx| 必须**严格大于** touchSlopPx（等于时不接管）。
+ */
+fun shouldDragTakeOver(dx: Float, dy: Float, touchSlopPx: Float): Boolean =
+    kotlin.math.abs(dx) > kotlin.math.abs(dy) && kotlin.math.abs(dx) > touchSlopPx
+
+/**
+ * 松手判定：|dxRatio| >= [DRAG_THRESHOLD]（0.25）→ COMMIT，否则 REVERT。
+ * dxRatio 是拖动总位移与屏宽的比值（带符号，但判定仅用绝对值）。
+ */
+fun resolveDragOutcome(dxRatio: Float): DragOutcome {
+    val abs = kotlin.math.abs(dxRatio)
+    return if (abs < DRAG_THRESHOLD) DragOutcome.REVERT else DragOutcome.COMMIT
+}
