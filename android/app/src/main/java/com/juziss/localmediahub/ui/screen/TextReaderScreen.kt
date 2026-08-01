@@ -16,7 +16,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
@@ -623,11 +623,15 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                 }
                             }
                         }
-                        // Task 12: DRAG 翻页手势（与上述 detectTapGestures 并排 —— 无位移时走 tap，位移时走 drag）
+                        // Task 12 fix-round-2: DRAG 翻页手势。使用 detectHorizontalDragGestures
+                        // 替代 detectDragGestures——此检测器仅响应水平拖动，垂直滑动穿透至子
+                        // LazyColumn 正常滚动。shouldDragTakeOver 的水平主导检查由框架内置的
+                        // 水平拖拽检测等效替代；resolveDragOutcome 仍用于松手 COMMIT/REVERT。
                         .pointerInput(settings.pageTurnStyle) {
                             if (settings.pageTurnStyle != PageTurnStyle.DRAG || isScrollMode) return@pointerInput
-                            detectDragGestures(
+                            detectHorizontalDragGestures(
                                 onDragStart = {
+                                    // 快照当前章状态（惰性：仅在水平拖拽确认后才记录，垂直滚动不触发）
                                     drag.takenOver = false
                                     drag.preloaded = false
                                     drag.totalDx = 0f
@@ -636,36 +640,28 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                     drag.oldIdx = idx
                                     drag.oldBlocks = blocks
                                 },
-                                onDrag = { _, amount ->
-                                    drag.totalDx += amount.x
-                                    drag.totalDy += amount.y
-
+                                onHorizontalDrag = { _, dragAmount ->
+                                    drag.totalDx += dragAmount
                                     if (!drag.takenOver) {
-                                        if (!shouldDragTakeOver(drag.totalDx, drag.totalDy, dragSlopPx)) {
-                                            // 尚未达到接管阈值，继续等待
-                                        } else {
-                                            // 接管：按 dx 符号确定方向
-                                            drag.takenOver = true
-                                            drag.direction = if (drag.totalDx < 0) PageTurnDirection.NEXT else PageTurnDirection.PREV
-                                            // 预加载目标章（底层），旧章快照已在 onDragStart 保存（顶层）
-                                            scope.launch {
-                                                val d = drag.direction ?: return@launch
-                                                val target = pageTurnController.turnTo(d) { t ->
-                                                    viewModel.loadChapter(t, resetScroll = true)
-                                                }
-                                                if (target == null) {
-                                                    drag.takenOver = false
-                                                    return@launch
-                                                }
-                                                drag.preloaded = true
-                                                incoming = IncomingPage(drag.oldBlocks, drag.oldIdx, target, d)
-                                                // 以预加载完成时的进度设置初始 overlay 位置
-                                                val w = size.width.toFloat().coerceAtLeast(1f)
-                                                progress.snapTo((abs(drag.totalDx) / w).coerceIn(0f, 1f))
+                                        drag.takenOver = true
+                                        drag.direction = if (drag.totalDx < 0) PageTurnDirection.NEXT else PageTurnDirection.PREV
+                                        // 异步预加载目标章
+                                        scope.launch {
+                                            val d = drag.direction ?: return@launch
+                                            val target = pageTurnController.turnTo(d) { t ->
+                                                viewModel.loadChapter(t, resetScroll = true)
                                             }
+                                            if (target == null) {
+                                                drag.takenOver = false
+                                                return@launch
+                                            }
+                                            drag.preloaded = true
+                                            incoming = IncomingPage(drag.oldBlocks, drag.oldIdx, target, d)
+                                            val w = size.width.toFloat().coerceAtLeast(1f)
+                                            progress.snapTo((abs(drag.totalDx) / w).coerceIn(0f, 1f))
                                         }
                                     }
-
+                                    // 预加载完成后每帧更新 overlay 位置
                                     if (drag.preloaded && incoming != null) {
                                         scope.launch {
                                             val w = size.width.toFloat().coerceAtLeast(1f)
@@ -686,7 +682,6 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                             }
                                             DragOutcome.REVERT -> scope.launch {
                                                 progress.animateTo(0f, tween(280, easing = FastOutSlowInEasing))
-                                                // 恢复当前章：预加载时 blocks 已被目标章覆盖
                                                 viewModel.loadChapter(drag.oldIdx, resetScroll = true)
                                                 incoming = null
                                                 drag.takenOver = false
@@ -696,13 +691,14 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                     }
                                 },
                                 onDragCancel = {
+                                    // LOW fix: 所有清理包在同一个协程内，与 onDragEnd 一致
                                     if (drag.takenOver) {
                                         scope.launch {
                                             incoming = null
                                             viewModel.loadChapter(drag.oldIdx, resetScroll = true)
+                                            drag.takenOver = false
+                                            drag.preloaded = false
                                         }
-                                        drag.takenOver = false
-                                        drag.preloaded = false
                                     }
                                 },
                             )
