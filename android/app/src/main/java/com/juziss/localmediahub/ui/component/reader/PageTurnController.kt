@@ -21,13 +21,6 @@ class PageTurnController(
 
     private val mutex = Mutex()
 
-    /**
-     * 最近一次成功翻页落点。设置后它作为"当前章"权威值，使连续 [turnTo] 能正确递进——
-     * 既适配 live-lambda 生产用法（currentIdx 随 ViewModel 更新），也适配快照构造的测试
-     * （currentIdx 在构造时冻结、不会自增）。
-     */
-    private var lastTarget: Int? = null
-
     /** @return 成功 = 已加载的目标章 index；失败（越界/load 失败/并发被拒）= null */
     suspend fun turnTo(
         direction: PageTurnDirection,
@@ -35,18 +28,12 @@ class PageTurnController(
     ): Int? {
         if (!mutex.tryLock()) return null
         try {
-            val from = lastTarget ?: currentIdx()
             val target = when (direction) {
-                PageTurnDirection.NEXT -> from + 1
-                PageTurnDirection.PREV -> from - 1
+                PageTurnDirection.NEXT -> currentIdx() + 1
+                PageTurnDirection.PREV -> currentIdx() - 1
             }
             if (target < 0 || target >= chapterCount()) return null
-            return if (load(target)) {
-                lastTarget = target
-                target
-            } else {
-                null
-            }
+            return if (load(target)) target else null
         } finally {
             mutex.unlock()
         }

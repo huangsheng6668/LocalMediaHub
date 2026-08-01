@@ -71,9 +71,11 @@ class PageTurnControllerTest {
 
     @Test
     fun turnTo_accepts_after_previous_completes() = runBlocking {
-        val controller = PageTurnController(currentIdx = 0, chapterCount = 3)
-        assertTrue(controller.turnTo(PageTurnDirection.NEXT, load = { true }) != null)
-        // busy 已复位，第二次可正常翻页
-        assertEquals(2, controller.turnTo(PageTurnDirection.NEXT, load = { true }))
+        var idx = 0
+        val controller = PageTurnController(currentIdx = { idx }, chapterCount = { 3 })
+        val first = controller.turnTo(PageTurnDirection.NEXT, load = { newIdx -> idx = newIdx; true })
+        assertEquals(1, first)
+        // Second NEXT reads idx=1 from the live lambda → target 2 (mirrors ViewModel updating idx after load).
+        assertEquals(2, controller.turnTo(PageTurnDirection.NEXT, load = { newIdx -> idx = newIdx; true }))
     }
 }
