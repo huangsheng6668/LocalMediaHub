@@ -1,6 +1,7 @@
 package com.juziss.localmediahub.data
 
 import androidx.compose.ui.graphics.Color
+import com.google.gson.annotations.SerializedName
 import com.juziss.localmediahub.ui.component.reader.ReaderFontFamily
 
 /**
@@ -12,6 +13,13 @@ import com.juziss.localmediahub.ui.component.reader.ReaderFontFamily
 enum class ReadingMode(val label: String) {
     CHAPTER("分章"),
     SCROLL("全文滚动"),
+}
+
+enum class PageTurnStyle(val label: String) {
+    NONE("无"),
+    COVER("覆盖"),
+    SIMULATION("仿真"),
+    DRAG("拖动"),
 }
 
 data class ReaderSettings(
@@ -30,7 +38,11 @@ data class ReaderSettings(
     val customBg: String? = null,       // #RRGGBB，仅 theme=CUSTOM 生效
     val customFg: String? = null,
     val customMuted: String? = null,
-)
+    @SerializedName("pageTurnStyle") private val _pageTurnStyle: PageTurnStyle? = null, // Nullable for Gson deserialization safety
+) {
+    /** Safe accessor for pageTurnStyle that handles null from unknown enum values. */
+    val pageTurnStyle: PageTurnStyle get() = _pageTurnStyle ?: PageTurnStyle.NONE
+}
 
 /**
  * 阅读区主题（含 chrome 配色字段）。AUTO 不携带颜色，由调用方解析为

@@ -128,6 +128,25 @@ class ReaderSettingsMigrationTest {
         assertEquals("#112233", s.customFg)
         assertEquals("#445566", s.customMuted)
     }
+
+    @Test
+    fun v2_without_pageTurnStyle_falls_back_to_none() = runBlocking {
+        injectRawSettings("""{"theme":"NIGHT"}""")
+        assertEquals(PageTurnStyle.NONE, store.readerSettingsFlow.first().pageTurnStyle)
+    }
+
+    @Test
+    fun v2_with_pageTurnStyle_reads_correctly() = runBlocking {
+        injectRawSettings("""{"pageTurnStyle":"DRAG"}""")
+        assertEquals(PageTurnStyle.DRAG, store.readerSettingsFlow.first().pageTurnStyle)
+    }
+
+    @Test
+    fun v2_with_invalid_pageTurnStyle_falls_back_to_none() = runBlocking {
+        injectRawSettings("""{"pageTurnStyle":"BOGUS"}""")
+        // Gson returns null for unknown enum values; our safe accessor converts this to NONE
+        assertEquals(PageTurnStyle.NONE, store.readerSettingsFlow.first().pageTurnStyle)
+    }
 }
 
 
