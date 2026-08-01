@@ -7,8 +7,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -87,12 +91,14 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.juziss.localmediahub.data.Bookmark
+import com.juziss.localmediahub.data.PageTurnStyle
 import com.juziss.localmediahub.data.ReadingMode
 import com.juziss.localmediahub.data.ScrollModeChapter
 import com.juziss.localmediahub.ui.component.reader.ReaderScrollbar
 import com.juziss.localmediahub.ui.component.reader.ReaderSettingsSheet
 import com.juziss.localmediahub.ui.component.reader.PageTurnController
 import com.juziss.localmediahub.ui.component.reader.PageTurnDirection
+import com.juziss.localmediahub.ui.component.reader.PageTurnSimulator
 import com.juziss.localmediahub.ui.component.reader.ReaderThemeWrapper
 import com.juziss.localmediahub.ui.component.reader.toCustomReaderColors
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
@@ -131,7 +137,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // ===== 分章模式翻页控制器（Task 10：NONE 行为） =====
+    // ===== 分章模式翻页控制器（Task 10/11） =====
     val totalChaptersCount = book?.chapters?.size ?: 1
     val pageTurnController = remember(settings.readingMode) {
         PageTurnController(
@@ -139,16 +145,35 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
             chapterCount = { totalChaptersCount },
         )
     }
+
+    // 动画层描述：顶层是旧章快照，随 progress 移出/卷走
+    data class IncomingPage(
+        val topBlocks: List<com.juziss.localmediahub.data.Block>,
+        val topIdx: Int,
+        val targetIdx: Int,
+        val direction: PageTurnDirection,
+    )
+    val progress = remember { Animatable(1f) }
+    var incoming by remember { mutableStateOf<IncomingPage?>(null) }
+
     fun turn(direction: PageTurnDirection) {
         scope.launch {
+            val style = settings.pageTurnStyle
+            val oldBlocks = blocks
             val target = pageTurnController.turnTo(direction) { t ->
                 viewModel.loadChapter(t, resetScroll = true)
             }
-            // NONE 行为：loadChapter 已更新 blocks/currentIndex 状态，
-            // 下方 ChapterModeContent 随状态自然刷新。
-            // COVER/SIMULATION 动画在 Task 11 加。
-            if (target == null && direction == PageTurnDirection.NEXT) {
-                // 边界提示保持与旧行为一致
+            if (target == null) return@launch
+            when (style) {
+                PageTurnStyle.NONE -> Unit // blocks 已刷新，直接显示新章
+                PageTurnStyle.COVER, PageTurnStyle.SIMULATION -> {
+                    incoming = IncomingPage(oldBlocks, idx, target, direction)
+                    progress.snapTo(0f)
+                    val ms = if (style == PageTurnStyle.COVER) 280 else 400
+                    progress.animateTo(1f, tween(ms, easing = FastOutSlowInEasing))
+                    incoming = null
+                }
+                PageTurnStyle.DRAG -> Unit // 手势路径在 Task 12
             }
         }
     }
@@ -632,19 +657,56 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                                     viewModel = viewModel,
                                 )
                             } else {
-                                // ===== 分章模式：NONE 行为（Task 10），blocks 状态自然驱动内容刷新 =====
-                                // COVER/SIMULATION 动画在 Task 11 实现。
-                                ChapterModeContent(
-                                    blocks = blocks,
-                                    idx = idx,
-                                    book = book,
-                                    settings = settings,
-                                    contentDp = contentDp,
-                                    listState = listState,
-                                    context = context,
-                                    viewModel = viewModel,
-                                    onTurnNext = { turn(PageTurnDirection.NEXT) },
-                                )
+                                // ===== 分章模式：COVER/SIMULATION/NONE 动画支持 =====
+                                Box(Modifier.fillMaxSize()) {
+                                    // 底层：当前 blocks（loadChapter 后的新章）
+                                    ChapterModeContent(
+                                        blocks = blocks,
+                                        idx = idx,
+                                        book = book,
+                                        settings = settings,
+                                        contentDp = contentDp,
+                                        listState = listState,
+                                        context = context,
+                                        viewModel = viewModel,
+                                        onTurnPrev = { turn(PageTurnDirection.PREV) },
+                                        onTurnNext = { turn(PageTurnDirection.NEXT) },
+                                    )
+                                    // 顶层：动画层（旧章快照）
+                                    incoming?.let { inc ->
+                                        val topTx by remember(inc, progress) {
+                                            derivedStateOf {
+                                                val sign = if (inc.direction == PageTurnDirection.NEXT) -1f else 1f
+                                                progress.value * sign
+                                            }
+                                        }
+                                        Box(
+                                            Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer { translationX = topTx * size.width }
+                                        ) {
+                                            // 顶层用静态 Column 渲染旧章（动画期间无需滚动）
+                                            StaticChapterOverlay(
+                                                blocks = inc.topBlocks,
+                                                idx = inc.topIdx,
+                                                book = book,
+                                                settings = settings,
+                                                contentDp = contentDp,
+                                                context = context,
+                                                viewModel = viewModel,
+                                                onTurnPrev = { turn(PageTurnDirection.PREV) },
+                                                onTurnNext = { turn(PageTurnDirection.NEXT) },
+                                            )
+                                            // SIMULATION：卷曲阴影覆盖层
+                                            if (settings.pageTurnStyle == PageTurnStyle.SIMULATION) {
+                                                PageTurnSimulator(
+                                                    progress = progress.value,
+                                                    reverse = inc.direction == PageTurnDirection.PREV,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -736,6 +798,7 @@ private fun ChapterModeContent(
     listState: androidx.compose.foundation.lazy.LazyListState,
     context: Context,
     viewModel: TextReaderViewModel,
+    onTurnPrev: () -> Unit = {},
     onTurnNext: () -> Unit = {},
 ) {
     LazyColumn(
@@ -776,6 +839,8 @@ private fun ChapterModeContent(
                 chapterIndex = idx,
                 context = context,
                 viewModel = viewModel,
+                onTurnPrev = onTurnPrev,
+                onTurnNext = onTurnNext,
             )
         }
 
@@ -899,6 +964,8 @@ private fun BlockItem(
     chapterIndex: Int,
     context: Context,
     viewModel: TextReaderViewModel,
+    onTurnPrev: () -> Unit = {},
+    onTurnNext: () -> Unit = {},
 ) {
     when (block.type) {
         "text" -> ParagraphItem(
@@ -917,8 +984,8 @@ private fun BlockItem(
                 val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 cm.setPrimaryClip(ClipData.newPlainText("paragraph", block.value ?: ""))
             },
-            onPrevChapter = { viewModel.prevChapter() },
-            onNextChapter = { viewModel.nextChapter() },
+            onPrevChapter = onTurnPrev,
+            onNextChapter = onTurnNext,
         )
         "image" -> {
             if (block.src.isNullOrEmpty()) {
@@ -1041,6 +1108,76 @@ private fun BookmarkRow(
         }
         IconButton(onClick = onDelete) {
             Icon(Icons.Filled.Delete, contentDescription = "删除书签")
+        }
+    }
+}
+
+/**
+ * 动画顶层：用静态 Column 渲染旧章内容快照（[ParagraphItem] 列表），
+ * 供 COVER/SIMULATION 动画期间使用。动画 280-400ms 内不需要滚动交互，
+ * 避免与底层 LazyColumn 共享 listState 的复杂化。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun StaticChapterOverlay(
+    blocks: List<com.juziss.localmediahub.data.Block>,
+    idx: Int,
+    book: com.juziss.localmediahub.data.Book?,
+    settings: com.juziss.localmediahub.data.ReaderSettings,
+    contentDp: androidx.compose.ui.unit.Dp,
+    context: Context,
+    viewModel: TextReaderViewModel,
+    onTurnPrev: () -> Unit = {},
+    onTurnNext: () -> Unit = {},
+) {
+    Column(
+        modifier = Modifier
+            .width(contentDp)
+            .padding(vertical = 16.dp)
+    ) {
+        // 章节大标题（镜像 ChapterModeContent item 0）
+        val chapterTitle = book?.chapters?.getOrNull(idx)?.title ?: ""
+        Text(
+            text = chapterTitle,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.SemiBold,
+                fontSize = (settings.fontSizeSp + 6).sp,
+                fontFamily = FontFamily.Serif,
+                textAlign = TextAlign.Center,
+            ),
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 32.dp, bottom = 24.dp),
+        )
+        HorizontalDivider(
+            modifier = Modifier
+                .width(40.dp)
+                .padding(bottom = 16.dp),
+            color = MaterialTheme.colorScheme.outline,
+        )
+
+        // 内容块（仅文本；图片在动画期间跳过）
+        blocks.forEachIndexed { blockIdx, block ->
+            when (block.type) {
+                "text" -> ParagraphItem(
+                    text = block.value ?: "",
+                    fontSizeSp = settings.fontSizeSp.sp,
+                    lineHeightSp = (settings.fontSizeSp * settings.lineHeightMultiplier).sp,
+                    letterSpacingSp = (settings.fontSizeSp * settings.letterSpacing).sp,
+                    fontFamily = settings.fontFamily.toFontFamily(),
+                    firstLineIndent = settings.firstLineIndent,
+                    paragraphGapEm = if (settings.paragraphSpacing) 1.6f else 1.2f,
+                    readingMode = ReadingMode.CHAPTER,
+                    onAddBookmark = {},
+                    onCopy = {},
+                    onPrevChapter = {},
+                    onNextChapter = {},
+                )
+                "image" -> {
+                    // 动画 280-400ms 内不渲染图片（顶层快照无需请求网络）
+                }
+            }
         }
     }
 }
