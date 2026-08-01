@@ -14,8 +14,19 @@ import { renderBookmarks } from './bookmarks.js';
 import { renderAutoscroll } from './autoscroll.js';
 import { renderSettings } from './reader-settings.js';
 import { renderScrubber, progressToChapterIndex } from './readerScrubber.js';
+import { renderPageTurn } from './pageTurn.js';
 
 const STORAGE_PREFIX = 'book_progress:';
+
+// Pure helper: click-region ratio for the content hotzone. Returns the
+// fraction (0..1) of clientX across rect.width. Guarded against zero-width
+// (jsdom returns all-zero rects with no layout). Exported for unit testing.
+export function hotzoneRatio(clientX, rect) {
+    const w = (rect && rect.width) || 0;
+    if (w <= 0) return 0.5;
+    const left = (rect && rect.left) || 0;
+    return Math.min(1, Math.max(0, (clientX - left) / w));
+}
 
 // Entry point invoked by router.js. Signature is FIXED: (container, path, chapterParam, paraParam).
 export async function renderTextReader(container, path, chapterParam, paraParam) {
@@ -336,16 +347,48 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     headerRight.appendChild(scrollBtn);
     els.header.appendChild(headerRight);
 
+    // ===== Page-turn controller (CHAPTER mode). Holds the animation layer over
+    // els.content; prev/next/hotzone/❖ in CHAPTER mode route through it. SCROLL
+    // mode keeps its existing direct loadChapter behaviour. =====
+    const pageTurnApi = renderPageTurn({
+        contentEl: els.content,
+        getStyle: () => readerPrefs.getSettings().pageTurnStyle,
+        loadChapterSection: async (idx) => {
+            const ch = await getBookChapter(path, idx);
+            // Mirror the bookkeeping loadChapter does for CHAPTER mode: update
+            // current idx / title / progress / scrubber / saved progress so a
+            // page-turn produces the same side effects as an instant load.
+            setCurrentIdx(idx);
+            els.title.textContent = `${ch.title || ''} — ${book.title || ''}`;
+            const sec = renderBlocks(ch.blocks || blocksFromLegacyContent(ch.content), ch.title, idx);
+            updateProgressUI();
+            if (scrubberApi) scrubberApi.update();
+            saveProgress(path, { chapterIndex: idx, scrollOffset: 0, lastReadAt: Date.now() });
+            return sec;
+        },
+        getCurrentIdx: () => state.currentIdx,
+        getChapterCount: () => chapterCount,
+    });
+
     // ===== Chrome button bindings =====
     els.back.addEventListener('click', () => {
         if (window.history.length > 1) window.history.back();
         else window.location.hash = '#/dashboard';
     });
     els.prev.addEventListener('click', () => {
-        if (state.currentIdx > 0) loadChapter(Math.max(0, state.currentIdx - 1));
+        // SCROLL 模式保持现状（直接 loadChapter），仅 CHAPTER 模式走翻页控制器。
+        if (readerPrefs.getSettings().readingMode === 'scroll') {
+            if (state.currentIdx > 0) loadChapter(Math.max(0, state.currentIdx - 1));
+            return;
+        }
+        pageTurnApi.turnTo('prev').then((ok) => { if (!ok) showToast('已经是第一章了', 'info'); });
     });
     els.next.addEventListener('click', () => {
-        if (state.currentIdx < chapterCount - 1) loadChapter(Math.min(chapterCount - 1, state.currentIdx + 1));
+        if (readerPrefs.getSettings().readingMode === 'scroll') {
+            if (state.currentIdx < chapterCount - 1) loadChapter(Math.min(chapterCount - 1, state.currentIdx + 1));
+            return;
+        }
+        pageTurnApi.turnTo('next').then((ok) => { if (!ok) showToast('已经是最后一章了', 'info'); });
     });
     els.toc.addEventListener('click', () => tocApi.toggleDrawer());
 
@@ -367,22 +410,18 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (readerPrefs.getSettings().readingMode === 'scroll') {
             els.content.style.cursor = 'default'; return;
         }
-        const rect = els.content.getBoundingClientRect();
-        const ratio = (e.clientX - rect.left) / rect.width;
+        const ratio = hotzoneRatio(e.clientX, els.content.getBoundingClientRect());
         els.content.style.cursor = (ratio < 0.20 || ratio > 0.80) ? 'pointer' : 'default';
     });
     els.content.addEventListener('click', (e) => {
         if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) return;
         if (window.getSelection()?.toString().trim() !== '') return;
         if (readerPrefs.getSettings().readingMode === 'scroll') return;
-        const rect = els.content.getBoundingClientRect();
-        const ratio = (e.clientX - rect.left) / rect.width;
+        const ratio = hotzoneRatio(e.clientX, els.content.getBoundingClientRect());
         if (ratio < 0.20) {
-            if (state.currentIdx > 0) loadChapter(state.currentIdx - 1);
-            else showToast('已经是第一章了', 'info');
+            pageTurnApi.turnTo('prev').then((ok) => { if (!ok) showToast('已经是第一章了', 'info'); });
         } else if (ratio > 0.80) {
-            if (state.currentIdx < chapterCount - 1) loadChapter(state.currentIdx + 1);
-            else showToast('已经是最后一章了', 'info');
+            pageTurnApi.turnTo('next').then((ok) => { if (!ok) showToast('已经是最后一章了', 'info'); });
         }
     });
 
@@ -420,6 +459,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         unsubSettings(); unsubPrefs(); unsubBms();
         tocApi.dispose(); bookmarksApi.dispose(); autoscrollApi.dispose(); settingsApi.dispose();
         scrubberApi.dispose();
+        pageTurnApi.dispose();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         document.removeEventListener('keydown', onKeyDown);
         document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -509,8 +549,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                     else loadNextScrollChapter();
                 } else showToast('已经是最后一章了', 'info');
             } else {
-                if (state.currentIdx < chapterCount - 1) loadChapter(state.currentIdx + 1);
-                else showToast('已经是最后一章了', 'info');
+                pageTurnApi.turnTo('next').then((ok) => { if (!ok) showToast('已经是最后一章了', 'info'); });
             }
         });
         section.appendChild(end);

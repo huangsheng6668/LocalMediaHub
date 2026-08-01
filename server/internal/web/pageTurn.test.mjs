@@ -78,3 +78,24 @@ test('invalid direction returns false and no-ops', async () => {
     api.dispose();
     teardownJsdom();
 });
+
+test('turnTo(next) requests the next chapter index via loadChapterSection', async () => {
+    setupJsdom();
+    window.matchMedia = window.matchMedia || (() => ({
+        matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    }));
+    const contentEl = document.createElement('div');
+    contentEl.appendChild(makeSection(1, 'one'));
+    let requestedIdx = null;
+    const api = renderPageTurn({
+        contentEl,
+        getStyle: () => 'NONE',
+        loadChapterSection: async (idx) => { requestedIdx = idx; return makeSection(idx, `ch${idx}`); },
+        getCurrentIdx: () => 1,
+        getChapterCount: () => 5,
+    });
+    await api.turnTo('next');
+    assert.equal(requestedIdx, 2);
+    api.dispose();
+    teardownJsdom();
+});
