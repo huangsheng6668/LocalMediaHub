@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
+import com.juziss.localmediahub.data.PageTurnStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Rule
@@ -276,5 +277,47 @@ class ReaderSettingsSheetTest {
         composeRule.onNodeWithTag("customBgHex").performTextInput("#ABCDEF")
         composeRule.waitForIdle()
         assertEquals("#ABCDEF", captured?.customBg)
+    }
+
+    @Test
+    fun page_turn_chips_render_in_chapter_mode() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(readingMode = com.juziss.localmediahub.data.ReadingMode.CHAPTER),
+                onChange = {},
+            )
+        }
+        composeRule.waitForIdle()
+        PageTurnStyle.entries.forEach { style ->
+            composeRule.onNodeWithText(style.label).assertExists()
+        }
+    }
+
+    @Test
+    fun page_turn_chip_click_fires_onchange() {
+        var captured: ReaderSettings? = null
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = { captured = it },
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText(com.juziss.localmediahub.data.PageTurnStyle.COVER.label).performClick()
+        assertEquals(com.juziss.localmediahub.data.PageTurnStyle.COVER, captured?.pageTurnStyle)
+    }
+
+    @Test
+    fun page_turn_chips_disabled_in_scroll_mode() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(readingMode = com.juziss.localmediahub.data.ReadingMode.SCROLL),
+                onChange = {},
+            )
+        }
+        composeRule.waitForIdle()
+        PageTurnStyle.entries.forEach { style ->
+            composeRule.onNodeWithText(style.label).assertIsNotEnabled()
+        }
     }
 }

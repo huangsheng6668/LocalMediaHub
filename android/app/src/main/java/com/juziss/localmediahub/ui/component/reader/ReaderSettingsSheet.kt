@@ -274,6 +274,24 @@ fun ReaderSettingsSheetContent(
         }
         Spacer(Modifier.size(8.dp))
 
+        Text("翻页动画", style = MaterialTheme.typography.labelMedium)
+        val isChapter = settings.readingMode == com.juziss.localmediahub.data.ReadingMode.CHAPTER
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            com.juziss.localmediahub.data.PageTurnStyle.entries.forEach { style ->
+                FilterChip(
+                    selected = settings.pageTurnStyle == style,
+                    onClick = { onChange(settings.copy(pageTurnStyle = style)) },
+                    enabled = isChapter,
+                    label = { Text(style.label) },
+                    colors = FilterChipDefaults.filterChipColors(),
+                )
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("沉浸模式", Modifier.weight(1f))
             Switch(
