@@ -70,6 +70,14 @@ test('COVER turnTo(next) ends with new section visible', async () => {
     teardownJsdom();
 });
 
+test('SIMULATION turnTo(next) ends with new section visible', async () => {
+    const { contentEl, api } = setup(0, 3, 'SIMULATION');
+    await api.turnTo('next');
+    assert.equal(contentEl.querySelector('.text-reader__chapter-section').dataset.chapterIndex, '1');
+    api.dispose();
+    teardownJsdom();
+});
+
 test('invalid direction returns false and no-ops', async () => {
     const { contentEl, api } = setup(0, 3, 'NONE');
     const ok = await api.turnTo('sideways');

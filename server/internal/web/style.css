@@ -2042,6 +2042,28 @@ body[data-active-tab="read"] .text-reader {
     will-change: transform;
 }
 
+/* SIMULATION 卷曲：旧章用 clip-path polygon（4 点 = 可见矩形）收缩模拟卷走。
+   next：右边界 100%→0（从右往左卷，最终贴左边缘）。
+   prev：左边界 0→100%（从左往右卷，最终贴右边缘）。
+   不用 animation-direction: reverse —— reverse 是时间反转，会让 from/to
+   互换、forwards 停在 from（全屏），视觉与期望完全相反。prev 用独立 keyframes
+   + normal 方向。首版用线性 polygon 矩形近似卷曲边界；贝塞尔采样点多边形是
+   视觉增强，首版满足"卷走"语义即可，视觉打磨留手动验证后迭代。 */
+@keyframes text-reader-curl-next {
+    from { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+    to   { clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); }
+}
+@keyframes text-reader-curl-prev {
+    from { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+    to   { clip-path: polygon(100% 0, 100% 0, 100% 100%, 100% 100%); }
+}
+.text-reader__content .text-reader__page--curling[data-curl-sign="1"] {
+    animation: text-reader-curl-next var(--reader-curl-ms, 400ms) ease-in-out forwards;
+}
+.text-reader__content .text-reader__page--curling[data-curl-sign="-1"] {
+    animation: text-reader-curl-prev var(--reader-curl-ms, 400ms) ease-in-out forwards;
+}
+
 .text-reader__content p {
     position: relative;
     margin-bottom: 1.2em;

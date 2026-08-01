@@ -1,9 +1,9 @@
 // Page-turn controller for CHAPTER mode. Owns the animation layer over
 // contentEl: on turnTo(direction) it loads the target chapter section via
 // loadChapterSection(), then animates the swap per getStyle(). NONE swaps
-// instantly. SIMULATION is added in Task 5 (this module falls through to
-// COVER if SIMULATION not yet implemented). prefers-reduced-motion degrades
-// COVER/SIMULATION to NONE.
+// instantly. SIMULATION animates a clip-path curl on the old section.
+// DRAG still falls through to COVER until Task 6 wires up the gesture.
+// prefers-reduced-motion degrades COVER/SIMULATION to NONE.
 const ANIM_MS = { COVER: 280, SIMULATION: 400, DRAG: 280 };
 const DRAG_THRESHOLD = 0.25; // 屏宽比例
 
@@ -60,6 +60,36 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
         });
     }
 
+    // SIMULATION: 单页卷曲。顶层（旧章）用 clip-path polygon 沿贝塞尔采样
+    // 点裁剪，随进度从右向左扫；阴影用伪元素渐变定位在裁剪边界。jsdom
+    // 无真实渲染，靠 transitionend + setTimeout 回退收尾（与 COVER 同策略）。
+    function animateSimulation(oldSection, newSection, direction) {
+        return new Promise((resolve) => {
+            const sign = direction === 'next' ? 1 : -1;
+            newSection.style.transform = `translateX(${sign * 100}%)`;
+            newSection.style.transition = `transform ${ANIM_MS.SIMULATION}ms ease-in-out`;
+            contentEl.appendChild(newSection);
+            void contentEl.offsetWidth;
+            // 旧章卷曲：clip-path 从满屏收缩到 0
+            oldSection.style.transition = `clip-path ${ANIM_MS.SIMULATION}ms ease-in-out`;
+            oldSection.classList.add('text-reader__page--curling');
+            oldSection.dataset.curlSign = String(sign);
+            newSection.style.transform = 'translateX(0)';
+            // CSS @keyframes 驱动 clip-path（见 style.css），这里仅触发 + 收尾
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                contentEl.removeChild(oldSection);
+                newSection.style.transition = '';
+                newSection.style.transform = '';
+                resolve();
+            };
+            newSection.addEventListener('transitionend', finish, { once: true });
+            setTimeout(finish, ANIM_MS.SIMULATION + 60);
+        });
+    }
+
     async function turnTo(direction) {
         if (busy) return false;
         if (direction !== 'next' && direction !== 'prev') return false;
@@ -74,10 +104,12 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
             const oldSection = contentEl.querySelector('.text-reader__chapter-section');
             if (style === 'NONE' || !oldSection) {
                 await swapInstant(newSection);
+            } else if (style === 'SIMULATION') {
+                await animateSimulation(oldSection, newSection, direction);
             } else if (style === 'COVER') {
                 await animateCover(oldSection, newSection, direction);
             } else {
-                // SIMULATION/DRAG fall back to COVER until those land (Task 5 / DRAG gesture).
+                // DRAG 仍回退，Task 6 接入手势
                 await animateCover(oldSection, newSection, direction);
             }
             return true;
