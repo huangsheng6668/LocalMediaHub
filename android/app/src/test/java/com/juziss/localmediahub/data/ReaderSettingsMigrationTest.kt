@@ -144,8 +144,28 @@ class ReaderSettingsMigrationTest {
     @Test
     fun v2_with_invalid_pageTurnStyle_falls_back_to_none() = runBlocking {
         injectRawSettings("""{"pageTurnStyle":"BOGUS"}""")
-        // Gson returns null for unknown enum values; our safe accessor converts this to NONE
+        // Global Gson enum-default TypeAdapterFactory maps unknown enum names to
+        // the enum's first declared value (NONE for PageTurnStyle).
         assertEquals(PageTurnStyle.NONE, store.readerSettingsFlow.first().pageTurnStyle)
+    }
+
+    /**
+     * Latent-bug regression: Gson's default behavior sets a non-nullable Kotlin enum
+     * field to `null` when it encounters an unknown enum-name string (no exception).
+     * This affects ALL enum fields on [ReaderSettings] (theme/readingMode/pageTurnStyle),
+     * causing NPEs at first access. The global TypeAdapterFactory must map unknown
+     * enum names to the enum's first declared value, fixing all three fields uniformly.
+     */
+    @Test
+    fun theme_bogus_falls_back_to_default_via_global_adapter() = runBlocking {
+        injectRawSettings("""{"theme":"BOGUS"}""")
+        assertEquals(ReaderTheme.DAY, store.readerSettingsFlow.first().theme)
+    }
+
+    @Test
+    fun readingMode_bogus_falls_back_to_default_via_global_adapter() = runBlocking {
+        injectRawSettings("""{"readingMode":"BOGUS"}""")
+        assertEquals(ReadingMode.CHAPTER, store.readerSettingsFlow.first().readingMode)
     }
 }
 

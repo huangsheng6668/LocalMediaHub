@@ -5,7 +5,12 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.TypeAdapter
+import com.google.gson.TypeAdapterFactory
 import com.google.gson.reflect.TypeToken
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonWriter
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -111,6 +116,47 @@ internal fun mergePlaybackProgress(
         .take(limit)
 }
 
+/**
+ * Global Gson enum-default factory.
+ *
+ * Gson's default enum deserializer silently sets a non-nullable Kotlin enum field
+ * to `null` when it encounters an unknown enum-name string (it does NOT throw).
+ * For `ReaderSettings` this means `theme`/`readingMode`/`pageTurnStyle` would all
+ * null-out on a corrupt or future enum value, causing NPEs at first property access.
+ *
+ * This factory intercepts every `Enum<*>` type: on read it looks up the token in a
+ * name→constant map; if absent (unknown name), it falls back to the enum's first
+ * declared constant — the conservative default for all three enums
+ * (DAY / CHAPTER / NONE). Non-enum types return `null` from [create] so Gson's
+ * built-in adapters handle them (Int/Float/List/Map/Boolean/String unchanged).
+ *
+ * Registered once on the shared Gson instance in [RecentActivityStore]; proguard
+ * already keeps `TypeAdapterFactory` (see proguard-rules.pro).
+ */
+private object EnumDefaultFactory : TypeAdapterFactory {
+    override fun <T> create(gson: Gson, type: TypeToken<T>): TypeAdapter<T>? {
+        val raw = type.rawType
+        if (!raw.isEnum) return null
+        // Fixed at factory-creation time: the enum constants of this exact type.
+        // Lookup by name is O(n) over a tiny enum set — negligible and avoids the
+        // generic `Class<T : Enum<T>>` inference trap of `java.lang.Enum.valueOf`.
+        val constants = raw.enumConstants ?: return null
+        val byName = constants.associateBy { (it as Enum<*>).name }
+        val fallback = constants.firstOrNull() ?: return null
+
+        return object : TypeAdapter<Any>() {
+            override fun write(out: JsonWriter, value: Any?) {
+                out.value((value as Enum<*>).name)
+            }
+
+            override fun read(reader: JsonReader): Any? {
+                val name = reader.nextString()
+                return byName[name] ?: fallback
+            }
+        } as TypeAdapter<T>
+    }
+}
+
 /** 在已保存的进度列表中按 key 查找单条记录。 */
 internal fun findPlaybackProgress(
     list: List<PlaybackProgressEntry>,
@@ -124,7 +170,8 @@ internal fun findPlaybackProgress(
 
 class RecentActivityStore @Inject constructor(@ApplicationContext private val context: Context) {
 
-    private val gson = Gson()
+    private val gson: Gson =
+        GsonBuilder().registerTypeAdapterFactory(EnumDefaultFactory).create()
 
     private val recentMediaKey = stringPreferencesKey("recent_media")
     private val lastBrowseLocationKey = stringPreferencesKey("last_browse_location")
