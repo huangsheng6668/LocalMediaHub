@@ -5,9 +5,11 @@ import { showToast } from './toast.js';
 import { elements } from './dom.js';
 import { formatTime, encodeRoutePath } from './utils.js';
 import { deleteMediaFile } from './delete.js';
+import { nextSpeed } from './videoHelpers.js';
 
 // Module-scoped player state (shared across the player's internal helpers).
 let controlsTimeout;
+const PLAYBACK_SPEEDS = [0.75, 1, 1.25, 1.5, 2, 3];
 
 // Custom controls: Play / Pause toggle
 function togglePlayPause() {
@@ -89,6 +91,10 @@ export async function openVideoPlayer(file) {
             url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0&vcodec=${state.vcodecMode}`;
         }
     }
+
+    // 重置倍速到 1x（每次打开新视频）
+    elements.videoPlayer.playbackRate = 1;
+    elements.btnVideoSpeed.textContent = '1x';
 
     elements.videoPlayer.src = url;
     elements.modalVideoPlayer.classList.add('active');
@@ -268,6 +274,13 @@ export function setupVideoPlayerListeners(elements) {
         } else {
             document.exitFullscreen();
         }
+    });
+
+    // 倍速按钮：循环档位 1→1.25→1.5→2→3→0.75→1
+    elements.btnVideoSpeed.addEventListener('click', () => {
+        const next = nextSpeed(elements.videoPlayer.playbackRate, PLAYBACK_SPEEDS);
+        elements.videoPlayer.playbackRate = next;
+        elements.btnVideoSpeed.textContent = next + 'x';
     });
 
     // Keyboard controls for video playback
