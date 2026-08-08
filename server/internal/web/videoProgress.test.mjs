@@ -69,3 +69,8 @@ test('loadProgress: JSON 损坏 → null', () => {
     global.localStorage.setItem('video_progress:e.mp4', '{not json');
     assert.equal(loadProgress('e.mp4'), null);
 });
+
+test('loadProgress: 缺 positionMs 字段 → null（schema 校验）', () => {
+    global.localStorage.setItem('video_progress:f.mp4', JSON.stringify({ durationMs: 10 }));
+    assert.equal(loadProgress('f.mp4'), null);
+});

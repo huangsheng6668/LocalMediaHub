@@ -394,6 +394,7 @@ export function setupVideoPlayerListeners(elements) {
 
     // 鼠标滚轮调音量（仅在视频区域内；进度条上的滚轮交给浏览器默认）
     wrapper.addEventListener('wheel', (e) => {
+        if (e.target.closest('#video-progress')) return;
         e.preventDefault();
         const vol = wheelToVolume(elements.videoPlayer.volume, e.deltaY, 0.05);
         elements.videoPlayer.volume = vol;

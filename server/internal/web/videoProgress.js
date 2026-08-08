@@ -30,7 +30,9 @@ export function loadProgress(relPath) {
     try {
         const raw = localStorage.getItem(key(relPath));
         if (!raw) return null;
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed.positionMs !== 'number') return null;
+        return parsed;
     } catch (e) {
         return null;
     }
