@@ -5,7 +5,7 @@ import { showToast } from './toast.js';
 import { elements } from './dom.js';
 import { formatTime, encodeRoutePath } from './utils.js';
 import { deleteMediaFile } from './delete.js';
-import { nextSpeed } from './videoHelpers.js';
+import { nextSpeed, wheelToVolume } from './videoHelpers.js';
 
 // Module-scoped player state (shared across the player's internal helpers).
 let controlsTimeout;
@@ -332,4 +332,14 @@ export function setupVideoPlayerListeners(elements) {
     const wrapper = elements.videoPlayer.parentElement; // .video-player-wrapper
     wrapper.addEventListener('mousemove', resetControlsTimer);
     elements.videoPlayer.addEventListener('play', resetControlsTimer);
+
+    // 鼠标滚轮调音量（仅在视频区域内；进度条上的滚轮交给浏览器默认）
+    wrapper.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const vol = wheelToVolume(elements.videoPlayer.volume, e.deltaY, 0.05);
+        elements.videoPlayer.volume = vol;
+        elements.videoPlayer.muted = (vol === 0);
+        elements.videoVolume.value = vol;
+        elements.btnVideoMute.textContent = vol === 0 ? '🔇' : '🔊';
+    }, { passive: false });
 }
