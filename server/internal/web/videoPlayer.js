@@ -89,7 +89,7 @@ export async function openVideoPlayer(file) {
     }
 
     // Set video src URL
-    let url = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.relative_path)}/stream`;
+    let url = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/stream`;
     if (state.isSystemBrowse) {
         url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}`;
     }

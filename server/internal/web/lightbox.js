@@ -46,7 +46,7 @@ function renderLightboxImage() {
         if (elements.lightboxStitchView.children.length === 0) {
             elements.lightboxStitchView.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
             state.lightboxFiles.forEach((file, idx) => {
-                let url = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.relative_path)}/original`;
+                let url = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.path)}/original`;
                 if (state.isSystemBrowse) {
                     url = `${state.apiBase}/api/v1/system/original?path=${encodeURIComponent(file.path)}`;
                 }
@@ -81,7 +81,7 @@ function renderLightboxImage() {
 
         const file = state.lightboxFiles[state.lightboxIndex];
 
-        let url = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.relative_path)}/original`;
+        let url = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.path)}/original`;
         if (state.isSystemBrowse) {
             url = `${state.apiBase}/api/v1/system/original?path=${encodeURIComponent(file.path)}`;
         }

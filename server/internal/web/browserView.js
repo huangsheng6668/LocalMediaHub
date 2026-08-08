@@ -273,13 +273,13 @@ export function renderBrowserList() {
         let previewHtml = '';
         let playOverlay = '';
 
-        let thumbUrl = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.relative_path)}/thumbnail`;
+        let thumbUrl = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.path)}/thumbnail`;
         if (state.isSystemBrowse) {
             thumbUrl = `${state.apiBase}/api/v1/system/thumbnail?path=${encodeURIComponent(file.path)}`;
         }
 
         if (isVideo) {
-            const videoThumbUrl = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.relative_path)}/thumbnail`;
+            const videoThumbUrl = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/thumbnail`;
             const videoUrl = state.isSystemBrowse ? thumbUrl : videoThumbUrl;
             previewHtml = `<img src="${escapeHtml(videoUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}">`;
             playOverlay = `
