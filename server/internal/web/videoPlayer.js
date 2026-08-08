@@ -5,9 +5,13 @@ import { showToast } from './toast.js';
 import { elements } from './dom.js';
 import { formatTime, encodeRoutePath } from './utils.js';
 import { deleteMediaFile } from './delete.js';
+import { nextSpeed, wheelToVolume } from './videoHelpers.js';
+import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoProgress.js';
 
 // Module-scoped player state (shared across the player's internal helpers).
 let controlsTimeout;
+const PLAYBACK_SPEEDS = [0.75, 1, 1.25, 1.5, 2, 3];
+let lastProgressSaveMs = 0;
 
 // Custom controls: Play / Pause toggle
 function togglePlayPause() {
@@ -90,9 +94,36 @@ export async function openVideoPlayer(file) {
         }
     }
 
+    // 续播：读取上次进度，决定起点
+    const saved = loadProgress(file.relative_path);
+    let resumePositionMs = 0;
+    if (saved && !isCompleted(saved.positionMs, saved.durationMs)) {
+        resumePositionMs = saved.positionMs;
+        if (state.useTranscode) {
+            // 转码流：把 URL 里的 start=0 替换为续播秒数（ffmpeg 从该点转码）
+            const startSec = Math.floor(resumePositionMs / 1000);
+            url = url.replace('start=0', 'start=' + startSec);
+            state.transcodeStartOffset = startSec * 1000;
+        }
+        showToast(`已从 ${formatTime(resumePositionMs / 1000)} 继续`, 'info');
+    } else if (saved && isCompleted(saved.positionMs, saved.durationMs)) {
+        // 上次看完了：清除记录，这次从头播
+        clearProgress(file.relative_path);
+    }
+
+    // 重置倍速到 1x（每次打开新视频）
+    elements.videoPlayer.playbackRate = 1;
+    elements.btnVideoSpeed.textContent = '1x';
+
     elements.videoPlayer.src = url;
     elements.modalVideoPlayer.classList.add('active');
     elements.videoPlayer.load();
+    // 原画流续播：loadedmetadata 后 seekTo（转码流已用 start 参数）
+    if (resumePositionMs > 0 && !state.useTranscode) {
+        elements.videoPlayer.addEventListener('loadedmetadata', function resumeSeek() {
+            elements.videoPlayer.currentTime = resumePositionMs / 1000;
+        }, { once: true });
+    }
     elements.videoPlayer.play();
 }
 
@@ -101,12 +132,21 @@ export function setupVideoPlayerListeners(elements) {
     // Close Video Modal
     elements.btnCloseVideoModal.addEventListener('click', () => {
         elements.videoPlayer.pause();
+        // 关闭前 flush 最终进度
+        if (state.playingFile && state.videoDuration > 0) {
+            const posMs = (state.transcodeStartOffset + elements.videoPlayer.currentTime) * 1000;
+            saveProgress(state.playingFile.relative_path, {
+                positionMs: posMs,
+                durationMs: state.videoDuration * 1000,
+            });
+        }
         elements.videoPlayer.src = '';
         elements.modalVideoPlayer.classList.remove('active');
         state.playingFile = null;
         state.videoDuration = 0;
         state.transcodeStartOffset = 0;
         state.isDraggingProgress = false;
+        lastProgressSaveMs = 0;
     });
 
     // Delete Video inside Video Modal
@@ -185,6 +225,21 @@ export function setupVideoPlayerListeners(elements) {
     });
     elements.videoPlayer.addEventListener('pause', () => {
         elements.btnVideoPlayPause.textContent = '▶';
+        // 暂停时 flush 进度
+        if (state.playingFile && state.videoDuration > 0) {
+            const posMs = (state.transcodeStartOffset + elements.videoPlayer.currentTime) * 1000;
+            saveProgress(state.playingFile.relative_path, {
+                positionMs: posMs,
+                durationMs: state.videoDuration * 1000,
+            });
+            lastProgressSaveMs = Date.now();
+        }
+    });
+    // 播放结束：清除进度记录（已看完）
+    elements.videoPlayer.addEventListener('ended', () => {
+        if (state.playingFile) {
+            clearProgress(state.playingFile.relative_path);
+        }
     });
 
     // Custom controls: Progress Bar Seek (Update timeline text while dragging)
@@ -224,6 +279,16 @@ export function setupVideoPlayerListeners(elements) {
 
         // Update time display text
         elements.videoTimeDisplay.textContent = `${formatTime(currentAbsoluteTime)} / ${formatTime(state.videoDuration)}`;
+
+        // 节流写进度：每 5s 存一次绝对位置
+        const now = Date.now();
+        if (state.videoDuration > 0 && now - lastProgressSaveMs >= 5000) {
+            saveProgress(state.playingFile.relative_path, {
+                positionMs: currentAbsoluteTime * 1000,
+                durationMs: state.videoDuration * 1000,
+            });
+            lastProgressSaveMs = now;
+        }
     });
 
     // Custom controls: Handle duration changes dynamically (especially for original play)
@@ -268,6 +333,13 @@ export function setupVideoPlayerListeners(elements) {
         } else {
             document.exitFullscreen();
         }
+    });
+
+    // 倍速按钮：循环档位 1→1.25→1.5→2→3→0.75→1
+    elements.btnVideoSpeed.addEventListener('click', () => {
+        const next = nextSpeed(elements.videoPlayer.playbackRate, PLAYBACK_SPEEDS);
+        elements.videoPlayer.playbackRate = next;
+        elements.btnVideoSpeed.textContent = next + 'x';
     });
 
     // Keyboard controls for video playback
@@ -319,4 +391,15 @@ export function setupVideoPlayerListeners(elements) {
     const wrapper = elements.videoPlayer.parentElement; // .video-player-wrapper
     wrapper.addEventListener('mousemove', resetControlsTimer);
     elements.videoPlayer.addEventListener('play', resetControlsTimer);
+
+    // 鼠标滚轮调音量（仅在视频区域内；进度条上的滚轮交给浏览器默认）
+    wrapper.addEventListener('wheel', (e) => {
+        if (e.target.closest('#video-progress')) return;
+        e.preventDefault();
+        const vol = wheelToVolume(elements.videoPlayer.volume, e.deltaY, 0.05);
+        elements.videoPlayer.volume = vol;
+        elements.videoPlayer.muted = (vol === 0);
+        elements.videoVolume.value = vol;
+        elements.btnVideoMute.textContent = vol === 0 ? '🔇' : '🔊';
+    }, { passive: false });
 }
