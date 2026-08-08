@@ -5,13 +5,20 @@ import { showToast } from './toast.js';
 import { elements } from './dom.js';
 import { formatTime, encodeRoutePath } from './utils.js';
 import { deleteMediaFile } from './delete.js';
-import { nextSpeed, wheelToVolume } from './videoHelpers.js';
+import { wheelToVolume } from './videoHelpers.js';
 import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoProgress.js';
 
 // Module-scoped player state (shared across the player's internal helpers).
 let controlsTimeout;
 const PLAYBACK_SPEEDS = [0.75, 1, 1.25, 1.5, 2, 3];
 let lastProgressSaveMs = 0;
+
+// 更新倍速菜单高亮项（按当前 playbackRate）
+function updateSpeedMenuActive(rate) {
+    elements.videoSpeedMenu.querySelectorAll('.video-speed-item').forEach(item => {
+        item.classList.toggle('video-speed-item--active', parseFloat(item.dataset.speed) === rate);
+    });
+}
 
 // Custom controls: Play / Pause toggle
 function togglePlayPause() {
@@ -111,9 +118,11 @@ export async function openVideoPlayer(file) {
         clearProgress(file.relative_path);
     }
 
-    // 重置倍速到 1x（每次打开新视频）
+    // 重置倍速到 1x + 关闭菜单 + 高亮 1x（每次打开新视频）
     elements.videoPlayer.playbackRate = 1;
     elements.btnVideoSpeed.textContent = '1x';
+    elements.videoSpeedMenu.hidden = true;
+    updateSpeedMenuActive(1);
 
     elements.videoPlayer.src = url;
     elements.modalVideoPlayer.classList.add('active');
@@ -335,11 +344,27 @@ export function setupVideoPlayerListeners(elements) {
         }
     });
 
-    // 倍速按钮：循环档位 1→1.25→1.5→2→3→0.75→1
-    elements.btnVideoSpeed.addEventListener('click', () => {
-        const next = nextSpeed(elements.videoPlayer.playbackRate, PLAYBACK_SPEEDS);
-        elements.videoPlayer.playbackRate = next;
-        elements.btnVideoSpeed.textContent = next + 'x';
+    // 倍速按钮：toggle 菜单（stopPropagation 防冒泡到 document 立即关闭）
+    elements.btnVideoSpeed.addEventListener('click', (e) => {
+        e.stopPropagation();
+        elements.videoSpeedMenu.hidden = !elements.videoSpeedMenu.hidden;
+    });
+    // 菜单项 click 委托：设速 + 高亮 + 关闭
+    elements.videoSpeedMenu.addEventListener('click', (e) => {
+        const item = e.target.closest('.video-speed-item');
+        if (!item) return;
+        e.stopPropagation();
+        const rate = parseFloat(item.dataset.speed);
+        elements.videoPlayer.playbackRate = rate;
+        elements.btnVideoSpeed.textContent = item.textContent;
+        updateSpeedMenuActive(rate);
+        elements.videoSpeedMenu.hidden = true;
+    });
+    // 点菜单外部关闭
+    document.addEventListener('click', (e) => {
+        if (!elements.videoSpeedMenu.hidden && !e.target.closest('.video-speed-wrap')) {
+            elements.videoSpeedMenu.hidden = true;
+        }
     });
 
     // Keyboard controls for video playback

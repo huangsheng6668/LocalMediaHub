@@ -77,6 +77,7 @@ export const elements = {
     videoVolume: document.getElementById('video-volume'),
     btnVideoFullscreen: document.getElementById('btn-video-fullscreen'),
     btnVideoSpeed: document.getElementById('btn-video-speed'),
+    videoSpeedMenu: document.getElementById('video-speed-menu'),
 
     modalImagePreview: document.getElementById('modal-image-preview'),
     lightboxImg: document.getElementById('lightbox-img'),
