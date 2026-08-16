@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -129,10 +130,31 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 		}
 	}
 
+	// Server-side sorting + pagination mirror the folder-browse endpoint so
+	// the Android client can load-more system directories the same way
+	// (service.SortMediaFiles semantics match the client BrowseSorter).
+	// Defaults (sort=name, order=asc) equal the natural ReadDir order,
+	// keeping legacy full-return behavior unchanged when page_size is absent.
+	sortField := strings.ToLower(c.QueryParam("sort"))
+	order := strings.ToLower(c.QueryParam("order"))
+	service.SortMediaFiles(files, sortField, order)
+
+	totalFiles := len(files)
+	page, _ := strconv.Atoi(c.QueryParam("page"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	if pageSize > 0 {
+		start, end := paginateBounds(len(files), page, pageSize)
+		files = files[start:end]
+	}
+
 	return c.JSON(http.StatusOK, models.BrowseResult{
 		CurrentPath: resolved,
 		Folders:     folders,
 		Files:       files,
+		HasMore:     pageSize > 0 && page*pageSize < totalFiles,
 	})
 }
 
