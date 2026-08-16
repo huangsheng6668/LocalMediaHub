@@ -24,17 +24,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import android.content.Context
+import androidx.annotation.StringRes
+import com.juziss.localmediahub.R
 import javax.inject.Inject
 
-enum class SortOrder(val label: String) {
-    NAME_ASC("按名称升序 (A-Z)"),
-    NAME_DESC("按名称降序 (Z-A)"),
-    NUMERIC_ASC("按数字升序 (1→9)"),
-    NUMERIC_DESC("按数字降序 (9→1)"),
-    SIZE_ASC("文件从小到大"),
-    SIZE_DESC("文件从大到小"),
-    TIME_ASC("修改时间从旧到新"),
-    TIME_DESC("修改时间从新到旧"),
+enum class SortOrder(@StringRes val labelRes: Int) {
+    NAME_ASC(R.string.sort_name_asc),
+    NAME_DESC(R.string.sort_name_desc),
+    NUMERIC_ASC(R.string.sort_numeric_asc),
+    NUMERIC_DESC(R.string.sort_numeric_desc),
+    SIZE_ASC(R.string.sort_size_asc),
+    SIZE_DESC(R.string.sort_size_desc),
+    TIME_ASC(R.string.sort_time_asc),
+    TIME_DESC(R.string.sort_time_desc),
 }
 
 @HiltViewModel

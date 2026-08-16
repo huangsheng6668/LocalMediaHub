@@ -189,7 +189,7 @@ fun ConnectionScreen(
                     StatusCard(
                         icon = rememberVectorPainter(Icons.Filled.CheckCircle),
                         title = stringResource(R.string.conn_ready),
-                        message = "已成功连接至 ${(connectionState as ConnectionState.Connected).serverUrl}",
+                        message = stringResource(R.string.conn_connected_success, (connectionState as ConnectionState.Connected).serverUrl),
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
@@ -228,11 +228,15 @@ fun ConnectionScreen(
                 is DiscoveryState.FoundMultiple -> {
                     StatusCard(
                         icon = rememberVectorPainter(Icons.Filled.CheckCircle),
-                        title = "发现 ${state.servers.size} 个可用服务器",
+                        title = stringResource(R.string.conn_found_servers_title, state.servers.size),
                         message = if (state.servers.size == 1) {
-                            "在 ${state.servers.first().ip}:${state.servers.first().port} 发现 LocalMediaHub 服务器。正在连接..."
+                            stringResource(
+                                R.string.conn_found_one_connecting,
+                                state.servers.first().ip,
+                                state.servers.first().port,
+                            )
                         } else {
-                            "发现 ${state.servers.size} 个服务器。点击 \"查看服务器\" 选择一个连接。"
+                            stringResource(R.string.conn_found_multiple, state.servers.size)
                         },
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -344,7 +348,7 @@ private fun ServerSelectionSheet(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "在当前局域网中发现 ${servers.size} 个 LocalMediaHub 服务器。",
+                text = stringResource(R.string.conn_found_banner, servers.size),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -561,7 +565,7 @@ private fun DiscoveryCard(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("查看可用服务器 ($discoveredCount)")
+                        Text(stringResource(R.string.conn_view_servers, discoveredCount))
                     }
                 }
             }
@@ -579,13 +583,13 @@ private fun DiscoveryCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(
-                            text = "已检查 ${scanProgress.first} / ${scanProgress.second} 个 IP 地址",
+                            text = stringResource(R.string.conn_scan_progress, scanProgress.first, scanProgress.second),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         if (discoveredCount > 0) {
                             Text(
-                                text = "已发现 $discoveredCount 个",
+                                text = stringResource(R.string.conn_scan_found, discoveredCount),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
                             )

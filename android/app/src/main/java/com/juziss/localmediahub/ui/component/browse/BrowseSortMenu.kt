@@ -55,7 +55,7 @@ internal fun BrowseSortMenu(
             SortOrder.TIME_DESC,
         ).forEach { order ->
             DropdownMenuItem(
-                text = { Text(order.label) },
+                text = { Text(stringResource(order.labelRes)) },
                 trailingIcon = {
                     if (order == folderSort) {
                         Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp))
@@ -74,7 +74,7 @@ internal fun BrowseSortMenu(
         )
         SortOrder.entries.forEach { order ->
             DropdownMenuItem(
-                text = { Text(order.label) },
+                text = { Text(stringResource(order.labelRes)) },
                 trailingIcon = {
                     if (order == fileSort) {
                         Icon(Icons.Filled.Check, null, modifier = Modifier.size(18.dp))

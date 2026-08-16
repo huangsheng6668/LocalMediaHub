@@ -235,7 +235,7 @@ fun HeroCard(
                     ) {
                         Icon(painterResource(R.drawable.ic_history), contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("继续浏览 ${location.title}")
+                        Text(stringResource(R.string.home_resume_browse, location.title))
                     }
                 }
                 OutlinedButton(
@@ -529,7 +529,7 @@ fun RecentMediaCard(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Filled.PlayArrow,
-                                    contentDescription = "播放",
+                                    contentDescription = stringResource(R.string.home_play),
                                     tint = Color.White,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -543,11 +543,13 @@ fun RecentMediaCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = when (entry.file.mediaType) {
-                        "image" -> "图片"
-                        "text" -> "小说"
-                        else -> "视频"
-                    },
+                    text = stringResource(
+                        when (entry.file.mediaType) {
+                            "image" -> R.string.home_media_type_image
+                            "text" -> R.string.home_media_type_novel
+                            else -> R.string.home_media_type_video
+                        }
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = primaryTextColor(),
@@ -752,11 +754,13 @@ fun DownloadedPreviewCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = when (entry.file.mediaType) {
-                        "image" -> "图片"
-                        "text" -> "小说"
-                        else -> "视频"
-                    },
+                    text = stringResource(
+                        when (entry.file.mediaType) {
+                            "image" -> R.string.home_media_type_image
+                            "text" -> R.string.home_media_type_novel
+                            else -> R.string.home_media_type_video
+                        }
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = primaryTextColor(),
