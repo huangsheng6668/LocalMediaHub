@@ -49,6 +49,10 @@ internal fun BrowseStateContent(
     videoEnabled: Boolean = true,
     /** Task 5: forwarded to [BrowseContent.onVideoDisabledClick]. */
     onVideoDisabledClick: () -> Unit = {},
+    /** Paged folder browse: forwarded to the Browsed branch's [BrowseContent]. */
+    onLoadMore: () -> Unit = {},
+    hasMore: Boolean = false,
+    loadingMore: Boolean = false,
 ) {
     val currentPath = state.currentPath
     when (browseState) {
@@ -225,6 +229,9 @@ internal fun BrowseStateContent(
                     isSelected = isSelected,
                     videoEnabled = videoEnabled,
                     onVideoDisabledClick = onVideoDisabledClick,
+                    onLoadMore = onLoadMore,
+                    hasMore = hasMore,
+                    loadingMore = loadingMore,
                 )
             }
         }

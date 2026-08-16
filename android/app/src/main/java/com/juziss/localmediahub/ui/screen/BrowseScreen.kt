@@ -87,6 +87,8 @@ fun BrowseScreen(
     val folderSort by viewModel.folderSortOrder.collectAsState()
     val fileSort by viewModel.fileSortOrder.collectAsState()
     val restoreScrollTo by viewModel.restoreScrollTo.collectAsState()
+    val hasMore by viewModel.hasMore.collectAsState()
+    val loadingMore by viewModel.loadingMore.collectAsState()
     val contentState = BrowseContentState(folderSort, fileSort, currentPath, restoreScrollTo)
  
     var isSearchMode by remember { mutableStateOf(false) }
@@ -541,6 +543,10 @@ fun BrowseScreen(
                 // Snackbar while BLE degraded mode is active.
                 videoEnabled = !isBleDegraded,
                 onVideoDisabledClick = onVideoDisabledClick,
+                // Paged folder browse: infinite scroll near the grid tail.
+                onLoadMore = viewModel::loadMore,
+                hasMore = hasMore,
+                loadingMore = loadingMore,
             )
         }
     }

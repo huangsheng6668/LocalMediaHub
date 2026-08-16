@@ -43,6 +43,40 @@ internal class BrowseNavigator(
     private val _restoreScrollTo = MutableStateFlow<String?>(null)
     val restoreScrollTo: StateFlow<String?> = _restoreScrollTo.asStateFlow()
 
+    // ── Paged folder browse (load-more) ──────────────────────
+    // Folder listings are now server-sorted + paginated (see
+    // /api/v1/folders/*/browse sort/order/page/page_size). Pages are appended
+    // verbatim — the client must NOT re-sort them locally, or the page
+    // composition (e.g. size-desc) would scramble. System-browse and tag
+    // collections keep the legacy client-side BrowseSorter path.
+    private val _hasMore = MutableStateFlow(false)
+    val hasMore: StateFlow<Boolean> = _hasMore.asStateFlow()
+    private val _loadingMore = MutableStateFlow(false)
+    val loadingMore: StateFlow<Boolean> = _loadingMore.asStateFlow()
+    private var nextPage = 1
+
+    private companion object {
+        const val BROWSE_PAGE_SIZE = 100
+    }
+
+    /** Maps the client SortOrder to the server's sort/order query params. */
+    private fun SortOrder.serverParams(): Pair<String, String> = when (this) {
+        SortOrder.NAME_ASC -> "name" to "asc"
+        SortOrder.NAME_DESC -> "name" to "desc"
+        SortOrder.NUMERIC_ASC -> "numeric" to "asc"
+        SortOrder.NUMERIC_DESC -> "numeric" to "desc"
+        SortOrder.SIZE_ASC -> "size" to "asc"
+        SortOrder.SIZE_DESC -> "size" to "desc"
+        SortOrder.TIME_ASC -> "time" to "asc"
+        SortOrder.TIME_DESC -> "time" to "desc"
+    }
+
+    private fun resetPaging() {
+        _hasMore.value = false
+        _loadingMore.value = false
+        nextPage = 1
+    }
+
     fun saveScrollPosition(path: String, index: Int) {
         if (index > 0) _scrollPositions[path] = index
     }
@@ -113,20 +147,30 @@ internal class BrowseNavigator(
         }
     }
 
-    /** Browse into a specific folder. */
+    /** Browse into a specific folder (page 1 of the server-sorted listing). */
     suspend fun browseFolder(relativePath: String, folderName: String) {
         sharedState.browseState.value = BrowseState.Loading
         sharedState.pathStack.value = sharedState.pathStack.value + sharedState.currentPath.value
         sharedState.currentPath.value = relativePath
 
-        when (val result = repository.browseFolder(relativePath)) {
+        resetPaging()
+        val (sort, order) = sharedState.fileSortOrder.value.serverParams()
+        when (val result = repository.browseFolder(
+            relativePath,
+            sort = sort,
+            order = order,
+            page = 1,
+            pageSize = BROWSE_PAGE_SIZE,
+        )) {
             is NetworkResult.Success -> {
                 recentActivityStore.saveLastBrowseLocation(
                     path = relativePath,
                     title = folderName,
                     isSystemBrowse = false,
                 )
-                applyFolderResult(result.data)
+                _hasMore.value = result.data.hasMore
+                nextPage = 2
+                applyFolderResult(result.data, serverSortedFiles = true)
             }
             is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
             is NetworkResult.Loading -> {}
@@ -169,9 +213,19 @@ internal class BrowseNavigator(
                 is NetworkResult.Loading -> {}
             }
         } else {
-            when (val result = repository.browseFolder(previousPath)) {
+            resetPaging()
+            val (sort, order) = sharedState.fileSortOrder.value.serverParams()
+            when (val result = repository.browseFolder(
+                previousPath,
+                sort = sort,
+                order = order,
+                page = 1,
+                pageSize = BROWSE_PAGE_SIZE,
+            )) {
                 is NetworkResult.Success -> {
-                    applyFolderResult(result.data)
+                    _hasMore.value = result.data.hasMore
+                    nextPage = 2
+                    applyFolderResult(result.data, serverSortedFiles = true)
                     _restoreScrollTo.value = previousPath
                 }
                 is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
@@ -181,6 +235,45 @@ internal class BrowseNavigator(
     }
 
     fun canGoBack(): Boolean = sharedState.pathStack.value.isNotEmpty()
+
+    /**
+     * Appends the next page of the currently browsed (non-system) directory.
+     * No-op unless the current state is a folder listing with more pages left.
+     */
+    suspend fun loadMore() {
+        if (_loadingMore.value || !_hasMore.value) return
+        val state = sharedState.browseState.value as? BrowseState.Browsed ?: return
+        if (sharedState.isSystemBrowse.value) return
+        val path = sharedState.currentPath.value
+        if (path.isEmpty()) return
+
+        _loadingMore.value = true
+        val (sort, order) = sharedState.fileSortOrder.value.serverParams()
+        when (val result = repository.browseFolder(
+            path,
+            sort = sort,
+            order = order,
+            page = nextPage,
+            pageSize = BROWSE_PAGE_SIZE,
+        )) {
+            is NetworkResult.Success -> {
+                // Pages arrive already server-sorted — append verbatim so the
+                // accumulated list keeps the server's global order.
+                val accumulated = sharedState.rawFiles.value + result.data.files
+                sharedState.rawFiles.value = accumulated
+                _hasMore.value = result.data.hasMore
+                nextPage++
+                sharedState.browseState.value = BrowseState.Browsed(
+                    state.result.copy(files = accumulated)
+                )
+            }
+            is NetworkResult.Error -> {
+                // Keep the pages already loaded; scrolling again retries.
+            }
+            is NetworkResult.Loading -> {}
+        }
+        _loadingMore.value = false
+    }
 
     suspend fun setFolderSortOrder(order: SortOrder) {
         sharedState.folderSortOrder.value = order
@@ -209,6 +302,16 @@ internal class BrowseNavigator(
 
     suspend fun setFileSortOrder(order: SortOrder) {
         sharedState.fileSortOrder.value = order
+        val state = sharedState.browseState.value
+        // Folder-browse mode is server-sorted + paged: a new order must
+        // re-fetch page 1 with the new key — re-sorting the already-loaded
+        // partial page client-side would scramble the page composition.
+        if (state is BrowseState.Browsed && !sharedState.isSystemBrowse.value &&
+            sharedState.currentPath.value.isNotEmpty()
+        ) {
+            refreshCurrentDirectory()
+            return
+        }
         val rawFiles = sharedState.rawFiles.value
         if (rawFiles.isEmpty()) return
         val sortedFiles = withContext(Dispatchers.Default) {
@@ -238,15 +341,22 @@ internal class BrowseNavigator(
         }
     }
 
-    /** 成功的文件夹浏览结果：存 raw、排序、emit Browsed。 */
-    private suspend fun applyFolderResult(data: BrowseResult) {
+    /** 成功的文件夹浏览结果：存 raw、（按模式）排序、emit Browsed。 */
+    private suspend fun applyFolderResult(data: BrowseResult, serverSortedFiles: Boolean = false) {
         sharedState.rawFolders.value = data.folders
         sharedState.rawFiles.value = data.files
         val sortedFolders = withContext(Dispatchers.Default) {
             BrowseSorter.sortFolders(data.folders, sharedState.folderSortOrder.value)
         }
-        val sortedFiles = withContext(Dispatchers.Default) {
-            BrowseSorter.sortFiles(data.files, sharedState.fileSortOrder.value)
+        val sortedFiles = if (serverSortedFiles) {
+            // Paged mode: the server already ordered this page; appending
+            // pages preserves the global order. Re-sorting here would break
+            // size/time/numeric compositions across page boundaries.
+            data.files
+        } else {
+            withContext(Dispatchers.Default) {
+                BrowseSorter.sortFiles(data.files, sharedState.fileSortOrder.value)
+            }
         }
         sharedState.browseState.value = BrowseState.Browsed(
             data.copy(folders = sortedFolders, files = sortedFiles)
@@ -310,8 +420,21 @@ internal class BrowseNavigator(
             if (path.isEmpty()) {
                 loadRoots()
             } else {
-                when (val result = repository.browseFolder(path, forceNetwork = forceNetwork)) {
-                    is NetworkResult.Success -> applyFolderResult(result.data)
+                resetPaging()
+                val (sort, order) = sharedState.fileSortOrder.value.serverParams()
+                when (val result = repository.browseFolder(
+                    path,
+                    forceNetwork = forceNetwork,
+                    sort = sort,
+                    order = order,
+                    page = 1,
+                    pageSize = BROWSE_PAGE_SIZE,
+                )) {
+                    is NetworkResult.Success -> {
+                        _hasMore.value = result.data.hasMore
+                        nextPage = 2
+                        applyFolderResult(result.data, serverSortedFiles = true)
+                    }
                     is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
                     is NetworkResult.Loading -> {}
                 }

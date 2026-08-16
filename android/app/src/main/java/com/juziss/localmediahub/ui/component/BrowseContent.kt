@@ -3,6 +3,7 @@ package com.juziss.localmediahub.ui.component
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -239,6 +240,15 @@ internal fun BrowseContent(
      */
     videoEnabled: Boolean = true,
     onVideoDisabledClick: () -> Unit = {},
+    /**
+     * Paged folder browse: when [hasMore] is true the grid requests the next
+     * server page via [onLoadMore] as the user scrolls near the end;
+     * [loadingMore] renders a footer spinner. Defaults keep legacy callers
+     * (system browse / tag collections) untouched.
+     */
+    onLoadMore: () -> Unit = {},
+    hasMore: Boolean = false,
+    loadingMore: Boolean = false,
 ) {
     val folderSortOrder = state.folderSort
     val fileSortOrder = state.fileSort
@@ -299,6 +309,27 @@ internal fun BrowseContent(
         lastFileSortOrder = fileSortOrder
     }
  
+    // Load-more trigger: derived from the scroll state, so the next page is
+    // requested exactly when the user reaches the tail (no polling).
+    LaunchedEffect(hasMore, files.size, folders.size) {
+        if (!hasMore) return@LaunchedEffect
+        snapshotFlow {
+            if (useStaggeredGrid) {
+                val info = staggeredState.layoutInfo
+                val total = info.totalItemsCount
+                val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+                total > 0 && last >= total - 6
+            } else {
+                val info = gridState.layoutInfo
+                val total = info.totalItemsCount
+                val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+                total > 0 && last >= total - 6
+            }
+        }.collect { nearEnd ->
+            if (nearEnd) onLoadMore()
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         if (useStaggeredGrid) {
             WaterfallImageGrid(
@@ -311,6 +342,9 @@ internal fun BrowseContent(
                 modifier = Modifier.fillMaxSize(),
                 state = staggeredState,
                 isSelected = isSelected,
+                onLoadMore = onLoadMore,
+                hasMore = hasMore,
+                loadingMore = loadingMore,
             )
         } else {
             LazyVerticalGrid(
@@ -364,6 +398,18 @@ internal fun BrowseContent(
                             onLongClick = longClick,
                             isSelected = isSelected(file.relativePath),
                         )
+                    }
+                }
+                if (loadingMore) {
+                    item(span = { GridItemSpan(maxLineSpan) }, key = "load-more-footer") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                        }
                     }
                 }
             }

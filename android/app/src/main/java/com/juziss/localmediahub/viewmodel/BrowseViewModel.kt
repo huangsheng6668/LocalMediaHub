@@ -191,6 +191,18 @@ class BrowseViewModel @Inject constructor(
         navigator.consumeRestoreScroll()
     }
 
+    // ── Paged load-more ────────────────────────────────────────────
+
+    val hasMore: StateFlow<Boolean>
+        get() = navigator.hasMore
+
+    val loadingMore: StateFlow<Boolean>
+        get() = navigator.loadingMore
+
+    fun loadMore() {
+        viewModelScope.launch { navigator.loadMore() }
+    }
+
     // ── URL builders ──────────────────────────────────────────────
 
     fun getVideoStreamUrl(file: MediaFile): String {

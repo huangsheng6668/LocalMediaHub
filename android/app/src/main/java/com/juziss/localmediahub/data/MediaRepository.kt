@@ -264,13 +264,27 @@ class MediaRepository @Inject constructor(
     suspend fun browseFolder(
         relativePath: String,
         forceNetwork: Boolean = false,
+        sort: String? = null,
+        order: String? = null,
+        page: Int = 0,
+        pageSize: Int = 0,
     ): NetworkResult<BrowseResult> {
         val route = normalizeRoutePath(relativePath)
         val browseType = object : TypeToken<BrowseResult>() {}.type
+        // Server-side sort + pagination (see /api/v1/folders/*/browse): pages
+        // are ordered deterministically on the server so the client can append
+        // consecutive pages without re-sorting (client-side sorting would
+        // scramble the page composition). No params = legacy full return.
+        val query = buildList {
+            if (!sort.isNullOrEmpty()) add("sort=${URLEncoder.encode(sort, "UTF-8")}")
+            if (!order.isNullOrEmpty()) add("order=${URLEncoder.encode(order, "UTF-8")}")
+            if (page > 0) add("page=$page")
+            if (pageSize > 0) add("page_size=$pageSize")
+        }.joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
         return bleFetchOrHttp<BrowseResult>(
             httpCall = {
                 val data = httpGetRaw<BrowseResult>(
-                    "$baseUrl/api/v1/folders/$route/browse",
+                    "$baseUrl/api/v1/folders/$route/browse$query",
                     browseType,
                     forceNetwork = forceNetwork,
                 )

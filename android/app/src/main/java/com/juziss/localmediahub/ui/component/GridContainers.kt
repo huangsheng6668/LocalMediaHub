@@ -17,12 +17,15 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.res.stringResource
 import com.juziss.localmediahub.R
 import androidx.compose.ui.Alignment
@@ -45,7 +48,24 @@ internal fun WaterfallImageGrid(
     onToggleFavorite: (MediaFile) -> Unit = {},
     onFileLongClick: (MediaFile) -> Unit = {},
     isSelected: (String) -> Boolean = { false },
+    /** Paged folder browse: request the next server page near the tail. */
+    onLoadMore: () -> Unit = {},
+    hasMore: Boolean = false,
+    loadingMore: Boolean = false,
 ) {
+    // Load-more trigger derived from scroll state (no polling).
+    LaunchedEffect(hasMore, images.size) {
+        if (!hasMore) return@LaunchedEffect
+        snapshotFlow {
+            val info = state.layoutInfo
+            val total = info.totalItemsCount
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            total > 0 && last >= total - 6
+        }.collect { nearEnd ->
+            if (nearEnd) onLoadMore()
+        }
+    }
+
     LazyVerticalStaggeredGrid(
         columns = StaggeredGridCells.Fixed(2),
         state = state,
@@ -112,6 +132,18 @@ internal fun WaterfallImageGrid(
                             }
                         }
                     }
+                }
+            }
+        }
+        if (loadingMore) {
+            item(span = StaggeredGridItemSpan.FullLine, key = "load-more-footer") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp))
                 }
             }
         }
