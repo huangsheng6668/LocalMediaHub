@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"os"
 	"net/http"
+	"os/signal"
+	"syscall"
 
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/gui"
@@ -86,6 +88,23 @@ func runHeadless(cfg *config.Config) {
 	if err != nil {
 		slog.Error("Failed to create server", "error", err); os.Exit(1)
 	}
+
+	// Graceful shutdown on Ctrl+C / SIGTERM: Server.Stop drains in-flight
+	// downloads, flushes durations.json + hot_directories.json and closes the
+	// tags DB. GUI mode already wires these signals; headless previously
+	// exited without any cleanup, corrupting half-written ZIP downloads and
+	// losing the persistence flushes.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		slog.Info("Shutdown signal received, stopping server...")
+		if err := s.Stop(); err != nil {
+			slog.Error("Server stop error", "error", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}()
 
 	slog.Info("LocalMediaHub Server Initialized", "ip", s.IP)
 	slog.Info("Starting LocalMediaHub (headless)", "host", cfg.Server.Host, "port", cfg.Server.Port)
