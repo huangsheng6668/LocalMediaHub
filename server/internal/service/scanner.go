@@ -56,7 +56,16 @@ type Scanner struct {
 	// scan; exactly one refresh runs at a time and completes by overwriting the
 	// cache + cacheTime inside Scan.
 	bgRefreshing bool
+
+	// watchedCount tracks how many directories are currently registered with
+	// the fsnotify watcher, so runtime adds (new directories created during a
+	// scan) respect maxWatchedDirs too. Guarded by mu.
+	watchedCount int
 }
+
+// maxWatchedDirs caps the number of fsnotify directory watches. See the
+// StartWatching comment for the rationale.
+const maxWatchedDirs = 4096
 
 func NewScanner(videoExts, imageExts, textExts []string) *Scanner {
 	vExts := make(map[string]bool)
@@ -629,18 +638,28 @@ func (s *Scanner) StartWatching(roots []string) error {
 	s.watcher = watcher
 	s.watchRoots = roots
 
-	// Watch all directories recursively
+	// Watch all directories recursively, capped at maxWatchedDirs in total.
+	// A very deep tree otherwise registers one OS watch per directory
+	// (Windows: one ReadDirectoryChangesW each, Linux: inotify watches), and
+	// the watcher only ever reacts with a full-cache invalidation + full
+	// rescan — so per-directory precision beyond the cap has no upside.
+	watched := 0
 	for _, root := range roots {
 		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
-			if d.IsDir() {
-				_ = watcher.Add(path)
+			if d.IsDir() && watched < maxWatchedDirs {
+				if watcher.Add(path) == nil {
+					watched++
+				}
 			}
 			return nil
 		})
 	}
+	s.mu.Lock()
+	s.watchedCount = watched
+	s.mu.Unlock()
 
 	// Start listening to events
 	go s.watchEvents()
@@ -689,8 +708,10 @@ func (s *Scanner) watchEvents() {
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					s.mu.Lock()
-					if s.watcher != nil {
-						_ = s.watcher.Add(event.Name)
+					if s.watcher != nil && s.watchedCount < maxWatchedDirs {
+						if s.watcher.Add(event.Name) == nil {
+							s.watchedCount++
+						}
 					}
 					s.mu.Unlock()
 				}
