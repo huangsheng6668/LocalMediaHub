@@ -147,6 +147,8 @@
     <string name="downloads_delete_folder_title">删除本地已下载文件夹？</string>
     <string name="downloads_delete_all">全部删除</string>
     <string name="downloads_file_count">%1$d 个文件</string>
+    <string name="downloads_folder_empty_title">此文件夹为空</string>
+    <string name="downloads_folder_empty_desc">该目录下还没有任何媒体文件</string>
 
     <!-- ── Video player ────────────────────────────────────── -->
     <string name="video_paused">已暂停</string>

@@ -228,7 +228,7 @@ fun DownloadsScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "stringResource(R.string.downloads_folder_empty_desc)",
+                            text = stringResource(R.string.downloads_folder_empty_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
