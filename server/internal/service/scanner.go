@@ -657,9 +657,8 @@ func (s *Scanner) StartWatching(roots []string) error {
 			return nil
 		})
 	}
-	s.mu.Lock()
+	// Caller already holds s.mu (deferred unlock above) — assign directly.
 	s.watchedCount = watched
-	s.mu.Unlock()
 
 	// Start listening to events
 	go s.watchEvents()
