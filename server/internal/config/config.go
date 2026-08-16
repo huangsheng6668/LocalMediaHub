@@ -183,11 +183,10 @@ func (c *Config) GetSystemAllowedRoots() []string {
 // LoadFromBytes parses config from a YAML byte slice. Used by tests to avoid
 // disk I/O; production code uses Load(path).
 func LoadFromBytes(data []byte) (*Config, error) {
-	cfg := Config{
-		System: SystemConfig{
-			EnableDelete: true,
-		},
-	}
+	// EnableDelete defaults to false (zero value). It must be opted into
+	// explicitly via `system.enable_delete: true` in config.yaml, and the
+	// delete endpoint additionally requires a non-empty server.token.
+	cfg := Config{}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
@@ -226,8 +225,11 @@ func LogSecurityWarnings(cfg *Config, autoFromFlag bool) {
 	if cfg.System.EnableDelete {
 		slog.Warn("==============================================================")
 		slog.Warn(" REMOTE DELETE IS ENABLED (system.enable_delete: true).")
-		slog.Warn(" Any authenticated client (or any LAN host if token is empty)")
-		slog.Warn(" can delete files under system.allowed_roots.")
+		slog.Warn(" Authenticated clients can delete files under system.allowed_roots.")
+		if cfg.Server.Token == "" {
+			slog.Warn(" WARNING: server.token is empty — /api/v1/system/delete will")
+			slog.Warn(" reject every request (403) until a token is configured.")
+		}
 		slog.Warn(" Disable 'system.enable_delete' in config.yaml unless you")
 		slog.Warn(" genuinely need this feature.")
 		slog.Warn("==============================================================")

@@ -155,8 +155,7 @@ func (h *Handler) SystemThumbnail(c echo.Context) error {
 		return respondInternalError(c, err)
 	}
 
-	setMediaCacheHeaders(c)
-	return c.Blob(http.StatusOK, "image/jpeg", thumbBytes)
+	return serveThumbnailBytes(c, resolved, thumbBytes)
 }
 
 func (h *Handler) SystemOriginal(c echo.Context) error {
@@ -202,6 +201,13 @@ type DeleteRequest struct {
 func (h *Handler) DeletePath(c echo.Context) error {
 	if !h.cfg.System.EnableDelete {
 		return respondError(c, http.StatusForbidden, "remote deletion is disabled")
+	}
+	// P0 hardening: deletion is destructive and irreversible — never allow it
+	// in open-auth mode. A non-empty server.token is required so every delete
+	// is authenticated, even when the operator explicitly enables
+	// system.enable_delete.
+	if h.cfg.Server.Token == "" {
+		return respondError(c, http.StatusForbidden, "remote deletion requires a bearer token (set server.token in config.yaml)")
 	}
 
 	var req DeleteRequest

@@ -332,6 +332,18 @@ func TestLogSecurityWarnings(t *testing.T) {
 			autoDetectCfg: false,
 			autoFromFlag: false,
 			wantContains: []string{"REMOTE DELETE IS ENABLED"},
+			wantNotContain: []string{"delete will"},
+		},
+		{
+			name:         "enable_delete=true + empty token → delete-refused note",
+			token:        "",
+			enableDelete: true,
+			autoDetectCfg: false,
+			autoFromFlag: false,
+			wantContains: []string{
+				"REMOTE DELETE IS ENABLED",
+				"reject every request",
+			},
 		},
 		{
 			name:         "auto_detect via config → AUTO-DETECT warning without flag note",

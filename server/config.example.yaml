@@ -47,10 +47,11 @@ thumbnail:
 # System browse: restrict which directories are visible to the Android client.
 # If omitted or empty, /api/v1/system/* browsing is disabled.
 system:
-  # CAUTION: when true, authenticated clients can delete files under allowed_roots
-  # via POST /api/v1/system/delete. The server prints a warning at startup when
-  # this is enabled. Default true.
-  enable_delete: true
+  # CAUTION: when true, AUTHENTICATED clients can delete files under
+  # allowed_roots via POST /api/v1/system/delete. Defaults to false.
+  # Delete additionally REQUIRES a non-empty server.token — without one the
+  # endpoint always returns 403, so remote deletion can never run unauthenticated.
+  enable_delete: false
   allowed_roots: []
     # - "D:/Media"
 

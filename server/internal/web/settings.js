@@ -19,7 +19,10 @@ export async function loadConfig() {
         state.imageExts = data.scan.image_extensions || [];
         state.textExts = data.scan.text_extensions || [];
         state.allowedRoots = (data.system && data.system.allowed_roots) || [];
-        state.enableDelete = (data.system && data.system.enable_delete) || false;
+        // Server-side P0 hardening: /system/delete requires both enable_delete
+        // AND a bearer token. Without a token in this session every delete
+        // would 403, so hide the destructive buttons up front.
+        state.enableDelete = ((data.system && data.system.enable_delete) && !!state.authToken) || false;
         state.thumbMax = (data.thumbnail && data.thumbnail.max_size) || 300;
 
         elements.infoScanRoots.textContent = getFolderPaths().join(', ') || '全盘自动检测';
