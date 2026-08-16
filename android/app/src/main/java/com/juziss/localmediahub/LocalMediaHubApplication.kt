@@ -12,7 +12,9 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.CachePolicy
 import coil3.request.crossfade
 import com.juziss.localmediahub.ble.BleDegradedImageInterceptor
+import com.juziss.localmediahub.data.BatchThumbnailFetcherFactory
 import com.juziss.localmediahub.native.NativeDecoderFactory
+import com.juziss.localmediahub.network.ServerConfig
 import com.juziss.localmediahub.util.cleanupOldEntries
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -65,6 +67,10 @@ class LocalMediaHubApplication : Application(), SingletonImageLoader.Factory {
     @Inject
     lateinit var okHttpClient: OkHttpClient
 
+    /** Current server base URL, consumed by the batch thumbnail fetcher. */
+    @Inject
+    lateinit var serverConfig: ServerConfig
+
     /** Holds SupervisorJob so cleanup coroutine isn't cancelled prematurely and
      *  the scope can be cancelled structurally if needed later. */
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -91,6 +97,11 @@ class LocalMediaHubApplication : Application(), SingletonImageLoader.Factory {
             .components {
                 add(NativeDecoderFactory.Factory())
                 add(BitmapFactoryDecoder.Factory())
+                // Batch thumbnail fetcher: collapses the grid's N+1 thumbnail
+                // requests into one POST /api/v1/media/thumbnails per scroll
+                // frame. Registered BEFORE the OkHttp network fetcher so our
+                // thumbnail URLs never fall through to a per-image request.
+                add(BatchThumbnailFetcherFactory(okHttpClient) { serverConfig.getBaseUrl() })
                 // coil-network-okhttp: register the OkHttp-backed network
                 // fetcher, wired to the Hilt-managed OkHttpClient so Coil
                 // shares the same connection pool as the rest of the app.
