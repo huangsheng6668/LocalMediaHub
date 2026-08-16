@@ -161,8 +161,19 @@ fun VideoPlayerScreen(
             // stall timeout), keeping connectTimeout as-is.
             .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
             .build()
-        val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okClient)
-            .setUserAgent("LocalMediaHub")
+        // 离线下载的视频以 file://（本地文件）地址进入 —— OkHttpDataSource 只
+        // 支持 http/https，遇到 file:// 会报 unsupported scheme 直接无法播放。
+        // 本地 URI 改用 DefaultDataSource（原生支持 file:// / content://），
+        // 远端流保持 OkHttp 工厂（Bearer token 注入 + 超时调优）。
+        val isLocalUri = streamUrl.startsWith("file://") ||
+            streamUrl.startsWith("content://") ||
+            streamUrl.startsWith("android.resource://")
+        val dataSourceFactory: androidx.media3.datasource.DataSource.Factory = if (isLocalUri) {
+            androidx.media3.datasource.DefaultDataSource.Factory(context)
+        } else {
+            androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okClient)
+                .setUserAgent("LocalMediaHub")
+        }
 
         val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
