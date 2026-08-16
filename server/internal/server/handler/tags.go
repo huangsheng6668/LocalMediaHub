@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/localmediahub/server/internal/models"
+	"github.com/localmediahub/server/internal/service"
 )
 
 type CreateTagRequest struct {
@@ -55,6 +56,14 @@ func (h *Handler) AssociateTag(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
 	}
 
+	// Security hardening: never persist a path that lies outside the
+	// configured scan roots / system allowed roots. Previously the raw route
+	// param was written to the DB verbatim, letting any caller pollute the
+	// tags store with arbitrary strings.
+	if !h.isPathWithinConfiguredRoots(pathStr) {
+		return respondError(c, http.StatusForbidden, "path outside allowed directories")
+	}
+
 	associated, err := h.tags.AssociateFile(tagID, pathStr)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -75,10 +84,26 @@ func (h *Handler) DisassociateTag(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
 	}
 
+	if !h.isPathWithinConfiguredRoots(pathStr) {
+		return respondError(c, http.StatusForbidden, "path outside allowed directories")
+	}
+
 	if err := h.tags.DisassociateFile(tagID, pathStr); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"detail": "Tag removed from file"})
+}
+
+// isPathWithinConfiguredRoots reports whether pathStr lies inside the scan
+// roots or the system allowed roots (lexical check — this is a DB-write guard,
+// not a file read, so reparse-point traversal is not applicable here).
+func (h *Handler) isPathWithinConfiguredRoots(pathStr string) bool {
+	allRoots := append(append([]string{}, h.cfg.Scan.GetRoots()...), h.cfg.GetSystemAllowedRoots()...)
+	if len(allRoots) == 0 {
+		return false
+	}
+	valid, err := service.IsPathWithinRoots(pathStr, allRoots)
+	return err == nil && valid
 }
 
 func (h *Handler) GetTaggedFiles(c echo.Context) error {

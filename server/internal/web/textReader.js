@@ -3,7 +3,7 @@
 // autoscroll/settings). Owns ONLY: render entry, book fetch, loadChapter,
 // scroll-mode chapter buffering, page-turn gestures, immersive state machine,
 // and lifecycle cleanup. Mirrors the Android TextReaderViewModel contract.
-import { getBookInfo, getBookChapter, getAuthToken } from './api.js';
+import { getBookInfo, getBookChapter } from './api.js';
 import { showToast } from './toast.js';
 import * as readerPrefs from './readerPrefs.js';
 import { on, EVT } from './bus.js';
@@ -505,7 +505,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 const img = document.createElement('img');
                 img.className = 'text-reader__image';
                 img.loading = 'lazy';
-                if (block.src) img.src = appendTokenQueryParam(block.src);
+                if (block.src) img.src = block.src;
                 else img.alt = '[本图片无法显示]';
                 section.appendChild(img);
                 return;
@@ -678,13 +678,6 @@ function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 // Converts an old-style chapter.content string into the block array shape.
 function blocksFromLegacyContent(content) {
     return (content || '').split('\n\n').filter(p => p.trim()).map(p => ({ type: 'text', value: p }));
-}
-
-// Adds ?token=... so <img> tags authenticate against /api/v1/books/image.
-function appendTokenQueryParam(url) {
-    const token = getAuthToken();
-    if (!token) return url;
-    return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
 }
 
 function bindEls(root) {

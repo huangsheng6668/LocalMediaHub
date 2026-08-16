@@ -1,12 +1,24 @@
 // Video player feature module: extracted from app.js (openVideoPlayer + listeners).
 import { state } from './state.js';
-import { apiRequest } from './api.js';
+import { apiRequest, getAuthToken } from './api.js';
 import { showToast } from './toast.js';
 import { elements } from './dom.js';
 import { formatTime, encodeRoutePath } from './utils.js';
 import { deleteMediaFile } from './delete.js';
 import { wheelToVolume } from './videoHelpers.js';
 import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoProgress.js';
+
+// <video> tags cannot send Authorization headers, so auth-gated stream URLs
+// (/api/v1/media/stream, /api/v1/system/stream) carry the bearer token as a
+// ?token= query parameter (server redacts it from access logs; the page's
+// Referrer-Policy: no-referrer keeps it out of referers). The public
+// /api/v1/videos/*/stream route needs no token.
+function withVideoAuthToken(url) {
+    if (!/\/api\/v1\/(media|system)\/stream/.test(url)) return url;
+    const token = getAuthToken();
+    if (!token) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+}
 
 // Module-scoped player state (shared across the player's internal helpers).
 let controlsTimeout;
@@ -124,7 +136,7 @@ export async function openVideoPlayer(file) {
     elements.videoSpeedMenu.hidden = true;
     updateSpeedMenuActive(1);
 
-    elements.videoPlayer.src = url;
+    elements.videoPlayer.src = withVideoAuthToken(url);
     elements.modalVideoPlayer.classList.add('active');
     elements.videoPlayer.load();
     // 原画流续播：loadedmetadata 后 seekTo（转码流已用 start 参数）
@@ -211,7 +223,7 @@ export function setupVideoPlayerListeners(elements) {
             elements.btnVideoTranscode.textContent = '原画';
         }
 
-        elements.videoPlayer.src = url;
+        elements.videoPlayer.src = withVideoAuthToken(url);
         elements.videoPlayer.load();
 
         if (!state.useTranscode) {
@@ -267,7 +279,7 @@ export function setupVideoPlayerListeners(elements) {
             if (state.isSystemBrowse) {
                 url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
             }
-            elements.videoPlayer.src = url;
+            elements.videoPlayer.src = withVideoAuthToken(url);
             elements.videoPlayer.load();
             elements.videoPlayer.play();
         } else {

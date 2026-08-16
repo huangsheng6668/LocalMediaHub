@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -12,6 +14,20 @@ import (
 	"github.com/localmediahub/server/internal/service"
 	"github.com/localmediahub/server/internal/service/bookparser"
 )
+
+// tokenMatches compares a provided bearer token against the configured one
+// using SHA-256 hashes + constant-time comparison (same discipline as
+// middleware.BearerToken). An empty configured token means open mode: any
+// provided value is accepted so the open-mode passthrough behavior is
+// preserved for the /books/image ?token= fallback.
+func tokenMatches(provided, configured string) bool {
+	if configured == "" {
+		return true
+	}
+	providedHash := sha256.Sum256([]byte(provided))
+	configuredHash := sha256.Sum256([]byte(configured))
+	return subtle.ConstantTimeCompare(providedHash[:], configuredHash[:]) == 1
+}
 
 // chapterResponse is the JSON body returned by GetBookChapter. The client
 // renders Blocks in order: text blocks render as paragraphs, image blocks
@@ -136,6 +152,13 @@ func (h *Handler) GetBookImage(c echo.Context) error {
 	// the bearer token into logs/history/referer. The ?token= path is the
 	// pre-Round-32 fallback kept for migration; it is logged so operators
 	// can see when all clients have moved over.
+	//
+	// NOTE: /api/v1/books/image is registered OUTSIDE the authMw group (see
+	// server.go) because <img> tags cannot send Authorization headers — so
+	// the middleware would 401 every sig-only request before this handler
+	// could run, making the signing mechanism dead code in token mode. The
+	// ?token= fallback therefore verifies the bearer value HERE (constant
+	// time) instead of relying on the middleware.
 	if h.bookSigner != nil {
 		sig := c.QueryParam("sig")
 		switch {
@@ -144,6 +167,9 @@ func (h *Handler) GetBookImage(c echo.Context) error {
 				return respondError(c, http.StatusUnauthorized, "invalid signature")
 			}
 		case c.QueryParam("token") != "":
+			if !tokenMatches(c.QueryParam("token"), h.cfg.Server.Token) {
+				return respondError(c, http.StatusUnauthorized, "invalid token")
+			}
 			slog.Warn("[DEPRECATED] /books/image called with ?token=",
 				"path", resolved,
 				"manifest", manifestID,

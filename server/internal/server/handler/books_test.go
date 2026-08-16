@@ -325,16 +325,11 @@ func TestGetBookImageNoSigNoTokenReturns401(t *testing.T) {
 }
 
 // TestGetBookImageTokenFallbackStillWorks covers the deprecated ?token=
-// fallback. The handler does NOT validate the token itself (BearerToken
-// middleware wrapping the /books route group does that in production);
-// GetBookImage only checks that the query param is non-empty, then logs a
-// slog.Warning and serves the bytes. We pass a placeholder token and assert
-// the response is 200 with the correct image payload — proving the
-// migration path still serves clients that have not adopted ?sig= yet.
-//
-// NOTE: This test exercises ONLY the handler. Production auth is enforced
-// separately by middleware.BearerToken; see middleware/auth_test.go for
-// token-validation coverage.
+// fallback in open mode (empty configured token). Since the /books/image
+// route is now registered OUTSIDE the BearerToken group, the handler verifies
+// the token itself; with an empty configured token (open mode) any non-empty
+// value passes, logs a slog.Warning, and serves the bytes — preserving the
+// migration path for clients that have not adopted ?sig= yet.
 func TestGetBookImageTokenFallbackStillWorks(t *testing.T) {
 	h, _, dir := newBooksHandlerWithSigner(t)
 	p := buildEpubWithImageBytes(t, dir, "cover", "Images/test.png", png1x1)
@@ -345,6 +340,39 @@ func TestGetBookImageTokenFallbackStillWorks(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "image/png", rec.Header().Get("Content-Type"))
 	assert.Equal(t, png1x1, rec.Body.Bytes())
+}
+
+// TestGetBookImageTokenFallbackVerifiedWhenTokenConfigured covers the new
+// handler-side token verification: with a non-empty configured token, the
+// ?token= fallback must accept only the exact value (constant-time) and 401
+// anything else — the route no longer sits behind middleware.BearerToken.
+func TestGetBookImageTokenFallbackVerifiedWhenTokenConfigured(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Server.Token = "book-image-secret"
+	cfg.Scan.VideoExtensions = []string{".mp4"}
+	cfg.Scan.ImageExtensions = []string{".jpg"}
+	cfg.Scan.TextExtensions = []string{".txt", ".epub"}
+	cfg.Scan.Roots = []string{dir}
+	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
+	books := service.NewBookService()
+	signer, err := service.NewBookSigner()
+	require.NoError(t, err)
+	h := New(cfg, scanner, nil, nil, nil, books, signer)
+
+	p := buildEpubWithImageBytes(t, dir, "cover", "Images/test.png", png1x1)
+
+	// Wrong token → 401.
+	q := "path=" + url.QueryEscape(p) + "&manifest=cover&token=wrong-token"
+	rec, c := newBookImageRequest(q)
+	require.NoError(t, h.GetBookImage(c))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	// Correct token → 200.
+	q = "path=" + url.QueryEscape(p) + "&manifest=cover&token=" + url.QueryEscape("book-image-secret")
+	rec, c = newBookImageRequest(q)
+	require.NoError(t, h.GetBookImage(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 // =============================================================================

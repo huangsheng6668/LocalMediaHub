@@ -53,6 +53,14 @@ func New(cfg *config.Config) (*Server, error) {
 	e := echo.New()
 	e.HideBanner = true
 
+	// Round N security hardening: derive client IPs from the socket address
+	// only. Echo's default IPExtractor trusts X-Forwarded-For / X-Real-IP
+	// headers, which any client can forge (no reverse proxy sits in front of
+	// this LAN server). Forged IPs would rotate the rate-limit buckets
+	// (middleware.RateLimit), bypass PrivateNetOnly for /debug/pprof, and let
+	// an attacker reuse BookSigner HMAC signatures bound to a victim's IP.
+	e.IPExtractor = echo.ExtractIPDirect()
+
 	ip, err := getLocalIP()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get local IP: %w", err)
@@ -254,17 +262,24 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	api := s.Echo.Group("/api/v1")
 
+	// Auth middleware: gates sensitive endpoints on the configured token.
+	// Empty token = open mode (passthrough), logged at startup.
+	authMw := middleware.BearerToken(s.Config.Server.Token)
+
 	api.GET("/health", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	// Folders
 	api.GET("/folders", h.GetFolders)
-	api.GET("/folders/*", h.BrowseFolder)
+	api.GET("/folders/*", h.BrowseFolder,
+		authZipDownload(authMw),
+		rateLimitWhen(isFolderZipDownload, middleware.RateLimit(2, 5*time.Minute)))
 
 	// Videos
 	api.GET("/videos", h.GetVideos)
-	api.GET("/videos/*", h.GetVideoAsset)
+	api.GET("/videos/*", h.GetVideoAsset,
+		rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
 
 	// Images
 	api.GET("/images", h.GetImages)
@@ -278,17 +293,16 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	// Tags
 	api.GET("/tags", h.GetTags)
-	api.POST("/tags", h.CreateTag)
-	api.DELETE("/tags/:tag_id", h.DeleteTag)
-	api.POST("/tags/:tag_id/files/*", h.AssociateTag)
-	api.DELETE("/tags/:tag_id/files/*", h.DisassociateTag)
+	// Mutation endpoints are auth-gated (security hardening): tag create /
+	// delete and file association write to the shared tags DB, so they must
+	// not be reachable unauthenticated. Reads stay public (documented design).
+	api.POST("/tags", h.CreateTag, authMw)
+	api.DELETE("/tags/:tag_id", h.DeleteTag, authMw)
+	api.POST("/tags/:tag_id/files/*", h.AssociateTag, authMw)
+	api.DELETE("/tags/:tag_id/files/*", h.DisassociateTag, authMw)
 	api.GET("/tags/:tag_id/files", h.GetTaggedFiles)
 	api.GET("/tags/:tag_id/media", h.GetTaggedMedia)
 	api.GET("/tags/file-tags", h.GetFileTags)
-
-	// Auth middleware: gates sensitive endpoints on the configured token.
-	// Empty token = open mode (passthrough), logged at startup.
-	authMw := middleware.BearerToken(s.Config.Server.Token)
 
 	// Admin
 	admin := api.Group("/admin", authMw)
@@ -302,14 +316,14 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	sys.GET("/browse", h.SystemBrowse)
 	sys.GET("/thumbnail", h.SystemThumbnail)
 	sys.GET("/original", h.SystemOriginal)
-	sys.GET("/stream", h.SystemStream)
+	sys.GET("/stream", h.SystemStream, rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
 	sys.POST("/delete", h.DeletePath, middleware.RateLimit(5, time.Minute))
 
 	// Unified absolute-path media access
 	media := api.Group("/media", authMw)
 	media.GET("/thumbnail", h.MediaThumbnail)
 	media.GET("/original", h.MediaOriginal)
-	media.GET("/stream", h.MediaStream)
+	media.GET("/stream", h.MediaStream, rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
 	media.GET("/duration", h.MediaDuration)
 
 	// Books (text-reader, Task 8): metadata + per-chapter text content for
@@ -321,7 +335,12 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	books := api.Group("/books", authMw)
 	books.GET("/info", h.GetBookInfo)
 	books.GET("/chapter", h.GetBookChapter)
-	books.GET("/image", h.GetBookImage)
+	// /image is deliberately OUTSIDE the auth group: <img> tags cannot send
+	// Authorization headers, so a sig-only request would be 401'd by authMw
+	// before the handler's HMAC check could run (making the signing mechanism
+	// dead code in token mode). The handler authenticates via ?sig= (preferred)
+	// or the deprecated ?token= (verified constant-time inside the handler).
+	api.GET("/books/image", h.GetBookImage)
 	// Round 32 Task 5: returns a signed <img src> URL bound to (clientIP,
 	// path, manifestID). Authenticated via authMw — the endpoint itself
 	// never returns a usable URL to an unauthenticated caller.
@@ -338,6 +357,47 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	bleGroup.POST("/send", h.SendBLE)
 
 	// Admin page
+}
+
+// isTranscodeRequest reports whether the request asks for real-time ffmpeg
+// transcoding (one process fork per request — a CPU/DoS amplifier).
+func isTranscodeRequest(c echo.Context) bool {
+	return c.QueryParam("transcode") == "true"
+}
+
+// isFolderZipDownload reports whether the request targets the recursive
+// folder-zip endpoint (walks the whole subtree and streams a ZIP — a disk-I/O
+// amplifier).
+func isFolderZipDownload(c echo.Context) bool {
+	return strings.HasSuffix(c.Param("*"), "/download")
+}
+
+// rateLimitWhen applies limiter only to requests satisfying cond. Used to
+// guard transcode + zip-download without rate-limiting normal browsing or
+// direct (non-transcoded) streams.
+func rateLimitWhen(cond func(echo.Context) bool, limiter echo.MiddlewareFunc) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if cond(c) {
+				return limiter(next)(c)
+			}
+			return next(c)
+		}
+	}
+}
+
+// authZipDownload requires authentication ONLY for the /download suffix of
+// /api/v1/folders/*, keeping regular folder browsing public per the existing
+// product design while closing the unauthenticated whole-tree ZIP download.
+func authZipDownload(auth echo.MiddlewareFunc) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			if isFolderZipDownload(c) {
+				return auth(next)(c)
+			}
+			return next(c)
+		}
+	}
 }
 
 // serveFavicon returns the procedurally-generated brand favicon PNG, cached for
