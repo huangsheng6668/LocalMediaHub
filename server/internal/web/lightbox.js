@@ -123,28 +123,34 @@ export function setupLightboxListeners(elements) {
         renderLightboxImage();
     });
 
-    // Stitch View Scroll listener to dynamically update the active index
+    // Stitch View Scroll listener to dynamically update the active index.
+    // rAF-throttled: the handler walks every .stitch-image-item with
+    // getBoundingClientRect, so more than once per frame is layout thrash.
+    let stitchRafId = null;
     elements.lightboxStitchView.addEventListener('scroll', () => {
-        if (!state.lightboxStitchMode) return;
-        const items = elements.lightboxStitchView.querySelectorAll('.stitch-image-item');
-        const containerRect = elements.lightboxStitchView.getBoundingClientRect();
+        if (!state.lightboxStitchMode || stitchRafId !== null) return;
+        stitchRafId = requestAnimationFrame(() => {
+            stitchRafId = null;
+            const items = elements.lightboxStitchView.querySelectorAll('.stitch-image-item');
+            const containerRect = elements.lightboxStitchView.getBoundingClientRect();
 
-        let closestIndex = state.lightboxIndex;
-        let minDistance = Infinity;
+            let closestIndex = state.lightboxIndex;
+            let minDistance = Infinity;
 
-        items.forEach((item, idx) => {
-            const rect = item.getBoundingClientRect();
-            // Distance from item's top to container's top
-            const distance = Math.abs(rect.top - containerRect.top);
-            if (distance < minDistance) {
-                minDistance = distance;
-                closestIndex = idx;
+            items.forEach((item, idx) => {
+                const rect = item.getBoundingClientRect();
+                // Distance from item's top to container's top
+                const distance = Math.abs(rect.top - containerRect.top);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestIndex = idx;
+                }
+            });
+
+            if (closestIndex !== state.lightboxIndex && closestIndex >= 0 && closestIndex < state.lightboxFiles.length) {
+                state.lightboxIndex = closestIndex;
             }
         });
-
-        if (closestIndex !== state.lightboxIndex && closestIndex >= 0 && closestIndex < state.lightboxFiles.length) {
-            state.lightboxIndex = closestIndex;
-        }
     });
 
     document.addEventListener('keydown', (e) => {

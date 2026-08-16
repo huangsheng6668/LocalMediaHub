@@ -402,16 +402,23 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         if (activeTab === 'bookmarks') bookmarksApi.refresh();
     });
 
-    // Page-turn gestures: left 20% prev, right 20% next. Cursor reflects hot zone.
+    // Page-turn gestures: left 20% prev, right 20% next. Cursor reflects hot
+    // zone. rAF-throttled: the cursor is purely visual, and each update costs
+    // a getBoundingClientRect, so more than once per frame is wasted layout.
+    let cursorRafId = null;
     els.content.addEventListener('mousemove', (e) => {
-        if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) {
-            els.content.style.cursor = 'default'; return;
-        }
-        if (readerPrefs.getSettings().readingMode === 'scroll') {
-            els.content.style.cursor = 'default'; return;
-        }
-        const ratio = hotzoneRatio(e.clientX, els.content.getBoundingClientRect());
-        els.content.style.cursor = (ratio < 0.20 || ratio > 0.80) ? 'pointer' : 'default';
+        if (cursorRafId !== null) return;
+        cursorRafId = requestAnimationFrame(() => {
+            cursorRafId = null;
+            if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) {
+                els.content.style.cursor = 'default'; return;
+            }
+            if (readerPrefs.getSettings().readingMode === 'scroll') {
+                els.content.style.cursor = 'default'; return;
+            }
+            const ratio = hotzoneRatio(e.clientX, els.content.getBoundingClientRect());
+            els.content.style.cursor = (ratio < 0.20 || ratio > 0.80) ? 'pointer' : 'default';
+        });
     });
     els.content.addEventListener('click', (e) => {
         if (e.target.closest('button, img, a, dialog, .text-reader__drawer')) return;
@@ -426,7 +433,18 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     });
 
     // Scroll-mode buffering + progress + active-chapter detection (修复 3 in progress.js).
+    // rAF-throttled: scroll events fire far more often than frames, and the
+    // detection walks EVERY chapter section with getBoundingClientRect — doing
+    // that per event is layout thrash on long books.
+    let scrollRafId = null;
     function onContentScroll() {
+        if (scrollRafId !== null) return;
+        scrollRafId = requestAnimationFrame(() => {
+            scrollRafId = null;
+            handleContentScroll();
+        });
+    }
+    function handleContentScroll() {
         const s = readerPrefs.getSettings();
         if (s.readingMode === 'scroll') {
             if (els.content.scrollTop + els.content.clientHeight >= els.content.scrollHeight - 300) {
@@ -456,6 +474,8 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
     // ===== Cleanup =====
     container._cleanupReader = () => {
+        if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
+        if (cursorRafId !== null) cancelAnimationFrame(cursorRafId);
         unsubSettings(); unsubPrefs(); unsubBms();
         tocApi.dispose(); bookmarksApi.dispose(); autoscrollApi.dispose(); settingsApi.dispose();
         scrubberApi.dispose();
@@ -595,6 +615,56 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         }
     }
 
+    // Scroll-mode DOM windowing: chapters read and scrolled past accumulate
+    // unboundedly above the viewport (memory + layout cost grow forever on a
+    // long book). Trim those away, keeping a few chapters above the active
+    // one so scrolling up a little does not immediately re-fetch. The bottom
+    // needs no trimming: buffer-fill only loads until ~viewport+400px of
+    // content exists, so loaded-below is naturally bounded (and trimming it
+    // would fight the fill loop into load/remove churn).
+    const SCROLL_WINDOW_BEFORE = 3;
+
+    function trimScrollWindow() {
+        if (readerPrefs.getSettings().readingMode !== 'scroll') return;
+        const sections = [...els.content.querySelectorAll('.text-reader__chapter-section')];
+        if (sections.length <= SCROLL_WINDOW_BEFORE + 2) return;
+
+        const anchor = clamp(state.currentIdx, minLoadedIdx, maxLoadedIdx);
+        const keepMin = Math.max(minLoadedIdx, anchor - SCROLL_WINDOW_BEFORE);
+        if (keepMin <= minLoadedIdx) return; // nothing above the window to drop
+
+        let removedTopHeight = 0;
+        for (const sec of sections) {
+            const idx = parseInt(sec.dataset.chapterIndex, 10);
+            if (Number.isNaN(idx)) continue;
+            if (idx < keepMin) {
+                removedTopHeight += sec.offsetHeight;
+                sec.remove();
+            }
+        }
+
+        // Compensate for content removed above the viewport so the visible
+        // text stays put. offsetHeight forces one layout — fine, this runs
+        // once per chapter load, not per scroll event.
+        if (removedTopHeight > 0) {
+            els.content.scrollTop -= removedTopHeight;
+        }
+
+        // Recompute the contiguous loaded bounds from what remains.
+        let newMin = Infinity, newMax = -Infinity;
+        els.content.querySelectorAll('.text-reader__chapter-section').forEach(sec => {
+            const idx = parseInt(sec.dataset.chapterIndex, 10);
+            if (!Number.isNaN(idx)) {
+                newMin = Math.min(newMin, idx);
+                newMax = Math.max(newMax, idx);
+            }
+        });
+        if (newMin !== Infinity) {
+            minLoadedIdx = newMin;
+            maxLoadedIdx = newMax;
+        }
+    }
+
     async function loadNextScrollChapter() {
         if (isLoadingChapter || maxLoadedIdx >= chapterCount - 1) return false;
         isLoadingChapter = true;
@@ -603,6 +673,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             const ch = await getBookChapter(path, nextIdx);
             els.content.appendChild(renderBlocks(ch.blocks || blocksFromLegacyContent(ch.content), ch.title, nextIdx));
             maxLoadedIdx = nextIdx;
+            trimScrollWindow();
             return true;
         } catch (e) {
             showToast('加载下一章失败: ' + e.message, 'error');
@@ -623,6 +694,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             els.content.insertBefore(sec, els.content.firstChild);
             els.content.scrollTop = oldTop + (els.content.scrollHeight - oldH);
             minLoadedIdx = prevIdx;
+            trimScrollWindow();
             return true;
         } catch (e) {
             showToast('加载上一章失败: ' + e.message, 'error');
