@@ -265,4 +265,82 @@
     <string name="tag_empty">尚无已创建的标签。请先在服务端或首页创建标签。</string>
 
     <!-- ── Main activity ──────────────────────────────────── -->
+
+    <!-- ── Downloads screen (slice 3) ──────────────────────── -->
+    <string name="dl_empty_title">暂无离线下载内容</string>
+    <string name="dl_empty_desc">您可以在浏览共享媒体库时，长按文件并选择“下载到本地”，以便随时在此离线播放和浏览。</string>
+    <string name="dl_back_to_parent">返回上一级文件夹</string>
+    <string name="dl_delete_file_confirm">这将从您手机的本地存储中永久删除文件 \"%1$s\"，该操作不可撤销。</string>
+    <string name="dl_delete_folder_confirm">这将从您手机的本地存储中永久删除文件夹 \"%1$s\" 及其包含的 %2$d 个离线媒体文件，该操作不可撤销。</string>
+    <string name="dl_unknown_size">未知大小</string>
+    <string name="a11y_delete">删除</string>
+
+    <!-- ── Browse selection mode (slice 3) ─────────────────── -->
+    <string name="browse_selected_media">已选 %1$d 个媒体</string>
+    <string name="browse_error_toast">错误: %1$s</string>
+    <string name="browse_confirm_batch_delete">确认要从服务器上删除这 %1$d 个选中的媒体文件吗？此操作不可撤销。</string>
+    <string name="browse_delete">删除</string>
+    <string name="browse_cancel">取消</string>
+
+    <!-- ── Reader settings sheet ───────────────────────────── -->
+    <string name="reader_settings_title">阅读设置</string>
+    <string name="rs_section_appearance">外观</string>
+    <string name="rs_font">字体</string>
+    <string name="rs_theme">主题</string>
+    <string name="rs_custom_colors">自定义颜色</string>
+    <string name="rs_custom_bg">背景</string>
+    <string name="rs_custom_fg">正文</string>
+    <string name="rs_custom_muted">次要</string>
+    <string name="rs_bg_image">背景图片</string>
+    <string name="rs_choose_image">选择图片</string>
+    <string name="rs_change_image">更换图片</string>
+    <string name="rs_clear_bg">清除背景图</string>
+    <string name="rs_section_font_spacing">字号与行距</string>
+    <string name="rs_font_size_fmt">字号 %1$d</string>
+    <string name="rs_line_height_fmt">行距 %1$s</string>
+    <string name="rs_width_fmt">宽度 %1$d</string>
+    <string name="rs_letter_spacing_fmt">字间距 %1$s</string>
+    <string name="rs_section_paragraph">段落</string>
+    <string name="rs_first_line_indent">首行缩进</string>
+    <string name="rs_paragraph_spacing">段间距</string>
+    <string name="rs_section_behavior">行为</string>
+    <string name="rs_reading_mode">阅读模式</string>
+    <string name="rs_page_turn_animation">翻页动画</string>
+    <string name="rs_immersive_mode">沉浸模式</string>
+    <string name="rs_autoscroll_speed_fmt">自动滚动速度 %1$d</string>
+
+    <!-- ── BLE channel section ─────────────────────────────── -->
+    <string name="ble_state_off">关闭</string>
+    <string name="ble_state_unsupported">此设备不支持</string>
+    <string name="ble_state_idle">待机</string>
+    <string name="ble_state_advertising">广播中…</string>
+    <string name="ble_state_connecting">连接中…</string>
+    <string name="ble_state_connected">已连接</string>
+    <string name="ble_state_disconnected">已断开</string>
+    <string name="ble_title">蓝牙稳定通道（实验性）</string>
+    <string name="ble_desc">可选的低功耗蓝牙控制通道；不可用时自动退回 Wi-Fi。</string>
+    <string name="ble_status_fmt">状态：%1$s</string>
+    <string name="ble_channel_title">BLE 控制通道</string>
+    <string name="ble_channel_desc">通过 PC 服务端建立双向低延迟蓝牙 GATT 控制通道。</string>
+    <string name="ble_connecting">建立 BLE 通道中…</string>
+    <string name="ble_connected">BLE 通道已建立</string>
+    <string name="ble_connect_btn">一键建立 BLE 控制通道</string>
+    <string name="ble_send_test">发送测试 (Ping / Pong)</string>
+    <string name="ble_echo_fmt">收到回声：%1$s</string>
+
+    <!-- ── BLE settings ViewModel messages ─────────────────── -->
+    <string name="ble_err_no_advertising">未发现当前手机的 BLE 广播（请确保手机蓝牙已开启且距离电脑较近）</string>
+    <string name="ble_err_connect_gatt">连接失败：服务端未能建立 BLE GATT 连接</string>
+    <string name="ble_err_connect_fmt">连接失败: %1$s</string>
+    <string name="ble_err_server_not_ready">服务端蓝牙未就绪（请确认 PC 已配有蓝牙且服务端使用 go build -tags bluetooth 编译）</string>
+    <string name="ble_err_connect_cause_fmt">建立连接失败: %1$s</string>
+    <string name="ble_err_scan_none">未扫描到可连接的 BLE 设备（请确保 PC 蓝牙已开启，并且 PC 服务端以 -tags bluetooth 编译启动）</string>
+    <string name="ble_err_scan_fmt">扫描失败: %1$s</string>
+    <string name="ble_err_gatt_connect2">连接失败：PC 服务端未能与设备建立 BLE GATT 连接</string>
+    <string name="ble_send_failed">发送失败</string>
+    <string name="ble_err_no_echo">未收到 BLE GATT Echo 回声响应</string>
+    <string name="ble_err_send_fmt">发送失败: %1$s</string>
+
+    <!-- ── Generic errors ──────────────────────────────────── -->
+    <string name="error_unknown">未知错误</string>
 </resources>

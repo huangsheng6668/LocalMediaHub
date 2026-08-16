@@ -261,7 +261,7 @@ fun BrowseScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "已选 ${selectedFiles.size} 个媒体",
+                            text = stringResource(R.string.browse_selected_media, selectedFiles.size),
                             style = MaterialTheme.typography.titleMedium
                         )
                         Row(
@@ -387,7 +387,7 @@ fun BrowseScreen(
                     showDeleteConfirm = false
                 }
                 is com.juziss.localmediahub.viewmodel.DeleteState.Error -> {
-                    Toast.makeText(context, "错误: ${state.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, context.getString(R.string.browse_error_toast, state.message), Toast.LENGTH_LONG).show()
                     viewModel.clearDeleteState()
                 }
                 else -> {}
@@ -442,7 +442,7 @@ fun BrowseScreen(
             AlertDialog(
                 onDismissRequest = { showBatchDeleteConfirm = false },
                 title = { Text(stringResource(R.string.browse_confirm_delete_title)) },
-                text = { Text("确认要从服务器上删除这 ${selectedFiles.size} 个选中的媒体文件吗？此操作不可撤销。") },
+                text = { Text(stringResource(R.string.browse_confirm_batch_delete, selectedFiles.size)) },
                 confirmButton = {
                     TextButton(
                         onClick = {
@@ -452,12 +452,12 @@ fun BrowseScreen(
                             selectedFiles.clear()
                         }
                     ) {
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.browse_delete), color = MaterialTheme.colorScheme.error)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showBatchDeleteConfirm = false }) {
-                        Text("取消")
+                        Text(stringResource(R.string.browse_cancel))
                     }
                 }
             )

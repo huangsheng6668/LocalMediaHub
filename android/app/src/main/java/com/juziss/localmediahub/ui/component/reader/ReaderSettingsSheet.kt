@@ -28,6 +28,8 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.juziss.localmediahub.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.testTag
@@ -87,14 +89,14 @@ fun ReaderSettingsSheetContent(
             .padding(horizontal = 24.dp, vertical = 16.dp)
             .navigationBarsPadding()
     ) {
-        Text("阅读设置", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.reader_settings_title), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.size(12.dp))
 
         // ── 外观 ──
-        Section("外观")
+        Section(stringResource(R.string.rs_section_appearance))
 
         // 字体
-        Text("字体", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.rs_font), style = MaterialTheme.typography.labelMedium)
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -111,7 +113,7 @@ fun ReaderSettingsSheetContent(
         Spacer(Modifier.size(8.dp))
 
         // 主题（Phase 2 已落地，保留）
-        Text("主题", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.rs_theme), style = MaterialTheme.typography.labelMedium)
         ThemeChipRow(
             selected = settings.theme,
             onSelect = { onChange(settings.copy(theme = it)) },
@@ -119,14 +121,14 @@ fun ReaderSettingsSheetContent(
         Spacer(Modifier.size(8.dp))
 
         if (settings.theme == ReaderTheme.CUSTOM) {
-            Text("自定义颜色", style = MaterialTheme.typography.labelMedium)
-            CustomColorRow("背景", settings.customBg, "customBgHex") {
+            Text(stringResource(R.string.rs_custom_colors), style = MaterialTheme.typography.labelMedium)
+            CustomColorRow(stringResource(R.string.rs_custom_bg), settings.customBg, "customBgHex") {
                 onChange(settings.copy(customBg = it))
             }
-            CustomColorRow("正文", settings.customFg, "customFgHex") {
+            CustomColorRow(stringResource(R.string.rs_custom_fg), settings.customFg, "customFgHex") {
                 onChange(settings.copy(customFg = it))
             }
-            CustomColorRow("次要", settings.customMuted, "customMutedHex") {
+            CustomColorRow(stringResource(R.string.rs_custom_muted), settings.customMuted, "customMutedHex") {
                 onChange(settings.copy(customMuted = it))
             }
             Spacer(Modifier.size(8.dp))
@@ -134,7 +136,7 @@ fun ReaderSettingsSheetContent(
 
         // 背景图片
         val context = androidx.compose.ui.platform.LocalContext.current
-        Text("背景图片", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.rs_bg_image), style = MaterialTheme.typography.labelMedium)
         val imagePickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
             contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
         ) { uri ->
@@ -159,7 +161,7 @@ fun ReaderSettingsSheetContent(
             androidx.compose.material3.OutlinedButton(
                 onClick = { imagePickerLauncher.launch("image/*") }
             ) {
-                Text(if (settings.bgImageUri.isNullOrBlank()) "选择图片" else "更换图片")
+                Text(if (settings.bgImageUri.isNullOrBlank()) stringResource(R.string.rs_choose_image) else stringResource(R.string.rs_change_image))
             }
             if (!settings.bgImageUri.isNullOrBlank()) {
                 androidx.compose.material3.TextButton(
@@ -171,7 +173,7 @@ fun ReaderSettingsSheetContent(
                         onChange(settings.copy(bgImageUri = null))
                     }
                 ) {
-                    Text("清除背景图")
+                    Text(stringResource(R.string.rs_clear_bg))
                 }
             }
         }
@@ -179,10 +181,10 @@ fun ReaderSettingsSheetContent(
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
 
         // ── 字号与行距 ──
-        Section("字号与行距")
+        Section(stringResource(R.string.rs_section_font_spacing))
 
         // 字号 Slider 12..28 step 1 (15 steps -> steps param = 15)
-        Text("字号 ${settings.fontSizeSp}", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.rs_font_size_fmt, settings.fontSizeSp), style = MaterialTheme.typography.labelMedium)
         Slider(
             value = settings.fontSizeSp.toFloat(),
             onValueChange = { onChange(settings.copy(fontSizeSp = it.roundToInt().coerceIn(12, 28))) },
@@ -195,7 +197,13 @@ fun ReaderSettingsSheetContent(
         Spacer(Modifier.size(8.dp))
 
         // 行距 Slider 1.2..2.4 step 0.1 (12 steps -> steps param = 11)
-        Text("行距 ${String.format(java.util.Locale.US, "%.1f", settings.lineHeightMultiplier)}", style = MaterialTheme.typography.labelMedium)
+        Text(
+            stringResource(
+                R.string.rs_line_height_fmt,
+                String.format(java.util.Locale.US, "%.1f", settings.lineHeightMultiplier),
+            ),
+            style = MaterialTheme.typography.labelMedium,
+        )
         Slider(
             value = settings.lineHeightMultiplier,
             onValueChange = { onChange(settings.copy(lineHeightMultiplier = it)) },
@@ -208,7 +216,7 @@ fun ReaderSettingsSheetContent(
         Spacer(Modifier.size(8.dp))
 
         // 宽度 Slider 360..1400 step 10
-        Text("宽度 ${settings.contentWidthDp}", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.rs_width_fmt, settings.contentWidthDp), style = MaterialTheme.typography.labelMedium)
         Slider(
             value = settings.contentWidthDp.toFloat(),
             onValueChange = { onChange(settings.copy(contentWidthDp = it.roundToInt().coerceIn(360, 1400))) },
@@ -222,7 +230,10 @@ fun ReaderSettingsSheetContent(
 
         // 字间距 Slider 0..1 step 0.05（20 档 -> steps = 19），吸附到 0.05 步进
         Text(
-            "字间距 ${String.format(java.util.Locale.US, "%.2f", settings.letterSpacing)}",
+            stringResource(
+                R.string.rs_letter_spacing_fmt,
+                String.format(java.util.Locale.US, "%.2f", settings.letterSpacing),
+            ),
             style = MaterialTheme.typography.labelMedium,
         )
         Slider(
@@ -238,16 +249,16 @@ fun ReaderSettingsSheetContent(
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
 
         // ── 段落 ──
-        Section("段落")
+        Section(stringResource(R.string.rs_section_paragraph))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("首行缩进", Modifier.weight(1f))
+            Text(stringResource(R.string.rs_first_line_indent), Modifier.weight(1f))
             Switch(
                 checked = settings.firstLineIndent,
                 onCheckedChange = { onChange(settings.copy(firstLineIndent = it)) },
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("段间距", Modifier.weight(1f))
+            Text(stringResource(R.string.rs_paragraph_spacing), Modifier.weight(1f))
             Switch(
                 checked = settings.paragraphSpacing,
                 onCheckedChange = { onChange(settings.copy(paragraphSpacing = it)) },
@@ -257,8 +268,8 @@ fun ReaderSettingsSheetContent(
         HorizontalDivider(Modifier.padding(vertical = 12.dp))
 
         // ── 行为 ──
-        Section("行为")
-        Text("阅读模式", style = MaterialTheme.typography.labelMedium)
+        Section(stringResource(R.string.rs_section_behavior))
+        Text(stringResource(R.string.rs_reading_mode), style = MaterialTheme.typography.labelMedium)
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -274,7 +285,7 @@ fun ReaderSettingsSheetContent(
         }
         Spacer(Modifier.size(8.dp))
 
-        Text("翻页动画", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.rs_page_turn_animation), style = MaterialTheme.typography.labelMedium)
         val isChapter = settings.readingMode == com.juziss.localmediahub.data.ReadingMode.CHAPTER
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -293,7 +304,7 @@ fun ReaderSettingsSheetContent(
         Spacer(Modifier.size(8.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("沉浸模式", Modifier.weight(1f))
+            Text(stringResource(R.string.rs_immersive_mode), Modifier.weight(1f))
             Switch(
                 checked = settings.immersiveMode,
                 onCheckedChange = { onChange(settings.copy(immersiveMode = it)) },
@@ -302,7 +313,7 @@ fun ReaderSettingsSheetContent(
         Spacer(Modifier.size(8.dp))
 
         // 自动滚动速度 1..10 step 1
-        Text("自动滚动速度 ${settings.autoScrollSpeed}", style = MaterialTheme.typography.labelMedium)
+        Text(stringResource(R.string.rs_autoscroll_speed_fmt, settings.autoScrollSpeed), style = MaterialTheme.typography.labelMedium)
         Slider(
             value = settings.autoScrollSpeed.toFloat(),
             onValueChange = { onChange(settings.copy(autoScrollSpeed = it.roundToInt().coerceIn(1, 10))) },

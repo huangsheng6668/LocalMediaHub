@@ -195,12 +195,12 @@ fun DownloadsScreen(
                             modifier = Modifier.size(64.dp)
                         )
                         Text(
-                            text = "暂无离线下载内容",
+                            text = stringResource(R.string.dl_empty_title),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "您可以在浏览共享媒体库时，长按文件并选择“下载到本地”，以便随时在此离线播放和浏览。",
+                            text = stringResource(R.string.dl_empty_desc),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -225,7 +225,7 @@ fun DownloadsScreen(
                             modifier = Modifier.size(64.dp)
                         )
                         Text(
-                            text = "此文件夹为空",
+                            text = stringResource(R.string.downloads_folder_empty_title),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                         )
@@ -242,7 +242,7 @@ fun DownloadsScreen(
                             ),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("返回上一级文件夹")
+                            Text(stringResource(R.string.dl_back_to_parent))
                         }
                     }
                 }
@@ -334,7 +334,7 @@ fun DownloadsScreen(
             onDismissRequest = { selectedEntryForDelete = null },
             shape = RoundedCornerShape(20.dp),
             title = { Text(stringResource(R.string.downloads_delete_file_title), fontWeight = FontWeight.Bold) },
-            text = { Text("这将从您手机的本地存储中永久删除文件 \"${entry.file.name}\"，该操作不可撤销。") },
+            text = { Text(stringResource(R.string.dl_delete_file_confirm, entry.file.name)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -372,7 +372,7 @@ fun DownloadsScreen(
             onDismissRequest = { selectedFolderForDelete = null },
             shape = RoundedCornerShape(20.dp),
             title = { Text(stringResource(R.string.downloads_delete_folder_title), fontWeight = FontWeight.Bold) },
-            text = { Text("这将从您手机的本地存储中永久删除文件夹 \"$folderName\" 及其包含的 ${folderFiles.size} 个离线媒体文件，该操作不可撤销。") },
+            text = { Text(stringResource(R.string.dl_delete_folder_confirm, folderName, folderFiles.size)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -499,6 +499,10 @@ private fun DownloadItemCard(
         sdf.format(Date(entry.addedAt))
     }
  
+    // Resolved in composition (stringResource is @Composable and cannot run
+    // inside the produceState coroutine below).
+    val unknownSizeText = stringResource(R.string.dl_unknown_size)
+
     val fileSize by produceState(initialValue = "…", entry.localPath) {
         value = withContext(Dispatchers.IO) {
             val file = File(entry.localPath)
@@ -512,7 +516,7 @@ private fun DownloadItemCard(
                     "${sizeBytes / 1024} KB"
                 }
             } else {
-                "未知大小"
+                unknownSizeText
             }
         }
     }
@@ -598,7 +602,7 @@ private fun DownloadItemCard(
                     text = when (entry.file.mediaType) {
                         "video" -> stringResource(R.string.video)
                         "image" -> stringResource(R.string.image)
-                        "text" -> "小说"
+                        "text" -> stringResource(R.string.home_media_type_novel)
                         else -> ""
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -632,7 +636,7 @@ private fun DownloadItemCard(
             IconButton(onClick = onDeleteClick) {
                 Icon(
                     Icons.Filled.Delete,
-                    contentDescription = "删除",
+                    contentDescription = stringResource(R.string.a11y_delete),
                     tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
                 )
             }

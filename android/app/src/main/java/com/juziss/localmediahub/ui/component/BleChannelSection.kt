@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.R
@@ -182,14 +183,17 @@ internal fun BleExperimentalToggleCard(
 ) {
     val canToggle = BleToggleRule.canToggle(hardwareAvailable = hardwareAvailable)
 
-    val statusText = when (connectionState) {
-        BleConnState.DISABLED -> if (hardwareAvailable) "关闭" else "此设备不支持"
-        BleConnState.IDLE -> "待机"
-        BleConnState.ADVERTISING -> "广播中…"
-        BleConnState.CONNECTING -> "连接中…"
-        BleConnState.CONNECTED -> "已连接"
-        BleConnState.DISCONNECTED -> "已断开"
-    }
+    val statusText = stringResource(
+        when (connectionState) {
+            BleConnState.DISABLED ->
+                if (hardwareAvailable) R.string.ble_state_off else R.string.ble_state_unsupported
+            BleConnState.IDLE -> R.string.ble_state_idle
+            BleConnState.ADVERTISING -> R.string.ble_state_advertising
+            BleConnState.CONNECTING -> R.string.ble_state_connecting
+            BleConnState.CONNECTED -> R.string.ble_state_connected
+            BleConnState.DISCONNECTED -> R.string.ble_state_disconnected
+        }
+    )
 
     ElevatedCard(
         shape = RoundedCornerShape(16.dp),
@@ -212,20 +216,20 @@ internal fun BleExperimentalToggleCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "蓝牙稳定通道（实验性）",
+                    text = stringResource(R.string.ble_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "可选的低功耗蓝牙控制通道；不可用时自动退回 Wi-Fi。",
+                    text = stringResource(R.string.ble_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "状态：$statusText",
+                    text = stringResource(R.string.ble_status_fmt, statusText),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (connectionState == BleConnState.CONNECTED)
                         MaterialTheme.colorScheme.primary
@@ -284,13 +288,13 @@ internal fun BleDeviceScanCard(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                text = "BLE 控制通道",
+                text = stringResource(R.string.ble_channel_title),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "通过 PC 服务端建立双向低延迟蓝牙 GATT 控制通道。",
+                text = stringResource(R.string.ble_channel_desc),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -308,13 +312,13 @@ internal fun BleDeviceScanCard(
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("建立 BLE 通道中…")
+                    Text(stringResource(R.string.ble_connecting))
                 } else if (isConnected) {
-                    Text("BLE 通道已建立")
+                    Text(stringResource(R.string.ble_connected))
                 } else {
                     Icon(Icons.Filled.Search, contentDescription = null)
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("一键建立 BLE 控制通道")
+                    Text(stringResource(R.string.ble_connect_btn))
                 }
             }
 
@@ -334,11 +338,11 @@ internal fun BleDeviceScanCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(10.dp),
                 ) {
-                    Text("发送测试 (Ping / Pong)")
+                    Text(stringResource(R.string.ble_send_test))
                 }
                 if (echoResult != null) {
                     Text(
-                        text = "收到回声：$echoResult",
+                        text = stringResource(R.string.ble_echo_fmt, echoResult),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
