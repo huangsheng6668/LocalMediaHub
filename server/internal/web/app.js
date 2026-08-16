@@ -46,14 +46,19 @@ function hideAuthModal() {
     elements.authTokenInput.value = '';
 }
 
-function saveAuthAndRetry() {
+async function saveAuthAndRetry() {
     const token = elements.authTokenInput.value.trim();
     if (!token) return;
     setAuthToken(token);
     hideAuthModal();
-    // Reload to re-trigger the original request with the new token.
+    // Re-drive the current view with the new token instead of a full page
+    // reload: reloading lost the browse position / reader DOM and cost a
+    // second full app bootstrap. loadConfig now succeeds with the header
+    // (delete controls etc. recompute), and handleRoute re-fetches the
+    // current view's data with the token attached.
     if (lastFailedUrl) {
-        window.location.reload();
+        await loadConfig();
+        handleRoute(elements, renderDashboard, loadRoots, browsePath, renderBookmarks, renderSettings);
     }
 }
 
