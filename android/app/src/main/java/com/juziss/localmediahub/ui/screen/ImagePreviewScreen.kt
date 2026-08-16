@@ -61,6 +61,14 @@ fun ImagePreviewScreen(
     }
 
     val context = LocalContext.current
+    // Preload requests decode at the same capped size as the visible item
+    // (ZoomableImageItem), so swiping through large photos does not decode
+    // neighbors at full resolution (memory spike).
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val preloadCap = 2048
+    val preloadWidth = min(with(density) { configuration.screenWidthDp.dp.toPx() }.toInt(), preloadCap)
+    val preloadHeight = min(with(density) { configuration.screenHeightDp.dp.toPx() }.toInt(), preloadCap)
     LaunchedEffect(visibleIndex) {
         if (imageList.isNotEmpty()) {
             val loader = coil3.SingletonImageLoader.get(context)
@@ -69,7 +77,10 @@ fun ImagePreviewScreen(
                 val nextFile = imageList[visibleIndex + 1]
                 val nextUrl = getOriginalUrl(nextFile)
                 if (nextUrl.isNotBlank()) {
-                    val req = coil3.request.ImageRequest.Builder(context).data(nextUrl).build()
+                    val req = coil3.request.ImageRequest.Builder(context)
+                        .data(nextUrl)
+                        .size(preloadWidth, preloadHeight)
+                        .build()
                     loader.enqueue(req)
                 }
             }
@@ -78,7 +89,10 @@ fun ImagePreviewScreen(
                 val prevFile = imageList[visibleIndex - 1]
                 val prevUrl = getOriginalUrl(prevFile)
                 if (prevUrl.isNotBlank()) {
-                    val req = coil3.request.ImageRequest.Builder(context).data(prevUrl).build()
+                    val req = coil3.request.ImageRequest.Builder(context)
+                        .data(prevUrl)
+                        .size(preloadWidth, preloadHeight)
+                        .build()
                     loader.enqueue(req)
                 }
             }
@@ -93,16 +107,19 @@ fun ImagePreviewScreen(
         }
     }
 
-    // Auto-hide top bar: show on tap or scrollbar drag, hide after 3 seconds
+    // Auto-hide top bar: show on tap or scrollbar drag, hide after 3 seconds.
+    // The restart key is a timestamp — the previous boolean-flip hack used a
+    // meaningless variable name and relied on the flip to restart the effect.
     var showTopBar by remember { mutableStateOf(true) }
-    var hideJob by remember { mutableStateOf(true) }
+    var hideTrigger by remember { mutableStateOf(0L) }
 
     fun resetHideTimer() {
         showTopBar = true
-        hideJob = !hideJob // flip to restart LaunchedEffect
+        hideTrigger = System.currentTimeMillis()
     }
 
-    LaunchedEffect(hideJob) {
+    LaunchedEffect(hideTrigger) {
+        if (hideTrigger == 0L) return@LaunchedEffect
         delay(3000)
         showTopBar = false
     }

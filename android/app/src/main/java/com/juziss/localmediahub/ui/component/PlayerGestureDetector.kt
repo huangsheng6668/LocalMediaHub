@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.juziss.localmediahub.R
 import androidx.media3.common.Player
@@ -40,6 +41,18 @@ fun rememberPlayerGestureListener(
     onPlayPauseIndicatorChange: (GestureIndicator) -> Unit,
     onDoubleTapSeek: ((isForward: Boolean, seekSeconds: Int) -> Unit)? = null,
 ): View.OnTouchListener {
+    // The touch listener is keyed only on exoPlayer, so texts/callbacks must
+    // not be frozen at first composition. rememberUpdatedState returns stable
+    // State objects whose .value always reads the latest — capturing them in
+    // the remember(exoPlayer) block below is safe (the State instances never
+    // change identity).
+    val currentPausedText = rememberUpdatedState(pausedText)
+    val currentPlayingText = rememberUpdatedState(playingText)
+    val currentOnSeekStateChange = rememberUpdatedState(onSeekStateChange)
+    val currentOnBrightnessIndicatorChange = rememberUpdatedState(onBrightnessIndicatorChange)
+    val currentOnVolumeIndicatorChange = rememberUpdatedState(onVolumeIndicatorChange)
+    val currentOnPlayPauseIndicatorChange = rememberUpdatedState(onPlayPauseIndicatorChange)
+    val currentOnDoubleTapSeek = rememberUpdatedState(onDoubleTapSeek)
     return remember(exoPlayer) {
         var gestureStartX = 0f
         var gestureStartY = 0f
@@ -148,12 +161,19 @@ fun rememberPlayerGestureListener(
 
                             lastSeekTargetPosition = targetPos
 
-                            currentSeekState = SeekState(
-                                isSeeking = true,
-                                offsetMs = offsetMs,
-                                basePositionMs = initialPlayerPosition
-                            )
-                            onSeekStateChange(currentSeekState)
+                            // Emit only when the seek offset actually changes:
+                            // ACTION_MOVE fires far more often than the
+                            // (density * 2.5)px-per-second quantization steps,
+                            // so identical SeekStates were re-emitted every
+                            // move event, forcing needless recompositions.
+                            if (currentSeekState.offsetMs != offsetMs) {
+                                currentSeekState = SeekState(
+                                    isSeeking = true,
+                                    offsetMs = offsetMs,
+                                    basePositionMs = initialPlayerPosition
+                                )
+                                currentOnSeekStateChange.value(currentSeekState)
+                            }
                         } else {
                             val isLeftHalf = gestureStartX < viewWidth / 2
                             val progress = -dy / viewHeight
@@ -161,7 +181,7 @@ fun rememberPlayerGestureListener(
                             if (isLeftHalf) {
                                 val newBrightness = (brightnessStart + progress).coerceIn(0f, 1f)
                                 setBrightness(ctx, newBrightness)
-                                onBrightnessIndicatorChange(
+                                currentOnBrightnessIndicatorChange.value(
                                     GestureIndicator(
                                         visible = true,
                                         iconResId = R.drawable.ic_brightness_6,
@@ -175,7 +195,7 @@ fun rememberPlayerGestureListener(
                                 val newVol = (volumeStart + delta).coerceIn(0, maxVol)
                                 setVolume(ctx, newVol)
                                 val volProgress = if (maxVol > 0) newVol.toFloat() / maxVol else 0f
-                                onVolumeIndicatorChange(
+                                currentOnVolumeIndicatorChange.value(
                                     GestureIndicator(
                                         visible = true,
                                         iconResId = R.drawable.ic_volume_up,
@@ -196,35 +216,35 @@ fun rememberPlayerGestureListener(
                     if (isDragging) {
                         if (currentSeekState.isSeeking) {
                             currentSeekState = currentSeekState.copy(isSeeking = false)
-                            onSeekStateChange(currentSeekState)
+                            currentOnSeekStateChange.value(currentSeekState)
                         }
                     } else if (event.actionMasked == MotionEvent.ACTION_UP) {
                         val now = System.currentTimeMillis()
                         if (now - lastTapTime < 300) {
                             val x = event.x
                             val width = viewWidth
-                            if (onDoubleTapSeek != null && x < width * 0.35f) {
-                                onDoubleTapSeek(false, 10)
-                            } else if (onDoubleTapSeek != null && x > width * 0.65f) {
-                                onDoubleTapSeek(true, 10)
+                            if (currentOnDoubleTapSeek.value != null && x < width * 0.35f) {
+                                currentOnDoubleTapSeek.value?.invoke(false, 10)
+                            } else if (currentOnDoubleTapSeek.value != null && x > width * 0.65f) {
+                                currentOnDoubleTapSeek.value?.invoke(true, 10)
                             } else {
                                 // Double tap center: toggle play/pause
                                 if (exoPlayer.isPlaying) {
                                     exoPlayer.pause()
-                                    onPlayPauseIndicatorChange(
+                                    currentOnPlayPauseIndicatorChange.value(
                                         GestureIndicator(
                                             visible = true,
                                             iconResId = R.drawable.ic_pause,
-                                            text = pausedText
+                                            text = currentPausedText.value
                                         )
                                     )
                                 } else {
                                     exoPlayer.play()
-                                    onPlayPauseIndicatorChange(
+                                    currentOnPlayPauseIndicatorChange.value(
                                         GestureIndicator(
                                             visible = true,
                                             icon = Icons.Default.PlayArrow,
-                                            text = playingText
+                                            text = currentPlayingText.value
                                         )
                                     )
                                 }
