@@ -162,9 +162,17 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 		}
 	}
 
+	// Server-side sorting mirrors the Android client's BrowseSorter so that
+	// pagination is stable and consecutive pages compose into the exact order
+	// the client used to compute locally. Defaults (sort=name, order=asc)
+	// match the natural readdir order, keeping legacy behavior unchanged.
+	sortField := strings.ToLower(c.QueryParam("sort"))
+	order := strings.ToLower(c.QueryParam("order"))
+	service.SortMediaFiles(files, sortField, order)
+
 	// Optional pagination on the files slice (folders are always returned in
 	// full — they are few and drive navigation). page_size <= 0 = legacy full
-	// return. os.ReadDir sorts entries by filename, so paging is stable.
+	// return.
 	totalFiles := len(files)
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	if page < 1 {

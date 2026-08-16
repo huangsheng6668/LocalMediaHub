@@ -341,3 +341,75 @@ func TestBrowseFolder_Files_SortedByName(t *testing.T) {
 	require.Equal(t, "mid.mp4", files[1].Name)
 	require.Equal(t, "zeta.mp4", files[2].Name)
 }
+
+// TestBrowseFolderSortAndPagination covers the paged load-more contract: the
+// browse endpoint sorts server-side (mirroring the Android client's
+// BrowseSorter) and pages deterministically, so consecutive pages append into
+// the same global order.
+func TestBrowseFolderSortAndPagination(t *testing.T) {
+	root := t.TempDir()
+	// Natural-order names: "2.mp4" < "10.mp4".
+	for _, name := range []string{"10.mp4", "b.mp4", "2.mp4", "a.mp4", "c.mp4"} {
+		require.NoError(t, os.WriteFile(filepath.Join(root, name), []byte("x"), 0o644))
+	}
+
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{root},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+	}
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
+	e := echo.New()
+	e.GET("/api/v1/folders/*", h.BrowseFolder)
+
+	encodedPath := strings.ReplaceAll(url.PathEscape(filepath.ToSlash(root)), "%2F", "/")
+
+	// Page 1 of a name-asc, page_size=2 listing → [2.mp4, 10.mp4], has_more.
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/folders/"+encodedPath+"/browse?sort=name&order=asc&page=1&page_size=2", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var page1 models.BrowseResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page1))
+	require.Len(t, page1.Files, 2)
+	require.Equal(t, "2.mp4", page1.Files[0].Name)
+	require.Equal(t, "10.mp4", page1.Files[1].Name)
+	require.True(t, page1.HasMore)
+
+	// Page 2 → [a.mp4, b.mp4], has_more.
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/folders/"+encodedPath+"/browse?sort=name&order=asc&page=2&page_size=2", nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	var page2 models.BrowseResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page2))
+	require.Len(t, page2.Files, 2)
+	require.Equal(t, "a.mp4", page2.Files[0].Name)
+	require.Equal(t, "b.mp4", page2.Files[1].Name)
+	require.True(t, page2.HasMore)
+
+	// Page 3 → [c.mp4], no more.
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/folders/"+encodedPath+"/browse?sort=name&order=asc&page=3&page_size=2", nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	var page3 models.BrowseResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &page3))
+	require.Len(t, page3.Files, 1)
+	require.Equal(t, "c.mp4", page3.Files[0].Name)
+	require.False(t, page3.HasMore)
+
+	// desc order reverses the same window: page 1 = [c.mp4, b.mp4].
+	req = httptest.NewRequest(http.MethodGet,
+		"/api/v1/folders/"+encodedPath+"/browse?sort=name&order=desc&page=1&page_size=2", nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	var pageDesc models.BrowseResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &pageDesc))
+	require.Len(t, pageDesc.Files, 2)
+	require.Equal(t, "c.mp4", pageDesc.Files[0].Name)
+	require.Equal(t, "b.mp4", pageDesc.Files[1].Name)
+}
