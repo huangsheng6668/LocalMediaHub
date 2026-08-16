@@ -82,6 +82,8 @@ data class SystemBrowseResult(
     val drives: List<String>? = null,
     val folders: List<Folder>,
     val files: List<MediaFile>,
+    @SerializedName("has_more")
+    val hasMore: Boolean = false,
 )
 
 /**

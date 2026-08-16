@@ -172,6 +172,10 @@ internal fun BrowseStateContent(
                     isSelected = isSelected,
                     videoEnabled = videoEnabled,
                     onVideoDisabledClick = onVideoDisabledClick,
+                    // System directories are server-paged like folder browse.
+                    onLoadMore = onLoadMore,
+                    hasMore = hasMore,
+                    loadingMore = loadingMore,
                 )
             }
         }

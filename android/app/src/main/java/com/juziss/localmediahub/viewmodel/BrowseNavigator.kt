@@ -134,14 +134,26 @@ internal class BrowseNavigator(
         sharedState.currentPath.value = absolutePath
         sharedState.isSystemBrowse.value = true
 
-        when (val result = repository.browseSystemPath(absolutePath)) {
+        // System directories are now server-sorted + paged exactly like
+        // folder browse (page 1 reset; append further pages via loadMore).
+        resetPaging()
+        val (sort, order) = sharedState.fileSortOrder.value.serverParams()
+        when (val result = repository.browseSystemPath(
+            absolutePath,
+            sort = sort,
+            order = order,
+            page = 1,
+            pageSize = BROWSE_PAGE_SIZE,
+        )) {
             is NetworkResult.Success -> {
                 recentActivityStore.saveLastBrowseLocation(
                     path = absolutePath,
                     title = folderName,
                     isSystemBrowse = true,
                 )
-                applySystemResult(result.data)
+                _hasMore.value = result.data.hasMore
+                nextPage = 2
+                applySystemResult(result.data, serverSortedFiles = true)
             }
             is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
             is NetworkResult.Loading -> {}
@@ -205,9 +217,19 @@ internal class BrowseNavigator(
                 loadRoots()
             }
         } else if (sharedState.isSystemBrowse.value) {
-            when (val result = repository.browseSystemPath(previousPath)) {
+            resetPaging()
+            val (sort, order) = sharedState.fileSortOrder.value.serverParams()
+            when (val result = repository.browseSystemPath(
+                previousPath,
+                sort = sort,
+                order = order,
+                page = 1,
+                pageSize = BROWSE_PAGE_SIZE,
+            )) {
                 is NetworkResult.Success -> {
-                    applySystemResult(result.data)
+                    _hasMore.value = result.data.hasMore
+                    nextPage = 2
+                    applySystemResult(result.data, serverSortedFiles = true)
                     _restoreScrollTo.value = previousPath
                 }
                 is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
@@ -238,18 +260,57 @@ internal class BrowseNavigator(
     fun canGoBack(): Boolean = sharedState.pathStack.value.isNotEmpty()
 
     /**
-     * Appends the next page of the currently browsed (non-system) directory.
-     * No-op unless the current state is a folder listing with more pages left.
+     * Appends the next page of the currently browsed directory — both the
+     * shared-library folder listings and system-browse directories are
+     * server-sorted + paged. No-op unless the current state is a browsed
+     * listing with more pages left.
      */
     suspend fun loadMore() {
         if (_loadingMore.value || !_hasMore.value) return
-        val state = sharedState.browseState.value as? BrowseState.Browsed ?: return
-        if (sharedState.isSystemBrowse.value) return
         val path = sharedState.currentPath.value
         if (path.isEmpty()) return
-
         _loadingMore.value = true
         val (sort, order) = sharedState.fileSortOrder.value.serverParams()
+
+        if (sharedState.isSystemBrowse.value) {
+            val state = sharedState.browseState.value as? BrowseState.SystemBrowsed ?: run {
+                _loadingMore.value = false
+                return
+            }
+            when (val result = repository.browseSystemPath(
+                path,
+                sort = sort,
+                order = order,
+                page = nextPage,
+                pageSize = BROWSE_PAGE_SIZE,
+            )) {
+                is NetworkResult.Success -> {
+                    val accumulated = sharedState.rawFiles.value + result.data.files
+                    sharedState.rawFiles.value = accumulated
+                    _hasMore.value = result.data.hasMore
+                    nextPage++
+                    sharedState.browseState.value = BrowseState.SystemBrowsed(
+                        SystemBrowseResult(
+                            currentPath = state.result.currentPath,
+                            drives = state.result.drives,
+                            folders = state.result.folders,
+                            files = accumulated,
+                        )
+                    )
+                }
+                is NetworkResult.Error -> {
+                    // Keep the pages already loaded; scrolling again retries.
+                }
+                is NetworkResult.Loading -> {}
+            }
+            _loadingMore.value = false
+            return
+        }
+
+        val state = sharedState.browseState.value as? BrowseState.Browsed ?: run {
+            _loadingMore.value = false
+            return
+        }
         when (val result = repository.browseFolder(
             path,
             sort = sort,
@@ -304,11 +365,13 @@ internal class BrowseNavigator(
     suspend fun setFileSortOrder(order: SortOrder) {
         sharedState.fileSortOrder.value = order
         val state = sharedState.browseState.value
-        // Folder-browse mode is server-sorted + paged: a new order must
-        // re-fetch page 1 with the new key — re-sorting the already-loaded
-        // partial page client-side would scramble the page composition.
-        if (state is BrowseState.Browsed && !sharedState.isSystemBrowse.value &&
-            sharedState.currentPath.value.isNotEmpty()
+        // Folder AND system directories are server-sorted + paged: a new
+        // order must re-fetch page 1 with the new key — re-sorting the
+        // already-loaded partial page client-side would scramble the page
+        // composition. Drives/root views and tag collections keep the legacy
+        // client-side BrowseSorter path.
+        if (sharedState.currentPath.value.isNotEmpty() &&
+            (state is BrowseState.Browsed || state is BrowseState.SystemBrowsed)
         ) {
             refreshCurrentDirectory()
             return
@@ -364,15 +427,21 @@ internal class BrowseNavigator(
         )
     }
 
-    /** 成功的系统浏览结果：存 raw、排序、emit SystemBrowsed。 */
-    private suspend fun applySystemResult(data: SystemBrowseResult) {
+    /** 成功的系统浏览结果：存 raw、（按模式）排序、emit SystemBrowsed。 */
+    private suspend fun applySystemResult(data: SystemBrowseResult, serverSortedFiles: Boolean = false) {
         sharedState.rawFolders.value = data.folders
         sharedState.rawFiles.value = data.files
         val sortedFolders = withContext(Dispatchers.Default) {
             BrowseSorter.sortFolders(data.folders, sharedState.folderSortOrder.value)
         }
-        val sortedFiles = withContext(Dispatchers.Default) {
-            BrowseSorter.sortFiles(data.files, sharedState.fileSortOrder.value)
+        val sortedFiles = if (serverSortedFiles) {
+            // Paged mode: the server already ordered this page (same contract
+            // as applyFolderResult).
+            data.files
+        } else {
+            withContext(Dispatchers.Default) {
+                BrowseSorter.sortFiles(data.files, sharedState.fileSortOrder.value)
+            }
         }
         sharedState.browseState.value = BrowseState.SystemBrowsed(
             SystemBrowseResult(
@@ -411,8 +480,21 @@ internal class BrowseNavigator(
             if (path.isEmpty()) {
                 loadSystemDrives()
             } else {
-                when (val result = repository.browseSystemPath(path, forceNetwork = forceNetwork)) {
-                    is NetworkResult.Success -> applySystemResult(result.data)
+                resetPaging()
+                val (sort, order) = sharedState.fileSortOrder.value.serverParams()
+                when (val result = repository.browseSystemPath(
+                    path,
+                    forceNetwork = forceNetwork,
+                    sort = sort,
+                    order = order,
+                    page = 1,
+                    pageSize = BROWSE_PAGE_SIZE,
+                )) {
+                    is NetworkResult.Success -> {
+                        _hasMore.value = result.data.hasMore
+                        nextPage = 2
+                        applySystemResult(result.data, serverSortedFiles = true)
+                    }
                     is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
                     is NetworkResult.Loading -> {}
                 }

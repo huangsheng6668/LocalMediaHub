@@ -322,10 +322,25 @@ class MediaRepository @Inject constructor(
     suspend fun browseSystemPath(
         path: String,
         forceNetwork: Boolean = false,
-    ): NetworkResult<SystemBrowseResult> =
-        httpGet("$baseUrl/api/v1/system/browse?path=${URLEncoder.encode(path, "UTF-8")}",
+        sort: String? = null,
+        order: String? = null,
+        page: Int = 0,
+        pageSize: Int = 0,
+    ): NetworkResult<SystemBrowseResult> {
+        // Server-side sort + pagination mirror /api/v1/folders/*/browse so the
+        // Android client loads system directories incrementally; no params =
+        // legacy full return.
+        val query = buildList {
+            add("path=${URLEncoder.encode(path, "UTF-8")}")
+            if (!sort.isNullOrEmpty()) add("sort=${URLEncoder.encode(sort, "UTF-8")}")
+            if (!order.isNullOrEmpty()) add("order=${URLEncoder.encode(order, "UTF-8")}")
+            if (page > 0) add("page=$page")
+            if (pageSize > 0) add("page_size=$pageSize")
+        }.joinToString("&")
+        return httpGet("$baseUrl/api/v1/system/browse?$query",
             object : TypeToken<SystemBrowseResult>() {}.type,
             forceNetwork = forceNetwork)
+    }
 
     // ── Health check ──────────────────────────────────────────
 
