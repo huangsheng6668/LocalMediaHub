@@ -49,6 +49,13 @@ type Scanner struct {
 	// 替代遍历 cache["all"] + IsPathWithinRoots 全量过滤。
 	// key = filepath.Clean(dir)；value = 该目录直接子文件（不含子目录的文件）
 	cacheByDir map[string][]models.MediaFile
+
+	// bgRefreshing marks that a background refresh scan (stale-while-revalidate
+	// or explicit TriggerScan) is in flight. Guarded by mu. Prevents every
+	// stale-cache request from cancelling and re-triggering its own full-tree
+	// scan; exactly one refresh runs at a time and completes by overwriting the
+	// cache + cacheTime inside Scan.
+	bgRefreshing bool
 }
 
 func NewScanner(videoExts, imageExts, textExts []string) *Scanner {
@@ -67,7 +74,7 @@ func NewScanner(videoExts, imageExts, textExts []string) *Scanner {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scanner{
 		cache:       make(map[string][]models.MediaFile),
-		cacheTTL:    60 * time.Second,
+		cacheTTL:    5 * time.Minute,
 		videoExts:   vExts,
 		imageExts:   iExts,
 		textExts:    tExts,
@@ -96,11 +103,34 @@ func (s *Scanner) TextExts() map[string]bool {
 // TriggerScan kicks off a background scan bound to the scanner's own lifecycle
 // context (not a request context), so it continues after the triggering HTTP
 // response is sent. Any previously triggered scan is cancelled first so two
-// background scans never run concurrently.
+// background scans never run concurrently. Sets bgRefreshing so
+// refreshInBackground won't start a competing scan while this one runs.
 func (s *Scanner) TriggerScan(roots []string) {
 	// Cancel any in-flight background scan before starting a new one.
 	// s.mu guards bgCtx/bgCancel against concurrent Shutdown/TriggerScan.
 	s.mu.Lock()
+	if s.bgCancel != nil {
+		s.bgCancel()
+	}
+	s.bgCtx, s.bgCancel = context.WithCancel(context.Background())
+	s.bgRefreshing = true
+	ctx := s.bgCtx
+	s.mu.Unlock()
+	go s.Scan(ctx, roots)
+}
+
+// refreshInBackground starts ONE background rescan for the stale-while-
+// revalidate path: when the cache exists but its TTL elapsed, callers serve
+// the snapshot immediately and ask for a refresh here. Exactly one refresh
+// runs at a time — concurrent stale hits reuse the in-flight scan instead of
+// cancelling/restarting it (which would starve completion under load).
+func (s *Scanner) refreshInBackground(roots []string) {
+	s.mu.Lock()
+	if s.bgRefreshing {
+		s.mu.Unlock()
+		return
+	}
+	s.bgRefreshing = true
 	if s.bgCancel != nil {
 		s.bgCancel()
 	}
@@ -242,6 +272,14 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	}
 
 	if err := g.Wait(); err != nil {
+		// Clear the background-refresh marker only if this scan's context is
+		// still the current one (a newer TriggerScan may have replaced it —
+		// in that case the newer scan owns the flag and will clear it).
+		s.mu.Lock()
+		if s.bgCtx == ctx {
+			s.bgRefreshing = false
+		}
+		s.mu.Unlock()
 		return nil, err
 	}
 
@@ -302,6 +340,7 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	s.cacheDirMap = cacheDirMap
 	s.cacheByDir = byDir
 	s.cacheTime = time.Now()
+	s.bgRefreshing = false
 	callback := s.OnScanComplete
 	s.mu.Unlock()
 
@@ -322,21 +361,26 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	return allFiles, nil
 }
 
-// GetCached returns cached scan results if fresh, otherwise triggers a scan.
-// The ctx is forwarded to Scan so a cache-miss scan can be cancelled when the
-// caller (typically a request handler) gives up.
+// GetCached returns cached scan results if present, otherwise triggers a scan.
+//
+// Stale-while-revalidate: a cache older than cacheTTL is still returned (the
+// caller gets an instant answer) and a background refresh is scheduled — the
+// request never blocks on a full-tree walk after the first fill. Only when no
+// cache exists at all (first request, or InvalidateCache wiped it after a
+// delete/fsnotify event) does the call scan synchronously, coalesced via
+// singleflight. The ctx is forwarded to Scan so a cache-miss scan can be
+// cancelled when the caller (typically a request handler) gives up.
 func (s *Scanner) GetCached(ctx context.Context, roots []string) ([]models.MediaFile, error) {
-	s.mu.RLock()
-	cachedValid := time.Since(s.cacheTime) < s.cacheTTL
-	if cachedValid {
-		if files, ok := s.cache["all"]; ok {
-			s.mu.RUnlock()
-			return files, nil
+	files, ok, fresh := s.cachedSnapshot("all")
+	if ok {
+		if !fresh {
+			s.refreshInBackground(roots)
 		}
+		return files, nil
 	}
-	s.mu.RUnlock()
 
-	// Use singleflight to prevent cache stampede
+	// No cache at all: fill synchronously so this caller gets data.
+	// Use singleflight to prevent cache stampede.
 	val, err, _ := s.sf.Do("scan", func() (interface{}, error) {
 		return s.Scan(ctx, roots)
 	})
@@ -346,17 +390,27 @@ func (s *Scanner) GetCached(ctx context.Context, roots []string) ([]models.Media
 	return val.([]models.MediaFile), nil
 }
 
+// cachedSnapshot returns the cached slice for key plus whether it is fresh
+// (ok=false means the entry does not exist / cache was wiped).
+func (s *Scanner) cachedSnapshot(key string) (files []models.MediaFile, ok bool, fresh bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	fresh = time.Since(s.cacheTime) < s.cacheTTL
+	files, ok = s.cache[key]
+	return files, ok, fresh
+}
+
 // GetCachedByType returns the cached scan results filtered to mediaType,
 // triggering a scan on cache miss (shared via singleflight, same as GetCached).
+// Stale (TTL-expired) results are served immediately with a background refresh.
 func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType string) ([]models.MediaFile, error) {
-	s.mu.RLock()
-	if time.Since(s.cacheTime) < s.cacheTTL {
-		if files, ok := s.cache[mediaType]; ok {
-			s.mu.RUnlock()
-			return files, nil
+	files, ok, fresh := s.cachedSnapshot(mediaType)
+	if ok {
+		if !fresh {
+			s.refreshInBackground(roots)
 		}
+		return files, nil
 	}
-	s.mu.RUnlock()
 
 	_, err, _ := s.sf.Do("scan", func() (interface{}, error) {
 		return s.Scan(ctx, roots)
@@ -365,9 +419,8 @@ func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType
 		return nil, err
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if files, ok := s.cache[mediaType]; ok {
+	files, ok, _ = s.cachedSnapshot(mediaType)
+	if ok {
 		return files, nil
 	}
 	return make([]models.MediaFile, 0), nil
@@ -383,23 +436,21 @@ func (s *Scanner) GetCachedByType(ctx context.Context, roots []string, mediaType
 // 排序在拷贝上完成，避免修改 cacheByDir 内部状态与并发读竞争。
 func (s *Scanner) GetCachedByDir(ctx context.Context, roots []string, dir string) ([]models.MediaFile, error) {
 	cleanDir := filepath.Clean(dir)
-	s.mu.RLock()
-	cachedValid := time.Since(s.cacheTime) < s.cacheTTL
-	if cachedValid {
-		if files, ok := s.cacheByDir[cleanDir]; ok {
-			out := make([]models.MediaFile, len(files))
-			copy(out, files)
-			s.mu.RUnlock()
-			sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-			return out, nil
+	files, ok, fresh := s.cachedDirSnapshot(cleanDir)
+	if ok {
+		if !fresh {
+			s.refreshInBackground(roots)
 		}
-		// cache 有效但目录不在 map 中 → 目录确实无媒体文件，返回空切片（不是 nil）
-		if s.cacheByDir != nil {
-			s.mu.RUnlock()
-			return []models.MediaFile{}, nil
-		}
+		return files, nil
 	}
-	s.mu.RUnlock()
+
+	// cacheByDir 已就绪但目录不在 map 中 → 目录确实无媒体文件，返回空切片（不是 nil）
+	if s.hasDirIndex() {
+		if !fresh {
+			s.refreshInBackground(roots)
+		}
+		return []models.MediaFile{}, nil
+	}
 
 	// cache miss → 触发 Scan（singleflight 防击穿）
 	_, err, _ := s.sf.Do("scan", func() (interface{}, error) {
@@ -410,46 +461,79 @@ func (s *Scanner) GetCachedByDir(ctx context.Context, roots []string, dir string
 	}
 
 	// Scan 刚填充了 cacheByDir；读回目标目录
+	files, ok, _ = s.cachedDirSnapshot(cleanDir)
+	if ok {
+		return files, nil
+	}
+	return []models.MediaFile{}, nil
+}
+
+// cachedDirSnapshot returns the (sorted-copy) direct children of cleanDir from
+// cacheByDir plus freshness. ok=false means the directory is absent from the
+// index (either genuinely empty or the cache was wiped).
+func (s *Scanner) cachedDirSnapshot(cleanDir string) (files []models.MediaFile, ok bool, fresh bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if files, ok := s.cacheByDir[cleanDir]; ok {
+	fresh = time.Since(s.cacheTime) < s.cacheTTL
+	if files, ok = s.cacheByDir[cleanDir]; ok {
 		out := make([]models.MediaFile, len(files))
 		copy(out, files)
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-		return out, nil
+		return out, true, fresh
 	}
-	return []models.MediaFile{}, nil
+	return nil, false, fresh
+}
+
+// hasDirIndex reports whether cacheByDir is populated (i.e. at least one scan
+// completed since the last wipe). Guards the "directory exists but is empty"
+// vs "cache was wiped" distinction in GetCachedByDir.
+func (s *Scanner) hasDirIndex() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cacheByDir != nil
 }
 
 // GetCachedDirs 返回已知目录列表，可选按 scope 前缀过滤。
 // scope="" 返回全部；scope="D:/Media" 返回该前缀下的目录。
 // 与 GetCached 共享 TTL + singleflight（cache miss 时触发 Scan 填充 cacheDirs）。
+// Stale（TTL 过期）目录快照同样立即返回，并安排后台刷新。
 // 返回 (dirs, mtimes, error)：mtimes[dir] 为目录 mtime，调用方可查。
 func (s *Scanner) GetCachedDirs(ctx context.Context, roots []string, scope string) ([]string, map[string]time.Time, error) {
-	dirs, mtimes, err := s.peekCachedDirs(scope)
-	if err == nil {
+	dirs, mtimes, ok := s.peekCachedDirs(scope)
+	if ok {
+		s.mu.RLock()
+		stale := time.Since(s.cacheTime) >= s.cacheTTL
+		s.mu.RUnlock()
+		if stale {
+			s.refreshInBackground(roots)
+		}
 		return dirs, mtimes, nil
 	}
 
 	// cache miss → 触发 Scan（singleflight 防击穿）
-	_, err, _ = s.sf.Do("scan", func() (interface{}, error) {
+	_, err, _ := s.sf.Do("scan", func() (interface{}, error) {
 		return s.Scan(ctx, roots)
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return s.peekCachedDirs(scope)
+	dirs, mtimes, ok = s.peekCachedDirs(scope)
+	if !ok {
+		return nil, nil, fmt.Errorf("cache still invalid after scan")
+	}
+	return dirs, mtimes, nil
 }
 
 // peekCachedDirs 持读锁从 cache 读取 scope 范围内的目录 + mtime。
-// cache 无效或为空时返回 error，由 caller 触发 Scan。
-func (s *Scanner) peekCachedDirs(scope string) ([]string, map[string]time.Time, error) {
+// cache 被清空（cacheDirs == nil）时 ok=false，由 caller 触发 Scan；
+// TTL 过期仍返回快照（stale-while-revalidate 由 caller 判定）。
+func (s *Scanner) peekCachedDirs(scope string) ([]string, map[string]time.Time, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if time.Since(s.cacheTime) >= s.cacheTTL || s.cacheDirs == nil {
-		return nil, nil, fmt.Errorf("cache invalid")
+	if s.cacheDirs == nil {
+		return nil, nil, false
 	}
 
 	dirs := s.filterDirsByScope(scope)
@@ -457,7 +541,7 @@ func (s *Scanner) peekCachedDirs(scope string) ([]string, map[string]time.Time, 
 	for _, d := range dirs {
 		mtimes[d] = s.cacheDirMap[d]
 	}
-	return dirs, mtimes, nil
+	return dirs, mtimes, true
 }
 
 // filterDirsByScope 持读锁调用，返回 scope 前缀下的目录。
