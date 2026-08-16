@@ -26,61 +26,46 @@ export async function renderDashboard() {
         renderBookshelfSection(elements.dashboardBookshelf);
     }
 
-    // 1. Fetch total files
-    try {
-        let totalTexts = 0;
-        try {
-            const textsData = await apiRequest(`${state.apiBase}/api/v1/texts?page=1&page_size=1`);
-            totalTexts = textsData.total || 0;
-        } catch (err) {
-            console.error('Fetch text count error:', err);
+    // 1. Fetch totals + recent videos in parallel. Previously these were
+    // awaited serially, so first paint waited ~4 RTTs; Promise.allSettled
+    // collapses them into one round-trip batch with per-request fallbacks.
+    const [textsRes, videosRes, imagesRes, recentRes] = await Promise.allSettled([
+        apiRequest(`${state.apiBase}/api/v1/texts?page=1&page_size=1`),
+        apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=1`),
+        apiRequest(`${state.apiBase}/api/v1/images?page=1&page_size=1`),
+        apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=3`),
+    ]);
+
+    if (textsRes.status === 'rejected') console.error('Fetch text count error:', textsRes.reason);
+    if (videosRes.status === 'rejected') console.error('Fetch video count error:', videosRes.reason);
+    if (imagesRes.status === 'rejected') console.error('Fetch image count error:', imagesRes.reason);
+    if (recentRes.status === 'rejected') console.error('Fetch recent videos error:', recentRes.reason);
+
+    elements.statTexts.textContent = textsRes.status === 'fulfilled' ? (textsRes.value.total || 0) : 0;
+    elements.statVideos.textContent = videosRes.status === 'fulfilled' ? (videosRes.value.total || 0) : 0;
+    elements.statImages.textContent = imagesRes.status === 'fulfilled' ? (imagesRes.value.total || 0) : 0;
+
+    if (recentRes.status === 'fulfilled') {
+        const items = recentRes.value.items || [];
+        state.dashboardRecentFiles = items;
+
+        if (items.length === 0) {
+            elements.dashboardRecent.classList.add('empty-state');
+            elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>'; // XSS-SAFE: hardcoded literal
+        } else {
+            elements.dashboardRecent.classList.remove('empty-state');
+            // XSS-SAFE: map callback returns a template whose only dynamic field (file.name) is wrapped in escapeHtml()
+            elements.dashboardRecent.innerHTML = items.map((file, index) => {
+                return `
+                    <div class="info-item" style="cursor:pointer;" data-action="open-video" data-index="${index}">
+                        <span class="info-label">🎬 ${escapeHtml(file.name)}</span>
+                        <span class="info-value" style="font-size:11px;">${formatSize(file.size)}</span>
+                    </div>
+                `;
+            }).join('');
         }
-
-        let totalVideos = 0;
-        try {
-            const videosData = await apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=1`);
-            totalVideos = videosData.total || 0;
-        } catch (err) {
-            console.error('Fetch video count error:', err);
-        }
-
-        let totalImages = 0;
-        try {
-            const imagesData = await apiRequest(`${state.apiBase}/api/v1/images?page=1&page_size=1`);
-            totalImages = imagesData.total || 0;
-        } catch (err) {
-            console.error('Fetch image count error:', err);
-        }
-
-        elements.statTexts.textContent = totalTexts;
-        elements.statVideos.textContent = totalVideos;
-        elements.statImages.textContent = totalImages;
-
-        // 2. Mock a list of files or load first page of videos/images for recent preview
-        try {
-            const data = await apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=3`);
-            const items = data.items || [];
-            state.dashboardRecentFiles = items;
-
-            if (items.length === 0) {
-                elements.dashboardRecent.classList.add('empty-state');
-                elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>'; // XSS-SAFE: hardcoded literal
-            } else {
-                elements.dashboardRecent.classList.remove('empty-state');
-                // XSS-SAFE: map callback returns a template whose only dynamic field (file.name) is wrapped in escapeHtml()
-                elements.dashboardRecent.innerHTML = items.map((file, index) => {
-                    return `
-                        <div class="info-item" style="cursor:pointer;" data-action="open-video" data-index="${index}">
-                            <span class="info-label">🎬 ${escapeHtml(file.name)}</span>
-                            <span class="info-value" style="font-size:11px;">${formatSize(file.size)}</span>
-                        </div>
-                    `;
-                }).join('');
-            }
-        } catch (err) {
-            elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>'; // XSS-SAFE: hardcoded literal
-        }
-    } catch (e) {
+    } else {
+        elements.dashboardRecent.classList.add('empty-state');
         elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>'; // XSS-SAFE: hardcoded literal
     }
 }

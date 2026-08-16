@@ -156,6 +156,8 @@ func (s *ThumbnailService) videoDuration(sourcePath string) (float64, bool) {
 
 // videoDurationCached 是 videoDuration 的缓存版本：先查内存 durCache（读锁），
 // miss 时 fork ffprobe 并写回 durCache（写锁）+ 标记 dirty 触发防抖落盘。
+// miss 路径经 singleflight 合并：多个播放器并发请求同一未缓存视频时长时只
+// fork 一次 ffprobe（与 generateBytesVia 的缩略图路径同款去重）。
 // os.Stat 失败时 fallback 到原 videoDuration（无缓存），与历史行为一致。
 func (s *ThumbnailService) videoDurationCached(sourcePath string) (float64, bool) {
 	fi, err := os.Stat(sourcePath)
@@ -171,14 +173,30 @@ func (s *ThumbnailService) videoDurationCached(sourcePath string) (float64, bool
 	}
 	s.durMu.RUnlock()
 
-	d, ok := s.videoDuration(sourcePath)
-	if ok {
+	v, err, _ := s.sf.Do("dur:"+key, func() (interface{}, error) {
+		// Double-check inside the singleflight body: a fill may have landed
+		// between the RUnlock above and this Do execution.
+		s.durMu.RLock()
+		if entry, ok := s.durCache[key]; ok {
+			s.durMu.RUnlock()
+			return entry.Duration, nil
+		}
+		s.durMu.RUnlock()
+
+		d, ok := s.videoDuration(sourcePath)
+		if !ok {
+			return float64(0), fmt.Errorf("ffprobe failed for %s", sourcePath)
+		}
 		s.durMu.Lock()
 		s.durCache[key] = durationEntry{Duration: d, ModTime: fi.ModTime()}
 		s.markDurDirty()
 		s.durMu.Unlock()
+		return d, nil
+	})
+	if err != nil {
+		return 0, false
 	}
-	return d, ok
+	return v.(float64), true
 }
 
 // VideoDuration 是 videoDurationCached 的导出版本，供 handler 层
