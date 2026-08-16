@@ -92,3 +92,40 @@ func TestGlobalTxtCache(t *testing.T) {
 		t.Errorf("expected err %v, got %v", errErr, err)
 	}
 }
+
+// TestGlobalTxtCacheRunes verifies the runes variant shares the same cache
+// entry as GetOrLoad (one load + one rune conversion total) and slices
+// correctly — the regression this guards: every chapter request used to
+// re-run []rune(text) over the whole book.
+func TestGlobalTxtCacheRunes(t *testing.T) {
+	cache := &txtCache{
+		entries: make(map[string]*txtCacheEntry),
+		maxCap:  4,
+	}
+	mt := time.Date(2025, 2, 2, 0, 0, 0, 0, time.UTC)
+	loads := 0
+	loadFn := func() (string, string, error) {
+		loads++
+		return "第一章\n\nbody\n", "UTF-8", nil
+	}
+
+	_, _, err := cache.GetOrLoad("book.txt", mt, loadFn)
+	if err != nil {
+		t.Fatalf("GetOrLoad: %v", err)
+	}
+	_, runes, err := cache.GetOrLoadRunes("book.txt", mt, loadFn)
+	if err != nil {
+		t.Fatalf("GetOrLoadRunes: %v", err)
+	}
+	if loads != 1 {
+		t.Fatalf("expected exactly one load across both variants, got %d", loads)
+	}
+	if string(runes) != "第一章\n\nbody\n" {
+		t.Fatalf("runes mismatch: %q", string(runes))
+	}
+
+	blocks := GetChapterBlocksFromRunes(runes, 3, len(runes)) // skip "第一章"
+	if len(blocks) != 1 || blocks[0].Value != "body" {
+		t.Fatalf("unexpected blocks: %+v", blocks)
+	}
+}

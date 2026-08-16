@@ -343,7 +343,7 @@ func (b *Book) txtChapterBlocks(idx int) ([]Block, error) {
 		return nil, fmt.Errorf("chapter index out of range: %d", idx)
 	}
 	c := b.Chapters[idx]
-	text, _, err := globalTxtCache.GetOrLoad(b.Path, b.ModTime, func() (string, string, error) {
+	_, runes, err := globalTxtCache.GetOrLoadRunes(b.Path, b.ModTime, func() (string, string, error) {
 		raw, err := os.ReadFile(b.Path)
 		if err != nil {
 			return "", "", fmt.Errorf("%w: %v", ErrIoFailure, err)
@@ -354,5 +354,5 @@ func (b *Book) txtChapterBlocks(idx int) ([]Block, error) {
 	if err != nil {
 		return nil, err
 	}
-	return GetChapterBlocksFromText(text, c.CharStart, c.CharEnd), nil
+	return GetChapterBlocksFromRunes(runes, c.CharStart, c.CharEnd), nil
 }
