@@ -28,11 +28,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import kotlin.math.min
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.ui.component.VerticalScrollbar
 import kotlinx.coroutines.delay
@@ -135,7 +137,7 @@ fun ImagePreviewScreen(
             )
         }
 
-        // Top bar — auto-hide with fade animation
+        // Top bar 鈥?auto-hide with fade animation
         AnimatedVisibility(
             visible = showTopBar,
             enter = fadeIn(),
@@ -155,7 +157,7 @@ fun ImagePreviewScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.a11y_back),
                             tint = Color.White,
                         )
                     }
@@ -229,7 +231,7 @@ private fun ZoomableImageItem(
                         }
                     } while (event.changes.any { it.pressed })
 
-                    // Simple tap (no zoom/pan) → toggle top bar
+                    // Simple tap (no zoom/pan) 鈫?toggle top bar
                     if (!hasMoved) {
                         onTap()
                     }

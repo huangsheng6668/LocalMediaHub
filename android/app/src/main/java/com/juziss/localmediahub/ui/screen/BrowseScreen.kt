@@ -167,7 +167,7 @@ fun BrowseScreen(
                 TopAppBar(
                     title = {
                         Text(
-                            text = "已选择 ${selectedFiles.size} 项",
+                            text = stringResource(R.string.browse_selected_count, selectedFiles.size),
                             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                         )
                     },
@@ -178,7 +178,7 @@ fun BrowseScreen(
                         }) {
                             Icon(
                                 imageVector = Icons.Filled.Close,
-                                contentDescription = "取消选择"
+                                contentDescription = stringResource(R.string.browse_cancel_selection)
                             )
                         }
                     },
@@ -199,7 +199,7 @@ fun BrowseScreen(
                                 }
                             }) {
                                 Text(
-                                    text = if (isAllSelected) "取消全选" else "全选",
+                                    text = stringResource(if (isAllSelected) R.string.browse_deselect_all else R.string.browse_select_all),
                                     color = if (isAllSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -280,7 +280,7 @@ fun BrowseScreen(
                                     MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
                                 )
                             ) {
-                                Text("删除所选")
+                                Text(stringResource(R.string.browse_delete_selected))
                             }
                             Button(
                                 onClick = {
@@ -292,7 +292,7 @@ fun BrowseScreen(
                                 },
                                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                             ) {
-                                Text("下载所选")
+                                Text(stringResource(R.string.browse_download_selected))
                             }
                         }
                     }
@@ -441,7 +441,7 @@ fun BrowseScreen(
         if (showBatchDeleteConfirm) {
             AlertDialog(
                 onDismissRequest = { showBatchDeleteConfirm = false },
-                title = { Text("确认删除") },
+                title = { Text(stringResource(R.string.browse_confirm_delete_title)) },
                 text = { Text("确认要从服务器上删除这 ${selectedFiles.size} 个选中的媒体文件吗？此操作不可撤销。") },
                 confirmButton = {
                     TextButton(

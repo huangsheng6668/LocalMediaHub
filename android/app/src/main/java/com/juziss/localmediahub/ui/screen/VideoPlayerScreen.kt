@@ -518,7 +518,11 @@ fun VideoPlayerScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = formatSeekOffset(seekState.offsetMs),
+                        text = formatSeekOffset(
+                            seekState.offsetMs,
+                            stringResource(R.string.video_seek_min),
+                            stringResource(R.string.video_seek_sec),
+                        ),
                         color = Color.White,
                         fontSize = 16.sp
                     )
@@ -693,14 +697,14 @@ fun VideoPlayerScreen(
     }
 }
 
-private fun formatSeekOffset(offsetMs: Long): String {
+private fun formatSeekOffset(offsetMs: Long, minUnit: String, secUnit: String): String {
     val seconds = abs(offsetMs) / 1000
     val sign = if (offsetMs >= 0) "+" else "-"
     return if (seconds >= 60) {
         val min = seconds / 60
         val sec = seconds % 60
-        "$sign${min}分${sec}秒"
+        "$sign${min}$minUnit${sec}$secUnit"
     } else {
-        "$sign${seconds}秒"
+        "$sign${seconds}$secUnit"
     }
 }

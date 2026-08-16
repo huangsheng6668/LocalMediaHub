@@ -150,6 +150,25 @@
     <string name="downloads_folder_empty_title">此文件夹为空</string>
     <string name="downloads_folder_empty_desc">该目录下还没有任何媒体文件</string>
 
+    <!-- ── Browse selection mode ───────────────────────────── -->
+    <string name="browse_selected_count">已选择 %1$d 项</string>
+    <string name="browse_cancel_selection">取消选择</string>
+    <string name="browse_select_all">全选</string>
+    <string name="browse_deselect_all">取消全选</string>
+    <string name="browse_delete_selected">删除所选</string>
+    <string name="browse_download_selected">下载所选</string>
+    <string name="browse_confirm_delete_title">确认删除</string>
+
+    <!-- ── Video player ────────────────────────────────────── -->
+    <string name="video_seek_min">分</string>
+    <string name="video_seek_sec">秒</string>
+    <string name="media_unsupported_badge">暂不支持</string>
+
+    <!-- ── Accessibility ───────────────────────────────────── -->
+    <string name="a11y_selected">已选择</string>
+    <string name="a11y_drive">磁盘</string>
+    <string name="a11y_back">返回</string>
+
     <!-- ── Video player ────────────────────────────────────── -->
     <string name="video_paused">已暂停</string>
     <string name="video_playing">播放中</string>

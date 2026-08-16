@@ -1,4 +1,4 @@
-package com.juziss.localmediahub.ui.component
+﻿package com.juziss.localmediahub.ui.component
  
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -131,7 +131,7 @@ internal fun VideoCard(
     onLongClick: () -> Unit = {},
     isSelected: Boolean = false,
     /**
-     * Task 5 §1.3: when false (BLE degraded mode is active), the card renders
+     * Task 5 搂1.3: when false (BLE degraded mode is active), the card renders
      * greyed (alpha 0.4) and its click is routed to [onDisabledClick] instead
      * of [onClick]. The screen wires [onDisabledClick] to a Snackbar showing
      * [R.string.ble_video_disabled_message]. Defaults to true so all existing
@@ -149,7 +149,7 @@ internal fun VideoCard(
         modifier = Modifier
             .fillMaxWidth()
             // Grey-out the entire card (thumbnail + text + favorite toggle)
-            // when BLE degraded mode is active — spec §1.3.
+            // when BLE degraded mode is active 鈥?spec 搂1.3.
             .alpha(if (enabled) 1f else 0.4f)
             .combinedClickable(
                 onClick = cardClick,
@@ -256,7 +256,7 @@ internal fun VideoCard(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Filled.Done,
-                            contentDescription = "Selected",
+                            contentDescription = stringResource(R.string.a11y_selected),
                             tint = Color.White,
                             modifier = Modifier.size(16.dp)
                         )
@@ -351,7 +351,7 @@ internal fun ImageCard(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Filled.Done,
-                            contentDescription = "Selected",
+                            contentDescription = stringResource(R.string.a11y_selected),
                             tint = Color.White,
                             modifier = Modifier.size(16.dp)
                         )
@@ -364,7 +364,7 @@ internal fun ImageCard(
 
 /**
  * Card for mediaType="text" files. Renders a document icon plus the file name
- * and an optional "暂不支持" badge when the format is one the reader cannot
+ * and an optional "鏆備笉鏀寔" badge when the format is one the reader cannot
  * open (e.g. .mobi, .azw3). The favorite toggle and selection overlay mirror
  * VideoCard / ImageCard so existing multi-select flows work unchanged.
  */
@@ -428,7 +428,7 @@ internal fun TextCard(
                         shape = RoundedCornerShape(8.dp),
                     ) {
                         Text(
-                            text = "暂不支持",
+                            text = "鏆備笉鏀寔",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.surface,
@@ -459,7 +459,7 @@ internal fun TextCard(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Filled.Done,
-                            contentDescription = "Selected",
+                            contentDescription = stringResource(R.string.a11y_selected),
                             tint = Color.White,
                             modifier = Modifier.size(16.dp),
                         )

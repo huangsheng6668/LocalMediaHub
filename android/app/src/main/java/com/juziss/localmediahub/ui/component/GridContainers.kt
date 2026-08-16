@@ -1,4 +1,4 @@
-package com.juziss.localmediahub.ui.component
+﻿package com.juziss.localmediahub.ui.component
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -125,7 +125,7 @@ internal fun WaterfallImageGrid(
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Filled.Done,
-                                    contentDescription = "Selected",
+                                    contentDescription = stringResource(R.string.a11y_selected),
                                     tint = Color.White,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -225,7 +225,7 @@ internal fun SystemDrivesContent(
                         ) {
                             Icon(
                                 painterResource(R.drawable.ic_storage),
-                                contentDescription = "Drive",
+                                contentDescription = stringResource(R.string.a11y_drive),
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.primary,
                             )
