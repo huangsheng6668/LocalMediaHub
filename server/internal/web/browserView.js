@@ -281,14 +281,17 @@ export function renderBrowserList() {
         if (isVideo) {
             const videoThumbUrl = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/thumbnail`;
             const videoUrl = state.isSystemBrowse ? thumbUrl : videoThumbUrl;
-            previewHtml = `<img src="${escapeHtml(videoUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}">`;
+            // loading=lazy + decoding=async: off-screen cards defer their
+            // thumbnail fetch/decode instead of storming the server with one
+            // request per card the moment the grid is injected.
+            previewHtml = `<img src="${escapeHtml(videoUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}" loading="lazy" decoding="async">`;
             playOverlay = `
                 <div class="play-overlay">
                     <div class="play-button-circle">▶</div>
                 </div>
             `;
         } else {
-            previewHtml = `<img src="${escapeHtml(thumbUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}">`;
+            previewHtml = `<img src="${escapeHtml(thumbUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}" loading="lazy" decoding="async">`;
         }
 
         const cardClass = 'media-card';

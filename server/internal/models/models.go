@@ -24,6 +24,9 @@ type BrowseResult struct {
 	CurrentPath string      `json:"current_path"`
 	Folders     []Folder    `json:"folders"`
 	Files       []MediaFile `json:"files"`
+	// HasMore is set when a page_size was requested and more files remain
+	// beyond the returned page (drives clients' load-more loops).
+	HasMore bool `json:"has_more,omitempty"`
 }
 
 type PaginatedMediaFiles struct {

@@ -43,6 +43,8 @@ data class BrowseResult(
     val currentPath: String,
     val folders: List<Folder>,
     val files: List<MediaFile>,
+    @SerializedName("has_more")
+    val hasMore: Boolean = false,
 )
 
 /**

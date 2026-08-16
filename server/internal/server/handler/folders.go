@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -86,6 +87,17 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 			return respondInternalError(c, err)
 		}
 
+		// Optional pagination (page_size <= 0 = legacy full return; the
+		// deterministic Name ordering makes paging stable across requests).
+		if pageSize, _ := strconv.Atoi(c.QueryParam("page_size")); pageSize > 0 {
+			page, _ := strconv.Atoi(c.QueryParam("page"))
+			if page < 1 {
+				page = 1
+			}
+			start, end := paginateBounds(len(matchedFiles), page, pageSize)
+			matchedFiles = matchedFiles[start:end]
+		}
+
 		setJsonCacheBrief(c)
 		return c.JSON(http.StatusOK, matchedFiles)
 	}
@@ -162,11 +174,26 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 		}
 	}
 
+	// Optional pagination on the files slice (folders are always returned in
+	// full — they are few and drive navigation). page_size <= 0 = legacy full
+	// return. os.ReadDir sorts entries by filename, so paging is stable.
+	totalFiles := len(files)
+	page, _ := strconv.Atoi(c.QueryParam("page"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	if pageSize > 0 {
+		start, end := paginateBounds(len(files), page, pageSize)
+		files = files[start:end]
+	}
+
 	setJsonCacheBrief(c)
 	return c.JSON(http.StatusOK, models.BrowseResult{
 		CurrentPath: pathStr,
 		Folders:     folders,
 		Files:       files,
+		HasMore:     pageSize > 0 && page*pageSize < totalFiles,
 	})
 }
 
