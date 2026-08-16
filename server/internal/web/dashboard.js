@@ -57,9 +57,9 @@ export async function renderDashboard() {
             // XSS-SAFE: map callback returns a template whose only dynamic field (file.name) is wrapped in escapeHtml()
             elements.dashboardRecent.innerHTML = items.map((file, index) => {
                 return `
-                    <div class="info-item" style="cursor:pointer;" data-action="open-video" data-index="${index}">
+                    <div class="info-item dashboard-recent-item" data-action="open-video" data-index="${index}">
                         <span class="info-label">🎬 ${escapeHtml(file.name)}</span>
-                        <span class="info-value" style="font-size:11px;">${formatSize(file.size)}</span>
+                        <span class="info-value dashboard-recent-size">${formatSize(file.size)}</span>
                     </div>
                 `;
             }).join('');

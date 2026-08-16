@@ -121,7 +121,7 @@ export function renderSettings(container) {
 
                 <section class="reader-settings__group">
                     <h4>行为</h4>
-                    <div class="reader-settings__row" style="margin-bottom: 8px;">
+                    <div class="reader-settings__row reader-settings__row--mb8">
                         <span>阅读模式</span>
                         <div class="reader-settings__font-row">
                             ${READING_MODE_OPTIONS.map(([v, label]) =>
@@ -129,7 +129,7 @@ export function renderSettings(container) {
                             ).join('')}
                         </div>
                     </div>
-                    <div class="reader-settings__row" style="margin-bottom: 8px;">
+                    <div class="reader-settings__row reader-settings__row--mb8">
                         <span>翻页动画</span>
                         <div class="reader-settings__font-row" id="pageTurnRow">
                             ${PAGE_TURN_OPTIONS.map(([v, label]) =>

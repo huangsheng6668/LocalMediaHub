@@ -193,8 +193,8 @@
 
                 <!-- Bookmarks Manager View -->
                 <section id="view-bookmarks" class="view-section">
-                    <div class="bookmarks-manager-container" style="padding: 24px max(24px, calc((100% - 800px) / 2));">
-                        <h2 style="margin-bottom:20px; font-size:22px; font-weight:600; color:var(--text-white);">我的书签</h2>
+                    <div class="bookmarks-manager-container">
+                        <h2 class="bookmarks-manager-title">我的书签</h2>
                         <div class="bookmarks-manager-list" id="bookmarks-manager-list">
                             <!-- Bookmarks injected here -->
                         </div>
@@ -209,7 +209,7 @@
                         <h2>外观与主题</h2>
                         <div class="form-group">
                             <label>应用全局主题</label>
-                            <div class="reader-settings__theme-grid" id="settings-global-theme-grid" style="grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); margin-top: 10px;">
+                            <div class="reader-settings__theme-grid settings-global-theme-grid" id="settings-global-theme-grid">
                                 <!-- Theme Swatches injected by settings.js -->
                             </div>
                         </div>
@@ -269,7 +269,7 @@
             <div class="modal-header">
                 <span class="modal-title" id="video-modal-title">视频播放器</span>
                 <div class="modal-actions">
-                    <button class="btn" id="btn-video-delete" style="display: none; background-color: var(--error); border-color: transparent; margin-right: 8px; font-size: 12px; padding: 6px 12px; color: var(--text-white);">🗑️ 删除</button>
+                    <button class="btn video-delete-btn" id="btn-video-delete">🗑️ 删除</button>
                     <button class="btn btn-transcode" id="btn-video-transcode">原画</button>
                     <button class="btn-close" id="btn-close-video-modal">✕</button>
                 </div>

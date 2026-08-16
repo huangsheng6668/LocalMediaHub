@@ -13,8 +13,10 @@ import (
 //   - Content-Security-Policy        → restricts resource loading to self (T4-04);
 //     provides defense-in-depth against XSS even if escapeHtml is missed somewhere
 //
-// TODO(Phase 5): once Web UI inline styles are migrated to external CSS,
-// remove 'unsafe-inline' from style-src for full CSP strictness.
+// style-src no longer carries 'unsafe-inline': every inline style="" attribute
+// was migrated to CSS classes (see style.css "CSP-safe replacements" section),
+// and dynamic styling goes through CSSOM property assignment, which CSP does
+// not block.
 //
 // Not added (intentional):
 //   - Strict-Transport-Security: only effective under HTTPS; TLS is deferred
@@ -30,7 +32,7 @@ func SecurityHeaders() echo.MiddlewareFunc {
 			h.Set("Content-Security-Policy",
 				"default-src 'self'; "+
 					"script-src 'self'; "+
-					"style-src 'self' 'unsafe-inline'; "+
+					"style-src 'self'; "+
 					"img-src 'self' data:; "+
 					"media-src 'self'; "+
 					"connect-src 'self'")

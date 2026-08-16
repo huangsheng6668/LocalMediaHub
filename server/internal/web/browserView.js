@@ -49,10 +49,10 @@ export async function loadRoots() {
     if (!state.folders || state.folders.length === 0) {
         // XSS-SAFE: pure-literal template, no interpolation
         elements.browserList.innerHTML = `
-            <div style="grid-column: 1/-1; text-align: center; padding: 48px; color: var(--text-muted);">
+            <div class="browser-empty-grid">
                 <h3>未配置扫描共享目录</h3>
-                <p style="margin-top:8px;">将在下方列出自动发现的 Windows 磁盘分区</p>
-                <button class="btn btn-primary" style="margin-top:16px;" id="btn-browse-drives">浏览磁盘驱动器</button>
+                <p>将在下方列出自动发现的 Windows 磁盘分区</p>
+                <button class="btn btn-primary btn-browse-drives" id="btn-browse-drives">浏览磁盘驱动器</button>
             </div>
         `;
         document.getElementById('btn-browse-drives')?.addEventListener('click', loadSystemDrives);
@@ -110,7 +110,7 @@ export async function loadSystemDrives() {
                 `;
             }).join('');
         } else {
-            elements.browserList.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:48px;">无法获取本地磁盘，可能未在 config.yaml 启用 system.allowed_roots</div>'; // XSS-SAFE: hardcoded literal
+            elements.browserList.innerHTML = '<div class="browser-status-note">无法获取本地磁盘，可能未在 config.yaml 启用 system.allowed_roots</div>'; // XSS-SAFE: hardcoded literal
         }
     } catch (e) {
         showToast('获取系统磁盘盘符失败: ' + e.message, 'error');
@@ -134,7 +134,7 @@ export async function browsePath(path, bypassCache = false) {
         url += `${url.includes('?') ? '&' : '?'}_t=${Date.now()}`;
     }
 
-    elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">正在读取目录结构...</div>'; // XSS-SAFE: hardcoded literal
+    elements.browserList.innerHTML = '<div class="browser-status-note">正在读取目录结构...</div>'; // XSS-SAFE: hardcoded literal
 
     try {
         const data = await apiRequest(url);
@@ -215,7 +215,7 @@ export function renderBrowserList() {
     state.currentFiles = sortMediaItems(state.currentFiles, state.sortField, state.sortOrder, false);
 
     if (state.currentFolders.length === 0 && state.currentFiles.length === 0) {
-        elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px; color: var(--text-muted);">📁 当前目录为空（无媒体文件）</div>'; // XSS-SAFE: hardcoded literal
+        elements.browserList.innerHTML = '<div class="browser-empty-grid">📁 当前目录为空（无媒体文件）</div>'; // XSS-SAFE: hardcoded literal
         return;
     }
 
@@ -261,7 +261,7 @@ export function renderBrowserList() {
             const safeName = escapeHtml(file.name);
             const safeExt = escapeHtml(file.extension);
             const unsupportedBadge = isUnsupportedText
-                ? '<span class="card-badge" style="background-color: rgba(239,68,68,0.2); color: #fca5a5;">暂不支持</span>'
+                ? '<span class="card-badge card-badge--unsupported">暂不支持</span>'
                 : '';
             html += `
                 <div class="media-card text-card ${isUnsupportedText ? 'text-card--unsupported' : ''}"
@@ -387,7 +387,7 @@ async function triggerBrowserSearch() {
         return;
     }
 
-    elements.browserList.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:48px;">全局模糊匹配检索中...</div>'; // XSS-SAFE: hardcoded literal
+    elements.browserList.innerHTML = '<div class="browser-status-note">全局模糊匹配检索中...</div>'; // XSS-SAFE: hardcoded literal
 
     try {
         const url = `${state.apiBase}/api/v1/search?q=${encodeURIComponent(query)}&path=${encodeURIComponent(state.currentPath)}`;

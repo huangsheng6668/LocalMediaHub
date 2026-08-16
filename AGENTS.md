@@ -76,7 +76,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - **注意**：`state.js` / `settings.js` 是全局 app 模块，**勿与** `reader-state.js` / `reader-settings.js` 混淆
 - **测试**：`node --test`（用 `.test.mjs` 扩展名 + jsdom，详见 [测试与验证](#测试与验证)）
 - **Token 集成**：`api.js` 的 `apiRequest()` 自动注入 Bearer header + 401 事件 → `app.js` 弹 token modal；sessionStorage 持久化
-- **CSP 兼容**：无 inline `<script>`；inline `style=` 暂留 `'unsafe-inline'`
+- **CSP 兼容**：无 inline `<script>`、无 inline `style="..."` 属性（已全量迁移为 CSS 类，`style-src 'self'` 不含 `'unsafe-inline'`；动态样式走 CSSOM 属性赋值）
 - **无构建步骤**，跟随 server 静态服务
 
 ### Rust 原生解码
@@ -229,9 +229,9 @@ node --test
 - `X-Frame-Options: DENY`
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: no-referrer`
-- `Content-Security-Policy`: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'`
+- `Content-Security-Policy`: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'`
 - 中间件**必须在 CORS 之前挂载**
-- 已知 TODO: `style 'unsafe-inline'` 待 Web UI XSS 整改后移除
+- 新增 inline `style="..."` 属性会破坏 CSP（`style-src 'self'` 无 `'unsafe-inline'`）——必须放进 CSS 类；动态样式用 `el.style.prop =`（CSSOM 不受限）
 
 ### APK 签名守卫（Phase 7）
 

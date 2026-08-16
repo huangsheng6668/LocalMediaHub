@@ -2920,3 +2920,66 @@ dialog#reader-settings-dialog::backdrop {
     margin-left: auto;
 }
 
+
+/* ══ CSP-safe replacements for former inline style="" attributes ══
+   (style-src 'unsafe-inline' was removed — these classes carry the old
+   per-element styles) */
+
+.browser-empty-grid {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 48px;
+    color: var(--text-muted);
+}
+.browser-empty-grid p { margin-top: 8px; }
+.browser-empty-grid .btn-browse-drives { margin-top: 16px; }
+
+.browser-status-note {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 48px;
+}
+
+.card-badge--unsupported {
+    background-color: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+}
+
+.dashboard-recent-item { cursor: pointer; }
+.dashboard-recent-size { font-size: 11px; }
+
+.bookmarks-manager-container {
+    padding: 24px max(24px, calc((100% - 800px) / 2));
+}
+.bookmarks-manager-title {
+    margin-bottom: 20px;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-white);
+}
+.bookmarks-empty-state {
+    padding: 48px;
+    text-align: center;
+    background-color: var(--surface-card);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.settings-global-theme-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    margin-top: 10px;
+}
+
+.video-delete-btn {
+    display: none;
+    background-color: var(--error);
+    border-color: transparent;
+    margin-right: 8px;
+    font-size: 12px;
+    padding: 6px 12px;
+    color: var(--text-white);
+}
+
+.reader-settings__row--mb8 { margin-bottom: 8px; }

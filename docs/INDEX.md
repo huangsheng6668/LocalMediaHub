@@ -165,11 +165,10 @@
 | `X-Frame-Options` | `DENY` | Clickjacking |
 | `X-Content-Type-Options` | `nosniff` | MIME 嗅探 |
 | `Referrer-Policy` | `no-referrer` | 外链泄漏 |
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; media-src 'self'; connect-src 'self'` | XSS 数据 exfiltration |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'` | XSS 数据 exfiltration |
 
 ### 当前已知 TODO
 
-- CSP `style 'unsafe-inline'` 待 Web UI XSS 整改后移除
 - HSTS 仅 HTTPS 下有效，TLS 留作未来
 - Permissions-Policy 项目暂不需要（不用相机/麦克风/地理位置）
 
@@ -285,8 +284,8 @@
 ### CSP 兼容要点
 
 - 无 inline `<script>`（`script-src 'self'`）
-- inline `style="..."` 属性暂留 `'unsafe-inline'`（待 Phase 5 Web UI XSS 整改）
-- 无 `data:` URI 例外
+- 无 inline `style="..."` 属性（已全部迁移为 CSS 类，`style-src 'self'` 不含 `'unsafe-inline'`；动态样式一律走 CSSOM 属性赋值）
+- 图片 `data:` URI 白名单保留（`img-src 'self' data:`）
 - 无 Google Fonts CDN（Phase 4 fixup 已移除，改用本地嵌入字体 LXGW WenKai + Noto Serif SC）
 
 ### 相关 spec/plan
