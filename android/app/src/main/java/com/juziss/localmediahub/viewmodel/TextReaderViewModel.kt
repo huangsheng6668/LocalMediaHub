@@ -2,6 +2,8 @@ package com.juziss.localmediahub.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.content.Context
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Block
 import com.juziss.localmediahub.data.Book
 import com.juziss.localmediahub.data.BookProgress
@@ -10,11 +12,13 @@ import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.network.NetworkResult
+import com.juziss.localmediahub.network.userText
 import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.LocalBookRepository
 import com.juziss.localmediahub.data.BookChapterContent
 import kotlinx.coroutines.flow.firstOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +28,7 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class TextReaderViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val repo: MediaRepository,
     private val store: RecentActivityStore,
     private val localBookRepo: LocalBookRepository,
@@ -142,7 +147,7 @@ class TextReaderViewModel @Inject constructor(
                             return@launch
                         }
                     }
-                    _error.value = r.message
+                    _error.value = r.userText(appContext)
                     _isLoading.value = false
                 }
                 NetworkResult.Loading -> Unit
@@ -153,7 +158,7 @@ class TextReaderViewModel @Inject constructor(
     private suspend fun processBookLoaded(b: Book, path: String) {
         _book.value = b
         if (b.format == "unsupported") {
-            _error.value = "暂不支持该格式"
+            _error.value = appContext.getString(R.string.reader_unsupported_format)
             _isLoading.value = false
             return
         }
@@ -226,7 +231,7 @@ class TextReaderViewModel @Inject constructor(
                 _isAutoScrolling.value = false
                 success = true
             }
-            is NetworkResult.Error -> _error.value = r.message
+            is NetworkResult.Error -> _error.value = r.userText(appContext)
             NetworkResult.Loading -> Unit
         }
         _isLoading.value = false
@@ -496,7 +501,7 @@ class TextReaderViewModel @Inject constructor(
         )
         viewModelScope.launch {
             val added = store.addBookmark(bm)
-            if (!added) _bookmarkToast.value = "已存在书签"
+            if (!added) _bookmarkToast.value = appContext.getString(R.string.reader_bookmark_exists)
         }
         return true
     }

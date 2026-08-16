@@ -169,6 +169,57 @@
     <string name="a11y_drive">磁盘</string>
     <string name="a11y_back">返回</string>
 
+    <!-- ── Text reader ──────────────────────────────────────── -->
+    <string name="reader_tab_toc">目录</string>
+    <string name="reader_tab_bookmarks">书签 (%1$d)</string>
+    <string name="reader_back">返回</string>
+    <string name="reader_font_size">Aa</string>
+    <string name="reader_autoscroll">自动滚动</string>
+    <string name="reader_prev_chapter">上一章</string>
+    <string name="reader_next_chapter">下一章</string>
+    <string name="reader_ble_degraded_badge">[⚡ BLE 降级传输中]</string>
+    <string name="reader_add_bookmark">添加书签</string>
+    <string name="reader_copy_paragraph">复制段落</string>
+    <string name="reader_delete_bookmark">删除书签</string>
+    <string name="reader_unsupported_format">暂不支持该格式</string>
+    <string name="reader_bookmark_exists">已存在书签</string>
+    <string name="reader_progress_scroll">全书进度 %1$d%% · 第 %2$d / %3$d 章</string>
+    <string name="reader_progress_chapter">第 %1$d / %2$d 章 (%3$d%%)</string>
+    <string name="reader_speed_suffix"> · 速:%1$d</string>
+    <string name="reader_bookmark_paragraph">段落 #%1$d</string>
+
+    <!-- ── Home components ──────────────────────────────────── -->
+    <string name="home_resume_browse">继续浏览 %1$s</string>
+    <string name="home_play">播放</string>
+    <string name="home_media_type_image">图片</string>
+    <string name="home_media_type_novel">小说</string>
+    <string name="home_media_type_video">视频</string>
+
+    <!-- ── Connection screen ────────────────────────────────── -->
+    <string name="conn_connected_success">已成功连接至 %1$s</string>
+    <string name="conn_found_servers_title">发现 %1$d 个可用服务器</string>
+    <string name="conn_found_one_connecting">在 %1$s:%2$s 发现 LocalMediaHub 服务器。正在连接...</string>
+    <string name="conn_found_multiple">发现 %1$d 个服务器。点击 \"查看服务器\" 选择一个连接。</string>
+    <string name="conn_found_banner">在当前局域网中发现 %1$d 个 LocalMediaHub 服务器。</string>
+    <string name="conn_view_servers">查看可用服务器 (%1$d)</string>
+    <string name="conn_scan_progress">已检查 %1$d / %2$d 个 IP 地址</string>
+    <string name="conn_scan_found">已发现 %1$d 个</string>
+
+    <!-- ── Sort order labels ────────────────────────────────── -->
+    <string name="sort_name_asc">按名称升序 (A-Z)</string>
+    <string name="sort_name_desc">按名称降序 (Z-A)</string>
+    <string name="sort_numeric_asc">按数字升序 (1→9)</string>
+    <string name="sort_numeric_desc">按数字降序 (9→1)</string>
+    <string name="sort_size_asc">文件从小到大</string>
+    <string name="sort_size_desc">文件从大到小</string>
+    <string name="sort_time_asc">修改时间从旧到新</string>
+    <string name="sort_time_desc">修改时间从新到旧</string>
+
+    <!-- ── Transport errors (repository-level, resolved via NetworkResult.userText) ── -->
+    <string name="error_cannot_connect">无法连接服务器，请检查 IP 和端口。</string>
+    <string name="error_timeout">连接超时。</string>
+    <string name="error_unknown_host">未知主机，请检查服务器地址。</string>
+
     <!-- ── Video player ────────────────────────────────────── -->
     <string name="video_paused">已暂停</string>
     <string name="video_playing">播放中</string>

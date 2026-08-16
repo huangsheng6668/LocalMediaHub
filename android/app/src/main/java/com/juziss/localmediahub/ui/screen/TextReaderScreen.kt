@@ -13,6 +13,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
+import com.juziss.localmediahub.R
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -377,12 +379,12 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                         Tab(
                             selected = tocTab == 0,
                             onClick = { tocTab = 0 },
-                            text = { Text("目录") },
+                            text = { Text(stringResource(R.string.reader_tab_toc)) },
                         )
                         Tab(
                             selected = tocTab == 1,
                             onClick = { tocTab = 1 },
-                            text = { Text("书签 (${bookmarks.size})") },
+                            text = { Text(stringResource(R.string.reader_tab_bookmarks, bookmarks.size)) },
                         )
                     }
                     when (tocTab) {
@@ -553,22 +555,22 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                             title = { Text(book?.chapters?.getOrNull(idx)?.title ?: book?.title ?: "") },
                             navigationIcon = {
                                 IconButton(onClick = onBack) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.reader_back))
                                 }
                             },
                             actions = {
                                 IconButton(onClick = { showSettings = true }) {
-                                    Text("Aa")
+                                    Text(stringResource(R.string.reader_font_size))
                                 }
                                 IconButton(onClick = { viewModel.toggleAutoScroll() }) {
                                     if (isAutoScrolling) {
                                         Text("‖")
                                     } else {
-                                        Icon(Icons.Filled.PlayArrow, contentDescription = "自动滚动")
+                                        Icon(Icons.Filled.PlayArrow, contentDescription = stringResource(R.string.reader_autoscroll))
                                     }
                                 }
                                 IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Filled.Menu, contentDescription = "目录")
+                                    Icon(Icons.Filled.Menu, contentDescription = stringResource(R.string.reader_tab_toc))
                                 }
                             },
                         )
@@ -585,19 +587,27 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                             BottomAppBar {
                                 if (isScrollMode) {
                                     Text(
-                                        "全书进度 ${overallPercent}% · 第 ${idx + 1} / ${totalChaptersCount} 章" +
-                                            if (isAutoScrolling) " · 速:${settings.autoScrollSpeed}" else "",
+                                        stringResource(
+                                            R.string.reader_progress_scroll,
+                                            overallPercent,
+                                            idx + 1,
+                                            totalChaptersCount,
+                                        ) + if (isAutoScrolling) stringResource(R.string.reader_speed_suffix, settings.autoScrollSpeed) else "",
                                         modifier = Modifier.padding(16.dp),
                                     )
                                 } else {
                                     Text(
-                                        "第 ${idx + 1} / ${totalChaptersCount} 章 (${chapterPercent}%)" +
-                                            if (isAutoScrolling) " · 速:${settings.autoScrollSpeed}" else "",
+                                        stringResource(
+                                            R.string.reader_progress_chapter,
+                                            idx + 1,
+                                            totalChaptersCount,
+                                            chapterPercent,
+                                        ) + if (isAutoScrolling) stringResource(R.string.reader_speed_suffix, settings.autoScrollSpeed) else "",
                                         modifier = Modifier.padding(16.dp),
                                     )
                                     Spacer(Modifier.weight(1f))
-                                    TextButton(onClick = { turn(PageTurnDirection.PREV) }) { Text("上一章") }
-                                    TextButton(onClick = { turn(PageTurnDirection.NEXT) }) { Text("下一章") }
+                                    TextButton(onClick = { turn(PageTurnDirection.PREV) }) { Text(stringResource(R.string.reader_prev_chapter)) }
+                                    TextButton(onClick = { turn(PageTurnDirection.NEXT) }) { Text(stringResource(R.string.reader_next_chapter)) }
                                 }
                             }
                         }
@@ -740,7 +750,7 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                             tonalElevation = 3.dp,
                         ) {
                             Text(
-                                text = "[⚡ BLE 降级传输中]",
+                                text = stringResource(R.string.reader_ble_degraded_badge),
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                                 style = MaterialTheme.typography.labelMedium,
                             )
@@ -1173,12 +1183,12 @@ internal fun ParagraphItem(
         )
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
             DropdownMenuItem(
-                text = { Text("添加书签") },
+                text = { Text(stringResource(R.string.reader_add_bookmark)) },
                 onClick = { onAddBookmark(); showMenu = false },
                 leadingIcon = { Icon(Icons.Filled.Favorite, contentDescription = null) },
             )
             DropdownMenuItem(
-                text = { Text("复制段落") },
+                text = { Text(stringResource(R.string.reader_copy_paragraph)) },
                 onClick = { onCopy(); showMenu = false },
             )
         }
@@ -1210,12 +1220,12 @@ private fun BookmarkRow(
                 maxLines = 1,
             )
             Text(
-                "段落 #${bookmark.paragraphIndex}",
+                stringResource(R.string.reader_bookmark_paragraph, bookmark.paragraphIndex),
                 style = MaterialTheme.typography.labelSmall,
             )
         }
         IconButton(onClick = onDelete) {
-            Icon(Icons.Filled.Delete, contentDescription = "删除书签")
+            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.reader_delete_bookmark))
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.juziss.localmediahub.viewmodel
 
+import android.content.Context
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Block
 import com.juziss.localmediahub.data.Book
 import com.juziss.localmediahub.data.BookChapter
@@ -13,6 +15,7 @@ import com.juziss.localmediahub.data.LocalBookRepository
 import com.juziss.localmediahub.network.NetworkResult
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -34,6 +37,12 @@ class TextReaderViewModelReaderTest {
     private val dispatcher = StandardTestDispatcher()
     private val localBookRepo = LocalBookRepository()
     private val downloadsStore = mockk<DownloadsStore>(relaxed = true)
+    // The ViewModel resolves localized error/bookmark strings through a
+    // Context; a mock returns the same literals the assertions expect.
+    private val appContext: Context = mockk(relaxed = true) {
+        every { getString(R.string.reader_bookmark_exists) } returns "已存在书签"
+        every { getString(R.string.reader_unsupported_format) } returns "暂不支持该格式"
+    }
 
     @Before
     fun setUp() {
@@ -42,7 +51,7 @@ class TextReaderViewModelReaderTest {
     }
 
     private fun createVm(repo: MediaRepository, store: RecentActivityStore) =
-        TextReaderViewModel(repo, store, localBookRepo, downloadsStore)
+        TextReaderViewModel(appContext, repo, store, localBookRepo, downloadsStore)
 
     @After
     fun tearDown() {
