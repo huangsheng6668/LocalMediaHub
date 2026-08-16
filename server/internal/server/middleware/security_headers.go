@@ -19,8 +19,13 @@ import (
 // not block.
 //
 // Not added (intentional):
-//   - Strict-Transport-Security: only effective under HTTPS; TLS is deferred
-//     per main spec section 6.2.
+//   - Strict-Transport-Security: only meaningful under HTTPS, and TLS is a
+//     decided NON-goal — LocalMediaHub targets trusted home LANs and is
+//     served over plain HTTP by IP address (public CAs cannot cover bare LAN
+//     IPs, and self-signed CA import/TOFU machinery outweighs the benefit in
+//     this threat model). Bearer-token auth + LAN-only discovery are the
+//     access controls instead. Re-evaluate only if a WAN/Internet deployment
+//     mode is ever added.
 //   - Permissions-Policy: project doesn't use camera/mic/geolocation APIs (YAGNI).
 func SecurityHeaders() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
