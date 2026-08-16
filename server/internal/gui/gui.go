@@ -3,13 +3,13 @@ package gui
 import (
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/localmediahub/server/internal/config"
+	"github.com/localmediahub/server/internal/netutil"
 	"github.com/localmediahub/server/internal/server"
 	"github.com/localmediahub/server/internal/systray"
 )
@@ -21,7 +21,7 @@ func Run(cfg *config.Config) {
 		slog.Error("Failed to create server", "error", err); os.Exit(1)
 	}
 
-	ip := getLocalIP()
+	ip := netutil.GetLocalIP()
 	srvURL := fmt.Sprintf("http://%s:%d", ip, cfg.Server.Port)
 
 	go func() {
@@ -46,21 +46,4 @@ func Run(cfg *config.Config) {
 	}()
 
 	tray.Run()
-}
-
-func getLocalIP() string {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return "127.0.0.1"
-	}
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
-			ip := ipNet.IP.To4()
-			if ip[0] == 169 && ip[1] == 254 {
-				continue
-			}
-			return ip.String()
-		}
-	}
-	return "127.0.0.1"
 }

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/localmediahub/server/internal/ble"
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/models"
+	"github.com/localmediahub/server/internal/netutil"
 	"github.com/localmediahub/server/internal/server/handler"
 	"github.com/localmediahub/server/internal/server/middleware"
 	"github.com/localmediahub/server/internal/service"
@@ -442,94 +442,14 @@ func (s *Server) Stop() error {
 }
 
 func getLocalIP() (string, error) {
-	ips := getAllLocalIPs()
-	if len(ips) == 0 {
-		return "127.0.0.1", nil
-	}
-	// getAllLocalIPs returns private LAN IPs first, so the head is the best pick.
-	return ips[0], nil
+	return netutil.GetLocalIP(), nil
 }
 
-// getAllLocalIPs returns all usable IPv4 addresses on this machine, with
-// private LAN addresses first, then any other non-loopback address, and
-// finally 127.0.0.1. APIPA (169.254.x.x) addresses and addresses on virtual
-// adapters (VMware vmnet*, VirtualBox vboxnet*, Hyper-V/WSL vEthernet*,
-// Docker) are skipped so mDNS broadcasts the host's real LAN IP rather than a
-// host-only/VM subnet that other devices can't reach. The ordering makes the
-// first element a good default for mDNS broadcast, while the full list is used
-// to build the CORS allow-list so browsers on the LAN can reach the embedded
-// Web UI.
+// getAllLocalIPs delegates to the shared netutil implementation so the CORS
+// allow-list, mDNS advertiser, and GUI tray URL all agree on which addresses
+// to advertise (virtual adapters skipped, private LAN IPs first).
 func getAllLocalIPs() []string {
-	var private, others []string
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return []string{"127.0.0.1"}
-	}
-	for _, ifc := range ifaces {
-		// Skip virtual machine / container adapters — their addresses sit on
-		// isolated host-only or NAT subnets that LAN clients cannot route to.
-		if isVirtualAdapter(ifc.Name) {
-			continue
-		}
-		addrs, err := ifc.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			ipNet, ok := addr.(*net.IPNet)
-			if !ok || ipNet.IP.IsLoopback() {
-				continue
-			}
-			ip := ipNet.IP.To4()
-			if ip == nil {
-				continue
-			}
-			// Skip APIPA (link-local) addresses.
-			if ip[0] == 169 && ip[1] == 254 {
-				continue
-			}
-
-			isPrivate := (ip[0] == 192 && ip[1] == 168) ||
-				(ip[0] == 10) ||
-				(ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31)
-
-			if isPrivate {
-				private = append(private, ip.String())
-			} else {
-				others = append(others, ip.String())
-			}
-		}
-	}
-
-	result := append(private, others...)
-	result = append(result, "127.0.0.1")
-	return result
-}
-
-// virtualAdapterPrefixes lists lower-cased interface-name prefixes that mark a
-// virtual machine / container / tunnel adapter. Matches are skipped by
-// getAllLocalIPs so discovery targets the physical LAN only.
-var virtualAdapterPrefixes = []string{
-	"vmnet",       // VMware
-	"vboxnet",     // VirtualBox host-only
-	"vethernet",   // Hyper-V / WSL
-	"docker",      // Docker bridge
-	"virtualbox",  // alt VirtualBox naming
-	"tap-",        // OpenVPN / TAP
-	"tun-",        // tunnel adapters
-	"isatap",      // ISATAP tunneling
-	"teredo",      // Teredo tunneling
-}
-
-func isVirtualAdapter(name string) bool {
-	lower := strings.ToLower(name)
-	for _, p := range virtualAdapterPrefixes {
-		if strings.HasPrefix(lower, p) {
-			return true
-		}
-	}
-	return false
+	return netutil.GetAllLocalIPs()
 }
 
 // allowedCORSOrigins builds the list of browser origins permitted by CORS.

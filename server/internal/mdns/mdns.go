@@ -6,6 +6,8 @@ import (
 	"net"
 
 	"github.com/hashicorp/mdns"
+
+	"github.com/localmediahub/server/internal/netutil"
 )
 
 type Service struct {
@@ -18,10 +20,7 @@ func NewService() (*Service, error) {
 }
 
 func (s *Service) Start(host string, port int) error {
-	ip, err := getLocalIP()
-	if err != nil {
-		return fmt.Errorf("mDNS: failed to get local IP: %w", err)
-	}
+	ip := netutil.GetLocalIP()
 
 	parsedIP := net.ParseIP(ip)
 	if parsedIP == nil {
@@ -61,31 +60,4 @@ func (s *Service) Stop() error {
 		return s.server.Shutdown()
 	}
 	return nil
-}
-
-func getLocalIP() (string, error) {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return "", err
-	}
-	var bestIP string
-	for _, addr := range addrs {
-		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() && ipNet.IP.To4() != nil {
-			ip := ipNet.IP.To4()
-			if ip[0] == 169 && ip[1] == 254 {
-				continue
-			}
-			isPrivate := (ip[0] == 192 && ip[1] == 168) || (ip[0] == 10) || (ip[0] == 172 && ip[1] >= 16 && ip[1] <= 31)
-			if isPrivate {
-				return ip.String(), nil
-			}
-			if bestIP == "" {
-				bestIP = ip.String()
-			}
-		}
-	}
-	if bestIP != "" {
-		return bestIP, nil
-	}
-	return "127.0.0.1", nil
 }
