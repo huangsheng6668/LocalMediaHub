@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"os"
 
@@ -8,6 +10,67 @@ import (
 
 	"github.com/localmediahub/server/internal/service"
 )
+
+// maxBatchThumbnails caps the number of paths per batch thumbnail request,
+// bounding both the server-side generation work and the response size
+// (thumbnails are returned as base64 JPEG).
+const maxBatchThumbnails = 64
+
+// ThumbnailsRequest is the JSON body for POST /api/v1/media/thumbnails.
+type ThumbnailsRequest struct {
+	Paths []string `json:"paths"`
+}
+
+// ThumbnailItem is one per-path result: either a base64 JPEG thumbnail or an
+// error string (per-item failures do not fail the whole batch).
+type ThumbnailItem struct {
+	Path      string `json:"path"`
+	Thumbnail string `json:"thumbnail,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// MediaThumbnails serves thumbnails for up to maxBatchThumbnails media paths
+// in a single round-trip, collapsing the N+1 request pattern of grid UIs
+// (each card previously fetched its own /media/thumbnail). Thumbnails are
+// returned as base64-encoded JPEG so the response stays a single JSON body.
+// Per-path validation mirrors MediaThumbnail (ValidateAccessibleMediaPath).
+func (h *Handler) MediaThumbnails(c echo.Context) error {
+	var req ThumbnailsRequest
+	if err := c.Bind(&req); err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid request body", err)
+	}
+	if len(req.Paths) == 0 {
+		return respondError(c, http.StatusBadRequest, "paths required")
+	}
+	if len(req.Paths) > maxBatchThumbnails {
+		return respondError(c, http.StatusBadRequest,
+			fmt.Sprintf("at most %d paths per request", maxBatchThumbnails))
+	}
+
+	allowedExts := append(h.cfg.Scan.ImageExtensions, h.cfg.Scan.VideoExtensions...)
+	items := make([]ThumbnailItem, 0, len(req.Paths))
+	for _, p := range req.Paths {
+		resolved, err := service.ValidateAccessibleMediaPath(p, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts)
+		if err != nil {
+			items = append(items, ThumbnailItem{Path: p, Error: "access denied"})
+			continue
+		}
+		thumbBytes, err := h.thumbnail.GenerateThumbnailBytes(resolved)
+		if err != nil {
+			if os.IsNotExist(err) {
+				items = append(items, ThumbnailItem{Path: p, Error: "file not found"})
+			} else {
+				items = append(items, ThumbnailItem{Path: p, Error: "thumbnail failed"})
+			}
+			continue
+		}
+		items = append(items, ThumbnailItem{
+			Path:      p,
+			Thumbnail: base64.StdEncoding.EncodeToString(thumbBytes),
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"items": items})
+}
 
 func (h *Handler) MediaThumbnail(c echo.Context) error {
 	pathStr := c.QueryParam("path")

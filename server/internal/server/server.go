@@ -325,6 +325,9 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	media.GET("/original", h.MediaOriginal)
 	media.GET("/stream", h.MediaStream, rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
 	media.GET("/duration", h.MediaDuration)
+	// Batch thumbnail endpoint (grid N+1 collapse). Rate-limited because it
+	// fans out to up to 64 thumbnail generations per request.
+	media.POST("/thumbnails", h.MediaThumbnails, middleware.RateLimit(10, time.Minute))
 
 	// Books (text-reader, Task 8): metadata + per-chapter text content for
 	// .txt / .epub files. Auth-gated because chapter content can be large and
