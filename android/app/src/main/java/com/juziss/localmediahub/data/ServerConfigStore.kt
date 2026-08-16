@@ -51,7 +51,15 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
     }
 
     val authToken: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_AUTH_TOKEN] ?: ""
+        val raw = prefs[KEY_AUTH_TOKEN] ?: ""
+        if (raw.isEmpty()) {
+            ""
+        } else {
+            // Stored encrypted since the Keystore hardening. Legacy plaintext
+            // values fail GCM decoding and are returned verbatim, so existing
+            // installs keep working and upgrade on the next save.
+            TokenCrypto.decrypt(raw) ?: raw
+        }
     }
 
     val appTheme: Flow<String> = context.dataStore.data.map { prefs ->
@@ -96,7 +104,9 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
 
     suspend fun saveAuthToken(token: String) {
         context.dataStore.edit { prefs ->
-            prefs[KEY_AUTH_TOKEN] = token
+            // Encrypt at rest via an AndroidKeyStore AES-GCM key. Falls back
+            // to plaintext only when the platform Keystore is unusable.
+            prefs[KEY_AUTH_TOKEN] = if (token.isEmpty()) "" else (TokenCrypto.encrypt(token) ?: token)
         }
     }
 
