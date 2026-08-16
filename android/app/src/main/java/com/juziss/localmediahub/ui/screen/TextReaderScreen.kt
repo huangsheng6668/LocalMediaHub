@@ -149,7 +149,11 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val pageTurnController = remember(settings.readingMode) {
         PageTurnController(
             currentIdx = { idx },
-            chapterCount = { totalChaptersCount },
+            // 必须经委托属性 `book` 读取章节数：直接捕获上面的普通 val
+            // totalChaptersCount 会把"控制器首次创建时"的值冻结在闭包里
+            // （此时 book 通常尚未加载 → 恒为 1 → NEXT 边界检查永远拒绝，
+            // 表现为"下一章按钮没反应"，而目录跳转绕过控制器所以正常）。
+            chapterCount = { book?.chapters?.size ?: 1 },
         )
     }
 
