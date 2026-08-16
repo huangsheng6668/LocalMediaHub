@@ -193,7 +193,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun getThumbnailUrl(entry: RecentMediaEntry): String {
-        return repository.getMediaThumbnailUrl(entry.file.path)
+        return repository.getMediaThumbnailUrl(entry.file.path, entry.file.modifiedTime)
     }
 
     fun getVideoStreamUrl(entry: RecentMediaEntry): String {

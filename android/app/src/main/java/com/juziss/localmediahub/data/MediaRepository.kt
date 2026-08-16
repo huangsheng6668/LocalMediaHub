@@ -273,7 +273,7 @@ class MediaRepository @Inject constructor(
     suspend fun search(query: String, currentPath: String = ""): NetworkResult<SearchResult> {
         val q = URLEncoder.encode(query, "UTF-8")
         val p = if (currentPath.isNotEmpty()) "&path=${URLEncoder.encode(currentPath, "UTF-8")}" else ""
-        return httpGet("$baseUrl/api/v1/search?q=$q&p", object : TypeToken<SearchResult>() {}.type)
+        return httpGet("$baseUrl/api/v1/search?q=$q$p", object : TypeToken<SearchResult>() {}.type)
     }
 
     // ── System browse ─────────────────────────────────────────
@@ -548,8 +548,20 @@ class MediaRepository @Inject constructor(
     fun getMediaStreamUrl(absolutePath: String): String =
         "$baseUrl/api/v1/media/stream?path=${URLEncoder.encode(absolutePath, "UTF-8")}"
 
-    fun getMediaThumbnailUrl(absolutePath: String): String =
-        "$baseUrl/api/v1/media/thumbnail?path=${URLEncoder.encode(absolutePath, "UTF-8")}"
+    fun getMediaThumbnailUrl(absolutePath: String, mtime: String = ""): String =
+        buildString {
+            append("$baseUrl/api/v1/media/thumbnail?path=")
+            append(URLEncoder.encode(absolutePath, "UTF-8"))
+            // Round: append the source modtime as a cache-busting version
+            // param. Coil keys its disk cache by URL and does not revalidate
+            // via ETag/Last-Modified, so without this a replaced source file
+            // keeps rendering its stale thumbnail until LRU eviction. The
+            // server ignores the extra param; it just changes the cache key.
+            if (mtime.isNotEmpty()) {
+                append("&mtime=")
+                append(URLEncoder.encode(mtime, "UTF-8"))
+            }
+        }
 
     fun getMediaOriginalImageUrl(absolutePath: String): String =
         "$baseUrl/api/v1/media/original?path=${URLEncoder.encode(absolutePath, "UTF-8")}"

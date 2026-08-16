@@ -278,7 +278,7 @@ internal class BrowseNavigator(
     }
 
     fun getThumbnailUrl(file: MediaFile): String {
-        return repository.getMediaThumbnailUrl(file.path)
+        return repository.getMediaThumbnailUrl(file.path, file.modifiedTime)
     }
 
     fun getOriginalImageUrl(file: MediaFile): String {

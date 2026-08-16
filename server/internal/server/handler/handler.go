@@ -1,9 +1,13 @@
 package handler
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -134,15 +138,48 @@ func respondNotFound(c echo.Context, msg string) error {
 
 // setMediaCacheHeaders marks a thumbnail/original response as browser-cacheable
 // for one day. The thumbnail cache key includes the source file's modtime, so a
-// changed source produces a new cache file with a different modtime and browsers
-// revalidating via If-Modified-Since get a 200 — correct outside the max-age
-// window. Not applied to stream endpoints (different Range semantics).
+// changed source produces a new cache file with a different modtime.
+// Not applied to stream endpoints (different Range semantics).
 //
 // Round 24 note: Coil 3.x on Android bypasses OkHttp's Cache and ignores these
 // headers, but the embedded web gallery (browser <img> tags) still honors them.
 // Kept for the web client's benefit.
 func setMediaCacheHeaders(c echo.Context) {
 	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
+}
+
+// serveThumbnailBytes writes thumbnail bytes with strong cache validators so
+// clients can detect source-file changes: ETag over the exact bytes and
+// Last-Modified from the source file, honoring If-None-Match /
+// If-Modified-Since with a 304. Previously thumbnails were served via
+// c.Blob with only Cache-Control — no validator headers — so after the
+// source file changed, clients kept showing the stale thumbnail until the
+// 24h max-age (or Coil's LRU) expired. Android's Coil still needs the
+// ?mtime= URL versioning added client-side; this fixes the web gallery and
+// any HTTP client that sends conditional requests.
+func serveThumbnailBytes(c echo.Context, sourcePath string, thumbBytes []byte) error {
+	h := c.Response().Header()
+	h.Set("Cache-Control", "public, max-age=86400")
+
+	sum := md5.Sum(thumbBytes)
+	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	h.Set("ETag", etag)
+
+	sourceMod := time.Time{}
+	if fi, err := os.Stat(sourcePath); err == nil {
+		sourceMod = fi.ModTime().UTC().Truncate(time.Second)
+		h.Set("Last-Modified", sourceMod.Format(http.TimeFormat))
+	}
+
+	if inm := c.Request().Header.Get("If-None-Match"); inm != "" && inm == etag {
+		return c.NoContent(http.StatusNotModified)
+	}
+	if !sourceMod.IsZero() {
+		if t, err := http.ParseTime(c.Request().Header.Get("If-Modified-Since")); err == nil && !sourceMod.After(t) {
+			return c.NoContent(http.StatusNotModified)
+		}
+	}
+	return c.Blob(http.StatusOK, "image/jpeg", thumbBytes)
 }
 
 // JSON Cache-Control policy tiers.

@@ -66,8 +66,7 @@ func (h *Handler) GetVideoThumbnail(c echo.Context) error {
 		return respondInternalError(c, err)
 	}
 
-	setMediaCacheHeaders(c)
-	return c.Blob(http.StatusOK, "image/jpeg", thumbBytes)
+	return serveThumbnailBytes(c, resolved, thumbBytes)
 }
 
 func (h *Handler) StreamVideo(c echo.Context) error {

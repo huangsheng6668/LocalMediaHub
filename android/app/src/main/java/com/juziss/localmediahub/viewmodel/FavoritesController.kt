@@ -107,7 +107,7 @@ internal class FavoritesController(
     }
 
     fun getFavoriteThumbnailUrl(file: MediaFile): String {
-        return repository.getMediaThumbnailUrl(file.path)
+        return repository.getMediaThumbnailUrl(file.path, file.modifiedTime)
     }
 
     fun getFavoriteOriginalImageUrl(file: MediaFile): String {
