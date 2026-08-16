@@ -3,6 +3,7 @@ package bookparser
 import (
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -23,9 +24,16 @@ var globalTxtCache = &txtCache{
 	maxCap:  20,
 }
 
-func (c *txtCache) GetOrLoad(path string, loadFn func() (string, string, error)) (string, string, error) {
+// GetOrLoad returns the cached decoded text for path, keyed by path + the
+// file's modtime. Including the modtime means editing a book file produces a
+// new cache key instead of silently serving the stale text (which also made
+// BookService's modtime-based metadata revalidation ineffective — the
+// re-parsed chapters were still sliced from the old text).
+func (c *txtCache) GetOrLoad(path string, modTime time.Time, loadFn func() (string, string, error)) (string, string, error) {
+	key := path + "|" + modTime.Format(time.RFC3339Nano)
+
 	c.mu.RLock()
-	if entry, ok := c.entries[path]; ok {
+	if entry, ok := c.entries[key]; ok {
 		c.mu.RUnlock()
 		return entry.text, entry.charset, nil
 	}
@@ -39,7 +47,7 @@ func (c *txtCache) GetOrLoad(path string, loadFn func() (string, string, error))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if entry, ok := c.entries[path]; ok {
+	if entry, ok := c.entries[key]; ok {
 		return entry.text, entry.charset, nil
 	}
 
@@ -48,8 +56,8 @@ func (c *txtCache) GetOrLoad(path string, loadFn func() (string, string, error))
 		c.order = c.order[1:]
 		delete(c.entries, oldest)
 	}
-	c.entries[path] = &txtCacheEntry{text: text, charset: charset}
-	c.order = append(c.order, path)
+	c.entries[key] = &txtCacheEntry{text: text, charset: charset}
+	c.order = append(c.order, key)
 	return text, charset, nil
 }
 

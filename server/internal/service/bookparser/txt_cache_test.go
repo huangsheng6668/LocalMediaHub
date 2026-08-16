@@ -3,6 +3,7 @@ package bookparser
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestTxtCacheSlice(t *testing.T) {
@@ -40,9 +41,10 @@ func TestGlobalTxtCache(t *testing.T) {
 			return content, "UTF-8", nil
 		}
 	}
+	mt1 := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// First load file1
-	text, cs, err := cache.GetOrLoad("file1.txt", loadFn("content1"))
+	text, cs, err := cache.GetOrLoad("file1.txt", mt1, loadFn("content1"))
 	if err != nil || text != "content1" || cs != "UTF-8" {
 		t.Fatalf("failed to load file1: %v, %s, %s", err, text, cs)
 	}
@@ -51,7 +53,7 @@ func TestGlobalTxtCache(t *testing.T) {
 	}
 
 	// Second load file1 (cached)
-	text, cs, err = cache.GetOrLoad("file1.txt", loadFn("content1"))
+	text, cs, err = cache.GetOrLoad("file1.txt", mt1, loadFn("content1"))
 	if err != nil || text != "content1" {
 		t.Fatalf("failed cached load file1: %v", err)
 	}
@@ -59,20 +61,31 @@ func TestGlobalTxtCache(t *testing.T) {
 		t.Fatalf("expected loadCount to remain 1, got %d", loadCount)
 	}
 
-	// Load file2
-	_, _, _ = cache.GetOrLoad("file2.txt", loadFn("content2"))
-	// Load file3 (should evict file1)
-	_, _, _ = cache.GetOrLoad("file3.txt", loadFn("content3"))
+	// Same path but different modtime → fresh load (edited file must not
+	// serve stale text; regression guard for the modtime-keyed cache).
+	mt2 := mt1.Add(time.Hour)
+	text, _, err = cache.GetOrLoad("file1.txt", mt2, loadFn("content1-edited"))
+	if err != nil || text != "content1-edited" {
+		t.Fatalf("failed modtime-variant load: %v, %s", err, text)
+	}
+	if loadCount != 2 {
+		t.Fatalf("expected loadCount 2 after modtime change, got %d", loadCount)
+	}
 
-	// Reload file1 (should trigger loadFn again due to eviction)
-	text, _, _ = cache.GetOrLoad("file1.txt", loadFn("content1"))
-	if loadCount != 4 {
-		t.Errorf("expected loadCount 4 after eviction reload, got %d", loadCount)
+	// Load file2
+	_, _, _ = cache.GetOrLoad("file2.txt", mt1, loadFn("content2"))
+	// Load file3 (should evict the oldest entry, file1@mt1)
+	_, _, _ = cache.GetOrLoad("file3.txt", mt1, loadFn("content3"))
+
+	// Reload file1@mt1 (should trigger loadFn again due to eviction)
+	text, _, _ = cache.GetOrLoad("file1.txt", mt1, loadFn("content1"))
+	if loadCount != 5 {
+		t.Errorf("expected loadCount 5 after eviction reload, got %d", loadCount)
 	}
 
 	// Test load error
 	errErr := errors.New("read error")
-	_, _, err = cache.GetOrLoad("error.txt", func() (string, string, error) {
+	_, _, err = cache.GetOrLoad("error.txt", mt1, func() (string, string, error) {
 		return "", "", errErr
 	})
 	if !errors.Is(err, errErr) {

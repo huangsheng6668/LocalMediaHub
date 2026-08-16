@@ -136,7 +136,7 @@ func parseTxt(path string, info os.FileInfo) (*Book, error) {
 	if info.Size() > MaxTxtSize {
 		return nil, fmt.Errorf("%w: %d bytes", ErrTooLarge, info.Size())
 	}
-	text, charset, err := globalTxtCache.GetOrLoad(path, func() (string, string, error) {
+	text, charset, err := globalTxtCache.GetOrLoad(path, info.ModTime(), func() (string, string, error) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return "", "", fmt.Errorf("%w: %v", ErrIoFailure, err)
@@ -343,7 +343,7 @@ func (b *Book) txtChapterBlocks(idx int) ([]Block, error) {
 		return nil, fmt.Errorf("chapter index out of range: %d", idx)
 	}
 	c := b.Chapters[idx]
-	text, _, err := globalTxtCache.GetOrLoad(b.Path, func() (string, string, error) {
+	text, _, err := globalTxtCache.GetOrLoad(b.Path, b.ModTime, func() (string, string, error) {
 		raw, err := os.ReadFile(b.Path)
 		if err != nil {
 			return "", "", fmt.Errorf("%w: %v", ErrIoFailure, err)
