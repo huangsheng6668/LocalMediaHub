@@ -63,7 +63,21 @@ class DownloadWorker(
 
             try {
                 showToast("开始下载 ${file.name}...")
-                val downloadResult = repository.downloadFileStream(url)
+                val destDirectory = File(applicationContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "LocalMediaHub")
+                if (!destDirectory.exists()) {
+                    destDirectory.mkdirs()
+                }
+                val localFile = safeResolveChild(destDirectory, file.name)
+                    ?: throw SecurityException("非法文件名，已拒绝下载")
+                val partFile = File(localFile.parentFile, localFile.name + ".part")
+
+                // Resume support: already-downloaded bytes live in <name>.part
+                // and the request continues with Range: bytes=N-. A completed
+                // .part is atomically renamed into place; on failure it stays
+                // on disk so the WorkManager retry resumes instead of
+                // restarting from byte 0.
+                var offset = if (partFile.exists()) partFile.length() else 0L
+                val downloadResult = repository.downloadStreamResumable(url, offset)
                 if (downloadResult !is NetworkResult.Success) {
                     val errorMsg = (downloadResult as? NetworkResult.Error)?.message ?: "未知错误"
                     showToast("下载失败: $errorMsg")
@@ -71,18 +85,34 @@ class DownloadWorker(
                     return@withContext Result.failure()
                 }
 
-                val responseBody = downloadResult.data
-                val destDirectory = File(applicationContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "LocalMediaHub")
-                if (!destDirectory.exists()) {
-                    destDirectory.mkdirs()
+                val dl = downloadResult.data
+                if (dl.code == 416) {
+                    // Range Not Satisfiable: the .part file already covers the
+                    // entire content (the server rejected the resume offset).
+                    if (!partFile.renameTo(localFile)) {
+                        localFile.delete()
+                        if (!partFile.renameTo(localFile)) {
+                            throw java.io.IOException("无法完成已下载文件: ${localFile.name}")
+                        }
+                    }
+                    downloadsStore.addDownload(file, localFile.absolutePath)
+                    showToast("${file.name} 已下载完成！")
+                    updateNotification(notificationId, "下载成功", file.name)
+                    return@withContext Result.success()
                 }
-                val localFile = safeResolveChild(destDirectory, file.name)
-                    ?: throw SecurityException("非法文件名，已拒绝下载")
+                if (dl.code == 200) {
+                    // Server ignored the Range header (or offset was 0): full
+                    // body — drop any partial data and restart from scratch.
+                    offset = 0L
+                    if (partFile.exists()) partFile.delete()
+                }
 
-                val totalBytes = responseBody.contentLength()
-                var bytesWritten = 0L
+                val responseBody = dl.body
+                val remainingBytes = responseBody.contentLength()
+                val totalBytes = offset + remainingBytes
+                var bytesWritten = offset
                 responseBody.byteStream().use { inputStream ->
-                    FileOutputStream(localFile).use { outputStream ->
+                    FileOutputStream(partFile, offset > 0).use { outputStream ->
                         val buffer = ByteArray(128 * 1024)
                         var bytesRead: Int
                         var lastProgressPercent = -1
@@ -100,6 +130,15 @@ class DownloadWorker(
                                 updateNotification(notificationId, "正在下载 ${file.name}", mbDownloaded)
                             }
                         }
+                    }
+                }
+
+                // Atomic promotion: only a fully-downloaded file becomes
+                // visible under its final name.
+                if (!partFile.renameTo(localFile)) {
+                    localFile.delete()
+                    if (!partFile.renameTo(localFile)) {
+                        throw java.io.IOException("无法重命名已下载文件: ${localFile.name}")
                     }
                 }
 

@@ -214,6 +214,32 @@ class MediaRepository @Inject constructor(
             }
         }
 
+    /** Response body plus the HTTP status so resumable downloads can
+     *  distinguish 200 (full body) from 206 (partial, resume at offset) and
+     *  416 (Range Not Satisfiable — the .part file already holds the whole
+     *  content). */
+    class DownloadResponse(val body: ResponseBody, val code: Int)
+
+    /** Streaming GET that resumes at [offset] via a Range header. Accepts
+     *  200/206/416; any other status surfaces as Error. */
+    suspend fun downloadStreamResumable(url: String, offset: Long): NetworkResult<DownloadResponse> =
+        withContext(Dispatchers.IO) {
+            try {
+                val builder = Request.Builder().url(url).get()
+                if (offset > 0) builder.header("Range", "bytes=$offset-")
+                val resp = http.newCall(builder.build()).execute()
+                if (resp.code == 200 || resp.code == 206 || resp.code == 416) {
+                    resp.body?.let { NetworkResult.Success(DownloadResponse(it, resp.code)) }
+                        ?: NetworkResult.Error("Empty response body").also { resp.close() }
+                } else {
+                    resp.close()
+                    NetworkResult.Error("Server returned ${resp.code}", resp.code)
+                }
+            } catch (e: Exception) {
+                NetworkResult.Error(e.toUserMessage())
+            }
+        }
+
     // ════════════════════════════════════════════════════════════════════════
     //  Public API — each endpoint uses httpGet / httpPost with explicit TypeToken
     // ════════════════════════════════════════════════════════════════════════
@@ -264,9 +290,6 @@ class MediaRepository @Inject constructor(
 
     suspend fun downloadFolderZip(relativePath: String): NetworkResult<ResponseBody> =
         httpStream("$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/download")
-
-    suspend fun downloadFileStream(url: String): NetworkResult<ResponseBody> =
-        httpStream(url)
 
     // ── Search ────────────────────────────────────────────────
 
