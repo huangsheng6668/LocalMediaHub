@@ -2,6 +2,7 @@ package com.juziss.localmediahub.data
 
 import android.content.Context
 import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import com.google.gson.Gson
@@ -35,7 +36,15 @@ class DownloadManager @Inject constructor(
             .addTag("download_file_${file.relativePath}")
             .build()
 
-        WorkManager.getInstance(appContext).enqueue(request)
+        // KEEP: re-tapping the same file while its download is enqueued or
+        // running is a no-op (previously every tap spawned a duplicate worker
+        // downloading the same bytes concurrently); once SUCCEEDED/FAILED the
+        // same unique name can be enqueued again.
+        WorkManager.getInstance(appContext).enqueueUniqueWork(
+            "download_file_${file.relativePath}",
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
         onMessage("已加入后台下载队列")
     }
 
@@ -54,7 +63,11 @@ class DownloadManager @Inject constructor(
             .addTag("download_folder_${folder.relativePath}")
             .build()
 
-        WorkManager.getInstance(appContext).enqueue(request)
+        WorkManager.getInstance(appContext).enqueueUniqueWork(
+            "download_folder_${folder.relativePath}",
+            ExistingWorkPolicy.KEEP,
+            request,
+        )
         onMessage("已加入后台下载队列")
     }
 }
