@@ -698,7 +698,10 @@ fun DownloadedPreviewCard(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(124.dp),
+                        .height(124.dp)
+                        // Neutral fallback block behind the image: shows on
+                        // decode failure instead of a blank card area.
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
                 )
             } else if (entry.file.mediaType == "text") {
                 Box(

@@ -300,6 +300,9 @@ internal fun ImageCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(124.dp)
+                        // Neutral fallback block: a failed thumbnail shows
+                        // this tint instead of a blank card area.
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
                 ) {
                     AsyncImage(
                         model = thumbnailUrl,

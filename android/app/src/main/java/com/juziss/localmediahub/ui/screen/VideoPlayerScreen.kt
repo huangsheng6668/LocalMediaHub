@@ -153,6 +153,13 @@ fun VideoPlayerScreen(
 
         val okClient = videoPlayerViewModel.provideHttpClient().newBuilder()
             .cache(null) // Disable cache to prevent locking and disk thrashing on video streaming range requests
+            // Video playback is latency-tolerant but stall-intolerant: the
+            // shared client's 30s read timeout kills a stream during long
+            // rebuffers (AP switch, server hiccup) before ExoPlayer's own
+            // stall handling can react. Disable the read deadline here and
+            // let ExoPlayer own load-error policy (it cancels the call on
+            // stall timeout), keeping connectTimeout as-is.
+            .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
             .build()
         val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(okClient)
             .setUserAgent("LocalMediaHub")

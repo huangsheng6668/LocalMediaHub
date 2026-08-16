@@ -67,7 +67,13 @@ internal fun WaterfallImageGrid(
                     ),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
             ) {
-                Box {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // Neutral fallback block: a failed thumbnail shows
+                        // this tint instead of a blank card area.
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+                ) {
                     AsyncImage(
                         model = getThumbnailUrl(file),
                         contentDescription = file.name,
