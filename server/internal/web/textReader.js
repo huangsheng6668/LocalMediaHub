@@ -187,19 +187,39 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             settings.immersiveMode ? enterImmersive() : exitImmersive();
         }
     });
-    // readerPrefs window event covers non-settings (bookmarks) changes; re-apply too.
-    const unsubPrefs = readerPrefs.subscribe(() => applySettingsToUI());
+    // readerPrefs.subscribe fires for every preference mutation. Settings
+    // changes already flow through the bus (SETTINGS_CHANGED -> unsubSettings)
+    // and bookmark changes are handled by unsubBms — re-applying the full
+    // settings pass here only duplicated work (a paragraph-class rewrite per
+    // event). Keep the handler for any other pref types only.
+    const unsubPrefs = readerPrefs.subscribe((e) => {
+        if (e.detail?.type === 'settings' || e.detail?.type === 'bookmarks') return;
+        applySettingsToUI();
+    });
     const mediaDark = window.matchMedia('(prefers-color-scheme: dark)');
     const onSystemColorSchemeChange = () => {
         if (readerPrefs.getSettings().theme === 'AUTO') applySettingsToUI();
     };
     mediaDark.addEventListener('change', onSystemColorSchemeChange);
 
+    // Early-registered subscriptions must be torn down if the book fetch
+    // fails below — otherwise repeated failures leak document-level
+    // listeners and bus subscriptions (the full _cleanupReader is only
+    // assigned after the fetch succeeds).
+    const cleanupEarlyListeners = () => {
+        document.removeEventListener('fullscreenchange', onFullscreenChange);
+        document.removeEventListener('keydown', onKeyDown);
+        unsubSettings();
+        unsubPrefs();
+        mediaDark.removeEventListener('change', onSystemColorSchemeChange);
+    };
+
     // ===== Fetch book info =====
     let book;
     try {
         book = await getBookInfo(path);
     } catch (e) {
+        cleanupEarlyListeners();
         els.title.textContent = '加载失败';
         els.content.textContent = '无法加载书籍信息: ' + e.message;
         showToast('加载书籍失败: ' + e.message, 'error');

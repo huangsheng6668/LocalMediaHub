@@ -10,11 +10,27 @@ import { formatSize, encodeRoutePath, safeBtoa } from './utils.js';
 import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 
+// Reflect the current browse location in the URL hash via history.replaceState
+// (fires no hashchange, so no re-render loop) — a refresh or a shared link
+// then restores the same directory instead of resetting to the root.
+function syncBrowserHash() {
+    try {
+        const base = '#/browser';
+        const q = state.currentPath
+            ? `${base}?path=${encodeURIComponent(state.currentPath)}${state.isSystemBrowse ? '&sys=1' : ''}`
+            : base;
+        history.replaceState(null, '', q);
+    } catch (e) {
+        // Restricted contexts (file://) — browsing works, just no URL sync.
+    }
+}
+
 // Load Root directories in file browser
 export async function loadRoots() {
     state.currentPath = '';
     state.pathHistory = [];
     state.isSystemBrowse = false;
+    syncBrowserHash();
 
     // Breadcrumbs
     elements.browserBreadcrumbs.innerHTML = '<span class="crumb active">根目录</span>'; // XSS-SAFE: hardcoded literal
@@ -66,9 +82,10 @@ export async function loadRoots() {
 }
 
 // Browse arbitrary absolute paths (System folders)
-async function loadSystemDrives() {
+export async function loadSystemDrives() {
     state.isSystemBrowse = true;
     state.currentPath = '/system';
+    syncBrowserHash();
 
     elements.browserBreadcrumbs.innerHTML = '<span class="crumb" data-action="load-roots">根目录</span><span class="crumb active">磁盘盘符</span>'; // XSS-SAFE: hardcoded literal
 
@@ -107,6 +124,7 @@ async function loadSystemDrives() {
 // Cache-Control: max-age=N for bandwidth savings.
 export async function browsePath(path, bypassCache = false) {
     state.currentPath = path;
+    syncBrowserHash();
 
     let url = `${state.apiBase}/api/v1/folders/${encodeRoutePath(path)}/browse`;
     if (state.isSystemBrowse) {

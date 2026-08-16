@@ -1,6 +1,7 @@
 // 自动滚动面板：播放/暂停/调速 rAF 循环。
 // 从 textReader.js 原自动滚动逻辑提取。
 import { state } from './reader-state.js';
+import * as readerPrefs from './readerPrefs.js';
 
 export function renderAutoscroll({ panelEl, playBtn, minusBtn, plusBtn, speedValEl }) {
     let rafId = null;
@@ -48,8 +49,12 @@ export function renderAutoscroll({ panelEl, playBtn, minusBtn, plusBtn, speedVal
     function adjustSpeed(delta) {
         const s = state.settings;
         if (!s) return;
-        s.autoScrollSpeed = Math.max(1, (s.autoScrollSpeed || 5) + delta);
+        const next = Math.max(1, (s.autoScrollSpeed || 5) + delta);
+        s.autoScrollSpeed = next;
         applySpeed();
+        // Persist + broadcast so the settings dialog slider stays in sync and
+        // the value survives a reload (previously it was memory-only).
+        readerPrefs.saveSettings({ autoScrollSpeed: next });
     }
 
     return { start, stop, toggle, applySpeed, dispose: stop };

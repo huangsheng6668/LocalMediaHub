@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { renderTextReader } from './textReader.js';
 import { render as renderBookshelf } from './bookshelf.js';
+import { loadSystemDrives } from './browserView.js';
 
 // hashParams: tiny helper to extract query params from a hash like
 // #/read?path=foo%20bar. Returns an empty Map when there is no query string.
@@ -45,7 +46,20 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
         if (elements.menuBrowser) elements.menuBrowser.classList.add('active');
         if (elements.viewBrowser) elements.viewBrowser.classList.add('active');
 
-        if (!state.currentPath) {
+        // Restore a deep-browsed location from the URL (written by
+        // browserView.syncBrowserHash): #/browser?path=...&sys=1.
+        const params = hashParams(hash);
+        const pathParam = params.get('path');
+        if (pathParam) {
+            state.isSystemBrowse = params.get('sys') === '1';
+            state.currentPath = pathParam;
+            if (state.isSystemBrowse && state.currentPath === '/system') {
+                // Pseudo-path for the drive-list view.
+                loadSystemDrives();
+            } else {
+                browsePath(state.currentPath);
+            }
+        } else if (!state.currentPath) {
             loadRoots();
         } else {
             browsePath(state.currentPath);
