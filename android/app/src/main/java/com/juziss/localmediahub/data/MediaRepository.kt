@@ -16,6 +16,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.ble.BleConnState
 import com.juziss.localmediahub.ble.BleController
 import com.juziss.localmediahub.ble.BleDegradedState
@@ -121,7 +122,7 @@ class MediaRepository @Inject constructor(
             val result = httpGetRaw<T>(url, type, forceNetwork = forceNetwork)
             NetworkResult.Success(result)
         } catch (e: Exception) {
-            NetworkResult.Error(e.toUserMessage())
+            e.toNetworkError()
         }
 
     /**
@@ -166,7 +167,7 @@ class MediaRepository @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                NetworkResult.Error(e.toUserMessage())
+                e.toNetworkError()
             }
         }
 
@@ -191,7 +192,7 @@ class MediaRepository @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                NetworkResult.Error(e.toUserMessage())
+                e.toNetworkError()
             }
         }
 
@@ -210,7 +211,7 @@ class MediaRepository @Inject constructor(
                     NetworkResult.Error("Server returned ${resp.code}", resp.code)
                 }
             } catch (e: Exception) {
-                NetworkResult.Error(e.toUserMessage())
+                e.toNetworkError()
             }
         }
 
@@ -236,7 +237,7 @@ class MediaRepository @Inject constructor(
                     NetworkResult.Error("Server returned ${resp.code}", resp.code)
                 }
             } catch (e: Exception) {
-                NetworkResult.Error(e.toUserMessage())
+                e.toNetworkError()
             }
         }
 
@@ -340,7 +341,7 @@ class MediaRepository @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                NetworkResult.Error(e.toUserMessage())
+                e.toNetworkError()
             }
         }
 
@@ -452,7 +453,7 @@ class MediaRepository @Inject constructor(
         } catch (e: IOException) {
             // Transport-level failure: candidate for BLE failover.
             if (bleController.connectionState.value != BleConnState.CONNECTED) {
-                NetworkResult.Error(e.toUserMessage())
+                e.toNetworkError()
             } else {
                 val json = bleTransportFallback.fetchJson(
                     BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index,
@@ -462,7 +463,7 @@ class MediaRepository @Inject constructor(
                 if (json == null) {
                     // BLE timed out / reassembly failed — surface the original
                     // HTTP error and DO NOT raise isBleDegraded.
-                    NetworkResult.Error(e.toUserMessage())
+                    e.toNetworkError()
                 } else {
                     val blocks = try {
                         gson.fromJson<List<Block>>(
@@ -473,7 +474,7 @@ class MediaRepository @Inject constructor(
                         null
                     }
                     if (blocks == null) {
-                        NetworkResult.Error(e.toUserMessage())
+                        e.toNetworkError()
                     } else {
                         setBleDegraded(true)
                         _bleDegradedEvents.tryEmit(Unit)
@@ -534,7 +535,7 @@ class MediaRepository @Inject constructor(
     } catch (e: IOException) {
         // Transport-level failure: candidate for BLE failover.
         if (bleController.connectionState.value != BleConnState.CONNECTED) {
-            NetworkResult.Error(e.toUserMessage())
+            e.toNetworkError()
         } else {
             val json = bleTransportFallback.fetchJson(endpoint, path, index) {
                 bleController.requestApi(endpoint, path, index)
@@ -543,7 +544,7 @@ class MediaRepository @Inject constructor(
                 // BLE link was CONNECTED but no payload arrived / reassembly
                 // failed within the timeout budget. Surface the original HTTP
                 // error and DO NOT raise isBleDegraded (no traffic was served).
-                NetworkResult.Error(e.toUserMessage())
+                e.toNetworkError()
             } else {
                 try {
                     val parsed = gson.fromJson<T>(json, type)
@@ -560,7 +561,7 @@ class MediaRepository @Inject constructor(
                 } catch (parseErr: Exception) {
                     // JSON deserialization failed — surface the original HTTP
                     // error rather than a misleading parse message.
-                    NetworkResult.Error(e.toUserMessage())
+                    e.toNetworkError()
                 }
             }
         }
@@ -618,6 +619,18 @@ class MediaRepository @Inject constructor(
         is HttpStatusException -> "Server returned ${this.code}"
         else -> message ?: "An unexpected error occurred."
     }
+
+    /** Localized resource for the well-known transport failures; null means
+     *  the caller should surface [toUserMessage] verbatim. */
+    private fun Exception.toUserMessageRes(): Int? = when (this) {
+        is java.net.ConnectException -> R.string.error_cannot_connect
+        is SocketTimeoutException -> R.string.error_timeout
+        is java.net.UnknownHostException -> R.string.error_unknown_host
+        else -> null
+    }
+
+    private fun Exception.toNetworkError(): NetworkResult.Error =
+        NetworkResult.Error(toUserMessage(), userMessageRes = toUserMessageRes())
 }
 
 /**

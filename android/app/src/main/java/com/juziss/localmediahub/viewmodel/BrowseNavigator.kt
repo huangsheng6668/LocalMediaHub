@@ -8,6 +8,7 @@ import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.SystemBrowseResult
 import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.network.NetworkResult
+import com.juziss.localmediahub.network.userText
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -99,7 +100,7 @@ internal class BrowseNavigator(
                 sharedState.pathStack.value = emptyList()
             }
             is NetworkResult.Error -> {
-                sharedState.browseState.value = BrowseState.Error(result.message)
+                sharedState.browseState.value = BrowseState.Error(result.userText(appContext))
             }
             is NetworkResult.Loading -> {}
         }
@@ -118,7 +119,7 @@ internal class BrowseNavigator(
                 sharedState.pathStack.value = emptyList()
             }
             is NetworkResult.Error -> {
-                sharedState.browseState.value = BrowseState.Error(result.message)
+                sharedState.browseState.value = BrowseState.Error(result.userText(appContext))
             }
             is NetworkResult.Loading -> {}
         }
@@ -142,7 +143,7 @@ internal class BrowseNavigator(
                 )
                 applySystemResult(result.data)
             }
-            is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
+            is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
             is NetworkResult.Loading -> {}
         }
     }
@@ -172,7 +173,7 @@ internal class BrowseNavigator(
                 nextPage = 2
                 applyFolderResult(result.data, serverSortedFiles = true)
             }
-            is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
+            is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
             is NetworkResult.Loading -> {}
         }
     }
@@ -209,7 +210,7 @@ internal class BrowseNavigator(
                     applySystemResult(result.data)
                     _restoreScrollTo.value = previousPath
                 }
-                is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
+                is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
                 is NetworkResult.Loading -> {}
             }
         } else {
@@ -228,7 +229,7 @@ internal class BrowseNavigator(
                     applyFolderResult(result.data, serverSortedFiles = true)
                     _restoreScrollTo.value = previousPath
                 }
-                is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
+                is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
                 is NetworkResult.Loading -> {}
             }
         }
@@ -412,7 +413,7 @@ internal class BrowseNavigator(
             } else {
                 when (val result = repository.browseSystemPath(path, forceNetwork = forceNetwork)) {
                     is NetworkResult.Success -> applySystemResult(result.data)
-                    is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
+                    is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
                     is NetworkResult.Loading -> {}
                 }
             }
@@ -435,7 +436,7 @@ internal class BrowseNavigator(
                         nextPage = 2
                         applyFolderResult(result.data, serverSortedFiles = true)
                     }
-                    is NetworkResult.Error -> sharedState.emitBrowseError(result.message)
+                    is NetworkResult.Error -> sharedState.emitBrowseError(result.userText(appContext))
                     is NetworkResult.Loading -> {}
                 }
             }
@@ -466,7 +467,7 @@ internal class BrowseNavigator(
                 )
             }
             is NetworkResult.Error -> {
-                sharedState.browseState.value = BrowseState.Error(result.message)
+                sharedState.browseState.value = BrowseState.Error(result.userText(appContext))
             }
             is NetworkResult.Loading -> {}
         }
