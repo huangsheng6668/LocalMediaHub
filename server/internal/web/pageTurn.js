@@ -313,7 +313,7 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
         // 目标章还没加载完 → 直接即时替换（DRAG 的降级路径，等价 NONE）。
         if (!targetSection || !oldSection) {
             if (targetSection) {
-                contentEl.innerHTML = '';
+                contentEl.innerHTML = ''; // XSS-SAFE: empty literal, clearing content
                 targetSection.classList.remove('text-reader__page--incoming');
                 targetSection.style.position = '';
                 targetSection.style.inset = '';
