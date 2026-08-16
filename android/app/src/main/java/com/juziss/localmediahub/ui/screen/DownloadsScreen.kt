@@ -36,6 +36,8 @@ import com.juziss.localmediahub.viewmodel.BrowseViewModel
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
  
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -252,39 +254,49 @@ fun DownloadsScreen(
                 ) {
                     // 1. Render Subfolders
                     items(foldersAtLevel, key = { "dir_$it" }) { folderName ->
-                        // Calculate subfolder statistics dynamically in parallel
-                        val (count, sizeStr) = remember(downloads, currentPath, folderName) {
-                            val targetPath = currentPath + folderName
-                            var fileCount = 0
-                            var totalSize = 0L
-                            for (entry in downloads) {
-                                val segments = entry.file.relativePath
-                                    .split('/', '\\')
-                                    .filter { it.isNotEmpty() }
-                                if (segments.size > targetPath.size && 
-                                    segments.take(targetPath.size) == targetPath
-                                ) {
-                                    fileCount++
-                                    val f = File(entry.localPath)
-                                    if (f.exists()) {
-                                        totalSize += f.length()
+                        // Subfolder statistics computed off the main thread
+                        // (File.exists()/length() are synchronous disk stats —
+                        // running them in composition froze first paint and
+                        // scrolling on large offline libraries).
+                        val folderStats by produceState(
+                            initialValue = 0 to "…",
+                            key1 = downloads,
+                            key2 = currentPath,
+                            key3 = folderName,
+                        ) {
+                            value = withContext(Dispatchers.IO) {
+                                val targetPath = currentPath + folderName
+                                var fileCount = 0
+                                var totalSize = 0L
+                                for (entry in downloads) {
+                                    val segments = entry.file.relativePath
+                                        .split('/', '\\')
+                                        .filter { it.isNotEmpty() }
+                                    if (segments.size > targetPath.size && 
+                                        segments.take(targetPath.size) == targetPath
+                                    ) {
+                                        fileCount++
+                                        val f = File(entry.localPath)
+                                        if (f.exists()) {
+                                            totalSize += f.length()
+                                        }
                                     }
                                 }
+                                val formattedSize = if (totalSize >= 1024 * 1024 * 1024) {
+                                    String.format(Locale.US, "%.2f GB", totalSize.toDouble() / (1024 * 1024 * 1024))
+                                } else if (totalSize >= 1024 * 1024) {
+                                    String.format(Locale.US, "%.2f MB", totalSize.toDouble() / (1024 * 1024))
+                                } else {
+                                    "${totalSize / 1024} KB"
+                                }
+                                Pair(fileCount, formattedSize)
                             }
-                            val formattedSize = if (totalSize >= 1024 * 1024 * 1024) {
-                                String.format(Locale.US, "%.2f GB", totalSize.toDouble() / (1024 * 1024 * 1024))
-                            } else if (totalSize >= 1024 * 1024) {
-                                String.format(Locale.US, "%.2f MB", totalSize.toDouble() / (1024 * 1024))
-                            } else {
-                                "${totalSize / 1024} KB"
-                            }
-                            Pair(fileCount, formattedSize)
                         }
  
                         FolderItemCard(
                             name = folderName,
-                            itemCount = count,
-                            totalSizeString = sizeStr,
+                            itemCount = folderStats.first,
+                            totalSizeString = folderStats.second,
                             onClick = { currentPath = currentPath + folderName },
                             onLongClick = { selectedFolderForDelete = folderName }
                         )
@@ -487,19 +499,21 @@ private fun DownloadItemCard(
         sdf.format(Date(entry.addedAt))
     }
  
-    val fileSize = remember(entry.localPath) {
-        val file = File(entry.localPath)
-        if (file.exists()) {
-            val sizeBytes = file.length()
-            if (sizeBytes >= 1024 * 1024 * 1024) {
-                String.format(Locale.US, "%.2f GB", sizeBytes.toDouble() / (1024 * 1024 * 1024))
-            } else if (sizeBytes >= 1024 * 1024) {
-                String.format(Locale.US, "%.2f MB", sizeBytes.toDouble() / (1024 * 1024))
+    val fileSize by produceState(initialValue = "…", entry.localPath) {
+        value = withContext(Dispatchers.IO) {
+            val file = File(entry.localPath)
+            if (file.exists()) {
+                val sizeBytes = file.length()
+                if (sizeBytes >= 1024 * 1024 * 1024) {
+                    String.format(Locale.US, "%.2f GB", sizeBytes.toDouble() / (1024 * 1024 * 1024))
+                } else if (sizeBytes >= 1024 * 1024) {
+                    String.format(Locale.US, "%.2f MB", sizeBytes.toDouble() / (1024 * 1024))
+                } else {
+                    "${sizeBytes / 1024} KB"
+                }
             } else {
-                "${sizeBytes / 1024} KB"
+                "未知大小"
             }
-        } else {
-            "未知大小"
         }
     }
  
