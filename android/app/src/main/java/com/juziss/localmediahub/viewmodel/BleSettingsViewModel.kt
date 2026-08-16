@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothManager
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.ble.BleConnState
 import com.juziss.localmediahub.ble.BleController
 import com.juziss.localmediahub.data.BleApi
@@ -51,6 +52,12 @@ class BleSettingsViewModel @Inject constructor(
     private val serverConfig: ServerConfig,
     @Named("bleEnabled") private val bleEnabledFlow: Flow<Boolean>,
 ) : AndroidViewModel(application) {
+
+    // AndroidViewModel already holds the Application; a short alias keeps the
+    // localized BLE error strings readable (getString is not @Composable-safe
+    // but ViewModels run outside composition).
+    private fun s(res: Int) = getApplication<Application>().getString(res)
+    private fun s(res: Int, vararg args: Any) = getApplication<Application>().getString(res, *args)
 
     private val _optimisticBleEnabled = MutableStateFlow<Boolean?>(null)
 
@@ -142,7 +149,7 @@ class BleSettingsViewModel @Inject constructor(
                     val discovered = scanResult.data
                     _devices.value = discovered
                     if (discovered.isEmpty()) {
-                        _errorText.value = "未发现当前手机的 BLE 广播（请确保手机蓝牙已开启且距离电脑较近）"
+                        _errorText.value = s(R.string.ble_err_no_advertising)
                         controller.markDisconnected()
                         return false
                     }
@@ -152,11 +159,11 @@ class BleSettingsViewModel @Inject constructor(
                             controller.markConnected(); return true
                         } else {
                             controller.markDisconnected()
-                            _errorText.value = "连接失败：服务端未能建立 BLE GATT 连接"; return false
+                            _errorText.value = s(R.string.ble_err_connect_gatt); return false
                         }
                         is NetworkResult.Error -> {
                             controller.markDisconnected()
-                            _errorText.value = "连接失败: ${connResult.message}"; return false
+                            _errorText.value = s(R.string.ble_err_connect_fmt, connResult.message); return false
                         }
                         else -> { controller.markDisconnected(); return false }
                     }
@@ -164,9 +171,9 @@ class BleSettingsViewModel @Inject constructor(
                 is NetworkResult.Error -> {
                     _devices.value = emptyList(); controller.markDisconnected()
                     val cause = if (scanResult.message.contains("ble unavailable")) {
-                        "服务端蓝牙未就绪（请确认 PC 已配有蓝牙且服务端使用 go build -tags bluetooth 编译）"
+                        s(R.string.ble_err_server_not_ready)
                     } else scanResult.message
-                    _errorText.value = "建立连接失败: $cause"; return false
+                    _errorText.value = s(R.string.ble_err_connect_cause_fmt, cause); return false
                 }
                 else -> { _devices.value = emptyList(); controller.markDisconnected(); return false }
             }
@@ -190,17 +197,17 @@ class BleSettingsViewModel @Inject constructor(
                     is NetworkResult.Success -> {
                         _devices.value = result.data
                         if (result.data.isEmpty()) {
-                            _errorText.value = "未扫描到可连接的 BLE 设备（请确保 PC 蓝牙已开启，并且 PC 服务端以 -tags bluetooth 编译启动）"
+                            _errorText.value = s(R.string.ble_err_scan_none)
                         }
                     }
                     is NetworkResult.Error -> {
                         _devices.value = emptyList()
                         val cause = if (result.message.contains("ble unavailable")) {
-                            "服务端蓝牙未就绪（请确认 PC 已配有蓝牙且服务端使用 go build -tags bluetooth 编译）"
+                            s(R.string.ble_err_server_not_ready)
                         } else {
                             result.message
                         }
-                        _errorText.value = "扫描失败: $cause"
+                        _errorText.value = s(R.string.ble_err_scan_fmt, cause)
                     }
                     else -> _devices.value = emptyList()
                 }
@@ -225,12 +232,12 @@ class BleSettingsViewModel @Inject constructor(
                         controller.markConnected()
                     } else {
                         controller.markDisconnected()
-                        _errorText.value = "连接失败：PC 服务端未能与设备建立 BLE GATT 连接"
+                        _errorText.value = s(R.string.ble_err_gatt_connect2)
                     }
                 }
                 is NetworkResult.Error -> {
                     controller.markDisconnected()
-                    _errorText.value = "连接失败: ${result.message}"
+                    _errorText.value = s(R.string.ble_err_connect_fmt, result.message)
                 }
                 else -> controller.markDisconnected()
             }
@@ -250,18 +257,18 @@ class BleSettingsViewModel @Inject constructor(
                     if (result.data != null) {
                         _echoResult.value = result.data
                     } else {
-                        _echoResult.value = "发送失败"
-                        _errorText.value = "未收到 BLE GATT Echo 回声响应"
+                        _echoResult.value = s(R.string.ble_send_failed)
+                        _errorText.value = s(R.string.ble_err_no_echo)
                         controller.markDisconnected()
                     }
                 }
                 is NetworkResult.Error -> {
-                    _echoResult.value = "发送失败"
-                    _errorText.value = "发送失败: ${result.message}"
+                    _echoResult.value = s(R.string.ble_send_failed)
+                    _errorText.value = s(R.string.ble_err_send_fmt, result.message)
                     controller.markDisconnected()
                 }
                 else -> {
-                    _echoResult.value = "发送失败"
+                    _echoResult.value = s(R.string.ble_send_failed)
                     controller.markDisconnected()
                 }
             }

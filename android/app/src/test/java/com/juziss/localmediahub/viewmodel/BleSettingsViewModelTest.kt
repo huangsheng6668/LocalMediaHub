@@ -11,6 +11,7 @@ import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.ServerConfig
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -119,7 +120,10 @@ class BleSettingsViewModelTest {
 
         assertEquals(1, api.scanCallCount)
         assertEquals(BleConnState.ADVERTISING, vm.connectionState.value)
-        assertTrue(vm.errorText.value?.contains("建立连接失败") == true)
+        // The error text is now resolved through the mocked Application's
+        // getString stub, which echoes the format argument — so the assertion
+        // checks that the API failure cause reaches the user-facing text.
+        assertTrue(vm.errorText.value?.contains("scan error") == true)
     }
 
     // --- Test helpers ------------------------------------------------------
@@ -232,8 +236,19 @@ class BleSettingsViewModelTest {
             is BleApi -> api
             else -> error("unsupported api fixture: ${api::class}")
         }
+        // The ViewModel resolves error strings via Application.getString;
+        // stub both overloads to echo the format argument so tests can assert
+        // that API failure causes surface in the user-facing text. The vararg
+        // overload is matched by its JVM shape (Int, Array<Any>) because
+        // mockk's anyVararg matcher does not bind to Kotlin vararg calls.
+        val application = mockk<Application>(relaxed = true)
+        every { application.getString(any<Int>()) } returns "ble"
+        every { application.getString(any<Int>(), any()) } answers {
+            "ble:" + secondArg<Array<Any>>().joinToString(",")
+        }
+
         val vm = BleSettingsViewModel(
-            application = mockk(relaxed = true),
+            application = application,
             controller = fakeController,
             api = bleApi,
             store = store,

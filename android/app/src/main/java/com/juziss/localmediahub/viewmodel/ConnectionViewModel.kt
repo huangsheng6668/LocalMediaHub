@@ -7,6 +7,7 @@ import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.network.NetworkResult
@@ -150,7 +151,7 @@ class ConnectionViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 _connectionState.value = ConnectionState.Error(
-                    e.message ?: "Unknown error"
+                    e.message ?: getApplication<Application>().getString(R.string.error_unknown)
                 )
             }
         }
