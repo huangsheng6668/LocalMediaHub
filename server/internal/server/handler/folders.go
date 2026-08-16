@@ -60,17 +60,9 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 			return respondError(c, http.StatusBadRequest, err.Error())
 		}
 
-		pathStr, err = service.NormalizePath(pathStr)
+		pathStr, err = service.ResolveBrowsePath(pathStr, h.cfg.Scan.GetRoots())
 		if err != nil {
-			return respondError(c, http.StatusBadRequest, err.Error())
-		}
-
-		valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
-		if err != nil {
-			return respondError(c, http.StatusBadRequest, err.Error())
-		}
-		if !valid {
-			return respondError(c, http.StatusForbidden, "path outside roots")
+			return respondError(c, http.StatusForbidden, "access denied")
 		}
 
 		// A2.2: 从 scanner cacheByDir 直接查目标目录的直接子文件。
@@ -107,17 +99,12 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
-	pathStr, err = service.NormalizePath(pathStr)
+	// ResolveBrowsePath enforces the within-roots boundary AND rejects reparse
+	// points (junctions/symlinks) below the root, so a link planted inside a
+	// library cannot escape the configured roots for directory listing.
+	pathStr, err = service.ResolveBrowsePath(pathStr, h.cfg.Scan.GetRoots())
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, err.Error())
-	}
-
-	valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
-	if err != nil {
-		return respondError(c, http.StatusBadRequest, err.Error())
-	}
-	if !valid {
-		return respondError(c, http.StatusForbidden, "path outside roots")
+		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
 	fi, err := os.Stat(pathStr)
@@ -125,7 +112,8 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "path not found")
 		}
-		return respondError(c, http.StatusBadRequest, err.Error())
+		// Do not echo the raw OS error: it embeds the absolute path.
+		return respondError(c, http.StatusBadRequest, "path not accessible")
 	}
 
 	if !fi.IsDir() {
@@ -204,13 +192,11 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, err.Error())
 	}
 
-	pathStr, err = service.NormalizePath(pathStr)
+	// ResolveBrowsePath: within-roots + no reparse points below the root
+	// boundary, so a junction inside the library cannot be zipped to leak
+	// out-of-library content.
+	pathStr, err = service.ResolveBrowsePath(pathStr, h.cfg.Scan.GetRoots())
 	if err != nil {
-		return respondError(c, http.StatusBadRequest, err.Error())
-	}
-
-	valid, err := service.IsPathWithinRoots(pathStr, h.cfg.Scan.GetRoots())
-	if err != nil || !valid {
 		return respondError(c, http.StatusForbidden, "access denied")
 	}
 
@@ -219,7 +205,8 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "path not found")
 		}
-		return respondError(c, http.StatusBadRequest, err.Error())
+		// Do not echo the raw OS error: it embeds the absolute path.
+		return respondError(c, http.StatusBadRequest, "path not accessible")
 	}
 
 	if !fi.IsDir() {

@@ -14,6 +14,10 @@ import (
 // `crypto/subtle.ConstantTimeCompare` over SHA-256 hashes to prevent
 // timing attacks and length leakage.
 //
+// A `?token=` query fallback exists ONLY for GET requests (clients that
+// cannot set headers, e.g. <img src> tags); state-changing methods must use
+// the header so a leaked token URL cannot drive mutations.
+//
 // When `token` is empty, the middleware is a no-op (passthrough). This keeps
 // existing deployments working until the operator explicitly sets a token.
 // Server startup logs a security warning when running in this open mode.
@@ -28,11 +32,13 @@ func BearerToken(token string) echo.MiddlewareFunc {
 			const prefix = "Bearer "
 			if strings.HasPrefix(auth, prefix) {
 				provided = auth[len(prefix):]
-			} else {
-				// Fallback for clients that cannot set headers (e.g. <img src>
-				// tags loading from /api/v1/books/image). Header takes
-				// precedence so this does not change behavior for any
-				// existing client.
+			} else if c.Request().Method == http.MethodGet {
+				// Query fallback ONLY for GET: <img>/<video> elements cannot
+				// send headers. State-changing endpoints (POST/PUT/DELETE)
+				// must carry the Authorization header, so a token URL leaked
+				// into history or logs cannot drive mutations by itself.
+				// Header takes precedence so this does not change behavior
+				// for any existing client.
 				provided = c.QueryParam("token")
 			}
 			providedHash := sha256.Sum256([]byte(provided))

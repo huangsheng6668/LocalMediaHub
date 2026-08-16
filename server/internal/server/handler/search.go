@@ -31,17 +31,13 @@ func (h *Handler) Search(c echo.Context) error {
 
 	searchPath := strings.TrimSpace(c.QueryParam("path"))
 	if searchPath != "" {
-		normalizedPath, err := service.NormalizePath(searchPath)
+		// ResolveBrowsePath enforces the within-roots boundary AND rejects
+		// reparse points (junctions/symlinks) below the root — previously the
+		// purely lexical IsPathWithinRoots let a junction inside the library
+		// scope a search outside the configured roots.
+		normalizedPath, err := service.ResolveBrowsePath(searchPath, h.cfg.Scan.GetRoots())
 		if err != nil {
-			return respondError(c, http.StatusBadRequest, err.Error())
-		}
-
-		valid, err := service.IsPathWithinRoots(normalizedPath, h.cfg.Scan.GetRoots())
-		if err != nil {
-			return respondError(c, http.StatusBadRequest, err.Error())
-		}
-		if !valid {
-			return respondError(c, http.StatusForbidden, "path outside roots")
+			return respondError(c, http.StatusForbidden, "access denied")
 		}
 
 		info, err := os.Stat(normalizedPath)
@@ -49,7 +45,8 @@ func (h *Handler) Search(c echo.Context) error {
 			if os.IsNotExist(err) {
 				return respondNotFound(c, "path not found")
 			}
-			return respondError(c, http.StatusBadRequest, err.Error())
+			// Do not echo the raw OS error: it embeds the absolute path.
+			return respondError(c, http.StatusBadRequest, "path not accessible")
 		}
 		if !info.IsDir() {
 			return respondError(c, http.StatusBadRequest, "path must be a directory")

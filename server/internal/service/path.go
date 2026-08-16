@@ -320,3 +320,19 @@ func ResolveWithinRoots(pathStr string, roots []string) (string, error) {
 	}
 	return resolved, nil
 }
+
+// ResolveBrowsePath is the security boundary for directory-oriented endpoints
+// (BrowseFolder, Search scope, folder-zip download). It applies the same
+// resolveWithin rules as the media endpoints — lexical cleaning, must lie
+// inside one of the roots, and any reparse point (junction/symlink) below the
+// root boundary is REJECTED so a link inside a library cannot escape the
+// configured roots for enumeration or zipping. Unlike
+// ValidateAccessibleMediaPath it does not require the target to be an
+// existing media file (browse targets are directories) and does not apply the
+// blocked-segment list (scan-root semantics — the operator's explicit
+// library). Previously these three endpoints used the purely lexical
+// IsPathWithinRoots, which let os.ReadDir/Stat follow a junction out of the
+// roots and leak out-of-library directory listings.
+func ResolveBrowsePath(pathStr string, roots []string) (string, error) {
+	return resolveWithin(pathStr, roots)
+}

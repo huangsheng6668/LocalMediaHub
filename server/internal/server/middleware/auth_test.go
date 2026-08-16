@@ -148,3 +148,28 @@ func TestBearerTokenRejectsInvalidQueryParamToken(t *testing.T) {
 	_ = h(c)
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
+
+// TestBearerTokenQueryFallbackGetOnly locks the hardening that ?token= is
+// accepted on GET only: a POST carrying the correct token purely in the query
+// string must be rejected (mutations require the Authorization header), while
+// the same POST with the header passes.
+func TestBearerTokenQueryFallbackGetOnly(t *testing.T) {
+	e := echo.New()
+	handler := func(c echo.Context) error {
+		return c.String(http.StatusOK, "ok")
+	}
+
+	// Correct token in query only, POST method → 401.
+	req := httptest.NewRequest(http.MethodPost, "/api/system/delete?token=secret", nil)
+	rec := httptest.NewRecorder()
+	_ = BearerToken("secret")(handler)(e.NewContext(req, rec))
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	// Correct token in header, POST method → 200 (header path unaffected).
+	req = httptest.NewRequest(http.MethodPost, "/api/system/delete", nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer secret")
+	rec = httptest.NewRecorder()
+	err := BearerToken("secret")(handler)(e.NewContext(req, rec))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
