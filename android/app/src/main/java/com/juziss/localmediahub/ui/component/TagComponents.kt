@@ -3,6 +3,8 @@ package com.juziss.localmediahub.ui.component
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -15,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.Tag
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TagFilterBar(
     tags: List<Tag>,
@@ -28,8 +31,12 @@ internal fun TagFilterBar(
             color = MaterialTheme.colorScheme.primary,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Row(
+        // FlowRow wraps overflowing chips onto the next line instead of
+        // clipping them at the screen edge (a fixed Row made the trailing
+        // tags unreachable once the bar exceeded the screen width).
+        FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
             tags.forEach { tag ->

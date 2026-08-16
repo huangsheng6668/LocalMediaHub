@@ -67,9 +67,13 @@ internal fun FavoritesContent(
         return
     }
  
-    val images = favoriteFiles.filter { it.mediaType == "image" }
+    // Cached per list identity: the O(n) filter + all() ran on every
+    // recomposition (e.g. each favorite toggle) despite the list being
+    // replaced-by-instance on content changes.
+    val images = remember(favoriteFiles) { favoriteFiles.filter { it.mediaType == "image" } }
+    val allImages = remember(favoriteFiles, images) { images.isNotEmpty() && favoriteFiles.all { it.mediaType == "image" } }
  
-    if (images.isNotEmpty() && favoriteFiles.all { it.mediaType == "image" }) {
+    if (allImages) {
         WaterfallImageGrid(
             images = images,
             onImageClick = remember(onImageClick, favoriteFiles) { { file -> onImageClick(file, favoriteFiles) } },
@@ -258,7 +262,10 @@ internal fun BrowseContent(
     val restorePath = state.restoreScrollTo
     val currentPath = state.currentPath
  
-    val images = files.filter { it.mediaType == "image" }
+    // Cached per list identity: recomputing this O(n) filter on every
+    // recomposition (selection toggles, BLE badge flips) was wasted work —
+    // the ViewModel replaces the list instance whenever its content changes.
+    val images = remember(files) { files.filter { it.mediaType == "image" } }
     val useStaggeredGrid = folders.isEmpty() && images.isNotEmpty()
  
     // Save scroll position whenever it changes (supporting both grid and staggered waterfall grids)
