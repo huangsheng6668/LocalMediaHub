@@ -175,7 +175,10 @@ func ValidateDeletion(pathStr string, allRoots []string) (string, error) {
 		// path, so the root check must also be lexical. Using EvalSymlinks here
 		// would resolve a symlink/junction root to its target and fail to match,
 		// letting a link-style root be deleted.
-		if resolved == absRoot {
+		// Case must be folded: Windows filesystems are case-insensitive and the
+		// lexical clean preserves the user-submitted case, so a "d:\MEDIA"
+		// submission must still match a "D:\Media" root (M-4, Phase 9).
+		if resolved == absRoot || strings.EqualFold(resolved, absRoot) {
 			return "", fmt.Errorf("access denied: cannot delete a root directory")
 		}
 	}

@@ -273,6 +273,19 @@ func TestValidateDeletionRejectsRootItself(t *testing.T) {
 	}
 }
 
+func TestValidateDeletionRejectsRootItselfCaseInsensitive(t *testing.T) {
+	root := filepath.Join(os.TempDir(), "LMH-CaseRoot")
+	os.MkdirAll(root, 0755)
+	defer os.RemoveAll(root)
+	// Windows 保留用户提交的大小写，词法清洗不归一盘符以外的段
+	variants := []string{strings.ToUpper(root), strings.ToLower(root)}
+	for _, v := range variants {
+		if _, err := ValidateDeletion(v, []string{root}); err == nil {
+			t.Fatalf("ValidateDeletion(%q) should reject the root itself", v)
+		}
+	}
+}
+
 func TestValidateDeletionAllowsChildFile(t *testing.T) {
 	root := t.TempDir()
 	child := filepath.Join(root, "clip.mp4")
