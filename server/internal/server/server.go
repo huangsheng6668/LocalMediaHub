@@ -329,17 +329,24 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	api.GET("/search", h.Search, authMw)
 
 	// Tags
-	api.GET("/tags", h.GetTags)
+	// Phase 9 (I-3): tag READS are auth-gated too (same reasoning as the
+	// H-2 media reads): the tag graph enumerates which files exist on the
+	// host — an information disclosure when token mode is on. Empty-token
+	// (open mode) deployments are unchanged: middleware.BearerToken is a
+	// passthrough when no token is configured (compat argument identical to
+	// the media reads: Android AuthInterceptor + web apiRequest inject the
+	// header on every call).
+	api.GET("/tags", h.GetTags, authMw)
 	// Mutation endpoints are auth-gated (security hardening): tag create /
 	// delete and file association write to the shared tags DB, so they must
-	// not be reachable unauthenticated. Reads stay public (documented design).
+	// not be reachable unauthenticated.
 	api.POST("/tags", h.CreateTag, authMw)
 	api.DELETE("/tags/:tag_id", h.DeleteTag, authMw)
 	api.POST("/tags/:tag_id/files/*", h.AssociateTag, authMw)
 	api.DELETE("/tags/:tag_id/files/*", h.DisassociateTag, authMw)
-	api.GET("/tags/:tag_id/files", h.GetTaggedFiles)
-	api.GET("/tags/:tag_id/media", h.GetTaggedMedia)
-	api.GET("/tags/file-tags", h.GetFileTags)
+	api.GET("/tags/:tag_id/files", h.GetTaggedFiles, authMw)
+	api.GET("/tags/:tag_id/media", h.GetTaggedMedia, authMw)
+	api.GET("/tags/file-tags", h.GetFileTags, authMw)
 
 	// Admin
 	admin := api.Group("/admin", authMw)

@@ -799,6 +799,38 @@ func TestMediaReadEndpointsRequireToken(t *testing.T) {
 	}
 }
 
+// TestTagReadEndpointsRequireToken is the Phase 9 (I-3) gate: the four tag
+// READ endpoints must reject unauthenticated requests with 401 when a token
+// is configured (the tag graph enumerates host files, so it is an information
+// disclosure on par with the H-2 media reads). Kept as its own test with its
+// own server instance: the per-IP auth-failure backoff (10 x 401/min) would
+// turn the trailing requests into 429 if these paths were appended to
+// TestMediaReadEndpointsRequireToken's loop.
+func TestTagReadEndpointsRequireToken(t *testing.T) {
+	s := newAuthTestServer(t, "sekrit-token")
+	for _, path := range []string{
+		"/api/v1/tags",
+		"/api/v1/tags/1/files",
+		"/api/v1/tags/1/media",
+		"/api/v1/tags/file-tags",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		s.Echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("GET %s without token = %d, want 401", path, rec.Code)
+		}
+	}
+	// With the token the gate opens (allow 200/404/400 — anything but 401/403).
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tags", nil)
+	req.Header.Set("Authorization", "Bearer sekrit-token")
+	rec := httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Fatalf("GET /tags with token must not %d", rec.Code)
+	}
+}
+
 // TestMediaReadEndpointsOpenModePassthrough pins the open-mode contract: when
 // no token is configured, middleware.BearerToken is a no-op, so deployments
 // that never set a token keep working exactly as before.
