@@ -14,6 +14,8 @@ import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.ServerConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Named
@@ -94,6 +97,75 @@ class BleSettingsViewModel @Inject constructor(
     /** Human-readable error message from the last operation (null if clean). */
     val errorText: StateFlow<String?> = _errorText.asStateFlow()
 
+    private var backgroundConnectJob: Job? = null
+    private var manualConnectJob: Job? = null
+    private var previousConnState: BleConnState? = null
+
+    init {
+        viewModelScope.launch {
+            combine(
+                bleEnabled,
+                store.serverUrl,
+                controller.connectionState
+            ) { enabled, url, connState ->
+                Triple(enabled, url, connState)
+            }.collect { (enabled, url, connState) ->
+                val wasConnected = previousConnState == BleConnState.CONNECTED
+                val isNowDisconnectedOrAdv =
+                    connState == BleConnState.ADVERTISING || connState == BleConnState.DISCONNECTED
+                val isEligible = enabled && hardwareAvailable() && url.isNotBlank() && isNowDisconnectedOrAdv
+
+                val stateChanged = previousConnState != connState
+                previousConnState = connState
+
+                if (!isEligible) {
+                    if (connState == BleConnState.CONNECTED || !enabled || url.isBlank()) {
+                        backgroundConnectJob?.cancel()
+                        backgroundConnectJob = null
+                    }
+                    return@collect
+                }
+
+                if (wasConnected && stateChanged) {
+                    // 断线智能退避重连 (3s ➔ 10s ➔ 30s 退避，最多 3 次)
+                    backgroundConnectJob?.cancel()
+                    backgroundConnectJob = launch {
+                        val delays = listOf(3_000L, 10_000L, 30_000L)
+                        for (delayMs in delays) {
+                            delay(delayMs)
+                            if (!isActive) break
+                            val success = doAutoConnectOnce(silent = true)
+                            if (success) break
+                        }
+                    }
+                } else {
+                    // 静默预建联 (0s ➔ 5s ➔ 15s 退避，3 次全部失败后进入 60s 冷却期)
+                    if (backgroundConnectJob?.isActive == true) {
+                        return@collect
+                    }
+                    backgroundConnectJob = launch {
+                        while (isActive) {
+                            val delays = listOf(0L, 5_000L, 15_000L)
+                            var connected = false
+                            for (delayMs in delays) {
+                                if (delayMs > 0) delay(delayMs)
+                                if (!isActive) break
+                                val success = doAutoConnectOnce(silent = true)
+                                if (success) {
+                                    connected = true
+                                    break
+                                }
+                            }
+                            if (connected) break
+                            // 3 次全部失败后进入 60s 冷却期
+                            delay(60_000L)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * True iff the device has a powered, present Bluetooth adapter. Re-read
      * on each call rather than cached so a user enabling Bluetooth in system
@@ -130,19 +202,30 @@ class BleSettingsViewModel @Inject constructor(
     }
 
     /**
-     * One-click BLE channel connection (manual button). Single-call wrapper
-     * around [doAutoConnectOnce].
+     * One-click BLE channel connection (manual button). Cancels any ongoing
+     * background auto-connect job, resets backoff/cooldown, and executes
+     * [doAutoConnectOnce] with silent = false.
      */
     fun autoConnect() {
-        viewModelScope.launch { doAutoConnectOnce() }
+        backgroundConnectJob?.cancel()
+        backgroundConnectJob = null
+        manualConnectJob?.cancel()
+        manualConnectJob = viewModelScope.launch {
+            doAutoConnectOnce(silent = false)
+        }
     }
 
     /**
      * One scan+connect attempt. Returns true if the BLE link reached CONNECTED.
      * Sets _scanning for the duration.
+     *
+     * @param silent when true, failures do not write to [_errorText], avoiding
+     *   polluting the UI during background auto-connect attempts.
      */
-    private suspend fun doAutoConnectOnce(): Boolean {
-        _errorText.value = null
+    suspend fun doAutoConnectOnce(silent: Boolean = false): Boolean {
+        if (!silent) {
+            _errorText.value = null
+        }
         _scanning.value = true
         try {
             return when (val scanResult = api.scan()) {
@@ -150,7 +233,9 @@ class BleSettingsViewModel @Inject constructor(
                     val discovered = scanResult.data
                     _devices.value = discovered
                     if (discovered.isEmpty()) {
-                        _errorText.value = s(R.string.ble_err_no_advertising)
+                        if (!silent) {
+                            _errorText.value = s(R.string.ble_err_no_advertising)
+                        }
                         controller.markDisconnected()
                         return false
                     }
@@ -167,26 +252,44 @@ class BleSettingsViewModel @Inject constructor(
                     when (val connResult = api.connect(target.id)) {
                         is NetworkResult.Success -> if (connResult.data) {
                             store.saveLastConnectedBleAddress(target.id)
-                            controller.markConnected(); return true
+                            controller.markConnected()
+                            return true
                         } else {
                             controller.markDisconnected()
-                            _errorText.value = s(R.string.ble_err_connect_gatt); return false
+                            if (!silent) {
+                                _errorText.value = s(R.string.ble_err_connect_gatt)
+                            }
+                            return false
                         }
                         is NetworkResult.Error -> {
                             controller.markDisconnected()
-                            _errorText.value = s(R.string.ble_err_connect_fmt, connResult.message); return false
+                            if (!silent) {
+                                _errorText.value = s(R.string.ble_err_connect_fmt, connResult.message)
+                            }
+                            return false
                         }
-                        else -> { controller.markDisconnected(); return false }
+                        else -> {
+                            controller.markDisconnected()
+                            return false
+                        }
                     }
                 }
                 is NetworkResult.Error -> {
-                    _devices.value = emptyList(); controller.markDisconnected()
-                    val cause = if (scanResult.message.contains("ble unavailable")) {
-                        s(R.string.ble_err_server_not_ready)
-                    } else scanResult.message
-                    _errorText.value = s(R.string.ble_err_connect_cause_fmt, cause); return false
+                    _devices.value = emptyList()
+                    controller.markDisconnected()
+                    if (!silent) {
+                        val cause = if (scanResult.message.contains("ble unavailable")) {
+                            s(R.string.ble_err_server_not_ready)
+                        } else scanResult.message
+                        _errorText.value = s(R.string.ble_err_connect_cause_fmt, cause)
+                    }
+                    return false
                 }
-                else -> { _devices.value = emptyList(); controller.markDisconnected(); return false }
+                else -> {
+                    _devices.value = emptyList()
+                    controller.markDisconnected()
+                    return false
+                }
             }
         } finally {
             _scanning.value = false

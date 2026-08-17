@@ -1,6 +1,9 @@
 package com.juziss.localmediahub.viewmodel
 
 import android.app.Application
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.content.Context
 import com.juziss.localmediahub.ble.BleConnState
 import com.juziss.localmediahub.ble.BleController
 import com.juziss.localmediahub.ble.BlePeripheralManager
@@ -25,14 +28,16 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 /**
- * Unit tests for the BLE scan/connect/sendTest flows (Task 9) and the manual
- * connection flow (`autoConnect()`).
+ * Unit tests for the BLE scan/connect/sendTest flows (Task 9) and the auto-connect /
+ * silent pre-connect and reconnect backoff flows (Task 3).
  *
  * Each VM is constructed with:
  *  - a real [BleController] backed by a [FakePeripheralManager], so the
@@ -61,7 +66,7 @@ class BleSettingsViewModelTest {
     @Test
     fun scan_populatesDevices() = runTest {
         val api = fakeApi(scanFailCount = 0)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
         vm.scan(); runCurrent()
 
         assertEquals(1, vm.devices.value.size)
@@ -71,7 +76,7 @@ class BleSettingsViewModelTest {
     @Test
     fun connect_marksControllerConnected() = runTest {
         val api = fakeApi(scanFailCount = 0)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
         vm.connect(BleDevice("AA:BB", "Pixel", -45)); runCurrent()
 
         assertEquals(BleConnState.CONNECTED, vm.connectionState.value)
@@ -79,9 +84,8 @@ class BleSettingsViewModelTest {
 
     @Test
     fun sendTest_updatesEchoResult() = runTest {
-        val api = mockk<BleApi>()
-        coEvery { api.send(any()) } returns NetworkResult.Success("pong")
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        val api = fakeApi(scanFailCount = 0)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
         vm.sendTest(); runCurrent()
 
         assertEquals("pong", vm.echoResult.value)
@@ -90,19 +94,9 @@ class BleSettingsViewModelTest {
     // --- Manual autoConnect flow -------------------------------------------
 
     @Test
-    fun bleEnabled_doesNotTriggerAutoConnect() = runTest {
-        val api = fakeApi(scanFailCount = 0)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
-        runCurrent()
-        vm.fireAdvertisingReady(true); runCurrent()
-        advanceTimeBy(10_000); runCurrent()
-        assertEquals(0, api.scanCallCount)
-    }
-
-    @Test
     fun autoConnect_manualCall_triggersSingleScanAndConnect() = runTest {
         val api = fakeApi(scanFailCount = 0)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
         runCurrent()
 
         vm.autoConnect(); runCurrent()
@@ -114,7 +108,7 @@ class BleSettingsViewModelTest {
     @Test
     fun autoConnect_manualCall_handlesScanFailureCleanly() = runTest {
         val api = fakeApi(scanFailCount = 1)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
         runCurrent()
 
         vm.autoConnect(); runCurrent()
@@ -125,6 +119,99 @@ class BleSettingsViewModelTest {
         // getString stub, which echoes the format argument — so the assertion
         // checks that the API failure cause reaches the user-facing text.
         assertTrue(vm.errorText.value?.contains("scan error") == true)
+    }
+
+    // --- Silent Pre-connect & Auto-reconnect Backoff (Task 3) ---------------
+
+    @Test
+    fun silentAutoConnect_onFailure_doesNotPolluteErrorText() = runTest {
+        val api = fakeApi(scanFailCount = 1)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
+        runCurrent()
+
+        val success = vm.doAutoConnectOnce(silent = true)
+        runCurrent()
+
+        assertFalse(success)
+        assertNull(vm.errorText.value) // 静默模式下错误文本保持 null
+    }
+
+    @Test
+    fun manualAutoConnect_resetsBackoffAndSetsErrorTextOnFailure() = runTest {
+        val api = fakeApi(scanFailCount = 10)
+        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        runCurrent()
+
+        vm.autoConnect()
+        runCurrent()
+
+        assertTrue(vm.errorText.value != null) // 手动模式下更新 errorText
+    }
+
+    @Test
+    fun silentAutoConnect_triggersAutomaticallyOnStartupWhenConfigured() = runTest {
+        val api = fakeApi(scanFailCount = 0)
+        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        runCurrent()
+
+        // 验证初始启动已触发静默预建联并成功连接
+        assertEquals(1, api.scanCallCount)
+        assertEquals(BleConnState.CONNECTED, vm.connectionState.value)
+    }
+
+    @Test
+    fun silentAutoConnect_entersCooldownAfterThreeFailures() = runTest {
+        val api = fakeApi(scanFailCount = 10) // 总是失败
+        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        runCurrent()
+        advanceTimeBy(30_000); runCurrent()
+
+        // 最多尝试 3 次退避，随后进入冷却期
+        assertEquals(3, api.scanCallCount)
+        assertNull(vm.errorText.value) // 静默模式下不污染 errorText
+    }
+
+    @Test
+    fun silentAutoConnect_doesNotTrigger_whenBleDisabled() = runTest {
+        val api = fakeApi(scanFailCount = 0)
+        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = false)
+        runCurrent()
+        advanceTimeBy(30_000); runCurrent()
+
+        assertEquals(0, api.scanCallCount)
+    }
+
+    @Test
+    fun silentAutoConnect_doesNotTrigger_whenServerNotConfigured() = runTest {
+        val api = fakeApi(scanFailCount = 0)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
+        runCurrent()
+        advanceTimeBy(30_000); runCurrent()
+
+        assertEquals(0, api.scanCallCount)
+    }
+
+    @Test
+    fun autoReconnectOnDisconnect_triggersBackoffWhenDisconnected() = runTest {
+        val api = fakeApi(scanFailCount = 0)
+        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        runCurrent()
+
+        assertEquals(1, api.scanCallCount)
+        assertEquals(BleConnState.CONNECTED, vm.connectionState.value)
+
+        // 触发服务端断开连接
+        vm.fakeController.markDisconnected()
+        runCurrent()
+
+        // 3s 退避延迟前不应触发扫描
+        advanceTimeBy(1_000); runCurrent()
+        assertEquals(1, api.scanCallCount)
+
+        // 到达 3s 触发第 1 次重连扫描
+        advanceTimeBy(2_000); runCurrent()
+        assertEquals(2, api.scanCallCount)
+        assertEquals(BleConnState.CONNECTED, vm.connectionState.value)
     }
 
     // --- selectBestDevice and MAC memory (Task 2) ---------------------------
@@ -174,7 +261,7 @@ class BleSettingsViewModelTest {
     @Test
     fun autoConnect_savesLastConnectedMacOnSuccess() = runTest {
         val api = fakeApi(scanFailCount = 0)
-        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
         runCurrent()
 
         vm.autoConnect(); runCurrent()
@@ -306,6 +393,11 @@ class BleSettingsViewModelTest {
         // overload is matched by its JVM shape (Int, Array<Any>) because
         // mockk's anyVararg matcher does not bind to Kotlin vararg calls.
         val application = mockk<Application>(relaxed = true)
+        val bluetoothManager = mockk<BluetoothManager>(relaxed = true)
+        val bluetoothAdapter = mockk<BluetoothAdapter>(relaxed = true)
+        every { bluetoothAdapter.isEnabled } returns true
+        every { bluetoothManager.adapter } returns bluetoothAdapter
+        every { application.getSystemService(Context.BLUETOOTH_SERVICE) } returns bluetoothManager
         every { application.getString(any<Int>()) } returns "ble"
         every { application.getString(any<Int>(), any()) } answers {
             "ble:" + secondArg<Array<Any>>().joinToString(",")
