@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/localmediahub/server/internal/ble"
+	"github.com/localmediahub/server/internal/config"
 )
 
 // fakeCentral satisfies the BLECentralBackend interface so handler tests can
@@ -43,12 +44,27 @@ func (f *fakeCentral) State() string {
 	return f.state
 }
 
+// newBLEHandler builds a Handler around the given BLE backend with a tokened
+// config, mirroring production (handler.New always carries a cfg). Tests for
+// the open-auth gate use newBLEOpenAuthHandler instead.
+func newBLEHandler(central BLECentralBackend) *Handler {
+	cfg := &config.Config{}
+	cfg.Server.Token = "unit-test-token"
+	return &Handler{cfg: cfg, BLECentral: central}
+}
+
+// newBLEOpenAuthHandler builds a Handler whose config has NO server.token —
+// the open-auth mode the BLE handlers must refuse (Phase 9 / H-1a).
+func newBLEOpenAuthHandler(central BLECentralBackend) *Handler {
+	return &Handler{cfg: &config.Config{}, BLECentral: central}
+}
+
 func TestScanBLEReturnsDevices(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ble/scan", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	h := &Handler{BLECentral: &fakeCentral{scanDevices: []ble.Device{{ID: "AA:BB", Name: "Pixel", RSSI: -45}}}}
+	h := newBLEHandler(&fakeCentral{scanDevices: []ble.Device{{ID: "AA:BB", Name: "Pixel", RSSI: -45}}})
 	if err := h.ScanBLE(c); err != nil {
 		t.Fatalf("ScanBLE error: %v", err)
 	}
@@ -68,7 +84,7 @@ func TestScanBLEUnavailableReturnsEmpty(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ble/scan", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	h := &Handler{BLECentral: &fakeCentral{scanErr: errors.New("unavailable")}}
+	h := newBLEHandler(&fakeCentral{scanErr: errors.New("unavailable")})
 	if err := h.ScanBLE(c); err != nil {
 		t.Fatalf("ScanBLE error: %v", err)
 	}
@@ -82,13 +98,53 @@ func TestScanBLEUnavailableReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestScanBLEOpenAuthModeRejected verifies the Phase 9 (H-1a) handler gate:
+// with no server.token the scan request is refused with HTTP 400 and a
+// message explaining BLE is unavailable in open-auth mode.
+func TestScanBLEOpenAuthModeRejected(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ble/scan", nil)
+	c := e.NewContext(req, httptest.NewRecorder())
+	h := newBLEOpenAuthHandler(&fakeCentral{})
+	err := h.ScanBLE(c)
+	if err == nil {
+		t.Fatal("expected 400 for scan in open-auth mode")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %v", err)
+	}
+	if msg, _ := he.Message.(string); msg == "" || !strings.Contains(msg, "open-auth") {
+		t.Fatalf("message must explain open-auth BLE unavailability, got %q", msg)
+	}
+}
+
+// TestConnectBLEOpenAuthModeRejected verifies the connect half of the same
+// gate: no token -> HTTP 400, never a GATT connection attempt.
+func TestConnectBLEOpenAuthModeRejected(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ble/connect", strings.NewReader(`{"id":"AA:BB"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	c := e.NewContext(req, httptest.NewRecorder())
+	fc := &fakeCentral{}
+	h := newBLEOpenAuthHandler(fc)
+	err := h.ConnectBLE(c)
+	if err == nil {
+		t.Fatal("expected 400 for connect in open-auth mode")
+	}
+	he, ok := err.(*echo.HTTPError)
+	if !ok || he.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %v", err)
+	}
+}
+
 func TestConnectBLE(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ble/connect", strings.NewReader(`{"id":"AA:BB"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	h := &Handler{BLECentral: &fakeCentral{}}
+	h := newBLEHandler(&fakeCentral{})
 	if err := h.ConnectBLE(c); err != nil {
 		t.Fatalf("ConnectBLE error: %v", err)
 	}
@@ -107,7 +163,7 @@ func TestSendBLEReturnsEcho(t *testing.T) {
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	h := &Handler{BLECentral: &fakeCentral{sendEcho: []byte("pong")}}
+	h := newBLEHandler(&fakeCentral{sendEcho: []byte("pong")})
 	if err := h.SendBLE(c); err != nil {
 		t.Fatalf("SendBLE error: %v", err)
 	}
@@ -127,7 +183,7 @@ func TestSendBLERejectsOversizePayload(t *testing.T) {
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	h := &Handler{BLECentral: &fakeCentral{sendEcho: []byte("pong")}}
+	h := newBLEHandler(&fakeCentral{sendEcho: []byte("pong")})
 	err := h.SendBLE(c)
 	if err == nil {
 		t.Fatal("expected 400 for oversize payload")

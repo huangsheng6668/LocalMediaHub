@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -28,13 +29,34 @@ type BLECentralBackend interface {
 // larger would fragment and is rejected with HTTP 400 instead.
 const maxBLEPayload = 244
 
+// bleOpenAuthModeMessage explains why scan/connect are refused when the
+// server runs without a token: the BLE channel authenticates every frame with
+// a key derived from server.token (Phase 9 / H-1a), and with no token there
+// is no key — an "authenticated" channel would be forgeable by any LAN
+// device. 400 (not 200-with-error) so callers treat it as a hard refusal.
+const bleOpenAuthModeMessage = "ble unavailable in open-auth mode: set server.token to enable the BLE channel"
+
+// requireBleToken enforces that gate. Returns nil when a token is configured.
+func (h *Handler) requireBleToken(c echo.Context) error {
+	if h.cfg == nil || h.cfg.Server.Token == "" {
+		slog.Warn("BLE request refused: server.token is empty (open-auth mode); BLE channel disabled")
+		return echo.NewHTTPError(http.StatusBadRequest, bleOpenAuthModeMessage)
+	}
+	return nil
+}
+
 // ScanBLE handles GET /api/v1/ble/scan. Triggers a Central scan for peripherals
 // advertising SERVICE_UUID and returns the discovered devices. When BLE is
 // unavailable (nil backend) or the scan errors, returns HTTP 200 with an empty
 // device list and an "error" field — never 500, never a crash (zero-regression).
+// In open-auth mode (no server.token) the request is refused with 400: the BLE
+// channel cannot be authenticated without a key (Phase 9 / H-1a).
 func (h *Handler) ScanBLE(c echo.Context) error {
 	if h.BLECentral == nil {
 		return c.JSON(http.StatusOK, map[string]any{"devices": []any{}, "error": "ble unavailable"})
+	}
+	if err := h.requireBleToken(c); err != nil {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), 4*time.Second)
 	defer cancel()
@@ -46,11 +68,16 @@ func (h *Handler) ScanBLE(c echo.Context) error {
 }
 
 // ConnectBLE handles POST /api/v1/ble/connect {"id":"..."}. Asks the Central to
-// establish a GATT connection to the named device. Returns {"connected":bool}
-// plus an "error" field on failure (HTTP 200, zero-regression).
+// establish a GATT connection to the named device and complete the Phase 9
+// mutual-challenge handshake. Returns {"connected":bool} plus an "error" field
+// on failure (HTTP 200, zero-regression). In open-auth mode (no server.token)
+// the request is refused with 400 — same rationale as ScanBLE.
 func (h *Handler) ConnectBLE(c echo.Context) error {
 	if h.BLECentral == nil {
 		return c.JSON(http.StatusOK, map[string]any{"connected": false, "error": "ble unavailable"})
+	}
+	if err := h.requireBleToken(c); err != nil {
+		return err
 	}
 	var req struct {
 		ID string `json:"id"`

@@ -137,6 +137,11 @@ func New(cfg *config.Config) (*Server, error) {
 	} else {
 		s.bleScanner = bleScanner
 		bleCentral := ble.NewCentral(bleScanner)
+		// Phase 9 (H-1a): derive the BLE auth key from the server token. The
+		// Central refuses the data phase with a nil key (open-auth mode), and
+		// the /api/v1/ble/scan|connect handlers already 400 on an empty token
+		// — this wiring is what makes an authenticated handshake possible.
+		bleCentral.SetAuthToken(cfg.Server.Token)
 		// Spec §3.1: inject the bleApiProvider so the long-lived listener can
 		// serve CMD_API_REQ frames for every endpoint (book chapter, folders,
 		// browse folder, book info) out of the box. The provider adapts cfg +

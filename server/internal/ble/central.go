@@ -1,8 +1,12 @@
 package ble
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -15,6 +19,33 @@ var ErrNotConnected = errors.New("ble: not connected")
 // ErrNoApiProvider is returned by ServeApiRequest when no ApiProvider has been
 // injected via SetApiProvider.
 var ErrNoApiProvider = errors.New("ble: API provider not configured")
+
+// ErrNoAuthKey is returned by Connect when no auth key is configured (empty
+// server token / open-auth mode). The BLE channel MUST NOT enter the data
+// phase without a key: every frame would be "authenticated" with a publicly
+// computable MAC (Phase 9 / H-1a).
+var ErrNoAuthKey = errors.New("ble: auth key not configured; BLE data channel unavailable in open-auth mode")
+
+// ErrNotAuthenticated is returned by data-phase operations (Send,
+// ServeApiRequest) when the mutual-challenge handshake has not completed for
+// the current connection (Phase 9 / H-1a).
+var ErrNotAuthenticated = errors.New("ble: channel not authenticated")
+
+// ErrHandshakeFailed wraps the concrete cause when the post-connect
+// mutual-challenge handshake does not complete within the 5s budget or the
+// peer's proof does not verify. The connection is dropped either way.
+var ErrHandshakeFailed = errors.New("ble: authentication handshake failed")
+
+// bleHandshakeTimeout is the Phase 9 (H-1a) budget for completing both
+// challenge directions after the GATT connection is established. On expiry
+// the connection is dropped (fail closed).
+const bleHandshakeTimeout = 5 * time.Second
+
+// authListenerHandshakePoll is how long RunApiListener pauses between checks
+// while Connect drives the handshake. Connect owns the notify stream during
+// that window; a second concurrent WaitNotify arm would steal/replace its
+// CCCD handler (the adapter's EnableNotifications is one-shot per call).
+const authListenerHandshakePoll = 20 * time.Millisecond
 
 // Device is a discovered BLE peripheral.
 type Device struct {
@@ -64,6 +95,19 @@ type Central struct {
 	scanner     CentralScanner
 	state       string // "disconnected" | "connected"
 	apiProvider ApiProvider
+
+	// Phase 9 (H-1a) auth state. authKey is DeriveBleAuthKey(server token)
+	// — nil in open-auth mode, which refuses the data phase entirely.
+	// authenticated flips true only after both handshake challenges verify;
+	// localSeq / remoteSeq enforce per-direction strictly-increasing v2 seq.
+	// handshaking pauses RunApiListener's WaitNotify arms while Connect owns
+	// the notify stream for the handshake.
+	authKey       []byte
+	authenticated bool
+	localSeq      uint64
+	remoteSeq     uint64
+	haveRemoteSeq bool
+	handshaking   bool
 }
 
 // ApiProvider returns the JSON response body for an endpoint/path/index triple
@@ -78,6 +122,53 @@ type ApiProvider interface {
 
 func NewCentral(s CentralScanner) *Central {
 	return &Central{scanner: s, state: "disconnected"}
+}
+
+// SetAuthToken derives and stores the BLE auth key from the server's Bearer
+// token. An EMPTY token stores a nil key — DeriveBleAuthKey("") would be a
+// publicly computable constant (the domain prefix is in the source), so
+// open-auth mode keeps the key nil and Connect/data paths refuse to run.
+// Call once at startup, before any Connect.
+func (c *Central) SetAuthToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if token == "" {
+		c.authKey = nil
+		return
+	}
+	c.authKey = DeriveBleAuthKey(token)
+}
+
+// resetAuthLocked clears the per-connection auth state. Caller holds mu.
+func (c *Central) resetAuthLocked() {
+	c.authenticated = false
+	c.localSeq = 0
+	c.remoteSeq = 0
+	c.haveRemoteSeq = false
+}
+
+// acceptRemoteSeqLocked applies the strictly-increasing receive gate to a
+// decoded v2 frame's seq: the first frame of a connection is accepted with any
+// seq, every later one must be strictly greater than the max seen. Returns
+// ErrReplaySeq on rollback/replay WITHOUT updating the max. Caller holds mu.
+func (c *Central) acceptRemoteSeqLocked(seq uint64) error {
+	if c.haveRemoteSeq && seq <= c.remoteSeq {
+		return ErrReplaySeq
+	}
+	c.remoteSeq, c.haveRemoteSeq = seq, true
+	return nil
+}
+
+// failConnection drops the GATT link and resets state + auth. Used by the
+// listener's post-auth violation paths (bad MAC, seq replay) and the pre-auth
+// policy gate: fail closed, let the client reconnect and re-handshake.
+func (c *Central) failConnection() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.scanner.Disconnect()
+	c.state = "disconnected"
+	c.resetAuthLocked()
+	slog.Warn("BLE connection dropped (authentication policy)")
 }
 
 // SetApiProvider injects the request handler used by ServeApiRequest. Required
@@ -96,37 +187,161 @@ func (c *Central) Scan(ctx context.Context) ([]Device, error) {
 	return c.scanner.Scan(ctx, ServiceUUID)
 }
 
-// Connect establishes a GATT connection to the device id. Serialized.
+// Connect establishes a GATT connection to the device id and immediately
+// drives the Phase 9 (H-1a) mutual-challenge handshake over the fresh link:
+//
+//  1. PC sends v1 CmdAuthChallenge(dir=CentralToPeripheral, nonce1)
+//  2. phone replies v1 CmdAuthResponse(nonce1, mac1); PC verifies mac1
+//  3. phone sends v1 CmdAuthChallenge(dir=PeripheralToCentral, nonce2)
+//  4. PC replies v1 CmdAuthResponse(nonce2, mac2)
+//  5. authenticated=true; data frames are v2 (EncodeAuthedFrame /
+//     DecodeAuthedFrame) with strictly-increasing seq per direction
+//
+// The handshake must complete within bleHandshakeTimeout; on timeout, a bad
+// MAC, or any non-handshake v1 command the link is dropped and the error is
+// returned (fail closed). With no auth key (open-auth mode) Connect refuses
+// before touching the radio.
+//
+// Integration-point note: the adapter exposes no explicit "CCCD subscribed"
+// callback — the only CCCD write happens inside WaitNotify's
+// EnableNotifications. Connect is therefore the closest existing hook: it is
+// where connection establishment is observed, and the handshake's first
+// WaitNotify arm follows the challenge write back-to-back, so the peer's
+// response cannot be lost to a long un-subscribed window. While the handshake
+// runs, the handshaking flag pauses RunApiListener's own WaitNotify arms so
+// the two never compete for the notify stream.
 func (c *Central) Connect(ctx context.Context, id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.resetAuthLocked()
+	if len(c.authKey) == 0 {
+		slog.Warn("BLE connect refused: no auth key configured (open-auth mode)")
+		return ErrNoAuthKey
+	}
+	c.handshaking = true
+	defer func() { c.handshaking = false }()
 	if err := c.scanner.Connect(ctx, id); err != nil {
 		return err
 	}
 	c.state = "connected"
+	if err := c.handshakeLocked(ctx); err != nil {
+		c.scanner.Disconnect()
+		c.state = "disconnected"
+		c.resetAuthLocked()
+		slog.Warn("BLE auth handshake failed; connection dropped", "device", id, "error", err)
+		return err
+	}
+	c.authenticated = true
+	slog.Info("BLE channel authenticated", "device", id)
+	return nil
+}
+
+// handshakeLocked runs the two-way challenge/response exchange. Caller holds
+// mu (Connect). Every error is wrapped in ErrHandshakeFailed so callers can
+// classify failures without matching on causes.
+func (c *Central) handshakeLocked(ctx context.Context) error {
+	hsCtx, cancel := context.WithTimeout(ctx, bleHandshakeTimeout)
+	defer cancel()
+
+	key := c.authKey
+	nonce1 := make([]byte, 8)
+	if _, err := rand.Read(nonce1); err != nil {
+		return fmt.Errorf("%w: cannot read challenge nonce: %w", ErrHandshakeFailed, err)
+	}
+	if err := c.scanner.WriteCommand(hsCtx, EncodeFrame(EncodeAuthChallengePayload(AuthDirCentralToPeripheral, nonce1))); err != nil {
+		return fmt.Errorf("%w: challenge write: %w", ErrHandshakeFailed, err)
+	}
+
+	// Order-agnostic: accept the peer's response and its own challenge in
+	// either arrival order; both must verify before authenticated is set.
+	var peerVerified, repliedPeerChallenge bool
+	for !(peerVerified && repliedPeerChallenge) {
+		if err := hsCtx.Err(); err != nil {
+			return fmt.Errorf("%w: %w", ErrHandshakeFailed, err)
+		}
+		raw, err := c.scanner.WaitNotify(hsCtx)
+		if err != nil {
+			return fmt.Errorf("%w: wait notify: %w", ErrHandshakeFailed, err)
+		}
+		frame, ferr := DecodeFrame(raw)
+		if ferr != nil {
+			// Pre-auth only v1 frames carrying the two AUTH commands are
+			// admissible (brief Step 4); anything else fails the link.
+			return fmt.Errorf("%w: undecodable pre-auth frame: %w", ErrHandshakeFailed, ferr)
+		}
+		if len(frame.Payload) == 0 {
+			continue
+		}
+		switch CmdID(frame.Payload[0]) {
+		case CmdAuthResponse:
+			rn, rm, derr := DecodeAuthResponsePayload(frame.Payload)
+			if derr != nil {
+				return fmt.Errorf("%w: malformed auth response: %w", ErrHandshakeFailed, derr)
+			}
+			if !bytes.Equal(rn, nonce1) {
+				return fmt.Errorf("%w: auth response nonce mismatch", ErrHandshakeFailed)
+			}
+			if !hmac.Equal(rm, AuthResponseMAC(key, nonce1, AuthDirCentralToPeripheral)) {
+				return fmt.Errorf("%w: auth response MAC mismatch (wrong key?)", ErrHandshakeFailed)
+			}
+			peerVerified = true
+		case CmdAuthChallenge:
+			dir, nonce2, derr := DecodeAuthChallengePayload(frame.Payload)
+			if derr != nil {
+				return fmt.Errorf("%w: malformed auth challenge: %w", ErrHandshakeFailed, derr)
+			}
+			if dir != AuthDirPeripheralToCentral {
+				return fmt.Errorf("%w: unexpected challenge dir %#x", ErrHandshakeFailed, dir)
+			}
+			mac2 := AuthResponseMAC(key, nonce2, AuthDirPeripheralToCentral)
+			if werr := c.scanner.WriteCommand(hsCtx, EncodeFrame(EncodeAuthResponsePayload(nonce2, mac2))); werr != nil {
+				return fmt.Errorf("%w: response write: %w", ErrHandshakeFailed, werr)
+			}
+			repliedPeerChallenge = true
+		default:
+			return fmt.Errorf("%w: non-handshake command %#x before authentication", ErrHandshakeFailed, byte(CmdID(frame.Payload[0])))
+		}
+	}
 	return nil
 }
 
 // Send writes payload to the Command characteristic and waits for a Notify
-// response (echo). Returns the decoded echo payload. Requires active connection.
+// response (echo). Returns the decoded echo payload. Requires an active,
+// AUTHENTICATED connection (Phase 9 / H-1a): the write is a v2 authed frame
+// (localSeq, strictly increasing) and the reply must decode as v2 with a
+// strictly-increasing seq — a reply that fails MAC or replays a seq drops
+// the connection.
 func (c *Central) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.state != "connected" {
 		return nil, ErrNotConnected
 	}
-	if err := c.scanner.WriteCommand(ctx, EncodeFrame(payload)); err != nil {
+	if !c.authenticated || len(c.authKey) == 0 {
+		return nil, ErrNotAuthenticated
+	}
+	if err := c.scanner.WriteCommand(ctx, EncodeAuthedFrame(payload, c.localSeq, c.authKey)); err != nil {
 		return nil, err
 	}
+	c.localSeq++
 	raw, err := c.scanner.WaitNotify(ctx)
 	if err != nil {
 		return nil, err
 	}
-	frame, err := DecodeFrame(raw)
-	if err != nil {
-		return nil, err
+	respPayload, respSeq, derr := DecodeAuthedFrame(raw, c.authKey)
+	if derr != nil {
+		c.scanner.Disconnect()
+		c.state = "disconnected"
+		c.resetAuthLocked()
+		return nil, derr
 	}
-	return frame.Payload, nil
+	if rerr := c.acceptRemoteSeqLocked(respSeq); rerr != nil {
+		c.scanner.Disconnect()
+		c.state = "disconnected"
+		c.resetAuthLocked()
+		return nil, rerr
+	}
+	return respPayload, nil
 }
 
 func (c *Central) Disconnect() {
@@ -134,6 +349,7 @@ func (c *Central) Disconnect() {
 	defer c.mu.Unlock()
 	c.scanner.Disconnect()
 	c.state = "disconnected"
+	c.resetAuthLocked()
 }
 
 func (c *Central) State() string {
@@ -144,17 +360,18 @@ func (c *Central) State() string {
 
 // ServeApiRequest handles a single CMD_API_REQ received via the State
 // characteristic. notifyPayload is the decoded frame payload (the bytes after
-// the 3-byte physical header). The method decodes the request via
-// DecodeApiReqPayload, fetches the JSON response bytes from the injected
-// ApiProvider, splits them into MTU-safe CMD_JSON_CHUNK frames via
-// ChunkJsonBytes, and writes each frame to the Command characteristic via
-// WriteCommand.
+// the physical header, seq and MAC already verified by the receive gate). The
+// method decodes the request via DecodeApiReqPayload, fetches the JSON
+// response bytes from the injected ApiProvider, splits them into MTU-safe
+// CMD_JSON_CHUNK frames via ChunkJsonBytes, and writes each frame to the
+// Command characteristic via WriteCommand as a v2 authed frame with a
+// strictly-increasing localSeq (Phase 9 / H-1a).
 //
 // The caller is responsible for obtaining notifyPayload (typically by calling
-// WaitNotify + DecodeFrame). This keeps the Central's one-shot WaitNotify
-// contract intact: a long-lived subscription loop belongs to the adapter that
-// owns the BLE notification handler, not to this serialized facade. Returns the
-// number of chunk frames written.
+// WaitNotify + the authenticated decode path). This keeps the Central's
+// one-shot WaitNotify contract intact: a long-lived subscription loop belongs
+// to the adapter that owns the BLE notification handler, not to this
+// serialized facade. Returns the number of chunk frames written.
 //
 // Provider errors are surfaced to the caller with n==0 (no frames written) —
 // the stream is aborted before the first WriteCommand so the receiver does not
@@ -173,6 +390,8 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 	c.mu.Lock()
 	provider := c.apiProvider
 	connected := c.state == "connected"
+	authenticated := c.authenticated && len(c.authKey) > 0
+	authKey := c.authKey
 	scanner := c.scanner
 	c.mu.Unlock()
 
@@ -181,6 +400,9 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 	}
 	if !connected {
 		return 0, ErrNotConnected
+	}
+	if !authenticated {
+		return 0, ErrNotAuthenticated
 	}
 
 	jsonBytes, err := provider.HandleBleRequest(ctx, endpoint, path, index)
@@ -195,10 +417,16 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 
 	written := 0
 	for _, payload := range chunkPayloads {
-		// WriteCommand expects a frame-encoded payload (3-byte header + payload).
+		// Each chunk goes out as a v2 authed frame. The seq is reserved
+		// atomically per write; a failed write leaves a gap in the seq space,
+		// which is fine — the receive gate only requires strict increase.
 		// Errors abort the stream: a partial write leaves the receiver to time
 		// out and re-request; we don't try to resume mid-stream.
-		if werr := scanner.WriteCommand(ctx, EncodeFrame(payload)); werr != nil {
+		c.mu.Lock()
+		seq := c.localSeq
+		c.localSeq++
+		c.mu.Unlock()
+		if werr := scanner.WriteCommand(ctx, EncodeAuthedFrame(payload, seq, authKey)); werr != nil {
 			slog.Warn("BLE JSON chunk write failed",
 				"endpoint", endpoint, "path", path, "index", index,
 				"written", written, "total", len(chunkPayloads), "error", werr)
@@ -262,6 +490,23 @@ func (c *Central) runApiListener(ctx context.Context, retryBackoff time.Duration
 			slog.Info("BLE API listener exiting (ctx cancelled)", "error", err)
 			return err
 		}
+
+		// Phase 9 (H-1a): while Connect drives the handshake it owns the
+		// notify stream (the adapter's EnableNotifications is one-shot per
+		// WaitNotify call — a second arm here would steal/replace the
+		// handshake's CCCD handler). Poll until the handshake resolves.
+		c.mu.Lock()
+		handshaking := c.handshaking
+		c.mu.Unlock()
+		if handshaking {
+			select {
+			case <-time.After(authListenerHandshakePoll):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
+		}
+
 		raw, err := c.scanner.WaitNotify(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -284,31 +529,83 @@ func (c *Central) runApiListener(ctx context.Context, retryBackoff time.Duration
 			}
 			continue
 		}
+		c.handleNotifyFrame(ctx, raw)
+	}
+}
+
+// handleNotifyFrame routes one raw notification through the Phase 9 (H-1a)
+// receive policy:
+//
+//   - !authenticated: only v1 frames carrying the two AUTH commands are
+//     admissible. The handshake itself is owned by Connect (under the
+//     handshaking pause), so an auth frame arriving here is a raced/stale
+//     notification and is dropped; any OTHER command pre-auth is a protocol
+//     violation and drops the link (no data phase before authentication).
+//   - authenticated: the frame must decode as v2 (DecodeAuthedFrame — a bad
+//     MAC / wrong structure drops the link) and pass the strictly-increasing
+//     remoteSeq gate (rollback/replay drops the link with ErrReplaySeq).
+//
+// Surviving CMD_API_REQ payloads are dispatched to ServeApiRequest in a
+// goroutine, as before.
+func (c *Central) handleNotifyFrame(ctx context.Context, raw []byte) {
+	c.mu.Lock()
+	authenticated := c.authenticated
+	authKey := c.authKey
+	c.mu.Unlock()
+
+	if !authenticated {
 		frame, ferr := DecodeFrame(raw)
 		if ferr != nil {
-			slog.Warn("BLE API listener: dropped undecodable frame", "error", ferr)
-			continue
+			slog.Warn("BLE API listener: dropped undecodable pre-auth frame", "error", ferr)
+			return
 		}
 		if len(frame.Payload) == 0 {
-			continue
+			return
 		}
-		if CmdID(frame.Payload[0]) != CmdApiReq {
-			// Non-API notifications (e.g. echo replies from the connectivity
-			// loop) are ignored by the listener; the connection-verification
-			// path uses Send() directly.
-			continue
+		if cmd := CmdID(frame.Payload[0]); cmd == CmdAuthChallenge || cmd == CmdAuthResponse {
+			// Handshake-owner is Connect; these raced past its window.
+			slog.Debug("BLE API listener: dropped stale handshake frame")
+			return
 		}
-		// Dispatch in a goroutine so a slow request (large book, disk I/O)
-		// does not block subsequent requests on the same notify stream.
-		// ServeApiRequest re-checks connection + provider state under the
-		// Central lock, so racing a Disconnect is safe (it returns
-		// ErrNotConnected).
-		payload := append([]byte(nil), frame.Payload...)
-		go func() {
-			n, sErr := c.ServeApiRequest(ctx, payload)
-			if sErr != nil {
-				slog.Warn("BLE API listener: ServeApiRequest failed", "error", sErr, "written", n)
-			}
-		}()
+		slog.Warn("BLE API listener: non-handshake command before authentication; dropping link",
+			"cmd", byte(frame.Payload[0]))
+		c.failConnection()
+		return
 	}
+
+	payload, seq, aerr := DecodeAuthedFrame(raw, authKey)
+	if aerr != nil {
+		slog.Warn("BLE API listener: v2 frame failed authentication; dropping link", "error", aerr)
+		c.failConnection()
+		return
+	}
+	c.mu.Lock()
+	rerr := c.acceptRemoteSeqLocked(seq)
+	c.mu.Unlock()
+	if rerr != nil {
+		slog.Warn("BLE API listener: seq rollback/replay rejected; dropping link", "seq", seq, "error", rerr)
+		c.failConnection()
+		return
+	}
+	if len(payload) == 0 {
+		return
+	}
+	if CmdID(payload[0]) != CmdApiReq {
+		// Non-API notifications (e.g. echo replies from the connectivity
+		// loop) are ignored by the listener; the connection-verification
+		// path uses Send() directly.
+		return
+	}
+	// Dispatch in a goroutine so a slow request (large book, disk I/O)
+	// does not block subsequent requests on the same notify stream.
+	// ServeApiRequest re-checks connection + auth state under the Central
+	// lock, so racing a Disconnect is safe (it returns ErrNotConnected /
+	// ErrNotAuthenticated).
+	reqPayload := append([]byte(nil), payload...)
+	go func() {
+		n, sErr := c.ServeApiRequest(ctx, reqPayload)
+		if sErr != nil {
+			slog.Warn("BLE API listener: ServeApiRequest failed", "error", sErr, "written", n)
+		}
+	}()
 }

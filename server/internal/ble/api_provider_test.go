@@ -31,26 +31,31 @@ func (s *stubApiProvider) HandleBleRequest(_ context.Context, endpoint byte, pat
 	return s.response, s.err
 }
 
-// newCentralWithProvider wires up a Central backed by a collectScanner (which
-// records WriteCommand frames) and the given ApiProvider, then transitions the
-// Central to the "connected" state so ServeApiRequest can proceed. Mirrors the
-// shape of existing helpers in central_chapter_test.go.
-func newCentralWithProvider(p ApiProvider) (*Central, *collectScanner) {
-	scanner := &collectScanner{}
+// newCentralWithProvider wires up a Central backed by a blePeerFake (which
+// completes the Phase 9 handshake and records WriteCommand frames) and the
+// given ApiProvider, then drives an authenticated Connect so ServeApiRequest
+// can proceed. Mirrors the shape of existing helpers in central_chapter_test.go.
+func newCentralWithProvider(t *testing.T, p ApiProvider) (*Central, *blePeerFake) {
+	t.Helper()
+	scanner := newBlePeerFake(centralTestToken)
 	c := NewCentral(scanner)
 	c.SetApiProvider(p)
-	_ = c.Connect(context.Background(), "AA:BB")
+	c.SetAuthToken(centralTestToken)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("authenticated Connect: %v", err)
+	}
 	return c, scanner
 }
 
 // TestServeApiRequestRoutesEndpointToProvider verifies the dispatcher contract:
 // ServeApiRequest must decode the CMD_API_REQ payload (endpoint/path/index),
 // forward them to the injected ApiProvider, and stream back the provider's JSON
-// response as one or more CMD_JSON_CHUNK frames. The returned chunk count must
-// be > 0 (an empty body still yields one chunk per ChunkJsonBytes's contract).
+// response as one or more authed v2 CMD_JSON_CHUNK frames. The returned chunk
+// count must be > 0 (an empty body still yields one chunk per ChunkJsonBytes's
+// contract).
 func TestServeApiRequestRoutesEndpointToProvider(t *testing.T) {
 	stub := &stubApiProvider{response: []byte(`[{"name":"x"}]`)}
-	c, scanner := newCentralWithProvider(stub)
+	c, scanner := newCentralWithProvider(t, stub)
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
 
 	n, err := c.ServeApiRequest(context.Background(), payload)
@@ -66,18 +71,20 @@ func TestServeApiRequestRoutesEndpointToProvider(t *testing.T) {
 	if n == 0 {
 		t.Fatalf("expected chunks written, got 0")
 	}
-	if n != len(scanner.written) {
-		t.Fatalf("returned chunk count %d != scanner.written %d", n, len(scanner.written))
+	writes := scanner.recordedWrites()
+	if n != len(writes) {
+		t.Fatalf("returned chunk count %d != recorded writes %d", n, len(writes))
 	}
-	// Every written frame must decode as a CMD_JSON_CHUNK payload carrying the
-	// total body length of the marshalled response.
+	// Every written frame must decode as an authed v2 CMD_JSON_CHUNK payload
+	// carrying the total body length of the marshalled response.
+	key := DeriveBleAuthKey(centralTestToken)
 	wantBytes := len(stub.response)
-	for i, raw := range scanner.written {
-		frame, derr := DecodeFrame(raw)
+	for i, raw := range writes {
+		framePayload, _, derr := DecodeAuthedFrame(raw, key)
 		if derr != nil {
-			t.Fatalf("frame %d decode: %v", i, derr)
+			t.Fatalf("frame %d not a v2 authed frame: %v", i, derr)
 		}
-		_, cidx, totalBytes, _, perr := DecodeJsonChunkPayload(frame.Payload)
+		_, cidx, totalBytes, _, perr := DecodeJsonChunkPayload(framePayload)
 		if perr != nil {
 			t.Fatalf("frame %d chunk decode: %v", i, perr)
 		}
@@ -108,7 +115,7 @@ func TestServeApiRequestRoutesAllEndpoints(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubApiProvider{response: []byte(`{}`)}
-			c, _ := newCentralWithProvider(stub)
+			c, _ := newCentralWithProvider(t, stub)
 			payload, _ := EncodeApiReqPayload(tc.endpoint, tc.path, tc.index)
 			if _, err := c.ServeApiRequest(context.Background(), payload); err != nil {
 				t.Fatalf("ServeApiRequest: %v", err)
@@ -130,7 +137,7 @@ func TestServeApiRequestRoutesAllEndpoints(t *testing.T) {
 // chunk frames (the stream is aborted before the first WriteCommand).
 func TestServeApiRequestProviderErrorIsSurfaced(t *testing.T) {
 	stub := &stubApiProvider{err: errors.New("boom")}
-	c, scanner := newCentralWithProvider(stub)
+	c, scanner := newCentralWithProvider(t, stub)
 	payload, _ := EncodeApiReqPayload(EndpointBookInfo, "/p", 0)
 	n, err := c.ServeApiRequest(context.Background(), payload)
 	if err == nil {
@@ -139,8 +146,8 @@ func TestServeApiRequestProviderErrorIsSurfaced(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("expected 0 chunks on error, got %d", n)
 	}
-	if len(scanner.written) != 0 {
-		t.Fatalf("expected no frames written on error, got %d", len(scanner.written))
+	if writes := scanner.recordedWrites(); len(writes) != 0 {
+		t.Fatalf("expected no frames written on error, got %d", len(writes))
 	}
 }
 
@@ -161,7 +168,7 @@ func TestServeApiRequestRequiresProvider(t *testing.T) {
 // write frames when the BLE Central is not connected (defends against races with
 // Disconnect).
 func TestServeApiRequestRequiresConnection(t *testing.T) {
-	c, _ := newCentralWithProvider(&stubApiProvider{response: []byte(`[]`)})
+	c, _ := newCentralWithProvider(t, &stubApiProvider{response: []byte(`[]`)})
 	c.Disconnect()
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
 	_, err := c.ServeApiRequest(context.Background(), payload)
@@ -175,7 +182,7 @@ func TestServeApiRequestRequiresConnection(t *testing.T) {
 // provider is consulted.
 func TestServeApiRequestRejectsMalformedPayload(t *testing.T) {
 	stub := &stubApiProvider{response: []byte(`[]`)}
-	c, _ := newCentralWithProvider(stub)
+	c, _ := newCentralWithProvider(t, stub)
 	bad, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
 	bad[0] = byte(CmdEcho) // wrong leading CmdID
 	_, err := c.ServeApiRequest(context.Background(), bad)
@@ -197,7 +204,7 @@ func TestServeApiRequestLargeResponseSplitsChunks(t *testing.T) {
 		body[i] = 'x'
 	}
 	stub := &stubApiProvider{response: body}
-	c, scanner := newCentralWithProvider(stub)
+	c, scanner := newCentralWithProvider(t, stub)
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
 	n, err := c.ServeApiRequest(context.Background(), payload)
 	if err != nil {
@@ -206,16 +213,17 @@ func TestServeApiRequestLargeResponseSplitsChunks(t *testing.T) {
 	if n < 2 {
 		t.Fatalf("expected multiple chunks, got %d", n)
 	}
+	key := DeriveBleAuthKey(centralTestToken)
 	total := -1
-	for i, raw := range scanner.written {
-		frame, derr := DecodeFrame(raw)
+	for i, raw := range scanner.recordedWrites() {
+		framePayload, _, derr := DecodeAuthedFrame(raw, key)
 		if derr != nil {
-			t.Fatalf("frame %d decode: %v", i, derr)
+			t.Fatalf("frame %d not a v2 authed frame: %v", i, derr)
 		}
-		if len(frame.Payload) > maxPayloadLen {
-			t.Fatalf("frame %d payload %d > max %d", i, len(frame.Payload), maxPayloadLen)
+		if len(framePayload) > maxPayloadLen {
+			t.Fatalf("frame %d payload %d > max %d", i, len(framePayload), maxPayloadLen)
 		}
-		tc, cidx, totalBytes, _, perr := DecodeJsonChunkPayload(frame.Payload)
+		tc, cidx, totalBytes, _, perr := DecodeJsonChunkPayload(framePayload)
 		if perr != nil {
 			t.Fatalf("frame %d chunk decode: %v", i, perr)
 		}
@@ -240,17 +248,25 @@ func TestServeApiRequestLargeResponseSplitsChunks(t *testing.T) {
 // a cancelled ctx when writing the chunk stream: WriteCommand is never invoked
 // because the context check (or the scanner's ctx-awareness) aborts early.
 //
-// NOTE: collectScanner.WriteCommand ignores ctx today; this test instead uses
+// NOTE: the peer fake's WriteCommand ignores ctx today; this test instead uses
 // the abort-on-write-error contract: a scanner that returns an error on the
-// first write surfaces that error from ServeApiRequest, with n=0 chunks.
+// first DATA write (after the handshake succeeded) surfaces that error from
+// ServeApiRequest, with n=0 chunks.
 func TestServeApiRequestAbortsOnFirstWriteError(t *testing.T) {
 	stub := &stubApiProvider{response: []byte(`hello world this is a json body`)}
 
-	// Build the central with a scanner that fails the first WriteCommand.
-	scanner := &collectScanner{writeErr: errors.New("gatt write failed")}
+	// Authenticate first, then arm the scanner to fail the next WriteCommand
+	// (the first data-frame write; the handshake writes already succeeded).
+	scanner := newBlePeerFake(centralTestToken)
 	c := NewCentral(scanner)
 	c.SetApiProvider(stub)
-	_ = c.Connect(context.Background(), "AA:BB")
+	c.SetAuthToken(centralTestToken)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("authenticated Connect: %v", err)
+	}
+	scanner.collectScanner.mu.Lock()
+	scanner.collectScanner.writeErr = errors.New("gatt write failed")
+	scanner.collectScanner.mu.Unlock()
 
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
 	n, err := c.ServeApiRequest(context.Background(), payload)
@@ -268,7 +284,7 @@ func TestServeApiRequestAbortsOnFirstWriteError(t *testing.T) {
 // marshalling nothing) must still produce 1 chunk.
 func TestServeApiRequestEmptyBodyStillEmitsOneChunk(t *testing.T) {
 	stub := &stubApiProvider{response: []byte{}}
-	c, scanner := newCentralWithProvider(stub)
+	c, scanner := newCentralWithProvider(t, stub)
 	payload, _ := EncodeApiReqPayload(EndpointFolders, "", 0)
 	n, err := c.ServeApiRequest(context.Background(), payload)
 	if err != nil {
@@ -277,8 +293,8 @@ func TestServeApiRequestEmptyBodyStillEmitsOneChunk(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected exactly 1 chunk for empty body, got %d", n)
 	}
-	if len(scanner.written) != 1 {
-		t.Fatalf("expected 1 frame written, got %d", len(scanner.written))
+	if writes := scanner.recordedWrites(); len(writes) != 1 {
+		t.Fatalf("expected 1 frame written, got %d", len(writes))
 	}
 }
 

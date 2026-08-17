@@ -2,6 +2,8 @@ package ble
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
 	"errors"
 	"strings"
 	"testing"
@@ -254,5 +256,45 @@ func TestChunkJsonBytesEmpty(t *testing.T) {
 	total, idx, tb, _, derr := DecodeJsonChunkPayload(frames[0])
 	if derr != nil || total != 1 || idx != 0 || tb != 0 {
 		t.Fatalf("decode mismatch: total=%d idx=%d tb=%d err=%v", total, idx, tb, derr)
+	}
+}
+
+// TestAuthedFrameRoundTripAndTamper is the Phase 9 (H-1a) protocol-layer gate:
+// a v2 authed frame must round-trip payload + seq, and any tampering (bit flip
+// or wrong key) must surface as ErrBadMAC — never as a silently accepted frame.
+func TestAuthedFrameRoundTripAndTamper(t *testing.T) {
+	key := DeriveBleAuthKey("sekrit")
+	frame := EncodeAuthedFrame([]byte{byte(CmdEcho), 1, 2}, 7, key)
+	payload, seq, err := DecodeAuthedFrame(frame, key)
+	if err != nil || seq != 7 || payload[0] != byte(CmdEcho) {
+		t.Fatalf("round trip failed: %v %d", err, seq)
+	}
+	frame[len(frame)-1] ^= 0xFF
+	if _, _, err := DecodeAuthedFrame(frame, key); err != ErrBadMAC {
+		t.Fatalf("tampered frame must fail with ErrBadMAC, got %v", err)
+	}
+	wrong := DecodeAuthedFrame // nil key path
+	if _, _, err := DecodeAuthedFrame(frame, DeriveBleAuthKey("other")); err != ErrBadMAC {
+		t.Fatalf("wrong key must fail, got %v", err)
+	}
+	_ = wrong
+}
+
+// TestAuthChallengeResponsePayload verifies the handshake payload codecs and
+// the challenge-response MAC derivation: mac = HMAC-SHA256(key, nonce||dir)[:16].
+func TestAuthChallengeResponsePayload(t *testing.T) {
+	key := DeriveBleAuthKey("sekrit")
+	nonce := make([]byte, 8)
+	rand.Read(nonce)
+	ch := EncodeAuthChallengePayload(AuthDirCentralToPeripheral, nonce)
+	dir, gotNonce, err := DecodeAuthChallengePayload(ch)
+	if err != nil || dir != AuthDirCentralToPeripheral || !bytes.Equal(gotNonce, nonce) {
+		t.Fatalf("challenge payload broken: %v", err)
+	}
+	mac := AuthResponseMAC(key, nonce, AuthDirCentralToPeripheral)
+	resp := EncodeAuthResponsePayload(nonce, mac)
+	rn, rm, err := DecodeAuthResponsePayload(resp)
+	if err != nil || !bytes.Equal(rn, nonce) || !hmac.Equal(rm, mac) {
+		t.Fatalf("response payload broken: %v", err)
 	}
 }

@@ -62,19 +62,24 @@ func (p *jsonBlockProvider) HandleBleRequest(_ context.Context, endpoint byte, p
 // TestServeApiRequestStreamsMultipleChunks exercises the legacy multi-chunk
 // streaming behaviour (formerly TestServeChapterRequestStreamsChunks) via the
 // generalized ApiProvider surface: a large JSON body forces multiple chunks at
-// the 200-byte spec ceiling, every chunk must decode as a CMD_JSON_CHUNK frame
-// with sequential ChunkIndex and a stable TotalChunks count.
+// the 200-byte spec ceiling, every chunk must decode as an authed v2
+// CMD_JSON_CHUNK frame with sequential ChunkIndex, a stable TotalChunks count
+// and a strictly increasing seq.
 func TestServeApiRequestStreamsMultipleChunks(t *testing.T) {
+	key := DeriveBleAuthKey(centralTestToken)
 	// ~2KB JSON body forces ~12 chunks at the 200-byte spec §1.2 cap.
 	body := make([]byte, 2048)
 	for i := range body {
 		body[i] = 'x'
 	}
 	provider := &jsonBlockProvider{body: body}
-	scanner := &collectScanner{}
+	scanner := newBlePeerFake(centralTestToken)
 	c := NewCentral(scanner)
 	c.SetApiProvider(provider)
-	_ = c.Connect(context.Background(), "AA:BB")
+	c.SetAuthToken(centralTestToken)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect (handshake): %v", err)
+	}
 
 	req, encErr := EncodeApiReqPayload(EndpointBookChapter, "/books/novel.txt", 4)
 	if encErr != nil {
@@ -87,8 +92,9 @@ func TestServeApiRequestStreamsMultipleChunks(t *testing.T) {
 	if written < 2 {
 		t.Fatalf("expected multiple chunks, got %d", written)
 	}
-	if written != len(scanner.written) {
-		t.Fatalf("written=%d but scanner recorded %d frames", written, len(scanner.written))
+	writes := scanner.recordedWrites()
+	if written != len(writes) {
+		t.Fatalf("written=%d but scanner recorded %d frames", written, len(writes))
 	}
 
 	// Provider was called with the decoded args.
@@ -99,18 +105,24 @@ func TestServeApiRequestStreamsMultipleChunks(t *testing.T) {
 			provider.last.ep, provider.last.path, provider.last.idx)
 	}
 
-	// Every written frame is a valid CMD_JSON_CHUNK frame whose payload fits
-	// in the MTU and whose ChunkIndex is its position in the stream.
+	// Every written frame is a valid authed v2 CMD_JSON_CHUNK frame whose
+	// payload fits in the MTU and whose ChunkIndex is its position in the
+	// stream, with strictly increasing seq.
 	total := -1
-	for i, raw := range scanner.written {
-		frame, derr := DecodeFrame(raw)
+	var lastSeq uint64
+	for i, raw := range writes {
+		payload, seq, derr := DecodeAuthedFrame(raw, key)
 		if derr != nil {
-			t.Fatalf("frame %d decode error: %v", i, derr)
+			t.Fatalf("frame %d not a v2 authed frame: %v", i, derr)
 		}
-		if len(frame.Payload) > maxPayloadLen {
-			t.Fatalf("frame %d payload %d > max %d", i, len(frame.Payload), maxPayloadLen)
+		if i > 0 && seq <= lastSeq {
+			t.Fatalf("frame %d seq %d not strictly greater than %d", i, seq, lastSeq)
 		}
-		tot, cidx, totalBytes, _, perr := DecodeJsonChunkPayload(frame.Payload)
+		lastSeq = seq
+		if len(payload) > maxPayloadLen {
+			t.Fatalf("frame %d payload %d > max %d", i, len(payload), maxPayloadLen)
+		}
+		tot, cidx, totalBytes, _, perr := DecodeJsonChunkPayload(payload)
 		if perr != nil {
 			t.Fatalf("frame %d chunk decode error: %v", i, perr)
 		}
@@ -170,31 +182,34 @@ func (s *scriptedScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 func (s *scriptedScanner) SetConnectRecorder(ConnectRecorder) {}
 
 // TestRunApiListenerDispatchesApiRequests exercises the long-lived listener
-// loop (spec §3.1) end-to-end: a stub scanner yields two CMD_API_REQ frames;
-// RunApiListener must decode each and hand it to ServeApiRequest, which writes
-// the expected CMD_JSON_CHUNK frames via WriteCommand. Verifies the multi-
-// goroutine dispatch path and the non-CMD_API_REQ frame ignore path.
+// loop (spec §3.1) end-to-end over an authenticated channel: a stub peer
+// yields two v2 authed CMD_API_REQ frames plus one v2 echo frame the listener
+// MUST silently ignore; RunApiListener must decode each and hand it to
+// ServeApiRequest, which writes the expected authed CMD_JSON_CHUNK frames via
+// WriteCommand. Verifies the multi-goroutine dispatch path and the post-auth
+// v2 receive gate (strictly increasing remote seq).
 func TestRunApiListenerDispatchesApiRequests(t *testing.T) {
+	key := DeriveBleAuthKey(centralTestToken)
 	provider := &jsonBlockProvider{body: []byte(`hello-listener`)}
-	scanner := &scriptedScanner{
-		doneCh:    make(chan struct{}),
-		unblockCh: make(chan struct{}),
-	}
-	// Build two physical CMD_API_REQ frames (encoded as the Android Peripheral
-	// would notify them) plus one non-API frame the listener MUST silently
-	// ignore.
-	req1, _ := EncodeApiReqPayload(EndpointBookChapter, "/books/a.txt", 1)
-	req2, _ := EncodeApiReqPayload(EndpointBookChapter, "/books/b.txt", 2)
-	echo := EncodeFrame([]byte{byte(CmdEcho), 0xAA})
-	scanner.frames = [][]byte{
-		EncodeFrame(req1),
-		echo,
-		EncodeFrame(req2),
-	}
-
+	scanner := newBlePeerFake(centralTestToken)
+	scanner.doneCh = make(chan struct{})
+	scanner.unblockCh = make(chan struct{})
 	c := NewCentral(scanner)
 	c.SetApiProvider(provider)
-	_ = c.Connect(context.Background(), "AA:BB")
+	c.SetAuthToken(centralTestToken)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect (handshake): %v", err)
+	}
+	// Build two v2 authed CMD_API_REQ frames (as the authenticated Android
+	// Peripheral would notify them) plus one v2 echo frame the listener MUST
+	// silently ignore. Seq is strictly increasing per the receive gate. Pushed
+	// only AFTER the handshake so Connect's handshake WaitNotify does not
+	// consume them.
+	req1, _ := EncodeApiReqPayload(EndpointBookChapter, "/books/a.txt", 1)
+	req2, _ := EncodeApiReqPayload(EndpointBookChapter, "/books/b.txt", 2)
+	scanner.push(EncodeAuthedFrame(req1, 0, key))
+	scanner.push(EncodeAuthedFrame([]byte{byte(CmdEcho), 0xAA}, 1, key))
+	scanner.push(EncodeAuthedFrame(req2, 2, key))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -214,10 +229,7 @@ func TestRunApiListenerDispatchesApiRequests(t *testing.T) {
 	waitForWrites := func(n int) {
 		deadline := time.Now().Add(2 * time.Second)
 		for time.Now().Before(deadline) {
-			scanner.collectScanner.mu.Lock()
-			got := len(scanner.collectScanner.written)
-			scanner.collectScanner.mu.Unlock()
-			if got >= n {
+			if len(scanner.recordedWrites()) >= n {
 				return
 			}
 			time.Sleep(5 * time.Millisecond)
@@ -233,20 +245,24 @@ func TestRunApiListenerDispatchesApiRequests(t *testing.T) {
 	// The listener must have dispatched both requests to ServeApiRequest,
 	// which writes the chunk frames via WriteCommand. The echo frame must NOT
 	// produce any write (the listener ignores it).
-	scanner.collectScanner.mu.Lock()
-	written := len(scanner.collectScanner.written)
-	scanner.collectScanner.mu.Unlock()
-	if written < 2 {
-		t.Fatalf("expected >=2 chunk writes (one per request), got %d", written)
+	writes := scanner.recordedWrites()
+	if len(writes) < 2 {
+		t.Fatalf("expected >=2 chunk writes (one per request), got %d", len(writes))
 	}
 
-	// Every written frame must be a CMD_JSON_CHUNK payload.
-	for i, raw := range scanner.collectScanner.written {
-		frame, derr := DecodeFrame(raw)
+	// Every written frame must be an authed v2 CMD_JSON_CHUNK payload with a
+	// strictly increasing seq.
+	var lastSeq uint64
+	for i, raw := range writes {
+		payload, seq, derr := DecodeAuthedFrame(raw, key)
 		if derr != nil {
-			t.Fatalf("frame %d decode: %v", i, derr)
+			t.Fatalf("frame %d not a v2 authed frame: %v", i, derr)
 		}
-		_, _, _, _, perr := DecodeJsonChunkPayload(frame.Payload)
+		if i > 0 && seq <= lastSeq {
+			t.Fatalf("frame %d seq %d not strictly greater than %d", i, seq, lastSeq)
+		}
+		lastSeq = seq
+		_, _, _, _, perr := DecodeJsonChunkPayload(payload)
 		if perr != nil {
 			t.Fatalf("frame %d chunk decode: %v", i, perr)
 		}

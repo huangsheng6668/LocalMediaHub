@@ -1,14 +1,28 @@
 // Package ble implements the BLE GATT control channel protocol shared by
-// the Go server (Peripheral) and the Android client (Central).
+// the Go server (Central) and the Android client (Peripheral).
 //
 // Frame wire format (big-endian):
 //
-//	[0]    version (currently 0x01)
-//	[1:3]  uint16 payload length
-//	[3:]   payload bytes
+//	v1 (handshake + legacy):
+//	  [0]    version (0x01)
+//	  [1:3]  uint16 payload length
+//	  [3:]   payload bytes
+//
+//	v2 (authenticated data frames, Phase 9 / H-1a):
+//	  [0]      version (0x02)
+//	  [1:3]    uint16 payload length (≤ 220)
+//	  [3:]     payload bytes
+//	  [n:n+8]  uint64 seq (big-endian, strictly increasing per direction)
+//	  [n+8:]   truncated HMAC-SHA256 (16 B) over [0 : n+8]
+//
+// Handshake (challenge/response) frames are carried as v1 frames; after both
+// sides authenticate, all data frames are v2 and reject seq rollback/replay.
 package ble
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/binary"
 	"errors"
 )
@@ -30,6 +44,22 @@ const (
 	// into MTU-safe pieces. Layout (spec §2.2):
 	//	[CmdID 1B][TotalChunks 2B BE][ChunkIndex 2B BE][TotalBytes 2B BE][ChunkLen 2B BE][Chunk Bytes]
 	CmdJsonChunk CmdID = 0x12
+	// CmdAuthChallenge is the Phase 9 (H-1a) mutual-challenge handshake
+	// command. Layout: [CmdID 1B][Dir 1B][Nonce 8B]. Carried in a v1 frame;
+	// the PC (Central) challenges with AuthDirCentralToPeripheral, the phone
+	// (Peripheral) challenges back with AuthDirPeripheralToCentral.
+	CmdAuthChallenge CmdID = 0x20
+	// CmdAuthResponse answers a CmdAuthChallenge. Layout:
+	// [CmdID 1B][Nonce 8B][MAC 16B] where MAC = HMAC-SHA256(key, nonce||dir)[:16].
+	CmdAuthResponse CmdID = 0x21
+)
+
+// AuthDir identifies which role issued a handshake challenge. The direction
+// byte is bound into the response MAC so a challenge captured in one
+// direction cannot be replayed as the other direction's proof.
+const (
+	AuthDirCentralToPeripheral byte = 0x01 // PC 验证手机
+	AuthDirPeripheralToCentral byte = 0x02 // 手机验证 PC
 )
 
 // Endpoint identifies the server-side API a CMD_API_REQ should be routed to.
@@ -73,7 +103,14 @@ const (
 
 const FrameVersion byte = 0x01
 
+// FrameVersion2 marks authenticated data frames (Phase 9 / H-1a). After the
+// mutual-challenge handshake completes, only v2 frames are accepted.
+const FrameVersion2 byte = 0x02
+
 const maxPayloadLen = 244 // fits in negotiated 247-byte MTU minus 3-byte header
+
+const authedOverhead = 8 + 16                              // seq + truncated HMAC
+const maxAuthedPayloadLen = maxPayloadLen - authedOverhead // 220
 
 var (
 	ErrTruncated  = errors.New("ble: frame truncated")
@@ -87,6 +124,13 @@ var (
 	// rather than silently truncating avoids the server fetching a wrong
 	// chapter path.
 	ErrPathTooLong = errors.New("ble: chapter request path exceeds 255 bytes")
+	// ErrBadMAC is returned by DecodeAuthedFrame when the truncated HMAC does
+	// not verify — a tampered frame or a wrong/no key (Phase 9 / H-1a).
+	ErrBadMAC = errors.New("ble: frame authentication failed")
+	// ErrReplaySeq is returned by the Central's receive gate when a v2 frame's
+	// seq rolls back or repeats the max seq already seen in that direction
+	// (replay / reorder rejection, Phase 9 / H-1a).
+	ErrReplaySeq = errors.New("ble: seq replay or rollback rejected")
 )
 
 type Frame struct {
@@ -116,6 +160,110 @@ func DecodeFrame(data []byte) (Frame, error) {
 		return Frame{}, ErrTruncated
 	}
 	return Frame{Payload: append([]byte(nil), data[3:3+length]...)}, nil
+}
+
+// DeriveBleAuthKey derives the 32-byte BLE channel key from the server's
+// Bearer token. Both sides derive the same key from the same token; the
+// "lmh-ble-v1:" domain-separation prefix keeps this hash distinct from any
+// other use of the token. MUST NOT be called with an empty token — a key
+// derived from "" would be publicly computable (the prefix is a constant);
+// the Central stores a nil key for an empty token and refuses the data phase.
+func DeriveBleAuthKey(token string) []byte {
+	h := sha256.Sum256([]byte("lmh-ble-v1:" + token))
+	return h[:]
+}
+
+// EncodeAuthedFrame wraps payload in a v2 authenticated frame:
+//
+//	[0x02][len 2B BE][payload ≤220B][seq 8B BE][hmac 16B]
+//
+// HMAC-SHA256(key) covers [0 : 3+len+8] (version, length, payload, seq) and
+// is truncated to 16 bytes. Callers pass a strictly-increasing per-direction
+// seq; the receiver rejects rollback/replay.
+func EncodeAuthedFrame(payload []byte, seq uint64, key []byte) []byte {
+	if len(payload) > maxAuthedPayloadLen {
+		payload = payload[:maxAuthedPayloadLen] // 调用方 ChunkJsonBytes 已限 200B，防御性截断
+	}
+	buf := make([]byte, 3+len(payload)+authedOverhead)
+	buf[0] = FrameVersion2
+	binary.BigEndian.PutUint16(buf[1:3], uint16(len(payload)))
+	copy(buf[3:], payload)
+	binary.BigEndian.PutUint64(buf[3+len(payload):], seq)
+	mac := hmac.New(sha256.New, key)
+	mac.Write(buf[:3+len(payload)+8])
+	copy(buf[3+len(payload)+8:], mac.Sum(nil)[:16])
+	return buf
+}
+
+// DecodeAuthedFrame verifies and parses a v2 authenticated frame. Returns the
+// payload, the seq, or ErrBadMAC when the truncated HMAC fails to verify
+// (tampered frame / wrong key). The seq is NOT checked here — replay/rollback
+// rejection is stateful (max-seen per direction) and lives in the Central.
+func DecodeAuthedFrame(data, key []byte) ([]byte, uint64, error) {
+	if len(data) < 3+authedOverhead {
+		return nil, 0, ErrTruncated
+	}
+	length := int(binary.BigEndian.Uint16(data[1:3]))
+	if length > maxAuthedPayloadLen || len(data) < 3+length+authedOverhead {
+		return nil, 0, ErrTooLarge
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data[:3+length+8])
+	want := mac.Sum(nil)[:16]
+	if subtle.ConstantTimeCompare(data[3+length+8:3+length+24], want) != 1 {
+		return nil, 0, ErrBadMAC
+	}
+	seq := binary.BigEndian.Uint64(data[3+length : 3+length+8])
+	payload := append([]byte(nil), data[3:3+length]...)
+	return payload, seq, nil
+}
+
+// EncodeAuthChallengePayload builds the CmdAuthChallenge payload:
+// [CmdID 1B][dir 1B][nonce 8B]. Carried inside a v1 frame (EncodeFrame).
+func EncodeAuthChallengePayload(dir byte, nonce []byte) []byte {
+	out := make([]byte, 10)
+	out[0] = byte(CmdAuthChallenge)
+	out[1] = dir
+	copy(out[2:], nonce)
+	return out
+}
+
+// DecodeAuthChallengePayload parses a CmdAuthChallenge payload, returning the
+// direction byte and the 8-byte nonce.
+func DecodeAuthChallengePayload(p []byte) (byte, []byte, error) {
+	if len(p) < 10 || CmdID(p[0]) != CmdAuthChallenge {
+		return 0, nil, ErrTruncated
+	}
+	return p[1], append([]byte(nil), p[2:10]...), nil
+}
+
+// AuthResponseMAC computes the proof for a challenge: a 16-byte truncated
+// HMAC-SHA256 over nonce || dir. Binding the direction byte prevents a
+// challenge issued in one direction being answered as the other's.
+func AuthResponseMAC(key, nonce []byte, dir byte) []byte {
+	m := hmac.New(sha256.New, key)
+	m.Write(nonce)
+	m.Write([]byte{dir})
+	return m.Sum(nil)[:16]
+}
+
+// EncodeAuthResponsePayload builds the CmdAuthResponse payload:
+// [CmdID 1B][nonce 8B][mac 16B]. Carried inside a v1 frame (EncodeFrame).
+func EncodeAuthResponsePayload(nonce, mac16 []byte) []byte {
+	out := make([]byte, 25)
+	out[0] = byte(CmdAuthResponse)
+	copy(out[1:9], nonce)
+	copy(out[9:], mac16)
+	return out
+}
+
+// DecodeAuthResponsePayload parses a CmdAuthResponse payload, returning the
+// echoed nonce and the 16-byte MAC proof.
+func DecodeAuthResponsePayload(p []byte) ([]byte, []byte, error) {
+	if len(p) < 25 || CmdID(p[0]) != CmdAuthResponse {
+		return nil, nil, ErrTruncated
+	}
+	return append([]byte(nil), p[1:9]...), append([]byte(nil), p[9:25]...), nil
 }
 
 // EncodeApiReqPayload builds the payload for CMD_API_REQ (spec §2.2):
