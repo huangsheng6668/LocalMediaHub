@@ -254,7 +254,20 @@ class BleSettingsViewModel @Inject constructor(
                         null
                     } ?: android.os.Build.MODEL
 
-                    val target = selectBestDevice(discovered, lastMac, localName) ?: discovered.first()
+                    // Phase 9 (Task 11 / H-1d): fail-closed 选路。三级匹配
+                    // （历史 MAC → 设备名 → RSSI 最强）选不出目标时不再兜底
+                    // discovered.first() 去连列表里的任意设备——直接报错并
+                    // 放弃本次连接。设备列表本身来自 PC 端 /api/v1/ble/scan，
+                    // PC 侧已按完整 128-bit UUID 精确匹配过滤，因此 RSSI 最强
+                    // 一档也必然是 UUID 命中的设备。
+                    val target = selectBestDevice(discovered, lastMac, localName)
+                    if (target == null) {
+                        controller.markDisconnected()
+                        if (!silent) {
+                            _errorText.value = s(R.string.ble_err_no_match)
+                        }
+                        return false
+                    }
                     when (val connResult = api.connect(target.id)) {
                         is NetworkResult.Success -> if (connResult.data) {
                             store.saveLastConnectedBleAddress(target.id)
@@ -398,11 +411,16 @@ class BleSettingsViewModel @Inject constructor(
 
     companion object {
         /**
-         * 智能选路算法：
+         * 智能选路算法（Phase 9 / Task 11 后无任意设备兜底）：
          * 1. 优先匹配上次成功连接的 MAC 地址（忽略大小写）；
          * 2. 匹配当前设备名称（忽略大小写）；
-         * 3. 兜底选择 RSSI 信号最强的设备；
+         * 3. 选择 RSSI 信号最强的设备；
          * 4. 列表为空返回 null。
+         *
+         * 入参 [discovered] 来自 PC 端 `/api/v1/ble/scan`，PC 侧已按完整
+         * 128-bit ServiceUUID 精确匹配过滤——因此第 3 档选出的设备也必然
+         * 是 UUID 命中的 LocalMediaHub 设备，不会选中陌生设备。调用方对
+         * null 必须 fail-closed（报错并放弃连接），不得再兜底连第一个设备。
          */
         fun selectBestDevice(
             discovered: List<BleDevice>,
@@ -418,7 +436,7 @@ class BleSettingsViewModel @Inject constructor(
                 val byName = discovered.find { it.name.equals(localDeviceName, ignoreCase = true) }
                 if (byName != null) return byName
             }
-            return discovered.maxByOrNull { it.rssi } ?: discovered.firstOrNull()
+            return discovered.maxByOrNull { it.rssi }
         }
     }
 }

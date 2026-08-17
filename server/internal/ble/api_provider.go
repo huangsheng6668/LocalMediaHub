@@ -150,11 +150,15 @@ func (p *bleApiProvider) validateBookPath(path string) (string, error) {
 // minus tag enrichment and the scanner cache (the BLE browse list just needs
 // names + types so the Android side can grey out videos).
 //
-// Security: reuses service.NormalizePath + service.IsPathWithinRoots so the
-// same path-traversal defense that gates the HTTP browse endpoint gates the
-// BLE one. A path outside the configured roots yields a wrapped error; the
-// caller (HandleBleRequest) surfaces it to ServeApiRequest, which surfaces it
-// to the listener — no data is leaked about directories outside roots.
+// Security (Task 11 / M-8): uses service.ResolveBrowsePath — the SAME security
+// boundary the HTTP BrowseFolder handler applies — instead of the former
+// purely lexical NormalizePath + IsPathWithinRoots pair. That lexical pair let
+// os.ReadDir follow a junction/symlink planted inside a root and leak an
+// out-of-library listing over BLE; ResolveBrowsePath additionally rejects UNC
+// paths and any reparse point below the root boundary. A path outside the
+// configured roots (or traversing a link) yields an error; the caller
+// (HandleBleRequest) surfaces it to ServeApiRequest, which surfaces it to the
+// listener — no data is leaked about directories outside roots.
 //
 // Sorting matches the echo handler's implicit ordering (os.ReadDir returns
 // entries in lexical order on most platforms), with a defensive sort to make
@@ -163,18 +167,11 @@ func BrowseFolderData(cfg *config.Config, path string) (*models.BrowseResult, er
 	if cfg == nil {
 		return nil, fmt.Errorf("ble: nil config")
 	}
-	absPath, err := service.NormalizePath(path)
+	resolved, err := service.ResolveBrowsePath(path, cfg.Scan.GetRoots())
 	if err != nil {
 		return nil, err
 	}
-	roots := cfg.Scan.GetRoots()
-	valid, err := service.IsPathWithinRoots(absPath, roots)
-	if err != nil {
-		return nil, err
-	}
-	if !valid {
-		return nil, fmt.Errorf("ble: path outside roots")
-	}
+	absPath := resolved
 
 	fi, err := os.Stat(absPath)
 	if err != nil {

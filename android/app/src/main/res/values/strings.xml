@@ -330,6 +330,7 @@
 
     <!-- ── BLE settings ViewModel messages ─────────────────── -->
     <string name="ble_err_no_advertising">未发现当前手机的 BLE 广播（请确保手机蓝牙已开启且距离电脑较近）</string>
+    <string name="ble_err_no_match">未找到匹配的 LocalMediaHub 设备</string>
     <string name="ble_err_connect_gatt">连接失败：服务端未能建立 BLE GATT 连接</string>
     <string name="ble_err_connect_fmt">连接失败: %1$s</string>
     <string name="ble_err_server_not_ready">服务端蓝牙未就绪（请确认 PC 已配有蓝牙且服务端使用 go build -tags bluetooth 编译）</string>

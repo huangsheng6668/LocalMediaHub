@@ -12,7 +12,6 @@ import (
 	"errors"
 	"log"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -82,27 +81,39 @@ func (t *tinyGoCentralScanner) Scan(ctx context.Context, serviceUUID string) ([]
 
 	slog.Info("BLE Central scan starting", "serviceUUID", serviceUUID)
 
+	// matchedAddrs feeds the finish log: Task 11 (M-6) keeps scan logging to
+	// hit count + hit device addresses only.
+	matchedAddrs := func() []string {
+		addrs := make([]string, 0, len(found))
+		for _, d := range found {
+			addrs = append(addrs, d.ID)
+		}
+		return addrs
+	}
+
 	// adapter.Scan blocks until StopScan; run it in a goroutine so the select
 	// below can race it against scanCtx.Done().
 	go func() {
 		errCh <- t.adapter.Scan(func(_ *bluetooth.Adapter, d bluetooth.ScanResult) {
 			scanCallbackCount++
-			hasUUID := hasServiceUUIDMatch(d, uuid, serviceUUID)
 			rawUUIDs := d.ServiceUUIDs()
 			uuidStrs := make([]string, len(rawUUIDs))
 			for i, u := range rawUUIDs {
 				uuidStrs[i] = u.String()
 			}
-			slog.Info("BLE scan result",
-				"addr", d.Address.String(),
-				"name", d.LocalName(),
-				"rssi", int(d.RSSI),
-				"hasServiceUUID", hasUUID,
-				"serviceUUIDs", uuidStrs,
-			)
+			// Task 11 (H-1d): exact-match only. d.HasServiceUUID is the stack's
+			// own bit-level 128-bit equality; hasServiceUUIDMatch (uuid_match.go)
+			// is the normalized string equivalent for platform formatting
+			// variance. The former prefix/short-UUID fallbacks are gone — a
+			// device whose advertised UUID merely shares our prefix is NOT us.
+			hasUUID := d.HasServiceUUID(uuid) || hasServiceUUIDMatch(uuidStrs)
 			if !hasUUID {
 				return
 			}
+			// Task 11 (M-6): log redaction — non-matching nearby devices are
+			// not logged at all (name/RSSI/UUID lists of every passer-by are
+			// bystander privacy data); a hit logs the address only.
+			slog.Info("BLE scan hit", "addr", d.Address.String())
 			// d.Address.String() works via Go method promotion:
 			// Address -> MACAddress -> MAC.String().
 			found = append(found, Device{
@@ -128,10 +139,13 @@ func (t *tinyGoCentralScanner) Scan(ctx context.Context, serviceUUID string) ([]
 		default:
 		}
 		slog.Info("BLE Central scan finished (timeout)",
-			"callbacks", scanCallbackCount, "matched", len(found), "scanErr", scanErr)
+			"callbacks", scanCallbackCount, "matched", len(found),
+			"matchedAddrs", matchedAddrs(), "scanErr", scanErr)
 		return dedup(found), nil
 	case err := <-errCh:
-		slog.Info("BLE Central scan finished (err)", "callbacks", scanCallbackCount, "err", err)
+		slog.Info("BLE Central scan finished (err)",
+			"callbacks", scanCallbackCount, "matched", len(found),
+			"matchedAddrs", matchedAddrs(), "err", err)
 		return found, err
 	}
 }
@@ -350,7 +364,15 @@ func (t *tinyGoCentralScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 	notifyCh := make(chan []byte, 1)
 	handler := func(data []byte) {
 		cp := append([]byte(nil), data...)
-		log.Printf("BLE WaitNotify received callback len=%d data=%x", len(cp), cp)
+		// Task 11 (M-6): log redaction — the raw payload hex dump (data=%x) is
+		// gone; only the length and the leading frame-type byte (0x01 v1 /
+		// 0x02 v2) survive so diagnostics can still spot short/garbage frames
+		// without logging frame contents (which carry auth nonces/MACs).
+		if len(cp) > 0 {
+			log.Printf("BLE WaitNotify received callback len=%d frameType=%#02x", len(cp), cp[0])
+		} else {
+			log.Printf("BLE WaitNotify received callback len=0")
+		}
 		select {
 		case notifyCh <- cp:
 		default:
@@ -397,47 +419,16 @@ func dedup(devices []Device) []Device {
 	return out
 }
 
-// matchUUIDPrefix returns true if u matches targetUUIDStr exactly or by 8-char hex prefix.
+// matchUUIDPrefix reports whether u equals targetUUIDStr exactly, after
+// normalization (dashes stripped, lower-cased — see normalizeUUIDString).
+//
+// Task 11 (H-1d): the former 8-char hex prefix fallback is REMOVED. The
+// prefix branch accepted any service/characteristic whose UUID merely shared
+// our "fa6a3001"/"fa6a3002"/"fa6a3003" prefix, so a hostile peripheral could
+// shadow the real characteristic layout. Full 128-bit equality only; the
+// historical name is kept to minimize churn at the connectLocked call sites.
 func matchUUIDPrefix(u bluetooth.UUID, targetUUIDStr string) bool {
-	uStr := strings.ToLower(u.String())
-	tStr := strings.ToLower(targetUUIDStr)
-	if uStr == tStr {
-		return true
-	}
-	if len(uStr) >= 8 && len(tStr) >= 8 && uStr[0:8] == tStr[0:8] {
-		return true
-	}
-	return false
-}
-
-// hasServiceUUIDMatch returns true if d matches targetUUID or its short/padded representation.
-// WinRT on Windows may format custom 128-bit UUIDs like "fa6a3001-8b2c-4e6f-9988-123456789abc"
-// as "fa6a3001-8b2c-4e6f-0000-000000000000". We check exact match, 4-char short match,
-// and 8-char hex prefix match.
-func hasServiceUUIDMatch(d bluetooth.ScanResult, targetUUID bluetooth.UUID, serviceUUIDStr string) bool {
-	if d.HasServiceUUID(targetUUID) {
-		return true
-	}
-	targetLower := strings.ToLower(serviceUUIDStr)
-	targetPrefix := targetLower
-	if len(targetPrefix) >= 8 {
-		targetPrefix = targetPrefix[0:8]
-	}
-	for _, u := range d.ServiceUUIDs() {
-		uStr := strings.ToLower(u.String())
-		if uStr == targetLower {
-			return true
-		}
-		// 16-bit short UUID (e.g. "fc01")
-		if len(uStr) == 4 && strings.HasPrefix(targetLower, "0000"+uStr) {
-			return true
-		}
-		// Match 8-char hex prefix (e.g. "fa6a3001" or "0000fc01")
-		if len(uStr) >= 8 && uStr[0:8] == targetPrefix {
-			return true
-		}
-	}
-	return false
+	return normalizeUUIDString(u.String()) == normalizeUUIDString(targetUUIDStr)
 }
 
 var (

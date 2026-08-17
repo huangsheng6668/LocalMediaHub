@@ -258,6 +258,55 @@ class BleSettingsViewModelTest {
         assertEquals("77:88:99:AA:BB:CC", best?.id)
     }
 
+    // --- Task 11 / H-1d: fail-closed selection (no discovered.first() fallback) ---
+
+    @Test
+    fun selectBestDevice_returnsNullForEmptyList() {
+        // 列表为空时必须返回 null——调用方据此 fail-closed，
+        // 不再兜底 discovered.first() 连接任意设备。
+        assertNull(
+            BleSettingsViewModel.selectBestDevice(
+                discovered = emptyList(),
+                lastConnectedMac = "AA:BB:CC:DD:EE:FF",
+                localDeviceName = "Pixel"
+            )
+        )
+    }
+
+    @Test
+    fun doAutoConnectOnce_noMatchingDevice_doesNotAttemptConnect() = runTest {
+        // 扫描成功但无可选目标（空列表）：必须直接失败并报错，
+        // 绝不发起 api.connect —— 记录 connect 调用数以证明 fail-closed。
+        val api = fakeApi(scanFailCount = 10)
+        api.overrideScanResult = NetworkResult.Success(emptyList())
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
+        runCurrent()
+
+        val success = vm.doAutoConnectOnce(silent = false)
+        runCurrent()
+
+        assertFalse(success)
+        assertEquals(0, api.connectCallCount) // 未发起任何连接
+        assertTrue(vm.errorText.value != null) // 非静默模式报用户可读错误
+        assertEquals(BleConnState.ADVERTISING, vm.connectionState.value)
+    }
+
+    @Test
+    fun doAutoConnectOnce_silentNoMatch_keepsErrorTextClean() = runTest {
+        // 静默（后台预建联）路径同样不连接，且不污染 errorText。
+        val api = fakeApi(scanFailCount = 10)
+        api.overrideScanResult = NetworkResult.Success(emptyList())
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
+        runCurrent()
+
+        val success = vm.doAutoConnectOnce(silent = true)
+        runCurrent()
+
+        assertFalse(success)
+        assertEquals(0, api.connectCallCount)
+        assertNull(vm.errorText.value)
+    }
+
     @Test
     fun autoConnect_savesLastConnectedMacOnSuccess() = runTest {
         val api = fakeApi(scanFailCount = 0)
@@ -300,20 +349,26 @@ class BleSettingsViewModelTest {
     private class FakeApi(scanFailCount: Int, connectFails: Boolean) {
         val api: BleApi = mockk()
         var scanCallCount: Int = 0; private set
+        var connectCallCount: Int = 0; private set
+
+        /** When set, returned by every scan() call (e.g. empty-list success). */
+        var overrideScanResult: NetworkResult<List<BleDevice>>? = null
         private val failRemaining = scanFailCount
 
         init {
             coEvery { api.scan() } answers {
                 scanCallCount++
-                if (failRemaining > 0 && scanCallCount <= failRemaining) {
+                overrideScanResult ?: if (failRemaining > 0 && scanCallCount <= failRemaining) {
                     NetworkResult.Error("scan error (attempt $scanCallCount)")
                 } else {
                     NetworkResult.Success(listOf(BleDevice("AA:BB", "Pixel", -50)))
                 }
             }
-            coEvery { api.connect(any()) } returns
+            coEvery { api.connect(any()) } answers {
+                connectCallCount++
                 if (connectFails) NetworkResult.Success(false)
                 else NetworkResult.Success(true)
+            }
             coEvery { api.send(any()) } returns NetworkResult.Success("pong")
         }
 

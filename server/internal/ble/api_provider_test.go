@@ -3,6 +3,10 @@ package ble
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/localmediahub/server/internal/config"
@@ -359,6 +363,75 @@ func TestBleApiProviderRejectsBookPathOutsideRoots(t *testing.T) {
 				t.Fatalf("BookService must NOT be called for rejected path; got %d call(s)", rec.calls)
 			}
 		})
+	}
+}
+
+// TestBleApiProviderRejectsBrowsePathOutsideRoots is the Task 11 (M-8) BLE-side
+// mirror of the book-path gate: an EndpointBrowseFolder request carrying a
+// traversal (`..`) or UNC path MUST yield an error rather than a directory
+// listing. Construction mirrors TestBleApiProviderRejectsBookPathOutsideRoots
+// (roots = t.TempDir()), but no book service assertion is needed — the browse
+// endpoint never consults BookService at all.
+func TestBleApiProviderRejectsBrowsePathOutsideRoots(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Scan.Roots = []string{root}
+	p := newBleApiProvider(cfg, &recordingBookService{}).(*bleApiProvider)
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		// "root/../../.." 形态：lexical 清洗后落在 roots 之外。
+		{"traversal_dotdot", filepath.Join(root, "..", "..")},
+		{"relative_traversal", "../../etc"},
+		// UNC 形态（\\server\share / \\?\ 前缀）一律拒绝。
+		{"unc", `\\server\share\media`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := p.HandleBleRequest(context.Background(), EndpointBrowseFolder, tc.path, 0)
+			if err == nil {
+				t.Fatalf("expected browse rejection for %q, got a listing (body=%q)", tc.path, string(body))
+			}
+		})
+	}
+}
+
+// TestBrowseFolderDataRejectsJunction guards the M-8 threat on the BLE browse
+// endpoint: a directory junction (or symlink) inside a scan root that points
+// outside the library. The previous lexical IsPathWithinRoots check accepted
+// the link path and let os.ReadDir follow it, leaking an out-of-root listing;
+// ResolveBrowsePath must reject any reparse point below the root instead.
+// Junctions need no administrator privilege on Windows, so this runs on every
+// Windows host (mirrors service.TestResolveWithinRootsRejectsJunction).
+func TestBrowseFolderDataRejectsJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junction test is Windows-specific")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	link := filepath.Join(root, "link")
+	cmd := exec.Command("cmd", "/c", "mklink", "/J", link, outside)
+	if err := cmd.Run(); err != nil {
+		t.Skipf("mklink /J failed: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Scan.Roots = []string{root}
+
+	if _, err := BrowseFolderData(cfg, link); err == nil {
+		t.Fatal("expected junction under root to be rejected")
+	}
+	through := filepath.Join(link, "subdir")
+	if err := os.Mkdir(filepath.Join(outside, "subdir"), 0o755); err != nil {
+		t.Fatalf("create subdir: %v", err)
+	}
+	if _, err := BrowseFolderData(cfg, through); err == nil {
+		t.Fatal("expected path traversing a junction to be rejected")
 	}
 }
 
