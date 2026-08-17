@@ -108,6 +108,22 @@ type Central struct {
 	remoteSeq     uint64
 	haveRemoteSeq bool
 	handshaking   bool
+
+	// sendMu serializes outbound v2 data writes (I-1 fix): the seq
+	// reservation and the WriteCommand radio call form ONE critical section
+	// for every data-frame write path (Send + ServeApiRequest chunk loop).
+	// Without it, two per-request dispatch goroutines can interleave as
+	// "A reserves seq=0 → B reserves seq=1 → B's radio write completes first",
+	// putting frames on the wire as [1,0] — a strict-increase receiver
+	// (Task 9 Android) would then kill the link for legitimate concurrent
+	// requests. Tradeoff (per review): c.mu is NOT held across WriteCommand
+	// because the radio op can block on GATT flow control and c.mu guards
+	// short paths (State, listener gates); instead this dedicated mutex
+	// matches the physical reality that a single BLE link carries one GATT
+	// write at a time anyway. Lock order: sendMu → c.mu, never reversed —
+	// Connect's v1 handshake writes take neither lock (they run under c.mu
+	// before authenticated flips true, so they can never overlap data writes).
+	sendMu sync.Mutex
 }
 
 // ApiProvider returns the JSON response body for an endpoint/path/index triple
@@ -157,6 +173,22 @@ func (c *Central) acceptRemoteSeqLocked(seq uint64) error {
 	}
 	c.remoteSeq, c.haveRemoteSeq = seq, true
 	return nil
+}
+
+// sendAuthedFrame atomically reserves the next outbound seq and writes one
+// v2 authed frame — the I-1 fix. The seq reservation and the radio write are
+// a single critical section under sendMu (see the field comment for the
+// locking tradeoff: no blocking radio op ever runs under c.mu). A failed
+// write still consumes its seq, leaving a gap — the receive gate only
+// requires strict increase, so gaps are harmless.
+func (c *Central) sendAuthedFrame(ctx context.Context, scanner CentralScanner, payload []byte, key []byte) error {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	c.mu.Lock()
+	seq := c.localSeq
+	c.localSeq++
+	c.mu.Unlock()
+	return scanner.WriteCommand(ctx, EncodeAuthedFrame(payload, seq, key))
 }
 
 // failConnection drops the GATT link and resets state + auth. Used by the
@@ -311,34 +343,51 @@ func (c *Central) handshakeLocked(ctx context.Context) error {
 // (localSeq, strictly increasing) and the reply must decode as v2 with a
 // strictly-increasing seq — a reply that fails MAC or replays a seq drops
 // the connection.
+//
+// I-1: the seq reservation and radio write go through sendAuthedFrame
+// (sendMu) so a concurrent ServeApiRequest chunk stream cannot interleave
+// out of seq order with this write. The WaitNotify for the echo happens
+// AFTER sendMu is released — holding a radio wait under the write lock would
+// stall unrelated chunk streams for the whole echo round-trip.
 func (c *Central) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.state != "connected" {
+		c.mu.Unlock()
 		return nil, ErrNotConnected
 	}
 	if !c.authenticated || len(c.authKey) == 0 {
+		c.mu.Unlock()
 		return nil, ErrNotAuthenticated
 	}
-	if err := c.scanner.WriteCommand(ctx, EncodeAuthedFrame(payload, c.localSeq, c.authKey)); err != nil {
+	key := c.authKey
+	scanner := c.scanner
+	c.mu.Unlock()
+
+	if err := c.sendAuthedFrame(ctx, scanner, payload, key); err != nil {
 		return nil, err
 	}
-	c.localSeq++
-	raw, err := c.scanner.WaitNotify(ctx)
+	raw, err := scanner.WaitNotify(ctx)
 	if err != nil {
 		return nil, err
 	}
-	respPayload, respSeq, derr := DecodeAuthedFrame(raw, c.authKey)
+	respPayload, respSeq, derr := DecodeAuthedFrame(raw, key)
 	if derr != nil {
+		c.mu.Lock()
 		c.scanner.Disconnect()
 		c.state = "disconnected"
 		c.resetAuthLocked()
+		c.mu.Unlock()
 		return nil, derr
 	}
-	if rerr := c.acceptRemoteSeqLocked(respSeq); rerr != nil {
+	c.mu.Lock()
+	rerr := c.acceptRemoteSeqLocked(respSeq)
+	c.mu.Unlock()
+	if rerr != nil {
+		c.mu.Lock()
 		c.scanner.Disconnect()
 		c.state = "disconnected"
 		c.resetAuthLocked()
+		c.mu.Unlock()
 		return nil, rerr
 	}
 	return respPayload, nil
@@ -417,16 +466,15 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 
 	written := 0
 	for _, payload := range chunkPayloads {
-		// Each chunk goes out as a v2 authed frame. The seq is reserved
-		// atomically per write; a failed write leaves a gap in the seq space,
-		// which is fine — the receive gate only requires strict increase.
-		// Errors abort the stream: a partial write leaves the receiver to time
-		// out and re-request; we don't try to resume mid-stream.
-		c.mu.Lock()
-		seq := c.localSeq
-		c.localSeq++
-		c.mu.Unlock()
-		if werr := scanner.WriteCommand(ctx, EncodeAuthedFrame(payload, seq, authKey)); werr != nil {
+		// Each chunk goes out as a v2 authed frame via sendAuthedFrame: the
+		// seq reservation and the radio write are one critical section (I-1
+		// fix), so concurrent per-request dispatch goroutines always put
+		// frames on the wire in strictly increasing seq order. A failed write
+		// consumes its seq, leaving a gap — harmless for the strict-increase
+		// receive gate. Errors abort the stream: a partial write leaves the
+		// receiver to time out and re-request; we don't try to resume
+		// mid-stream.
+		if werr := c.sendAuthedFrame(ctx, scanner, payload, authKey); werr != nil {
 			slog.Warn("BLE JSON chunk write failed",
 				"endpoint", endpoint, "path", path, "index", index,
 				"written", written, "total", len(chunkPayloads), "error", werr)

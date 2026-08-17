@@ -219,6 +219,11 @@ type blePeerFake struct {
 	collectScanner
 	peerKey []byte
 
+	// silent suppresses the automatic handshake response queueing — models a
+	// phone that receives the challenge but never answers (handshake-timeout
+	// test). The challenge write is still accepted (nil error).
+	silent bool
+
 	mu        sync.Mutex
 	frames    [][]byte
 	nextIdx   int
@@ -250,6 +255,9 @@ func (p *blePeerFake) WriteCommand(ctx context.Context, payload []byte) error {
 			dir, nonce, derr := DecodeAuthChallengePayload(frame.Payload)
 			if derr != nil || dir != AuthDirCentralToPeripheral {
 				return errors.New("peer fake: malformed central challenge")
+			}
+			if p.silent {
+				return nil // phone received the challenge but never answers
 			}
 			mac := AuthResponseMAC(p.peerKey, nonce, dir)
 			p.push(EncodeFrame(EncodeAuthResponsePayload(nonce, mac)))
@@ -488,4 +496,135 @@ func TestCentralV2ReplaySeqRejected(t *testing.T) {
 	defer close(peer.unblockCh)
 	cancel()
 	<-listenerDone
+}
+
+// TestCentralV1FrameAfterAuthRejected (M-3a, anti-downgrade): once
+// authenticated, the listener MUST NOT accept a downgrade to an unauthenticated
+// v1 frame. A bare v1 CMD_API_REQ fails DecodeAuthedFrame (too short / no MAC)
+// and the link is dropped — the request is never served.
+func TestCentralV1FrameAfterAuthRejected(t *testing.T) {
+	peer := newBlePeerFake(centralTestToken)
+	peer.doneCh = make(chan struct{})
+	peer.unblockCh = make(chan struct{})
+	c := NewCentral(peer)
+	c.SetAuthToken(centralTestToken)
+	c.SetApiProvider(&jsonBlockProvider{body: []byte(`hi`)})
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect (handshake) error: %v", err)
+	}
+
+	// Downgrade attempt: a v1-framed CMD_API_REQ (no seq, no MAC).
+	req, encErr := EncodeApiReqPayload(EndpointBookChapter, "/books/a.txt", 0)
+	if encErr != nil {
+		t.Fatalf("EncodeApiReqPayload: %v", encErr)
+	}
+	peer.push(EncodeFrame(req))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	listenerDone := make(chan struct{})
+	go func() {
+		_ = c.RunApiListener(ctx)
+		close(listenerDone)
+	}()
+
+	waitFor := func(cond func() bool) bool {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if cond() {
+				return true
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		return cond()
+	}
+	if !waitFor(func() bool { return peer.wasDisconnected() && c.State() == "disconnected" }) {
+		t.Fatal("v1 frame after authentication must drop the link (downgrade rejected)")
+	}
+	if writes := peer.recordedWrites(); len(writes) != 0 {
+		t.Fatalf("downgraded request must not be served, got %d chunk writes", len(writes))
+	}
+
+	defer close(peer.unblockCh)
+	cancel()
+	<-listenerDone
+}
+
+// TestCentralListenerPreAuthApiReqDropsLink (M-3b): before authentication the
+// listener only tolerates the two AUTH commands — a bare v1 CMD_API_REQ is a
+// protocol violation and must drop the link (fail closed), with no dispatch.
+func TestCentralListenerPreAuthApiReqDropsLink(t *testing.T) {
+	peer := newBlePeerFake(centralTestToken)
+	peer.doneCh = make(chan struct{})
+	peer.unblockCh = make(chan struct{})
+	c := NewCentral(peer)
+	c.SetApiProvider(&jsonBlockProvider{body: []byte(`hi`)})
+	// NOTE: deliberately NOT authenticated — the listener's pre-auth policy
+	// gate is under test, so no Connect() is performed.
+
+	req, encErr := EncodeApiReqPayload(EndpointBookChapter, "/books/a.txt", 0)
+	if encErr != nil {
+		t.Fatalf("EncodeApiReqPayload: %v", encErr)
+	}
+	peer.push(EncodeFrame(req))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	listenerDone := make(chan struct{})
+	go func() {
+		_ = c.RunApiListener(ctx)
+		close(listenerDone)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !peer.wasDisconnected() {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !peer.wasDisconnected() {
+		t.Fatal("pre-auth non-handshake command must drop the link")
+	}
+	if c.State() != "disconnected" {
+		t.Fatalf("state=%q want disconnected", c.State())
+	}
+	if writes := peer.recordedWrites(); len(writes) != 0 {
+		t.Fatalf("pre-auth request must not be served, got %d chunk writes", len(writes))
+	}
+
+	defer close(peer.unblockCh)
+	cancel()
+	<-listenerDone
+}
+
+// TestCentralHandshakeTimeoutDisconnects (M-3c): a peer that never answers the
+// challenge must not hold the link — the handshake budget expires, Connect
+// returns an ErrHandshakeFailed-wrapped error, and the GATT connection is
+// dropped (fail closed). The test drives the expiry with a short parent ctx;
+// context.WithTimeout(parent, bleHandshakeTimeout) makes the effective
+// deadline min(parent, 5s), and the deadline-exceeded branch is the exact
+// code path the 5s cap itself takes.
+func TestCentralHandshakeTimeoutDisconnects(t *testing.T) {
+	peer := newBlePeerFake(centralTestToken)
+	peer.silent = true // receives the challenge, never answers
+	c := NewCentral(peer)
+	c.SetAuthToken(centralTestToken)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := c.Connect(ctx, "AA:BB")
+	if err == nil {
+		t.Fatal("expected handshake timeout failure")
+	}
+	if !errors.Is(err, ErrHandshakeFailed) {
+		t.Fatalf("want ErrHandshakeFailed, got %v", err)
+	}
+	if c.State() != "disconnected" {
+		t.Fatalf("state=%q want disconnected after handshake timeout", c.State())
+	}
+	if !peer.wasDisconnected() {
+		t.Fatal("expected scanner Disconnect after handshake timeout")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("handshake must respect its deadline, took %s", elapsed)
+	}
 }
