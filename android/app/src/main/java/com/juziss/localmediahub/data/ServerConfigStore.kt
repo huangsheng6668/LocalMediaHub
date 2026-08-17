@@ -91,13 +91,13 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
         }
     }
 
-    suspend fun saveLastConnectedBleAddress(address: String) {
+    open suspend fun saveLastConnectedBleAddress(address: String) {
         context.dataStore.edit { prefs ->
             prefs[KEY_LAST_CONNECTED_BLE_ADDRESS] = address
         }
     }
 
-    suspend fun clearLastConnectedBleAddress() {
+    open suspend fun clearLastConnectedBleAddress() {
         context.dataStore.edit { prefs ->
             prefs.remove(KEY_LAST_CONNECTED_BLE_ADDRESS)
         }

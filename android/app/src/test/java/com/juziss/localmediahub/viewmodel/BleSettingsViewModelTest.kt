@@ -16,6 +16,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
@@ -126,6 +127,61 @@ class BleSettingsViewModelTest {
         assertTrue(vm.errorText.value?.contains("scan error") == true)
     }
 
+    // --- selectBestDevice and MAC memory (Task 2) ---------------------------
+
+    @Test
+    fun selectBestDevice_prioritizesLastConnectedMac() {
+        val devices = listOf(
+            BleDevice("11:22:33:44:55:66", "Pixel 8", -40),
+            BleDevice("AA:BB:CC:DD:EE:FF", "Pixel 7", -60),
+        )
+        val best = BleSettingsViewModel.selectBestDevice(
+            discovered = devices,
+            lastConnectedMac = "AA:BB:CC:DD:EE:FF",
+            localDeviceName = "Pixel 8"
+        )
+        assertEquals("AA:BB:CC:DD:EE:FF", best?.id)
+    }
+
+    @Test
+    fun selectBestDevice_fallsBackToDeviceNameMatch_whenNoMacMatch() {
+        val devices = listOf(
+            BleDevice("11:22:33:44:55:66", "Unknown", -40),
+            BleDevice("77:88:99:AA:BB:CC", "My Phone", -70),
+        )
+        val best = BleSettingsViewModel.selectBestDevice(
+            discovered = devices,
+            lastConnectedMac = "FF:EE:DD:CC:BB:AA",
+            localDeviceName = "My Phone"
+        )
+        assertEquals("77:88:99:AA:BB:CC", best?.id)
+    }
+
+    @Test
+    fun selectBestDevice_fallsBackToMaxRssi_whenNoMacOrNameMatch() {
+        val devices = listOf(
+            BleDevice("11:22:33:44:55:66", "Device A", -80),
+            BleDevice("77:88:99:AA:BB:CC", "Device B", -45),
+        )
+        val best = BleSettingsViewModel.selectBestDevice(
+            discovered = devices,
+            lastConnectedMac = null,
+            localDeviceName = "My Phone"
+        )
+        assertEquals("77:88:99:AA:BB:CC", best?.id)
+    }
+
+    @Test
+    fun autoConnect_savesLastConnectedMacOnSuccess() = runTest {
+        val api = fakeApi(scanFailCount = 0)
+        val vm = buildVm(api = api, serverConfigured = true, bleEnabled = true)
+        runCurrent()
+
+        vm.autoConnect(); runCurrent()
+
+        assertEquals("AA:BB", vm.store.lastConnectedBleAddress.first())
+    }
+
     // --- Test helpers ------------------------------------------------------
 
     /**
@@ -227,9 +283,17 @@ class BleSettingsViewModelTest {
         }
         val serverUrlFlow: MutableStateFlow<String> =
             MutableStateFlow(if (serverConfigured) "http://192.168.1.10:8000" else "")
+        val lastConnectedBleAddressFlow: MutableStateFlow<String?> = MutableStateFlow(null)
         val store = object : ServerConfigStore(mockk(relaxed = true)) {
             override val serverUrl: Flow<String> = serverUrlFlow
             override val bleEnabled: Flow<Boolean> = bleEnabledFlow
+            override val lastConnectedBleAddress: Flow<String?> = lastConnectedBleAddressFlow
+            override suspend fun saveLastConnectedBleAddress(address: String) {
+                lastConnectedBleAddressFlow.value = address
+            }
+            override suspend fun clearLastConnectedBleAddress() {
+                lastConnectedBleAddressFlow.value = null
+            }
         }
         val bleApi: BleApi = when (api) {
             is FakeApi -> api.api

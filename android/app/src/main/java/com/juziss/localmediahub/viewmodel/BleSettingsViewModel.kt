@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -48,7 +49,7 @@ class BleSettingsViewModel @Inject constructor(
     application: Application,
     private val controller: BleController,
     private val api: BleApi,
-    private val store: ServerConfigStore,
+    val store: ServerConfigStore,
     private val serverConfig: ServerConfig,
     @Named("bleEnabled") private val bleEnabledFlow: Flow<Boolean>,
 ) : AndroidViewModel(application) {
@@ -153,9 +154,19 @@ class BleSettingsViewModel @Inject constructor(
                         controller.markDisconnected()
                         return false
                     }
-                    val target = discovered.first()
+                    val lastMac = store.lastConnectedBleAddress.firstOrNull()
+                    val mgr = getApplication<Application>().getSystemService(Context.BLUETOOTH_SERVICE)
+                        as? BluetoothManager
+                    val localName = try {
+                        mgr?.adapter?.name?.takeIf { it.isNotBlank() }
+                    } catch (_: SecurityException) {
+                        null
+                    } ?: android.os.Build.MODEL
+
+                    val target = selectBestDevice(discovered, lastMac, localName) ?: discovered.first()
                     when (val connResult = api.connect(target.id)) {
                         is NetworkResult.Success -> if (connResult.data) {
+                            store.saveLastConnectedBleAddress(target.id)
                             controller.markConnected(); return true
                         } else {
                             controller.markDisconnected()
@@ -229,6 +240,7 @@ class BleSettingsViewModel @Inject constructor(
             when (val result = api.connect(device.id)) {
                 is NetworkResult.Success -> {
                     if (result.data) {
+                        store.saveLastConnectedBleAddress(device.id)
                         controller.markConnected()
                     } else {
                         controller.markDisconnected()
@@ -272,6 +284,32 @@ class BleSettingsViewModel @Inject constructor(
                     controller.markDisconnected()
                 }
             }
+        }
+    }
+
+    companion object {
+        /**
+         * 智能选路算法：
+         * 1. 优先匹配上次成功连接的 MAC 地址（忽略大小写）；
+         * 2. 匹配当前设备名称（忽略大小写）；
+         * 3. 兜底选择 RSSI 信号最强的设备；
+         * 4. 列表为空返回 null。
+         */
+        fun selectBestDevice(
+            discovered: List<BleDevice>,
+            lastConnectedMac: String?,
+            localDeviceName: String?
+        ): BleDevice? {
+            if (discovered.isEmpty()) return null
+            if (!lastConnectedMac.isNullOrBlank()) {
+                val byMac = discovered.find { it.id.equals(lastConnectedMac, ignoreCase = true) }
+                if (byMac != null) return byMac
+            }
+            if (!localDeviceName.isNullOrBlank()) {
+                val byName = discovered.find { it.name.equals(localDeviceName, ignoreCase = true) }
+                if (byName != null) return byName
+            }
+            return discovered.maxByOrNull { it.rssi } ?: discovered.firstOrNull()
         }
     }
 }
