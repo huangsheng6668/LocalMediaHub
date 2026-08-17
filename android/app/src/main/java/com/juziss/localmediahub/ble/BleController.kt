@@ -17,6 +17,13 @@ import javax.inject.Singleton
  * HTTP coordination (Task 9 BleApi via the VM) drives [markConnected] /
  * [markDisconnected] based on the Central's connect/disconnect responses.
  *
+ * Phase 9 (C-1): the per-connection auth reset is driven by GATT link events
+ * ([BlePeripheralManager.setOnPeerConnected] / [setOnPeerDisconnected]), not
+ * by the HTTP-coordination callbacks — the Go Central completes the whole
+ * handshake inside the HTTP /connect handler, so markConnected() runs strictly
+ * AFTER the phone is already authenticated and must not reset it (see
+ * [markConnected]).
+ *
  * Phase 9 (Task 9, H-1b) authentication policy — the receive mirror of the Go
  * Central's `handleNotifyFrame` (`server/internal/ble/central.go`):
  *
@@ -142,6 +149,25 @@ class BleController @Inject constructor(
         peripheralManager.setOnAdvertisingStarted { success ->
             _advertisingStarted.tryEmit(success)
         }
+        // Phase 9 (C-1): per-connection auth reset is driven by GATT link
+        // events, NOT by the HTTP-coordination callbacks. The PC's Go
+        // Central completes the ENTIRE mutual challenge handshake inside the
+        // POST /api/v1/ble/connect HTTP handler; by the time the HTTP
+        // response reaches the phone and markConnected() runs, the
+        // handshake over the air is long done. Resetting in markConnected
+        // therefore wiped authenticated=true and permanently killed the BLE
+        // data channel (requestApi pre-refused; the PC's v2 frames hit the
+        // pre-auth path and were dropped as violations). At GATT
+        // STATE_CONNECTED the peer's challenge has not arrived yet, so the
+        // reset here is ordering-correct by construction.
+        peripheralManager.setOnPeerConnected {
+            synchronized(authLock) { resetAuthLocked() }
+        }
+        // Link dropped (peer went away / cancelConnection after fatal):
+        // auth state must not survive into the next link.
+        peripheralManager.setOnPeerDisconnected {
+            synchronized(authLock) { resetAuthLocked() }
+        }
     }
 
     /**
@@ -164,13 +190,22 @@ class BleController @Inject constructor(
         peripheralManager.startAdvertising()
     }
 
-    /** Called by BleApi (Task 9 VM) when the Central reports a successful /connect. */
+    /**
+     * Called by BleApi (Task 9 VM) when the Central reports a successful /connect.
+     *
+     * Phase 9 (C-1): this is a pure state-machine transition — it does NOT
+     * reset the auth state. The per-connection auth reset now fires on the
+     * GATT link events ([BlePeripheralManager.setOnPeerConnected] /
+     * [setOnPeerDisconnected], registered in [init]): the Go Central drives
+     * the whole mutual handshake to completion INSIDE the HTTP /connect
+     * handler, so the HTTP response (and thus this call) arrives strictly
+     * after the phone's `authenticated` flag has already flipped true.
+     * Resetting here used to erase a completed handshake (C-1). Auth resets
+     * remain on: peer-disconnect event, [markDisconnected], fatal violations
+     * ([fatalLocked]) and BLE disable ([evaluateAvailability]).
+     */
     fun markConnected() {
         machine.onConnected()
-        // Per-connection auth reset (Go `resetAuthLocked` on Connect): a new
-        // GATT link must re-run the mutual handshake; stale v2 seq state
-        // from the previous link must not survive.
-        synchronized(authLock) { resetAuthLocked() }
     }
 
     /** Called by BleApi (Task 9 VM) when the Central reports disconnect or connect failure. */

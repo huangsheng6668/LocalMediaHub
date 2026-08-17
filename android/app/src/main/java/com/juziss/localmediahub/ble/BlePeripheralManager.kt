@@ -30,6 +30,24 @@ interface BlePeripheralManager {
      * [BleController.onCommandWrite] owns v1/v2 dispatch and authentication.
      */
     fun setOnRawFrameReceived(cb: (rawFrame: ByteArray) -> Unit)
+    /**
+     * Phase 9 (C-1): register callback invoked when a Central establishes the
+     * GATT link (production impl: onConnectionStateChange →
+     * STATE_CONNECTED). [BleController] resets its per-connection auth state
+     * HERE — at GATT-link establishment the peer's handshake challenge has
+     * not arrived yet, so the reset can never race the handshake the way the
+     * old markConnected()-driven reset did (the HTTP /connect response lands
+     * AFTER the PC has already completed the mutual challenge over BLE).
+     */
+    fun setOnPeerConnected(cb: () -> Unit)
+    /**
+     * Phase 9 (C-1): register callback invoked when the GATT link to the
+     * Central drops (production impl: onConnectionStateChange →
+     * STATE_DISCONNECTED). [BleController] clears its auth state here: the
+     * next link must re-run the mutual handshake before the data phase
+     * reopens.
+     */
+    fun setOnPeerDisconnected(cb: () -> Unit)
     /** Send payload via the State characteristic (Notify). Returns false if no subscriber. */
     fun notifyPayload(payload: ByteArray): Boolean
     /**

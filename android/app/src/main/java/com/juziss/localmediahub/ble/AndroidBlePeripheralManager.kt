@@ -111,6 +111,8 @@ class AndroidBlePeripheralManager @Inject constructor(
     private var subscriberDevice: BluetoothDevice? = null
     private var onRawFrameReceived: ((ByteArray) -> Unit)? = null
     private var onAdvertisingStarted: ((Boolean) -> Unit)? = null
+    private var onPeerConnected: (() -> Unit)? = null
+    private var onPeerDisconnected: (() -> Unit)? = null
 
     override fun isAdapterUsable(): Boolean = adapter?.isEnabled == true
 
@@ -120,6 +122,14 @@ class AndroidBlePeripheralManager @Inject constructor(
 
     override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {
         onAdvertisingStarted = cb
+    }
+
+    override fun setOnPeerConnected(cb: () -> Unit) {
+        onPeerConnected = cb
+    }
+
+    override fun setOnPeerDisconnected(cb: () -> Unit) {
+        onPeerDisconnected = cb
     }
 
     override fun startAdvertising() {
@@ -234,9 +244,24 @@ class AndroidBlePeripheralManager @Inject constructor(
     private val gattCallback = object : BluetoothGattServerCallback() {
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                // Existing behavior (known deferred item, deliberately
+                // unchanged): the subscriber is set optimistically here; a
+                // later bonded CCCD write re-asserts it.
                 subscriberDevice = device
+                // Phase 9 (C-1): per-connection auth reset fires at GATT-link
+                // establishment. At this instant the Central's handshake
+                // challenge cannot have arrived yet (the PC writes it only
+                // after its Connect() returns from the link layer), so the
+                // ordering is inherently race-free — unlike the old
+                // markConnected() reset, which landed after the HTTP
+                // coordination round-trip and wiped an already-completed
+                // handshake.
+                onPeerConnected?.invoke()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 subscriberDevice = null
+                // Phase 9 (C-1): link gone — auth state must not survive into
+                // the next connection (it must re-handshake).
+                onPeerDisconnected?.invoke()
             }
         }
 

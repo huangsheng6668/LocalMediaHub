@@ -19,6 +19,8 @@ object TestBleFixtures {
         override fun stopAdvertising() = Unit
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) = Unit
         override fun setOnRawFrameReceived(cb: (ByteArray) -> Unit) = Unit
+        override fun setOnPeerConnected(cb: () -> Unit) = Unit
+        override fun setOnPeerDisconnected(cb: () -> Unit) = Unit
         override fun notifyPayload(payload: ByteArray): Boolean = false
         override fun disconnectPeer() = Unit
         override fun isAdapterUsable(): Boolean = false

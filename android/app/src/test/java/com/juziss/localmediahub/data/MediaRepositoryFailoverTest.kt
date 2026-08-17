@@ -112,6 +112,8 @@ class MediaRepositoryFailoverTest {
         override fun stopAdvertising() { advertising = false }
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {}
         override fun setOnRawFrameReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
+        override fun setOnPeerConnected(cb: () -> Unit) {}
+        override fun setOnPeerDisconnected(cb: () -> Unit) {}
         override fun disconnectPeer() {}
 
         /**

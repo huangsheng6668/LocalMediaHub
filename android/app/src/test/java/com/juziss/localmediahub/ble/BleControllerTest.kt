@@ -26,12 +26,20 @@ class BleControllerTest {
         var notifyFailuresRemaining = 0
         private var cb: ((ByteArray) -> Unit)? = null
         private var onAdvertisingStarted: ((Boolean) -> Unit)? = null
+        private var onPeerConnected: (() -> Unit)? = null
+        private var onPeerDisconnected: (() -> Unit)? = null
 
         override fun startAdvertising() { advertising = true }
         override fun stopAdvertising() { advertising = false }
         override fun setOnRawFrameReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {
             onAdvertisingStarted = cb
+        }
+        override fun setOnPeerConnected(cb: () -> Unit) {
+            onPeerConnected = cb
+        }
+        override fun setOnPeerDisconnected(cb: () -> Unit) {
+            onPeerDisconnected = cb
         }
         override fun notifyPayload(payload: ByteArray): Boolean {
             if (notifyFailuresRemaining > 0) {
@@ -50,6 +58,12 @@ class BleControllerTest {
         // `encodeFrame(...)`-wrapped payloads, or raw v2 authed frames) go to
         // the controller unchanged.
         fun simulateWrite(rawFrame: ByteArray) { cb?.invoke(rawFrame) }
+
+        // Phase 9 (C-1) hooks: simulate AndroidBlePeripheralManager's
+        // onConnectionStateChange STATE_CONNECTED / STATE_DISCONNECTED
+        // callbacks (what a real GATT link does to the controller).
+        fun simulatePeerConnected() { onPeerConnected?.invoke() }
+        fun simulatePeerDisconnected() { onPeerDisconnected?.invoke() }
 
         // Test hook simulating the AdvertiseCallback's onStartSuccess(true) /
         // onStartFailure(false). Backs the Task 1 advertising-started signal.
@@ -77,11 +91,15 @@ class BleControllerTest {
      * Drive the PC (Central) side of the Phase 9 handshake up to and
      * including the phone's own challenge: writes a C2P challenge (as a RAW
      * v1 frame through the peripheral seam), and returns the nonce of the
-     * phone's P2C challenge (notified[1]).
+     * phone's P2C challenge (notified[1]). [notifiedBefore] is the manager's
+     * notified-frame count BEFORE this handshake round (0 for a fresh
+     * manager), so the helper also works for a re-handshake on a reused
+     * manager (C-1 reconnect test).
      */
     private fun pcChallengeAndExtractOwnNonce(
         mgr: FakePeripheralManager,
         nonce1: ByteArray = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+        notifiedBefore: Int = 0,
     ): ByteArray {
         mgr.simulateWrite(
             BleProtocol.encodeFrame(
@@ -90,16 +108,16 @@ class BleControllerTest {
         )
         assertEquals(
             "handshake must notify exactly: response, then own challenge",
-            2, mgr.notified.size,
+            notifiedBefore + 2, mgr.notified.size,
         )
-        val ownCh = BleProtocol.decodeFrame(mgr.notified[1])!!.payload
+        val ownCh = BleProtocol.decodeFrame(mgr.notified[notifiedBefore + 1])!!.payload
         assertEquals(BleProtocol.CMD_AUTH_CHALLENGE, ownCh[0])
         return BleProtocol.decodeAuthChallengePayload(ownCh)!!.second
     }
 
     /** Full mutual handshake: PC challenge → phone response+own challenge → PC response. */
     private fun performHandshake(mgr: FakePeripheralManager, controller: BleController) {
-        val ownNonce = pcChallengeAndExtractOwnNonce(mgr)
+        val ownNonce = pcChallengeAndExtractOwnNonce(mgr, notifiedBefore = mgr.notified.size)
         mgr.simulateWrite(
             BleProtocol.encodeFrame(
                 BleProtocol.encodeAuthResponsePayload(
@@ -746,5 +764,130 @@ class BleControllerTest {
             "no fatal occurred: manager link cancel must not fire",
             0, mgr.disconnectPeerCalls,
         )
+    }
+
+    // ------------------------------------------------------------------
+    // Phase 9 (C-1): per-connection auth reset driven by GATT link events,
+    // not by the HTTP-coordination markConnected() callback.
+    // ------------------------------------------------------------------
+
+    /**
+     * C-1 regression (production ordering): the Go Central completes the
+     * ENTIRE mutual handshake inside the POST /api/v1/ble/connect HTTP
+     * handler, so on the phone the true event order is
+     *
+     *   GATT STATE_CONNECTED → handshake over the air → HTTP response →
+     *   markConnected()
+     *
+     * The old markConnected() unconditionally called resetAuthLocked() and
+     * erased the already-completed handshake, permanently killing the BLE
+     * data channel (requestApi pre-refused; the PC's v2 frames were dropped
+     * on the pre-auth path). markConnected() must now be a pure state-machine
+     * transition.
+     */
+    @Test
+    fun markConnected_afterCompletedHandshake_preservesAuthentication() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr)
+        controller.evaluateAvailability(enabled = true)
+
+        // (1) GATT link established — per-connection auth reset fires HERE
+        // (the PC's challenge has not arrived yet; ordering is race-free).
+        mgr.simulatePeerConnected()
+
+        // (2) The PC drives the mutual handshake to completion over the air
+        // (this all happens inside the server's HTTP /connect handler).
+        performHandshake(mgr, controller)
+
+        // (3) The HTTP response finally reaches the phone — LATE. This used
+        // to wipe authenticated=true (C-1 root cause).
+        controller.markConnected()
+
+        assertTrue(
+            "late HTTP markConnected must NOT erase a completed handshake",
+            controller.authenticated,
+        )
+        assertEquals(BleConnState.CONNECTED, controller.connectionState.value)
+
+        // The data channel must remain usable: requestApi sends a v2 frame.
+        val notifiedCountBefore = mgr.notified.size
+        val ok = controller.requestApi(
+            endpoint = BleProtocol.ENDPOINT_FOLDERS,
+            path = "/",
+            index = 0,
+        )
+        assertTrue("post-markConnected requestApi must be admitted", ok)
+        assertEquals(
+            "requestApi must have notified a v2 frame",
+            notifiedCountBefore + 1, mgr.notified.size,
+        )
+    }
+
+    /**
+     * C-1 reverse case: when the GATT link drops (peer went away, or the
+     * manager cancelled the link after a fatal), the auth state MUST be
+     * cleared — the next link has to re-run the mutual handshake before the
+     * data phase reopens. Stale v2 seq state must not survive either.
+     */
+    @Test
+    fun peerDisconnectEvent_clearsAuthentication_requiresRehandshake() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr)
+        controller.evaluateAvailability(enabled = true)
+        mgr.simulatePeerConnected()
+        performHandshake(mgr, controller)
+        assertTrue(controller.authenticated)
+
+        mgr.simulatePeerDisconnected()
+
+        assertFalse("GATT link loss must clear the auth state", controller.authenticated)
+        assertFalse(
+            "requestApi must be refused until the next handshake",
+            controller.requestApi(BleProtocol.ENDPOINT_FOLDERS, "/", 0),
+        )
+    }
+
+    /**
+     * C-1 forward case: a NEW GATT link resets any auth state from the
+     * previous link (a reconnecting peer must re-handshake — it cannot ride
+     * a stale authenticated=true), and a fresh handshake re-authenticates
+     * normally on the new link.
+     */
+    @Test
+    fun peerReconnectEvent_resetsAuth_thenRehandshakeSucceeds() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr)
+        controller.evaluateAvailability(enabled = true)
+        mgr.simulatePeerConnected()
+        performHandshake(mgr, controller)
+
+        // Link dropped and a new one came up.
+        mgr.simulatePeerDisconnected()
+        mgr.simulatePeerConnected()
+
+        assertFalse("new GATT link must invalidate the previous handshake", controller.authenticated)
+
+        // A stale post-auth v1 frame from the old link is now pre-auth input
+        // again — the handshake-command routing accepts the re-handshake.
+        performHandshake(mgr, controller)
+        assertTrue("fresh handshake on the new link must re-authenticate", controller.authenticated)
+    }
+
+    /**
+     * C-1 regression: the HTTP-coordination disconnect path keeps its auth
+     * reset (markConnected lost its reset, markDisconnected keeps it).
+     */
+    @Test
+    fun markDisconnected_stillResetsAuthentication() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr)
+        controller.evaluateAvailability(enabled = true)
+        mgr.simulatePeerConnected()
+        performHandshake(mgr, controller)
+
+        controller.markDisconnected()
+
+        assertFalse("markDisconnected must still reset the auth state", controller.authenticated)
+        assertEquals(BleConnState.ADVERTISING, controller.connectionState.value)
     }
 }

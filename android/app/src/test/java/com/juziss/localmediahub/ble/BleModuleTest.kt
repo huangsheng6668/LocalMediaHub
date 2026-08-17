@@ -18,6 +18,8 @@ class BleModuleTest {
         override fun stopAdvertising() {}
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {}
         override fun setOnRawFrameReceived(cb: (ByteArray) -> Unit) {}
+        override fun setOnPeerConnected(cb: () -> Unit) {}
+        override fun setOnPeerDisconnected(cb: () -> Unit) {}
         override fun notifyPayload(payload: ByteArray): Boolean = false
         override fun disconnectPeer() {}
         override fun isAdapterUsable(): Boolean = false
