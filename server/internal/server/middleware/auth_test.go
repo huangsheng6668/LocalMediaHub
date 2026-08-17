@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
@@ -172,4 +173,58 @@ func TestBearerTokenQueryFallbackGetOnly(t *testing.T) {
 	err := BearerToken("secret")(handler)(e.NewContext(req, rec))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestAuthFailureLimiterBlocksAfterBurst(t *testing.T) {
+	l := NewAuthFailureLimiter(3, time.Minute)
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		l.RecordFailure("10.0.0.9", now)
+	}
+	if !l.Blocked("10.0.0.9", now) {
+		t.Fatal("expected blocked after 3 failures")
+	}
+	if l.Blocked("10.0.0.8", now) {
+		t.Fatal("other IP must not be blocked")
+	}
+	l.Reset("10.0.0.9")
+	if l.Blocked("10.0.0.9", now.Add(time.Second)) {
+		t.Fatal("reset must clear the window")
+	}
+	// 窗口过期自动解封
+	l.RecordFailure("10.0.0.9", now)
+	if l.Blocked("10.0.0.9", now.Add(2*time.Minute)) {
+		t.Fatal("window expiry must unblock")
+	}
+}
+
+func TestBearerTokenReturns429WhenFailureLimited(t *testing.T) {
+	e := echo.New()
+	limiter := NewAuthFailureLimiter(2, time.Minute)
+	e.GET("/p", func(c echo.Context) error { return c.NoContent(200) },
+		BearerToken("sekrit", limiter))
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/p", nil)
+		req.Header.Set("Authorization", "Bearer wrong")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d = %d, want 401", i, rec.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/p", nil)
+	req.Header.Set("Authorization", "Bearer wrong")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("third attempt = %d, want 429", rec.Code)
+	}
+	// 正确 token 在限速期内也被拒（防爆破期间绕过）
+	req2 := httptest.NewRequest(http.MethodGet, "/p", nil)
+	req2.Header.Set("Authorization", "Bearer sekrit")
+	rec2 := httptest.NewRecorder()
+	e.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Fatalf("valid token during block = %d, want 429", rec2.Code)
+	}
 }

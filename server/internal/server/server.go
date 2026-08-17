@@ -269,7 +269,11 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	// Auth middleware: gates sensitive endpoints on the configured token.
 	// Empty token = open mode (passthrough), logged at startup.
-	authMw := middleware.BearerToken(s.Config.Server.Token)
+	// Phase 9 (M-2): per-IP auth-failure backoff on the same instance —
+	// 10 failed attempts per IP per 60s window escalates to 429, throttling
+	// online token brute-forcing. Successful auth resets the IP counter.
+	authFailLimiter := middleware.NewAuthFailureLimiter(10, time.Minute)
+	authMw := middleware.BearerToken(s.Config.Server.Token, authFailLimiter)
 
 	api.GET("/health", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
