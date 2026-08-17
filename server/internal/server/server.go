@@ -207,6 +207,8 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 			if q.Get("token") != "" {
 				q.Set("token", "REDACTED")
 				req.URL.RawQuery = q.Encode()
+				// Echo Logger 打印 req.RequestURI（请求行原文，不随 URL 同步），必须一并改写
+				req.RequestURI = req.URL.Path + "?" + req.URL.RawQuery
 			}
 			return next(c)
 		}

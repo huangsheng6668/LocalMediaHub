@@ -603,6 +603,8 @@ func TestRedactMiddleware_TokenRedactedFromLogButVisibleToDownstream(t *testing.
 			if q.Get("token") != "" {
 				q.Set("token", "REDACTED")
 				req.URL.RawQuery = q.Encode()
+				// Echo Logger 打印 req.RequestURI（请求行原文，不随 URL 同步），必须一并改写
+				req.RequestURI = req.URL.Path + "?" + req.URL.RawQuery
 			}
 			return next(c)
 		}
@@ -644,5 +646,91 @@ func TestRedactMiddleware_TokenRedactedFromLogButVisibleToDownstream(t *testing.
 	}
 	if strings.Contains(rawQuery, "secret123") {
 		t.Errorf("RawQuery must NOT contain the raw token value, got %q", rawQuery)
+	}
+
+	// (3) req.RequestURI — the request-line copy echoMw.Logger prints via the
+	// ${uri} tag — is rewritten as well. Mutating URL.RawQuery alone leaves
+	// RequestURI stale, which leaked the raw token to the access log (Phase 9
+	// H-3). Asserting both fields prevents the regression from being tested
+	// only halfway.
+	if !strings.Contains(req.RequestURI, "token=REDACTED") {
+		t.Errorf("expected RequestURI to contain token=REDACTED, got %q", req.RequestURI)
+	}
+	if strings.Contains(req.RequestURI, "secret123") {
+		t.Errorf("RequestURI must NOT contain the raw token value, got %q", req.RequestURI)
+	}
+}
+
+// TestTokenRedactRewritesRequestURI is the Phase 9 (H-3) end-to-end gate: it
+// boots a REAL Server via New(cfg) so the production registerRoutes middleware
+// chain — including the actual echoMw.Logger() — runs against the request.
+//
+// Background: echoMw.Logger prints ${uri} from req.RequestURI (the request-line
+// copy, see echo v4 middleware/logger.go tagURI), which is NOT kept in sync
+// with req.URL when RawQuery is mutated. The Round 32 S2 redact middleware only
+// rewrote URL.RawQuery, so the access log still leaked ?token=<raw>. This test
+// fails until the production redact middleware also rewrites req.RequestURI.
+func TestTokenRedactRewritesRequestURI(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0},
+		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: filepath.Join(t.TempDir(), "thumb"), MaxSize: 64, Format: "jpeg",
+		},
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Stop(); err != nil {
+			t.Logf("Stop: %v", err)
+		}
+	})
+
+	// Capture the real Logger middleware output (echoMw.Logger writes to
+	// e.Logger) so we can assert on the actual access-log line.
+	var logBuf bytes.Buffer
+	s.Echo.Logger.SetOutput(&logBuf)
+
+	// Downstream probe: proves the cached query params still expose the
+	// ORIGINAL token (middleware.BearerToken's ?token= fallback depends on it).
+	var downstreamToken string
+	s.Echo.GET("/api/v1/__test_redact_probe", func(c echo.Context) error {
+		downstreamToken = c.QueryParam("token")
+		return c.NoContent(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/__test_redact_probe?token=sekrit", nil)
+	rec := httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%q)", rec.Code, rec.Body.String())
+	}
+
+	// (1) req.RequestURI — the field echoMw.Logger prints via ${uri} — must be
+	// rewritten, not just URL.RawQuery.
+	if strings.Contains(req.RequestURI, "sekrit") {
+		t.Errorf("RequestURI still leaks token: %s", req.RequestURI)
+	}
+	if req.RequestURI != "/api/v1/__test_redact_probe?token=REDACTED" {
+		t.Errorf("unexpected RequestURI: %s", req.RequestURI)
+	}
+
+	// (2) The real echoMw.Logger output must not contain the raw token, and
+	// must show the redacted one.
+	if strings.Contains(logBuf.String(), "sekrit") {
+		t.Errorf("access log leaked raw token, log line: %s", strings.TrimSpace(logBuf.String()))
+	}
+	if !strings.Contains(logBuf.String(), "token=REDACTED") {
+		t.Errorf("expected token=REDACTED in access log, got: %s", strings.TrimSpace(logBuf.String()))
+	}
+
+	// (3) Cached query params still carry the original token for the auth
+	// fallback (redaction must stay log-only).
+	if downstreamToken != "sekrit" {
+		t.Errorf("downstream c.QueryParam(\"token\") = %q, want %q (redaction must not break downstream auth)",
+			downstreamToken, "sekrit")
 	}
 }
