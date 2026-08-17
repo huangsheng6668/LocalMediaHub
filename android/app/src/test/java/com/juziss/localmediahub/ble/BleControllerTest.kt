@@ -19,6 +19,9 @@ class BleControllerTest {
         var received: ByteArray? = null
         val notified = mutableListOf<ByteArray>()
 
+        /** Task 10: counts fatal-path disconnectPeer() calls from the controller. */
+        var disconnectPeerCalls = 0
+
         /** Simulates "CCCD not subscribed yet" — every notify fails while > 0. */
         var notifyFailuresRemaining = 0
         private var cb: ((ByteArray) -> Unit)? = null
@@ -26,7 +29,7 @@ class BleControllerTest {
 
         override fun startAdvertising() { advertising = true }
         override fun stopAdvertising() { advertising = false }
-        override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
+        override fun setOnRawFrameReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {
             onAdvertisingStarted = cb
         }
@@ -39,12 +42,14 @@ class BleControllerTest {
             notified.add(payload.copyOf())
             return true
         }
+        override fun disconnectPeer() { disconnectPeerCalls++ }
         override fun isAdapterUsable(): Boolean = true
 
-        // Test hook to simulate a Central write. The production manager
-        // delivers the DECODED v1 payload (bytes after the 3-byte header);
-        // the fake matches that contract.
-        fun simulateWrite(payload: ByteArray) { cb?.invoke(payload) }
+        // Test hook to simulate a Central write. Matches the Task 10 raw
+        // pass-through contract: the EXACT on-air frame bytes (v1
+        // `encodeFrame(...)`-wrapped payloads, or raw v2 authed frames) go to
+        // the controller unchanged.
+        fun simulateWrite(rawFrame: ByteArray) { cb?.invoke(rawFrame) }
 
         // Test hook simulating the AdvertiseCallback's onStartSuccess(true) /
         // onStartFailure(false). Backs the Task 1 advertising-started signal.
@@ -70,14 +75,19 @@ class BleControllerTest {
 
     /**
      * Drive the PC (Central) side of the Phase 9 handshake up to and
-     * including the phone's own challenge: writes a C2P challenge, and
-     * returns the nonce of the phone's P2C challenge (notified[1]).
+     * including the phone's own challenge: writes a C2P challenge (as a RAW
+     * v1 frame through the peripheral seam), and returns the nonce of the
+     * phone's P2C challenge (notified[1]).
      */
     private fun pcChallengeAndExtractOwnNonce(
         mgr: FakePeripheralManager,
         nonce1: ByteArray = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
     ): ByteArray {
-        mgr.simulateWrite(BleProtocol.encodeAuthChallengePayload(BleProtocol.AUTH_DIR_C2P, nonce1))
+        mgr.simulateWrite(
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthChallengePayload(BleProtocol.AUTH_DIR_C2P, nonce1),
+            ),
+        )
         assertEquals(
             "handshake must notify exactly: response, then own challenge",
             2, mgr.notified.size,
@@ -91,9 +101,11 @@ class BleControllerTest {
     private fun performHandshake(mgr: FakePeripheralManager, controller: BleController) {
         val ownNonce = pcChallengeAndExtractOwnNonce(mgr)
         mgr.simulateWrite(
-            BleProtocol.encodeAuthResponsePayload(
-                ownNonce,
-                BleProtocol.authResponseMac(authKey, ownNonce, BleProtocol.AUTH_DIR_P2C),
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthResponsePayload(
+                    ownNonce,
+                    BleProtocol.authResponseMac(authKey, ownNonce, BleProtocol.AUTH_DIR_P2C),
+                ),
             ),
         )
         assertTrue("handshake must complete", controller.authenticated)
@@ -180,7 +192,11 @@ class BleControllerTest {
         controller.markConnected()
 
         val nonce1 = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
-        mgr.simulateWrite(BleProtocol.encodeAuthChallengePayload(BleProtocol.AUTH_DIR_C2P, nonce1))
+        mgr.simulateWrite(
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthChallengePayload(BleProtocol.AUTH_DIR_C2P, nonce1),
+            ),
+        )
 
         // Response: v1 frame, echoes nonce1 with MAC over nonce1||dir(C2P).
         val resp = BleProtocol.decodeFrame(mgr.notified[0])!!.payload
@@ -199,9 +215,11 @@ class BleControllerTest {
 
         // PC answers our challenge → both directions verified → authenticated.
         mgr.simulateWrite(
-            BleProtocol.encodeAuthResponsePayload(
-                ownNonce,
-                BleProtocol.authResponseMac(authKey, ownNonce, BleProtocol.AUTH_DIR_P2C),
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthResponsePayload(
+                    ownNonce,
+                    BleProtocol.authResponseMac(authKey, ownNonce, BleProtocol.AUTH_DIR_P2C),
+                ),
             ),
         )
         assertTrue(controller.authenticated)
@@ -233,8 +251,10 @@ class BleControllerTest {
         controller.markConnected()
 
         mgr.simulateWrite(
-            BleProtocol.encodeAuthChallengePayload(
-                BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthChallengePayload(
+                    BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+                ),
             ),
         )
 
@@ -254,7 +274,11 @@ class BleControllerTest {
         val ownNonce = pcChallengeAndExtractOwnNonce(mgr)
 
         val badMac = ByteArray(16) { 0xAA.toByte() }
-        mgr.simulateWrite(BleProtocol.encodeAuthResponsePayload(ownNonce, badMac))
+        mgr.simulateWrite(
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthResponsePayload(ownNonce, badMac),
+            ),
+        )
 
         assertFalse(controller.authenticated)
         assertEquals(BleConnState.DISCONNECTED, controller.connectionState.value)
@@ -270,8 +294,10 @@ class BleControllerTest {
         controller.markConnected()
 
         mgr.simulateWrite(
-            BleProtocol.encodeAuthChallengePayload(
-                BleProtocol.AUTH_DIR_P2C, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthChallengePayload(
+                    BleProtocol.AUTH_DIR_P2C, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+                ),
             ),
         )
 
@@ -312,8 +338,10 @@ class BleControllerTest {
         controller.markConnected()
 
         mgr.simulateWrite(
-            BleProtocol.encodeAuthChallengePayload(
-                BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthChallengePayload(
+                    BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+                ),
             ),
         )
 
@@ -335,7 +363,7 @@ class BleControllerTest {
         controller.evaluateAvailability(enabled = true)
         controller.markConnected()
 
-        mgr.simulateWrite(byteArrayOf(BleProtocol.CMD_ECHO))
+        mgr.simulateWrite(BleProtocol.encodeFrame(byteArrayOf(BleProtocol.CMD_ECHO)))
 
         assertEquals("no echo before authentication", 0, mgr.notified.size)
         assertFalse(controller.authenticated)
@@ -599,5 +627,124 @@ class BleControllerTest {
         )
         assertFalse("pre-auth requestApi must be refused", ok)
         assertEquals("nothing may be notified pre-auth", 0, mgr.notified.size)
+    }
+
+    // ------------------------------------------------------------------
+    // Task 10: raw pass-through seam + fatal-path GATT cancel.
+    // ------------------------------------------------------------------
+
+    /**
+     * Task 10 seam close-out (Task 9 leftover #1): pre-Task-10 the manager
+     * decoded v1 frames and delivered only the payload, re-framed — so a
+     * real PC's v2 authenticated frames NEVER reached the controller. The
+     * manager now passes the exact on-air bytes through, and this test locks
+     * the real-device end-to-end shape at the fake-manager level: a full
+     * mutual handshake over RAW v1 frames, then a RAW v2 data frame flowing
+     * through the same seam into the reassembly engine.
+     */
+    @Test
+    fun rawSeam_endToEnd_v1HandshakeAndV2DataReachController() = runTest {
+        val mgr = FakePeripheralManager()
+        val fallback = BleTransportFallback()
+        val controller = newController(mgr, fallback = fallback)
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+
+        // (1) PC's C2P challenge as a raw v1 frame through the seam.
+        val nonce1 = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2)
+        mgr.simulateWrite(
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthChallengePayload(BleProtocol.AUTH_DIR_C2P, nonce1),
+            ),
+        )
+        assertEquals(2, mgr.notified.size)
+        val ownCh = BleProtocol.decodeFrame(mgr.notified[1])!!.payload
+        val ownNonce = BleProtocol.decodeAuthChallengePayload(ownCh)!!.second
+        assertFalse("not yet authenticated", controller.authenticated)
+
+        // (2) PC's response as a raw v1 frame through the seam.
+        mgr.simulateWrite(
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthResponsePayload(
+                    ownNonce,
+                    BleProtocol.authResponseMac(authKey, ownNonce, BleProtocol.AUTH_DIR_P2C),
+                ),
+            ),
+        )
+        assertTrue("raw v1 handshake frames must complete auth", controller.authenticated)
+
+        // (3) A raw v2 authed CMD_JSON_CHUNK frame through the SAME seam —
+        // the exact bytes a real bonded Central writes. Pre-Task-10 this
+        // frame died in the manager's v1-only decode; it must now reach the
+        // controller's v2 gate, verify, and complete a fetchJson cycle.
+        val json = "{\"task10\":true}".toByteArray(Charsets.UTF_8)
+        val v2 = BleProtocol.encodeAuthedFrame(
+            BleProtocol.encodeJsonChunkPayload(
+                totalChunks = 1, chunkIndex = 0, totalBytes = json.size, chunk = json,
+            ),
+            0uL, authKey,
+        )
+        val result = fallback.fetchJson(
+            endpoint = BleProtocol.ENDPOINT_BOOK_CHAPTER,
+            path = "/book.txt",
+            index = 0,
+        ) {
+            mgr.simulateWrite(v2.copyOf())
+        }
+        assertEquals("raw v2 frames must survive the manager seam into the engine",
+            "{\"task10\":true}", result)
+        assertTrue(controller.authenticated)
+        assertTrue("no fatal occurred: manager must NOT have cancelled the link",
+            mgr.disconnectPeerCalls == 0)
+    }
+
+    /**
+     * Task 9 leftover #2 wiring: a fatal auth/protocol violation must now
+     * proactively cancel the GATT link via the manager (fail closed on the
+     * transport, not just the state machine).
+     */
+    @Test
+    fun fatalAuthViolation_cancelsGattLinkViaManager() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr, token = "") // empty token → fatal refusal
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        assertEquals(0, mgr.disconnectPeerCalls)
+
+        mgr.simulateWrite(
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthChallengePayload(
+                    BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+                ),
+            ),
+        )
+
+        assertEquals(
+            "fatal violation must cancel the GATT link exactly once",
+            1, mgr.disconnectPeerCalls,
+        )
+        assertEquals(BleConnState.DISCONNECTED, controller.connectionState.value)
+        assertNotNull(controller.authErrorText)
+    }
+
+    /**
+     * Negative control for the fatal wiring: benign lifecycle transitions
+     * (successful handshake, HTTP-coordination disconnect, disable) must NOT
+     * cancel the GATT link — only [BleController] fatal paths may.
+     */
+    @Test
+    fun nonFatalPaths_doNotCancelGattLink() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr)
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        performHandshake(mgr, controller)
+        controller.markDisconnected()
+        controller.evaluateAvailability(enabled = false)
+
+        assertEquals(
+            "no fatal occurred: manager link cancel must not fire",
+            0, mgr.disconnectPeerCalls,
+        )
     }
 }

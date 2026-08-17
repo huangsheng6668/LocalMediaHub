@@ -330,11 +330,12 @@ class BleSettingsViewModelTest {
 
         override fun startAdvertising() { advertising = true }
         override fun stopAdvertising() { advertising = false }
-        override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) = Unit
+        override fun setOnRawFrameReceived(cb: (ByteArray) -> Unit) = Unit
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {
             onAdvertisingStarted = cb
         }
         override fun notifyPayload(payload: ByteArray): Boolean = false
+        override fun disconnectPeer() {}
         override fun isAdapterUsable(): Boolean = true
 
         fun fireAdvertisingStarted(success: Boolean) {

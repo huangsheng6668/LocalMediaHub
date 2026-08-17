@@ -254,8 +254,42 @@ func (t *tinyGoCentralScanner) connectLocked(ctx context.Context, id string) (er
 		log.Printf("BLE Connect failed: state char %s not found", StateCharUUID)
 		return errNoStateChar
 	}
+	// Phase 9 (Task 10): MTU step of the connect flow. See requestMtu247.
+	t.requestMtu247()
 	log.Printf("BLE Connect success for device=%s", id)
 	return nil
+}
+
+// requestMtu247 is the Task 10 MTU step of the connect flow.
+//
+// The protocol's frame budget assumes a 247-byte ATT MTU: chunk payloads are
+// capped at 200 B (spec §1.2), so the largest v2 authed frame is
+// 3 (header) + 200 + 8 (seq) + 16 (HMAC) = 227 B — comfortably inside a
+// 247-byte PDU (244 usable bytes).
+//
+// WinRT has no app-driven ATT MTU exchange exposed through the vendored
+// winrt-go bindings (BluetoothLEDevice.RequestMaxPayloadSize is not bound;
+// hand-rolling the IBluetoothLEDevice5 vtable call risks the same native
+// COM fault class documented on disconnectLocked, which takes the whole
+// server down). The equivalent on this stack: Windows automatically
+// negotiates the maximum PDU size when the GATT session is established, so
+// this step reads the negotiated value back via GattSession.MaxPduSize (the
+// fork's DeviceCharacteristic.GetMTU) and logs it as a diagnostic gate. If
+// the link stayed at the 23-byte default (adapter/OS combination that did
+// not auto-negotiate), large single writes fail and the existing short-frame
+// decode-error fallback applies (brief: "若 adapter 不支持则保持 23 并由既有
+// 短帧解码错误兜底"). Errors here are non-fatal by design.
+func (t *tinyGoCentralScanner) requestMtu247() {
+	mtu, err := t.cmdChar.GetMTU()
+	if err != nil {
+		log.Printf("BLE MTU readback failed err=%v; assuming 23-byte default, short-frame fallback applies", err)
+		return
+	}
+	if int(mtu) >= 247 {
+		log.Printf("BLE negotiated ATT MTU=%d (>=247): full-size frames fit a single PDU", mtu)
+	} else {
+		log.Printf("BLE negotiated ATT MTU=%d (<247): single-PDU writes capped at %d bytes; short-frame fallback applies", mtu, mtu-3)
+	}
 }
 
 // Disconnect drops the GATT connection and clears cached characteristics.

@@ -42,8 +42,9 @@ import javax.inject.Singleton
  *  - Outbound data frames ([requestApi], echo) are v2 with a strictly
  *    increasing per-direction tx seq starting at 0, reset per connection.
  *  - Any fatal violation: [authenticated] ← false, state → DISCONNECTED
- *    ([BleConnectionStateMachine.onAuthFailure]) + [authErrorText] set. The
- *    link is dead to the data phase until the PC re-connects and re-handshakes.
+ *    ([BleConnectionStateMachine.onAuthFailure]) + [authErrorText] set + the
+ *    GATT link cancelled via the manager's disconnectPeer (Task 10). The link
+ *    is dead to the data phase until the PC re-connects and re-handshakes.
  *
  * Go implementer note (a), honored here: the PC's challenge write and its
  * CCCD subscription are back-to-back, so the FIRST handshake notify can hit a
@@ -129,12 +130,12 @@ class BleController @Inject constructor(
     val advertisingStarted: SharedFlow<Boolean> = _advertisingStarted.asSharedFlow()
 
     init {
-        // The production manager delivers the v1-DECODED payload (bytes after
-        // the 3-byte header); re-frame so every Central write converges into
-        // [onCommandWrite]'s raw-frame auth gate. (Task 10 will pass raw
-        // writes straight through so v2 frames survive the seam.)
-        peripheralManager.setOnPayloadReceived { payload ->
-            onCommandWrite(BleProtocol.encodeFrame(payload))
+        // Task 10 raw seam: the manager hands over the EXACT on-air frame
+        // bytes a bonded Central wrote (v1 handshake frames and v2
+        // authenticated frames alike) — no decode/re-frame here; this method
+        // is the single v1/v2 dispatch + authentication gate.
+        peripheralManager.setOnRawFrameReceived { rawFrame ->
+            onCommandWrite(rawFrame)
         }
         // Surface the advertising-started signal so callers can observe
         // when the peripheral is actually discoverable.
@@ -459,14 +460,17 @@ class BleController @Inject constructor(
      * Fail closed: kills the session. [authenticated] ← false, seq/handshake
      * state cleared, machine → DISCONNECTED (distinct from the
      * HTTP-coordination [markDisconnected] → ADVERTISING), error text
-     * recorded for the UI. The GATT link itself is left for the PC to tear
-     * down (its writes now go unanswered and its handshake/echo timeouts
-     * fire); Task 10 wires the manager-level connection cancel.
+     * recorded for the UI. The GATT link is also proactively cancelled via
+     * [BlePeripheralManager.disconnectPeer] (Task 10 minimal wiring): the
+     * dead peer's writes would bounce off the auth gate regardless, but
+     * dropping the link frees the phone's connection resources immediately
+     * instead of waiting for the PC's handshake/echo timeout to tear it down.
      */
     private fun fatalLocked(reason: String) {
         resetAuthLocked()
         authErrorText = reason
         machine.onAuthFailure()
+        peripheralManager.disconnectPeer()
     }
 
     /** Clears handshake + per-connection seq state. authLock held. */

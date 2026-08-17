@@ -63,10 +63,10 @@ class MediaRepositoryFailoverTest {
      *  - [notifyPayload] receives a v2 authed CMD_API_REQ frame (the
      *    controller's post-auth outbound format) and decodes it with the
      *    shared key before the wire-parity checks.
-     *  - Chunk responses are RAW v2 authed frames posted through
-     *    [rawWriteSink] (a direct line to `BleController.onCommandWrite`) —
-     *    the legacy payload callback re-frames everything as v1, which the
-     *    post-auth gate rejects as a fatal downgrade.
+     *  - Chunk responses are RAW v2 authed frames posted through the same
+     *    raw-frame callback the handshake uses (Task 10 raw pass-through
+     *    seam — the manager no longer decodes/re-frames, so v2 frames reach
+     *    `BleController.onCommandWrite` unchanged).
      *
      * Delivery is asynchronous: each chunk is dispatched to [scope] via
      * `launch { delay(chunkDelayMs); sink(frame) }` so the test exercises the
@@ -102,13 +102,6 @@ class MediaRepositoryFailoverTest {
         var advertising = false
         private var cb: ((ByteArray) -> Unit)? = null
 
-        /**
-         * Direct line to `BleController.onCommandWrite` for RAW v2 authed
-         * frames (PC → phone data direction). Assigned by [repoWithBle] once
-         * the controller exists; null before that.
-         */
-        var rawWriteSink: ((ByteArray) -> Unit)? = null
-
         /** Shared BLE auth key — mirrors the controller's token ("sekrit"). */
         private val authKey: ByteArray = BleProtocol.deriveBleAuthKey("sekrit")
 
@@ -118,20 +111,24 @@ class MediaRepositoryFailoverTest {
         override fun startAdvertising() { advertising = true }
         override fun stopAdvertising() { advertising = false }
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {}
-        override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
+        override fun setOnRawFrameReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
+        override fun disconnectPeer() {}
 
         /**
          * Phase 9: drives the PC side of the mutual handshake to completion
-         * in ONE synchronous call — writes a C2P challenge; the controller
-         * responds and challenges back via [notifyPayload], whose synchronous
-         * answer below closes the loop, so `controller.authenticated` is true
-         * when this returns. (The synchronous re-entry is safe: the
-         * controller registers its pending nonce BEFORE notifying.)
+         * in ONE synchronous call — writes a C2P challenge (raw v1 frame,
+         * Task 10 seam contract); the controller responds and challenges back
+         * via [notifyPayload], whose synchronous answer below closes the
+         * loop, so `controller.authenticated` is true when this returns.
+         * (The synchronous re-entry is safe: the controller registers its
+         * pending nonce BEFORE notifying.)
          */
         fun simulateCentralHandshake() {
             cb?.invoke(
-                BleProtocol.encodeAuthChallengePayload(
-                    BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+                BleProtocol.encodeFrame(
+                    BleProtocol.encodeAuthChallengePayload(
+                        BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+                    ),
                 ),
             )
         }
@@ -148,13 +145,15 @@ class MediaRepositoryFailoverTest {
             ) {
                 val decoded = BleProtocol.decodeAuthChallengePayload(v1.payload)
                 if (decoded != null && decoded.first == BleProtocol.AUTH_DIR_P2C) {
-                    val (dir, nonce) = decoded
-                    cb?.invoke(
+                val (dir, nonce) = decoded
+                cb?.invoke(
+                    BleProtocol.encodeFrame(
                         BleProtocol.encodeAuthResponsePayload(
                             nonce,
                             BleProtocol.authResponseMac(authKey, nonce, dir),
                         ),
-                    )
+                    ),
+                )
                 }
                 return true
             }
@@ -197,7 +196,10 @@ class MediaRepositoryFailoverTest {
             responsePayloads.forEach { chunk ->
                 scope.launch {
                     delay(chunkDelayMs)
-                    rawWriteSink?.invoke(
+                    // Task 10: the peripheral seam is raw pass-through now, so
+                    // v2 authed frames ride the SAME cb the handshake used —
+                    // exactly the bytes a real bonded Central would write.
+                    cb?.invoke(
                         BleProtocol.encodeAuthedFrame(
                             chunk, pcSeq.getAndIncrement().toULong(), authKey,
                         ),
@@ -271,10 +273,10 @@ class MediaRepositoryFailoverTest {
         controller.evaluateAvailability(enabled = true)
         if (state.value == BleConnState.CONNECTED) {
             controller.markConnected()
-            // Phase 9: wire the fake's raw-v2 data line, then drive the PC
-            // side of the mutual handshake to completion so the repository's
-            // requestApi dispatches are accepted by the auth gate.
-            peripheral.rawWriteSink = { controller.onCommandWrite(it) }
+            // Phase 9 / Task 10: the fake's cb IS the controller's raw-frame
+            // seam now (registered in BleController's init), so driving the
+            // PC side of the mutual handshake through it also completes the
+            // wiring the repository's requestApi dispatches rely on.
             peripheral.simulateCentralHandshake()
             check(controller.authenticated) {
                 "test harness: BLE handshake must complete synchronously"

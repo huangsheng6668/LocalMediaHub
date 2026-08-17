@@ -22,10 +22,23 @@ interface BlePeripheralManager {
      * connect before the peripheral is discoverable (spec method B).
      */
     fun setOnAdvertisingStarted(cb: (success: Boolean) -> Unit)
-    /** Register callback invoked when the Central writes to the Command characteristic. */
-    fun setOnPayloadReceived(cb: (ByteArray) -> Unit)
+    /**
+     * Register callback invoked with the RAW frame bytes the Central wrote to
+     * the Command characteristic (Task 10 raw pass-through): the exact
+     * on-air bytes — v1 handshake frames and v2 authenticated frames alike —
+     * with NO decoding or re-framing at this seam. The controller's
+     * [BleController.onCommandWrite] owns v1/v2 dispatch and authentication.
+     */
+    fun setOnRawFrameReceived(cb: (rawFrame: ByteArray) -> Unit)
     /** Send payload via the State characteristic (Notify). Returns false if no subscriber. */
     fun notifyPayload(payload: ByteArray): Boolean
+    /**
+     * Task 10 fatal-path wiring: proactively drop the GATT link to the
+     * connected Central (production impl: BluetoothGattServer.cancelConnection).
+     * Called by [BleController] when an auth/protocol violation kills the
+     * session. No-op when no peer is tracked.
+     */
+    fun disconnectPeer()
     /** True iff a Bluetooth adapter exists and is powered on. */
     fun isAdapterUsable(): Boolean
 }
