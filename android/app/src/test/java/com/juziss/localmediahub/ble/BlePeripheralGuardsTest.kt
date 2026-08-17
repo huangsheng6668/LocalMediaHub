@@ -56,4 +56,14 @@ class BlePeripheralGuardsTest {
         assertFalse(isCccd(UUID.fromString("00002901-0000-1000-8000-00805f9b34fb")))
         assertFalse(isCccd(UUID.fromString("fa6a3002-8b2c-4e6f-9988-123456789abc")))
     }
+
+    @Test
+    fun bondRequestedOnlyForUnbondedPeers() {
+        // ATT-0x05 finding: only a BOND_NONE peer needs the Peripheral to
+        // kick off Just Works pairing on connection.
+        assertTrue(shouldRequestBond(BluetoothDevice.BOND_NONE))
+        assertFalse(shouldRequestBond(BluetoothDevice.BOND_BONDED))
+        // Bonding already in flight — createBond() must not be re-issued.
+        assertFalse(shouldRequestBond(BluetoothDevice.BOND_BONDING))
+    }
 }

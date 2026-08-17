@@ -33,9 +33,10 @@ enum class WriteDecision { ACCEPT, REJECT_AUTH, REJECT_NOT_SUPPORTED }
  * so it is unit-testable without a Bluetooth stack (BlePeripheralGuardsTest).
  *
  * Only a BONDED peer is admitted: the Command/State characteristics are
- * PERMISSION_*_ENCRYPTED, and the LE stack auto-initiates the Just Works
- * pairing flow when the first encrypted access is refused with
- * GATT_INSUFFICIENT_AUTHENTICATION (one-time per peer, expected UX).
+ * PERMISSION_*_ENCRYPTED. The Peripheral side initiates Just Works pairing
+ * on connection (see [shouldRequestBond]); the Central retries its
+ * challenge exchange until the bond lands, so this guard flips to ACCEPT
+ * once encryption is up.
  *
  * Known timing edge (recorded per brief, NOT relaxed): if the link is already
  * encrypted but `bondState` has not yet flipped to BOND_BONDED, this guard
@@ -60,6 +61,14 @@ fun shouldAcceptWrite(bondState: Int, offset: Int, preparedWrite: Boolean): Writ
  * replace the notify subscriber in [AndroidBlePeripheralManager].
  */
 fun isCccd(uuid: UUID): Boolean = uuid == UUID.fromString(CCCD_UUID)
+
+/**
+ * Phase 9 real-device finding (ATT 0x05): true iff the connected peer has no
+ * bond yet, i.e. [AndroidBlePeripheralManager.onConnectionStateChange] should
+ * kick off LE Just Works pairing via `createBond()` so the encrypted
+ * characteristics become accessible to the Central.
+ */
+fun shouldRequestBond(bondState: Int): Boolean = bondState == BluetoothDevice.BOND_NONE
 
 /** Client Characteristic Configuration Descriptor UUID (standard 0x2902). */
 private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
@@ -257,6 +266,29 @@ class AndroidBlePeripheralManager @Inject constructor(
                 // coordination round-trip and wiped an already-completed
                 // handshake.
                 onPeerConnected?.invoke()
+                // Phase 9 real-device finding (ATT 0x05): our characteristics
+                // carry PERMISSION_*_ENCRYPTED, so the peer's CCCD write is
+                // rejected with "insufficient authentication" until the link
+                // is encrypted. Nothing on the Central side auto-pairs (the
+                // original assumption that the LE stack would kick off Just
+                // Works from the 0x05 refusal did not hold on real devices),
+                // so the Peripheral initiates bonding itself. The PC retries
+                // its challenge exchange while pairing completes (~1-3s);
+                // already-bonded peers skip this path entirely.
+                if (shouldRequestBond(device.bondState)) {
+                    try {
+                        val initiated = device.createBond()
+                        android.util.Log.i(
+                            "BlePeripheral",
+                            "peer connected unbonded; createBond() initiated=$initiated",
+                        )
+                    } catch (se: SecurityException) {
+                        // Missing BLUETOOTH_CONNECT at runtime — the write
+                        // guards below keep rejecting with 0x05 (fail closed)
+                        // until the user grants the nearby-devices permission.
+                        android.util.Log.w("BlePeripheral", "createBond blocked: ${se.message}")
+                    }
+                }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 subscriberDevice = null
                 // Phase 9 (C-1): link gone — auth state must not survive into
