@@ -29,28 +29,44 @@ import javax.inject.Inject
 enum class WriteDecision { ACCEPT, REJECT_AUTH, REJECT_NOT_SUPPORTED }
 
 /**
+ * Real-device Phase 9 finding: OS-level pairing between an Android LE
+ * Peripheral and a Windows LE Central cannot be established reliably —
+ * Windows' "Add device" flow ignores third-party LE advertisements,
+ * peripheral-initiated `createBond()` is silently dropped by Windows, and
+ * every encrypted-permission access fails with ATT 0x05 forever.
+ *
+ * The link-encryption layer (Task 10's PERMISSION_*_ENCRYPTED + bond guard)
+ * is therefore OPTIONAL, default off: the enforced authentication boundary
+ * is the application-layer HMAC challenge-response (Phase 9 H-1a/b, key
+ * derived from the server token), which is fully independent of link
+ * encryption. Flip this to true only when a system-level bond already
+ * exists (e.g. user paired the devices manually); the guards and
+ * characteristic permissions below honor it uniformly.
+ */
+const val REQUIRE_ENCRYPTED_LINK = false
+
+/**
  * Task 10 (H-1c) write-request admission policy, extracted as a pure function
  * so it is unit-testable without a Bluetooth stack (BlePeripheralGuardsTest).
  *
- * Only a BONDED peer is admitted: the Command/State characteristics are
- * PERMISSION_*_ENCRYPTED. The Peripheral side initiates Just Works pairing
- * on connection (see [shouldRequestBond]); the Central retries its
- * challenge exchange until the bond lands, so this guard flips to ACCEPT
- * once encryption is up.
+ * When [REQUIRE_ENCRYPTED_LINK] is on, only a BONDED peer is admitted (the
+ * Command/State characteristics are PERMISSION_*_ENCRYPTED in that mode).
+ * With it off (default), bond state is not enforced — authentication is
+ * enforced one layer up, by BleController's HMAC handshake; any frame an
+ * impostor writes without the key is dropped fatally there.
  *
- * Known timing edge (recorded per brief, NOT relaxed): if the link is already
- * encrypted but `bondState` has not yet flipped to BOND_BONDED, this guard
- * still refuses; the peer retries after the bond completes and succeeds.
- * Security errs closed — an unauthenticated frame must never reach the
- * controller's auth gate.
- *
- * Offset (partial) and prepared (long) writes are rejected as
+ * Offset (partial) and prepared (long) writes are ALWAYS rejected as
  * GATT_REQUEST_NOT_SUPPORTED: the Command characteristic is a fixed-size
  * one-shot frame channel; reassembly/fragmentation semantics do not exist in
  * this protocol and must not be silently synthesized by the GATT layer.
  */
-fun shouldAcceptWrite(bondState: Int, offset: Int, preparedWrite: Boolean): WriteDecision {
-    if (bondState != BluetoothDevice.BOND_BONDED) return WriteDecision.REJECT_AUTH
+fun shouldAcceptWrite(
+    bondState: Int,
+    offset: Int,
+    preparedWrite: Boolean,
+    requireBond: Boolean = REQUIRE_ENCRYPTED_LINK,
+): WriteDecision {
+    if (requireBond && bondState != BluetoothDevice.BOND_BONDED) return WriteDecision.REJECT_AUTH
     if (offset != 0 || preparedWrite) return WriteDecision.REJECT_NOT_SUPPORTED
     return WriteDecision.ACCEPT
 }
@@ -63,12 +79,18 @@ fun shouldAcceptWrite(bondState: Int, offset: Int, preparedWrite: Boolean): Writ
 fun isCccd(uuid: UUID): Boolean = uuid == UUID.fromString(CCCD_UUID)
 
 /**
- * Phase 9 real-device finding (ATT 0x05): true iff the connected peer has no
- * bond yet, i.e. [AndroidBlePeripheralManager.onConnectionStateChange] should
- * kick off LE Just Works pairing via `createBond()` so the encrypted
- * characteristics become accessible to the Central.
+ * True iff the connected peer has no bond yet AND link encryption is being
+ * required — i.e. [AndroidBlePeripheralManager.onConnectionStateChange]
+ * should kick off LE Just Works pairing via `createBond()`. With
+ * [REQUIRE_ENCRYPTED_LINK] off (default) pairing is never initiated: OS-level
+ * pairing between an Android Peripheral and a Windows Central proved
+ * unestablishable in practice (Windows ignores both directions), and the
+ * HMAC handshake carries the authentication load alone.
  */
-fun shouldRequestBond(bondState: Int): Boolean = bondState == BluetoothDevice.BOND_NONE
+fun shouldRequestBond(
+    bondState: Int,
+    requireEncryption: Boolean = REQUIRE_ENCRYPTED_LINK,
+): Boolean = requireEncryption && bondState == BluetoothDevice.BOND_NONE
 
 /** Client Characteristic Configuration Descriptor UUID (standard 0x2902). */
 private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
@@ -91,13 +113,15 @@ private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
  * go there.
  *
  * Task 10 hardening (H-1c / L-9):
- *  - Command characteristic: PERMISSION_WRITE_ENCRYPTED; State:
- *    PERMISSION_READ_ENCRYPTED. The first encrypted access triggers the
- *    system LE Just Works pairing (one-time per peer, expected).
+ *  - Command/State characteristics use PERMISSION_*_ENCRYPTED only when
+ *    [REQUIRE_ENCRYPTED_LINK] is on (default off; see the constant's doc for
+ *    the real-device pairing findings). The enforced authentication boundary
+ *    is BleController's HMAC handshake, independent of link permissions.
  *  - onCharacteristicWriteRequest / onDescriptorWriteRequest are guarded by
- *    [shouldAcceptWrite]: unbonded → GATT_INSUFFICIENT_AUTHENTICATION,
- *    offset/prepared → GATT_REQUEST_NOT_SUPPORTED; a rejected write never
- *    reaches the controller callback nor replaces the subscriber.
+ *    [shouldAcceptWrite]: (in encrypted mode) unbonded →
+ *    GATT_INSUFFICIENT_AUTHENTICATION; offset/prepared →
+ *    GATT_REQUEST_NOT_SUPPORTED; a rejected write never reaches the
+ *    controller callback nor replaces the subscriber.
  *  - Only a CCCD (0x2902) descriptor write ([isCccd]) may replace the notify
  *    subscriber; any other descriptor write is refused with
  *    GATT_REQUEST_NOT_SUPPORTED.
@@ -150,18 +174,27 @@ class AndroidBlePeripheralManager @Inject constructor(
             UUID.fromString(BleProtocol.SERVICE_UUID),
             BluetoothGattService.SERVICE_TYPE_PRIMARY,
         )
-        // Task 10 (H-1c): link-layer encrypted access only. First write/read
-        // from an unbonded peer is refused with insufficient authentication,
-        // which makes the LE stack run the Just Works pairing flow once.
+        // Task 10 (H-1c): when REQUIRE_ENCRYPTED_LINK is on, access needs a
+        // link-encrypted (bonded) peer. Default OFF per the real-device
+        // finding documented on the constant — authentication is enforced by
+        // the controller's HMAC handshake, not by link permissions.
         val cmd = BluetoothGattCharacteristic(
             UUID.fromString(BleProtocol.COMMAND_CHAR_UUID),
             BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED,
+            if (REQUIRE_ENCRYPTED_LINK) {
+                BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED
+            } else {
+                BluetoothGattCharacteristic.PERMISSION_WRITE
+            },
         )
         val state = BluetoothGattCharacteristic(
             UUID.fromString(BleProtocol.STATE_CHAR_UUID),
             BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED,
+            if (REQUIRE_ENCRYPTED_LINK) {
+                BluetoothGattCharacteristic.PERMISSION_READ_ENCRYPTED
+            } else {
+                BluetoothGattCharacteristic.PERMISSION_READ
+            },
         )
         // CCCD required for Notify subscribers. Kept PERMISSION_WRITE (not
         // encrypted): the bond guard in onDescriptorWriteRequest is the
@@ -266,15 +299,13 @@ class AndroidBlePeripheralManager @Inject constructor(
                 // coordination round-trip and wiped an already-completed
                 // handshake.
                 onPeerConnected?.invoke()
-                // Phase 9 real-device finding (ATT 0x05): our characteristics
-                // carry PERMISSION_*_ENCRYPTED, so the peer's CCCD write is
-                // rejected with "insufficient authentication" until the link
-                // is encrypted. Nothing on the Central side auto-pairs (the
-                // original assumption that the LE stack would kick off Just
-                // Works from the 0x05 refusal did not hold on real devices),
-                // so the Peripheral initiates bonding itself. The PC retries
-                // its challenge exchange while pairing completes (~1-3s);
-                // already-bonded peers skip this path entirely.
+                // Phase 9 real-device finding (ATT 0x05): when link
+                // encryption is required ([REQUIRE_ENCRYPTED_LINK]), the
+                // peer's CCCD write is rejected with "insufficient
+                // authentication" until the link is encrypted, and nothing
+                // pairs on its own — so the Peripheral initiates bonding.
+                // With the default (encryption optional), this is skipped
+                // entirely: the HMAC handshake authenticates the peer.
                 if (shouldRequestBond(device.bondState)) {
                     try {
                         val initiated = device.createBond()
