@@ -273,25 +273,33 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	})
 
 	// Folders
-	api.GET("/folders", h.GetFolders)
+	// Phase 9 (H-2): media read endpoints are auth-gated. Previously the
+	// media library could be enumerated and streamed anonymously by anyone on
+	// the LAN; now /folders, /videos, /images, /texts and /search all require
+	// the bearer token. authZipDownload (zip-download-only auth) was removed —
+	// the whole /folders/* route is now unconditionally gated, which covers
+	// zip downloads too. Open-mode (empty token) deployments are unchanged:
+	// middleware.BearerToken is a passthrough when no token is configured.
+	api.GET("/folders", h.GetFolders, authMw)
 	api.GET("/folders/*", h.BrowseFolder,
-		authZipDownload(authMw),
+		authMw,
 		rateLimitWhen(isFolderZipDownload, middleware.RateLimit(2, 5*time.Minute)))
 
 	// Videos
-	api.GET("/videos", h.GetVideos)
+	api.GET("/videos", h.GetVideos, authMw)
 	api.GET("/videos/*", h.GetVideoAsset,
+		authMw,
 		rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
 
 	// Images
-	api.GET("/images", h.GetImages)
-	api.GET("/images/*", h.GetImageAsset)
+	api.GET("/images", h.GetImages, authMw)
+	api.GET("/images/*", h.GetImageAsset, authMw)
 
 	// Texts
-	api.GET("/texts", h.GetTexts)
+	api.GET("/texts", h.GetTexts, authMw)
 
 	// Search
-	api.GET("/search", h.Search)
+	api.GET("/search", h.Search, authMw)
 
 	// Tags
 	api.GET("/tags", h.GetTags)
@@ -385,20 +393,6 @@ func rateLimitWhen(cond func(echo.Context) bool, limiter echo.MiddlewareFunc) ec
 		return func(c echo.Context) error {
 			if cond(c) {
 				return limiter(next)(c)
-			}
-			return next(c)
-		}
-	}
-}
-
-// authZipDownload requires authentication ONLY for the /download suffix of
-// /api/v1/folders/*, keeping regular folder browsing public per the existing
-// product design while closing the unauthenticated whole-tree ZIP download.
-func authZipDownload(auth echo.MiddlewareFunc) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			if isFolderZipDownload(c) {
-				return auth(next)(c)
 			}
 			return next(c)
 		}

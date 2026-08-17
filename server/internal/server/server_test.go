@@ -661,6 +661,78 @@ func TestRedactMiddleware_TokenRedactedFromLogButVisibleToDownstream(t *testing.
 	}
 }
 
+// newAuthTestServer boots a real Server via New(cfg) with the given bearer
+// token (empty string = open mode) and a temporary scan root, so requests
+// through s.Echo exercise the production registerRoutes middleware chain —
+// including middleware.BearerToken, which reads cfg.Server.Token. New() does
+// not trigger a scan (only filesystem watching starts), so no media files are
+// needed. Built for the Phase 9 (H-2) media-read auth tests.
+func newAuthTestServer(t *testing.T, token string) *Server {
+	t.Helper()
+	cfg := &config.Config{
+		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0, Token: token},
+		Scan:   config.ScanConfig{Roots: []string{t.TempDir()}, VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: filepath.Join(t.TempDir(), "thumb"), MaxSize: 64, Format: "jpeg",
+		},
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Stop(); err != nil {
+			t.Logf("Stop: %v", err)
+		}
+	})
+	return s
+}
+
+// TestMediaReadEndpointsRequireToken is the Phase 9 (H-2) gate: every media
+// read endpoint (folders / videos / images / texts / search, including the
+// wildcard asset routes) must reject unauthenticated requests with 401 when a
+// token is configured, while a valid Bearer header must pass the auth layer.
+func TestMediaReadEndpointsRequireToken(t *testing.T) {
+	// newTestServer 辅助若不存在，参照同文件既有带 token 的测试构造 Server
+	s := newAuthTestServer(t, "sekrit-token") // token = "sekrit-token"
+	for _, path := range []string{
+		"/api/v1/folders", "/api/v1/videos", "/api/v1/images", "/api/v1/texts",
+		"/api/v1/search?q=x",
+		// wildcard asset routes (also auth-gated by Phase 9 H-2)
+		"/api/v1/folders/C%3A/tmp/browse",
+		"/api/v1/videos/foo/thumbnail",
+		"/api/v1/images/foo/thumbnail",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		s.Echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("GET %s without token = %d, want 401", path, rec.Code)
+		}
+	}
+	// 带 header 后不再 401（允许 200/404/400，取决于数据，但不得是 401/403）
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders", nil)
+	req.Header.Set("Authorization", "Bearer sekrit-token")
+	rec := httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("GET /folders with token must not 401, got %d", rec.Code)
+	}
+}
+
+// TestMediaReadEndpointsOpenModePassthrough pins the open-mode contract: when
+// no token is configured, middleware.BearerToken is a no-op, so deployments
+// that never set a token keep working exactly as before.
+func TestMediaReadEndpointsOpenModePassthrough(t *testing.T) {
+	s := newAuthTestServer(t, "") // 开放模式
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders", nil)
+	rec := httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("open mode must stay passthrough, got 401")
+	}
+}
+
 // TestTokenRedactRewritesRequestURI is the Phase 9 (H-3) end-to-end gate: it
 // boots a REAL Server via New(cfg) so the production registerRoutes middleware
 // chain — including the actual echoMw.Logger() — runs against the request.
