@@ -85,7 +85,10 @@ func (h *Handler) ConnectBLE(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 11*time.Second)
+	// 15s (raised from 11s): GATT establishment (~2s) + the 10s handshake
+	// budget must fit; the handshake's pairing-race retries can legitimately
+	// consume several seconds on first connect (LE Just Works bonding).
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 15*time.Second)
 	defer cancel()
 	if err := h.BLECentral.Connect(ctx, req.ID); err != nil {
 		return c.JSON(http.StatusOK, map[string]any{"connected": false, "error": err.Error()})

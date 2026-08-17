@@ -38,8 +38,18 @@ var ErrHandshakeFailed = errors.New("ble: authentication handshake failed")
 
 // bleHandshakeTimeout is the Phase 9 (H-1a) budget for completing both
 // challenge directions after the GATT connection is established. On expiry
-// the connection is dropped (fail closed).
-const bleHandshakeTimeout = 5 * time.Second
+// the connection is dropped (fail closed). 10s (raised from 5s) leaves room
+// for LE Just Works pairing — the phone bonds on connection and the link
+// needs 1-3s to encrypt before our CCCD write stops failing with ATT 0x05.
+const bleHandshakeTimeout = 10 * time.Second
+
+// handshakeAttempts / handshakeRetryBackoff pace the challenge-exchange
+// retries that cover the pairing window described above. The caller's HTTP
+// budget (~11s) bounds the whole connect, so 4 attempts fit comfortably.
+const (
+	handshakeAttempts     = 4
+	handshakeRetryBackoff = 1500 * time.Millisecond
+)
 
 // authListenerHandshakePoll is how long RunApiListener pauses between checks
 // while Connect drives the handshake. Connect owns the notify stream during
@@ -280,8 +290,39 @@ func (c *Central) handshakeLocked(ctx context.Context) error {
 	if _, err := rand.Read(nonce1); err != nil {
 		return fmt.Errorf("%w: cannot read challenge nonce: %w", ErrHandshakeFailed, err)
 	}
-	if err := c.scanner.WriteCommand(hsCtx, EncodeFrame(EncodeAuthChallengePayload(AuthDirCentralToPeripheral, nonce1))); err != nil {
-		return fmt.Errorf("%w: challenge write: %w", ErrHandshakeFailed, err)
+
+	// Pairing race (real-device Phase 9 finding): the phone issues
+	// createBond() when our GATT connection lands, but LE Just Works pairing
+	// takes 1-3s to encrypt the link. Until then the phone's stack rejects
+	// our CCCD write with ATT 0x05 (insufficient authentication) — and the
+	// challenge write itself is a write-without-response that the phone's
+	// bond guard silently drops. Retry the challenge write + first notify
+	// arm until the handshake budget expires; the same nonce1 is reused, so
+	// a late-arriving response to an earlier attempt still verifies.
+	var pendingFrame []byte
+	for attempt := 1; ; attempt++ {
+		if err := hsCtx.Err(); err != nil {
+			return fmt.Errorf("%w: %w", ErrHandshakeFailed, err)
+		}
+		err := c.scanner.WriteCommand(hsCtx, EncodeFrame(EncodeAuthChallengePayload(AuthDirCentralToPeripheral, nonce1)))
+		if err == nil {
+			var raw []byte
+			raw, err = c.scanner.WaitNotify(hsCtx)
+			if err == nil {
+				pendingFrame = raw
+				break
+			}
+		}
+		if attempt >= handshakeAttempts {
+			return fmt.Errorf("%w: challenge exchange: %w", ErrHandshakeFailed, err)
+		}
+		slog.Warn("BLE handshake attempt failed; retrying while pairing/encryption may still be in progress",
+			"attempt", attempt, "err", err)
+		select {
+		case <-hsCtx.Done():
+			return fmt.Errorf("%w: %w", ErrHandshakeFailed, hsCtx.Err())
+		case <-time.After(handshakeRetryBackoff):
+		}
 	}
 
 	// Order-agnostic: accept the peer's response and its own challenge in
@@ -291,9 +332,15 @@ func (c *Central) handshakeLocked(ctx context.Context) error {
 		if err := hsCtx.Err(); err != nil {
 			return fmt.Errorf("%w: %w", ErrHandshakeFailed, err)
 		}
-		raw, err := c.scanner.WaitNotify(hsCtx)
-		if err != nil {
-			return fmt.Errorf("%w: wait notify: %w", ErrHandshakeFailed, err)
+		var raw []byte
+		if pendingFrame != nil {
+			raw, pendingFrame = pendingFrame, nil
+		} else {
+			var err error
+			raw, err = c.scanner.WaitNotify(hsCtx)
+			if err != nil {
+				return fmt.Errorf("%w: wait notify: %w", ErrHandshakeFailed, err)
+			}
 		}
 		frame, ferr := DecodeFrame(raw)
 		if ferr != nil {

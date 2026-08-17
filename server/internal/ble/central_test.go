@@ -97,6 +97,34 @@ func TestCentralConnectSetsState(t *testing.T) {
 	}
 }
 
+func TestCentralHandshakeRetriesThroughPairingWindow(t *testing.T) {
+	// Real-device Phase 9 finding: the phone's encrypted characteristics
+	// reject writes/CCCD with ATT 0x05 until LE Just Works pairing encrypts
+	// the link. The Central must retry the challenge exchange and still
+	// complete the handshake once bonding lands.
+	peer := newBlePeerFake(centralTestToken)
+	peer.failChallengeFirstN = 2
+	c := NewCentral(peer)
+	c.SetAuthToken(centralTestToken)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect must succeed through pairing-window retries: %v", err)
+	}
+	if c.State() != "connected" {
+		t.Fatalf("state=%q want connected", c.State())
+	}
+	// Authenticated data path must work end to end after the retried
+	// handshake (first outbound data frame is seq 0).
+	key := DeriveBleAuthKey(centralTestToken)
+	peer.push(EncodeAuthedFrame([]byte("pong"), 0, key))
+	echo, err := c.Send(context.Background(), []byte("ping"))
+	if err != nil {
+		t.Fatalf("Send after retried handshake: %v", err)
+	}
+	if string(echo) != "pong" {
+		t.Fatalf("echo=%q want pong", string(echo))
+	}
+}
+
 func TestCentralSendEncodesAndReturnsEcho(t *testing.T) {
 	key := DeriveBleAuthKey(centralTestToken)
 	peer := newBlePeerFake(centralTestToken)
@@ -224,6 +252,12 @@ type blePeerFake struct {
 	// test). The challenge write is still accepted (nil error).
 	silent bool
 
+	// failChallengeFirstN rejects the first N challenge writes with an
+	// ATT-0x05-style error — models the real-device pairing window where the
+	// phone's bond guard drops our writes until LE Just Works encryption
+	// lands (the Central must retry and then succeed).
+	failChallengeFirstN int
+
 	mu        sync.Mutex
 	frames    [][]byte
 	nextIdx   int
@@ -252,6 +286,10 @@ func (p *blePeerFake) WriteCommand(ctx context.Context, payload []byte) error {
 	if frame, err := DecodeFrame(payload); err == nil && len(frame.Payload) > 0 {
 		switch CmdID(frame.Payload[0]) {
 		case CmdAuthChallenge:
+			if p.failChallengeFirstN > 0 {
+				p.failChallengeFirstN--
+				return errors.New("async operation failed with status 3: Bluetooth ATT error (code 0x0005)")
+			}
 			dir, nonce, derr := DecodeAuthChallengePayload(frame.Payload)
 			if derr != nil || dir != AuthDirCentralToPeripheral {
 				return errors.New("peer fake: malformed central challenge")
