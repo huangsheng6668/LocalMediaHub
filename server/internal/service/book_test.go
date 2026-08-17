@@ -169,6 +169,34 @@ func TestGetChapterBlocksPreservesDataUri(t *testing.T) {
 	t.Fatal("no image block found")
 }
 
+// TestGetChapterBlocksStripsExternalHttpUrls verifies that image Srcs with
+// absolute http:// or https:// prefixes are blanked (Phase 9 / L-11): CSP
+// img-src 'self' data: already blocks the fetch in the browser, so the server
+// strips the src to make the client render the placeholder instead of a
+// silently broken image. data: URIs stay allowed (epub-spec-legal, CSP-exempt).
+func TestGetChapterBlocksStripsExternalHttpUrls(t *testing.T) {
+	for _, external := range []string{
+		"https://evil.com/x.png",
+		"http://evil.com/y.jpg",
+	} {
+		t.Run(external, func(t *testing.T) {
+			// Manifest entry deliberately does NOT match the external URL —
+			// matching or not must not matter, the prefix alone forces the strip.
+			p := buildEpubWithImage(t, external, "img-foo", "images/foo.jpg")
+			svc := NewBookService()
+			blocks, err := svc.GetChapterBlocks(t.Context(), p, 0, "127.0.0.1")
+			require.NoError(t, err)
+			for _, b := range blocks {
+				if b.Type == "image" {
+					assert.Equal(t, "", b.Src, "external http(s) src must be blanked to force placeholder rendering")
+					return
+				}
+			}
+			t.Fatal("no image block found")
+		})
+	}
+}
+
 // TestGetChapterBlocksBlanksOnNoManifestMatch verifies that an image Src
 // with no matching manifest entry is set to "" (clients render a
 // placeholder) rather than leaking the raw relative path to the frontend.

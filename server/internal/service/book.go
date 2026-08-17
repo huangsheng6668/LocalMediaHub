@@ -93,8 +93,11 @@ func (s *BookService) GetBook(path string) (*bookparser.Book, error) {
 // book at path. Image blocks' Src is rewritten to a
 // /api/v1/books/image?path=...&manifest=... URL that the client can fetch
 // through the authenticated book-image endpoint, unless the original Src is
-// empty, a data: URI, or an absolute http(s):// URL — these are passed through
-// unchanged. If no manifest entry matches the Src, the Src is set to "" so
+// empty or a data: URI — data: URIs are passed through unchanged (epub-spec
+// legal and allowed by CSP img-src). Absolute http(s):// URLs are stripped to
+// "" (Phase 9 / L-11): CSP blocks the external fetch anyway, so blanking the
+// src makes the client render a placeholder instead of a silently broken
+// image. If no manifest entry matches the Src, the Src is set to "" so
 // clients can render a placeholder (e.g. "[本图片无法显示]").
 //
 // When a BookSigner has been injected via SetSigner (production), the
@@ -128,10 +131,16 @@ func (s *BookService) GetChapterBlocks(ctx context.Context, path string, idx int
 			continue
 		}
 		src := out[i].Src
-		if src == "" ||
-			strings.HasPrefix(src, "data:") ||
-			strings.HasPrefix(src, "http://") ||
-			strings.HasPrefix(src, "https://") {
+		if src == "" {
+			continue
+		}
+		if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
+			// Phase 9 (L-11)：外联图片剥离 —— CSP img-src 'self' data: 本就拦截，
+			// 服务端置空让客户端渲染占位符而不是静默破图；data: 合法保留。
+			out[i].Src = ""
+			continue
+		}
+		if strings.HasPrefix(src, "data:") {
 			continue
 		}
 		manifestID := reverseLookupManifest(b.EpubManifest(), src)

@@ -53,9 +53,11 @@ function renderLightboxImage() {
                 const imgContainer = document.createElement('div');
                 imgContainer.className = 'stitch-image-item';
                 imgContainer.id = `stitch-img-${idx}`;
-                // XSS-SAFE: file.name wrapped in escapeHtml(); URL built from server-controlled relative_path + encodeURIComponent
+                // URL is derived from user media-library file paths (not purely
+                // server-controlled), so it needs the same escaping as file.name.
+                // XSS-SAFE: file.name and URL both wrapped in escapeHtml()
                 imgContainer.innerHTML = `
-                    <img src="${url}" alt="${escapeHtml(file.name)}" loading="lazy">
+                    <img src="${escapeHtml(url)}" alt="${escapeHtml(file.name)}" loading="lazy">
                     <div class="stitch-image-caption">${escapeHtml(file.name)} (${idx + 1}/${state.lightboxFiles.length})</div>
                 `;
                 elements.lightboxStitchView.appendChild(imgContainer);

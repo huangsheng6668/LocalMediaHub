@@ -11,7 +11,11 @@ import (
 //   - X-Content-Type-Options: nosniff → stops MIME sniffing (T4-04)
 //   - Referrer-Policy: no-referrer   → prevents leaking URLs to external resources (T4-04)
 //   - Content-Security-Policy        → restricts resource loading to self (T4-04);
-//     provides defense-in-depth against XSS even if escapeHtml is missed somewhere
+//     provides defense-in-depth against XSS even if escapeHtml is missed somewhere;
+//     Phase 9 (L-12) adds base-uri 'none' (no <base> injection hijacking relative
+//     URLs), object-src 'none' (no <object>/<embed> plugins) and form-action
+//     'self' (no cross-origin form submission) — the SPA has no <base>/<object>
+//     usage and its only <form> is method="dialog" which never navigates.
 //
 // style-src no longer carries 'unsafe-inline': every inline style="" attribute
 // was migrated to CSS classes (see style.css "CSP-safe replacements" section),
@@ -40,7 +44,10 @@ func SecurityHeaders() echo.MiddlewareFunc {
 					"style-src 'self'; "+
 					"img-src 'self' data:; "+
 					"media-src 'self'; "+
-					"connect-src 'self'")
+					"connect-src 'self'; "+
+					"base-uri 'none'; "+
+					"object-src 'none'; "+
+					"form-action 'self'")
 			return next(c)
 		}
 	}
