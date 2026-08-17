@@ -945,6 +945,68 @@ func BenchmarkPreGenerateThumbnails_EnqueueStage(b *testing.B) {
 	}
 }
 
+// TestEnforceDiskCacheCapEvictsOldest 验证 Phase 9 (M-3) 磁盘缓存总量上限：
+// 超过 diskCacheCapBytes 时按 mtime 升序淘汰最旧的 .jpg，较新的文件存活。
+func TestEnforceDiskCacheCapEvictsOldest(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewThumbnailService(dir, 10, "webp", "ffmpeg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 直接操作内部上限便于测试：临时下调（生产常量 512MB）
+	s.diskCacheCapBytes = 3 << 10
+	s.sweepInterval = 0 // 关闭节流
+	old := filepath.Join(dir, "old.jpg")
+	newer := filepath.Join(dir, "newer.jpg")
+	for _, f := range []string{old, newer} {
+		if err := os.WriteFile(f, make([]byte, 2<<10), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	past := time.Now().Add(-time.Hour)
+	os.Chtimes(old, past, past)
+	s.enforceDiskCacheCap()
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatal("oldest cache file must be evicted")
+	}
+	if _, err := os.Stat(newer); err != nil {
+		t.Fatal("newer cache file must survive")
+	}
+}
+
+// TestEnforceDiskCacheCap_Throttled 验证清扫节流：距上次清扫不足 sweepInterval
+// 时直接返回，不重复清扫（防止 encode 热路径上每次落盘都 walk 整个 cacheDir）。
+func TestEnforceDiskCacheCap_Throttled(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewThumbnailService(dir, 10, "webp", "ffmpeg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.diskCacheCapBytes = 3 << 10
+	s.sweepInterval = 0
+	s.enforceDiskCacheCap()     // 首次清扫（lastSweep=0 恒通过节流），记录 lastSweep
+	s.sweepInterval = time.Hour // 拉满节流窗口：1h 内的后续调用必须直接返回
+
+	old := filepath.Join(dir, "old.jpg")
+	newer := filepath.Join(dir, "newer.jpg")
+	for _, f := range []string{old, newer} {
+		if err := os.WriteFile(f, make([]byte, 2<<10), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	past := time.Now().Add(-time.Hour)
+	os.Chtimes(old, past, past)
+
+	// 距上次清扫 < sweepInterval：即使超限也不得删除任何文件
+	s.enforceDiskCacheCap()
+	if _, err := os.Stat(old); err != nil {
+		t.Fatal("throttled sweep must not evict files")
+	}
+	if _, err := os.Stat(newer); err != nil {
+		t.Fatal("throttled sweep must not touch surviving files")
+	}
+}
+
 // BenchmarkEncodeThumbnailToCache 度量 encodeThumbnailToCache 热路径的内存分配。
 // B2 前后对比基线：用 5000x4000 大图（典型高分辨率照片）作为输入，
 // 每次迭代用不同 cachePath 避免命中已存在文件。

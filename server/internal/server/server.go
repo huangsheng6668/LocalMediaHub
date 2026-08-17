@@ -296,11 +296,16 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	api.GET("/videos", h.GetVideos, authMw)
 	api.GET("/videos/*", h.GetVideoAsset,
 		authMw,
-		rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
+		rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)),
+		// Phase 9 (M-3): thumbnail misses fork ffmpeg/ffprobe + decode a
+		// full-size frame — a CPU/disk amplifier when filenames are enumerated.
+		rateLimitWhen(isThumbnailRequest, middleware.RateLimit(60, time.Minute)))
 
 	// Images
 	api.GET("/images", h.GetImages, authMw)
-	api.GET("/images/*", h.GetImageAsset, authMw)
+	// Phase 9 (M-3): each miss decodes a full-size image to build the thumbnail;
+	// rate-limit to blunt filename-enumeration floods.
+	api.GET("/images/*", h.GetImageAsset, authMw, middleware.RateLimit(60, time.Minute))
 
 	// Texts
 	api.GET("/texts", h.GetTexts, authMw)
@@ -390,6 +395,17 @@ func isTranscodeRequest(c echo.Context) bool {
 // amplifier).
 func isFolderZipDownload(c echo.Context) bool {
 	return strings.HasSuffix(c.Param("*"), "/download")
+}
+
+// isThumbnailRequest reports whether the request targets the thumbnail
+// sub-resource of a wildcard media route (each miss forks ffmpeg/ffprobe or
+// decodes a full-size image — a CPU/disk amplifier when filenames are
+// enumerated). Matches on c.Param("*") — the wildcard portion of the concrete
+// URL, same convention as isFolderZipDownload and the GetVideoAsset dispatch.
+// c.Path() would return the route template ("/api/v1/videos/*") which never
+// ends in "/thumbnail".
+func isThumbnailRequest(c echo.Context) bool {
+	return strings.HasSuffix(c.Param("*"), "/thumbnail")
 }
 
 // rateLimitWhen applies limiter only to requests satisfying cond. Used to

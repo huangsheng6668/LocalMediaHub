@@ -14,9 +14,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/disintegration/imaging"
@@ -35,6 +37,12 @@ var thumbBufPool = sync.Pool{
 		return &b
 	},
 }
+
+// Phase 9 (M-3): 磁盘缓存总量上限。默认 512MB，LRU(mtime) 淘汰，清扫节流 30s。
+// 常量而非 config 字段（YAGNI）：攻击者枚举文件名循环请求缩略图时，每次 miss
+// 都会 fork ffmpeg/ffprobe + 落盘一个 .jpg，无上限时既打满 CPU 也撑爆磁盘；
+// 限速（server.go 路由层）挡请求频率，本上限兜底磁盘总量。
+const defaultDiskCacheCapBytes int64 = 512 << 20
 
 type ThumbnailService struct {
 	cacheDir   string
@@ -85,6 +93,14 @@ type ThumbnailService struct {
 	durTimerPending bool               // 是否已启动 5s 延迟落盘协程
 	ctx             context.Context    // 用于 goroutine 生命周期控制
 	durCancel       context.CancelFunc // 用于在服务停止时取消 goroutine
+
+	// Phase 9 (M-3): 磁盘缓存总量上限。enforceDiskCacheCap 在每次成功落盘后
+	// 异步触发（30s 节流），超限时按 mtime 升序删除最旧的 .jpg 直到总量 ≤ cap。
+	// 只清理 cacheDir 与 cacheDir/system 下的 .jpg —— durations.json /
+	// hot_directories.json 等非缩略图文件不在清扫范围。
+	diskCacheCapBytes int64
+	lastSweep         int64 // unix nano，atomic
+	sweepInterval     time.Duration
 }
 
 func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath string) (*ThumbnailService, error) {
@@ -114,6 +130,9 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 		durCache:  make(map[string]durationEntry),
 		ctx:       ctx,
 		durCancel: cancel,
+		// Phase 9 (M-3): 磁盘缓存总量上限 + 清扫节流。
+		diskCacheCapBytes: defaultDiskCacheCapBytes,
+		sweepInterval:     30 * time.Second,
 	}
 	s.loadDurationCache()
 	return s, nil
@@ -304,7 +323,53 @@ func (s *ThumbnailService) encodeThumbnailToCache(src image.Image, cachePath str
 	if err := os.Rename(tempPath, cachePath); err != nil {
 		return "", err
 	}
+	// Phase 9 (M-3): 落盘成功后异步清扫磁盘缓存总量（30s 节流），
+	// 不阻塞缩略图生成路径。超限时按 mtime 淘汰最旧的 .jpg。
+	go s.enforceDiskCacheCap()
 	return cachePath, nil
+}
+
+// enforceDiskCacheCap 遍历 cacheDir 与 cacheDir/system 下的 .jpg，总量超过
+// diskCacheCapBytes 时按 mtime 升序删除最旧文件直到回到上限内（LRU-by-mtime）。
+// 内部节流：距上次清扫不足 sweepInterval 直接返回，保证 encode 热路径上每次
+// 落盘触发的 goroutine 绝大多数立即退出，只有至多每 30s 一次真正 walk 目录。
+// Walk 的返回值显式丢弃：root 不存在（如 system 子目录尚未创建）或遍历中被
+// 并发删除都是良性情况，跳过该 root 即可。
+func (s *ThumbnailService) enforceDiskCacheCap() {
+	now := time.Now().UnixNano()
+	if now-atomic.LoadInt64(&s.lastSweep) < int64(s.sweepInterval) {
+		return
+	}
+	atomic.StoreInt64(&s.lastSweep, now)
+	type entry struct {
+		path    string
+		size    int64
+		modTime time.Time
+	}
+	var total int64
+	var entries []entry
+	for _, root := range []string{s.cacheDir, filepath.Join(s.cacheDir, "system")} {
+		_ = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+			if err != nil || fi == nil || fi.IsDir() || filepath.Ext(p) != ".jpg" {
+				return nil
+			}
+			entries = append(entries, entry{p, fi.Size(), fi.ModTime()})
+			total += fi.Size()
+			return nil
+		})
+	}
+	if total <= s.diskCacheCapBytes {
+		return
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].modTime.Before(entries[j].modTime) })
+	for _, e := range entries {
+		if total <= s.diskCacheCapBytes {
+			break
+		}
+		if os.Remove(e.path) == nil {
+			total -= e.size
+		}
+	}
 }
 
 func isVideoFile(filePath string) bool {
