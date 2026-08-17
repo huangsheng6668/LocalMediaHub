@@ -13,6 +13,7 @@ import (
 	"github.com/saltosystems/winrt-go/windows/devices/bluetooth/advertisement"
 	"github.com/saltosystems/winrt-go/windows/devices/bluetooth/genericattributeprofile"
 	"github.com/saltosystems/winrt-go/windows/foundation"
+	"github.com/saltosystems/winrt-go/windows/foundation/collections"
 	"github.com/saltosystems/winrt-go/windows/storage/streams"
 )
 
@@ -253,12 +254,11 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 		vector, _ = winAdv.GetServiceUuids()
 		size, _ = vector.GetSize()
 		for i := uint32(0); i < size; i++ {
-			element, _ := vector.GetAt(i)
-			// element is not a pointer, but a GUID struct. But we cannot convert
-			// unsafe.Pointer to a non-pointer type, so instead we are doing this:
-			serviceGUID := (*syscall.GUID)(unsafe.Pointer(&element))
-			uuid := GUIDToUUID(*serviceGUID)
-			serviceUUIDs = append(serviceUUIDs, uuid)
+			guid, err := vectorGetGuidAt(vector, i)
+			if err != nil {
+				continue
+			}
+			serviceUUIDs = append(serviceUUIDs, GUIDToUUID(guid))
 		}
 	}
 
@@ -273,6 +273,31 @@ func getScanResultFromArgs(args *advertisement.BluetoothLEAdvertisementReceivedE
 	}
 
 	return result
+}
+
+// vectorGetGuidAt reads a Guid element from an IVector by invoking the COM
+// vtable directly with a full 16-byte destination buffer.
+//
+// winrt-go's generic IVector.GetAt marshals elements through an 8-byte
+// unsafe.Pointer out-slot. For a 16-byte GUID element the marshaller writes
+// the full struct starting at that slot, so the upper 8 bytes land past it in
+// GetAt's own frame and are destroyed when the function returns — every
+// extracted UUID came back with garbage in its last 8 bytes (16-bit service
+// UUIDs masked the bug because their base-UUID tail is constant; 128-bit
+// UUIDs never matched). Calling the vtable ourselves with a syscall.GUID
+// buffer avoids the truncation entirely.
+func vectorGetGuidAt(v *collections.IVector, index uint32) (syscall.GUID, error) {
+	var guid syscall.GUID
+	hr, _, _ := syscall.SyscallN(
+		v.VTable().GetAt,
+		uintptr(unsafe.Pointer(v)),     // this
+		uintptr(index),                 // in uint32
+		uintptr(unsafe.Pointer(&guid)), // out GUID (16 bytes, full width)
+	)
+	if hr != 0 {
+		return syscall.GUID{}, ole.NewError(hr)
+	}
+	return guid, nil
 }
 
 func GUIDToUUID(guid syscall.GUID) UUID {
