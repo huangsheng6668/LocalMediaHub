@@ -52,6 +52,22 @@ class BleConnectionStateMachine {
         _state.value = BleConnState.ADVERTISING
     }
 
+    /**
+     * Phase 9 (Task 9, H-1b): fatal BLE authentication / protocol violation
+     * (handshake MAC mismatch, pre-auth data command, post-auth v2 frame that
+     * fails MAC/structure, or seq rollback/replay). Fail closed: unlike
+     * [onDisconnected] the drop is surfaced as DISCONNECTED — a distinct
+     * terminal signal for observers — rather than immediately ADVERTISING.
+     * The next explicit transition (HTTP-coordination markConnected /
+     * markDisconnected, or an availability re-evaluation) moves the machine
+     * on; a re-connect must re-run the mutual-challenge handshake before any
+     * data phase. Mirrors Go Central's `failConnection` (drop + auth reset).
+     */
+    fun onAuthFailure() {
+        if (_state.value == BleConnState.DISABLED) return
+        _state.value = BleConnState.DISCONNECTED
+    }
+
     fun onError() {
         if (_state.value == BleConnState.DISABLED) return
         _state.value = BleConnState.IDLE

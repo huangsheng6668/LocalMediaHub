@@ -30,6 +30,7 @@ class BleModuleTest {
             bleEnabledFlow = MutableStateFlow(false),
             bleHardwareAvailable = { false },
             saveBleEnabled = {},
+            authTokenProvider = { "test-token" },
         )
         assertNotNull(controller)
     }

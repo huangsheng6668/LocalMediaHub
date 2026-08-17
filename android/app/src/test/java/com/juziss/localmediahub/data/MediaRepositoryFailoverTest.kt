@@ -54,10 +54,22 @@ class MediaRepositoryFailoverTest {
     /**
      * Fake [BlePeripheralManager] that simulates the Central (PC server)
      * responding to a CMD_API_REQ notify by writing the prebuilt CHUNK
-     * payloads back through the registered payload callback.
+     * payloads back to the peripheral.
+     *
+     * Phase 9 (Task 9): the channel is now authenticated end-to-end.
+     *  - Construction wiring ([repoWithBle]) drives the mutual challenge/
+     *    response handshake via [simulateCentralHandshake] right after
+     *    markConnected, sharing the "sekrit" token with the controller.
+     *  - [notifyPayload] receives a v2 authed CMD_API_REQ frame (the
+     *    controller's post-auth outbound format) and decodes it with the
+     *    shared key before the wire-parity checks.
+     *  - Chunk responses are RAW v2 authed frames posted through
+     *    [rawWriteSink] (a direct line to `BleController.onCommandWrite`) —
+     *    the legacy payload callback re-frames everything as v1, which the
+     *    post-auth gate rejects as a fatal downgrade.
      *
      * Delivery is asynchronous: each chunk is dispatched to [scope] via
-     * `launch { delay(chunkDelayMs); cb(chunk) }` so the test exercises the
+     * `launch { delay(chunkDelayMs); sink(frame) }` so the test exercises the
      * suspend-await bridge in [MediaRepository.bleFetchOrHttp]. A real
      * BluetoothGattServer delivers chunks on its callback thread with
      * indeterminate timing; modeling that here ensures the test fails on any
@@ -67,11 +79,6 @@ class MediaRepositoryFailoverTest {
      * using the SAME Go-spec §2.2 layout the real Go decoder
      * (DecodeApiReqPayload) expects:
      *   `[CmdID 1B = CMD_API_REQ][Endpoint 1B][PathLen 1B][Path UTF-8][Index 2B BE]`
-     * On a request, simulate the Central streaming back each CHUNK payload via
-     * the registered callback — but NOT inline. Real GATT hardware delivers
-     * these on a callback thread some time later, so the fake posts each chunk
-     * to the test scope with a small delay. The repository's suspend bridge
-     * must await the resulting frame arrivals.
      *
      * @param expectedEndpoint the endpoint byte the test expects the
      *   repository to request (e.g. [BleProtocol.ENDPOINT_FOLDERS]). Used to
@@ -95,53 +102,106 @@ class MediaRepositoryFailoverTest {
         var advertising = false
         private var cb: ((ByteArray) -> Unit)? = null
 
+        /**
+         * Direct line to `BleController.onCommandWrite` for RAW v2 authed
+         * frames (PC → phone data direction). Assigned by [repoWithBle] once
+         * the controller exists; null before that.
+         */
+        var rawWriteSink: ((ByteArray) -> Unit)? = null
+
+        /** Shared BLE auth key — mirrors the controller's token ("sekrit"). */
+        private val authKey: ByteArray = BleProtocol.deriveBleAuthKey("sekrit")
+
+        /** PC → phone data seq, strictly increasing per connection. */
+        private val pcSeq = java.util.concurrent.atomic.AtomicLong(0)
+
         override fun startAdvertising() { advertising = true }
         override fun stopAdvertising() { advertising = false }
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {}
         override fun setOnPayloadReceived(cb: (ByteArray) -> Unit) { this.cb = cb }
+
+        /**
+         * Phase 9: drives the PC side of the mutual handshake to completion
+         * in ONE synchronous call — writes a C2P challenge; the controller
+         * responds and challenges back via [notifyPayload], whose synchronous
+         * answer below closes the loop, so `controller.authenticated` is true
+         * when this returns. (The synchronous re-entry is safe: the
+         * controller registers its pending nonce BEFORE notifying.)
+         */
+        fun simulateCentralHandshake() {
+            cb?.invoke(
+                BleProtocol.encodeAuthChallengePayload(
+                    BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+                ),
+            )
+        }
+
         override fun notifyPayload(payload: ByteArray): Boolean {
-            // The controller just dispatched a CMD_API_REQ frame over GATT
-            // (notifyPayload takes an already frame-encoded payload, per the
-            // existing echo path in BleController.init). Decode it using the
-            // SAME Go-spec §2.2 layout the real Go decoder (DecodeApiReqPayload)
-            // expects so the fake asserts wire-format parity on every test run.
+            // Handshake frames still ride v1. The controller's own P2C
+            // challenge is answered SYNCHRONOUSLY through the payload
+            // callback (a test-only re-entry that real GATT hardware cannot
+            // do) so repoWithBle can complete auth inline; data chunks below
+            // keep the asynchronous discipline.
+            val v1 = BleProtocol.decodeFrame(payload)
+            if (v1 != null && v1.payload.isNotEmpty() &&
+                v1.payload[0] == BleProtocol.CMD_AUTH_CHALLENGE
+            ) {
+                val decoded = BleProtocol.decodeAuthChallengePayload(v1.payload)
+                if (decoded != null && decoded.first == BleProtocol.AUTH_DIR_P2C) {
+                    val (dir, nonce) = decoded
+                    cb?.invoke(
+                        BleProtocol.encodeAuthResponsePayload(
+                            nonce,
+                            BleProtocol.authResponseMac(authKey, nonce, dir),
+                        ),
+                    )
+                }
+                return true
+            }
+
+            // Data requests arrive as v2 authed frames; decode with the shared
+            // key, then parity-check the CMD_API_REQ payload using the SAME
+            // Go-spec §2.2 layout the real Go decoder (DecodeApiReqPayload)
+            // expects:
             //   [CmdID 1B = CMD_API_REQ][Endpoint 1B][PathLen 1B]
             //   [Path UTF-8][Index 2B BE]
-            val decoded = BleProtocol.decodeFrame(payload)
-            if (decoded != null && decoded.payload.isNotEmpty() &&
-                decoded.payload[0] == BleProtocol.CMD_API_REQ) {
-                val p = decoded.payload
-                // Minimum header = CmdID(1) + Endpoint(1) + PathLen(1) + Index(2) = 5
-                // bytes (path may be empty).
-                require(p.size >= 5) {
-                    "api req payload too short: ${p.size}"
-                }
-                val endpoint = p[1]
-                val pathLen = p[2].toInt() and 0xFF
-                require(p.size == 3 + pathLen + 2) {
-                    "api req PathLen=$pathLen but payload has ${p.size - 5} path bytes"
-                }
-                val decodedPath = String(p, 3, pathLen, Charsets.UTF_8)
-                val indexOff = 3 + pathLen
-                val decodedIndex = ((p[indexOff].toInt() and 0xFF) shl 8) or
-                    (p[indexOff + 1].toInt() and 0xFF)
-                // Sanity-check the decoded args so a future wire-layout
-                // regression in BleController.requestApi surfaces here, not as
-                // an opaque test failure downstream.
-                require(endpoint == expectedEndpoint) {
-                    "decoded endpoint mismatch: got $endpoint, expected $expectedEndpoint"
-                }
-                require(decodedPath == expectedPath) {
-                    "decoded path mismatch: got '$decodedPath', expected '$expectedPath'"
-                }
-                require(decodedIndex in 0..0xFFFF) {
-                    "decoded index out of uint16 range: $decodedIndex"
-                }
-                responsePayloads.forEach { chunk ->
-                    scope.launch {
-                        delay(chunkDelayMs)
-                        cb?.invoke(chunk)
-                    }
+            val authed = BleProtocol.decodeAuthedFrame(payload, authKey) ?: return true
+            val p = authed.payload
+            if (p.isEmpty() || p[0] != BleProtocol.CMD_API_REQ) return true
+            // Minimum header = CmdID(1) + Endpoint(1) + PathLen(1) + Index(2) = 5
+            // bytes (path may be empty).
+            require(p.size >= 5) {
+                "api req payload too short: ${p.size}"
+            }
+            val endpoint = p[1]
+            val pathLen = p[2].toInt() and 0xFF
+            require(p.size == 3 + pathLen + 2) {
+                "api req PathLen=$pathLen but payload has ${p.size - 5} path bytes"
+            }
+            val decodedPath = String(p, 3, pathLen, Charsets.UTF_8)
+            val indexOff = 3 + pathLen
+            val decodedIndex = ((p[indexOff].toInt() and 0xFF) shl 8) or
+                (p[indexOff + 1].toInt() and 0xFF)
+            // Sanity-check the decoded args so a future wire-layout
+            // regression in BleController.requestApi surfaces here, not as an
+            // opaque test failure downstream.
+            require(endpoint == expectedEndpoint) {
+                "decoded endpoint mismatch: got $endpoint, expected $expectedEndpoint"
+            }
+            require(decodedPath == expectedPath) {
+                "decoded path mismatch: got '$decodedPath', expected '$expectedPath'"
+            }
+            require(decodedIndex in 0..0xFFFF) {
+                "decoded index out of uint16 range: $decodedIndex"
+            }
+            responsePayloads.forEach { chunk ->
+                scope.launch {
+                    delay(chunkDelayMs)
+                    rawWriteSink?.invoke(
+                        BleProtocol.encodeAuthedFrame(
+                            chunk, pcSeq.getAndIncrement().toULong(), authKey,
+                        ),
+                    )
                 }
             }
             return true
@@ -204,10 +264,21 @@ class MediaRepositoryFailoverTest {
             bleEnabledFlow = kotlinx.coroutines.flow.flowOf(true),
             bleHardwareAvailable = { true },
             saveBleEnabled = {},
+            // Phase 9: the token shared with the fake Central — the BLE data
+            // channel now refuses to open without a completed handshake.
+            authTokenProvider = { "sekrit" },
         )
         controller.evaluateAvailability(enabled = true)
         if (state.value == BleConnState.CONNECTED) {
             controller.markConnected()
+            // Phase 9: wire the fake's raw-v2 data line, then drive the PC
+            // side of the mutual handshake to completion so the repository's
+            // requestApi dispatches are accepted by the auth gate.
+            peripheral.rawWriteSink = { controller.onCommandWrite(it) }
+            peripheral.simulateCentralHandshake()
+            check(controller.authenticated) {
+                "test harness: BLE handshake must complete synchronously"
+            }
         }
         val serverConfig = ServerConfig().apply {
             // Reserved loopback port with no listener → ConnectException (IOException).

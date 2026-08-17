@@ -374,6 +374,10 @@ class BleSettingsViewModelTest {
             bleEnabledFlow = bleEnabledFlow,
             bleHardwareAvailable = { true },
             saveBleEnabled = {},
+            // Phase 9: these fixtures only exercise the connection-state
+            // coordination path (markConnected/markDisconnected); the BLE
+            // data path is never driven, so the token is left empty.
+            authTokenProvider = { "" },
         )
         // Drive the controller into ADVERTISING so markConnected/markDisconnected
         // actually flip connectionState (the state machine no-ops in DISABLED).

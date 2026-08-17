@@ -47,12 +47,19 @@ import javax.inject.Singleton
  * @param frameTimeoutMs per-frame timeout. A frame whose arrival is more than
  *   this many milliseconds after the previous one consumes one retry attempt.
  * @param maxAttempts number of consecutive timeouts before the engine gives up.
+ * @param maxStreamBytes Phase 9 (M-9) reassembly byte cap. A stream whose
+ *   declared TotalBytes exceeds the cap — or whose accumulated buffered
+ *   bytes would cross it — triggers a full stream reset (chunkBuffer +
+ *   counters cleared) and the offending frame is never buffered. Injectable
+ *   so unit tests can exercise the reset paths without pushing a real
+ *   megabyte through; defaults to [MAX_STREAM_BYTES] (1 MiB).
  */
 @Singleton
 class BleTransportFallback(
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val frameTimeoutMs: Long = DEFAULT_FRAME_TIMEOUT_MS,
     private val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
+    private val maxStreamBytes: Int = MAX_STREAM_BYTES,
 ) {
 
     /**
@@ -96,6 +103,13 @@ class BleTransportFallback(
     private var exhausted: Boolean = false
 
     /**
+     * Phase 9 (M-9): bytes currently held in [chunkBuffer]. Maintained on
+     * insert / reset so the cap check in [onFrameReceived] is O(1); exposed
+     * read-only via [bufferedByteCount].
+     */
+    private var bufferedBytes: Int = 0
+
+    /**
      * Completion hook registered by [fetchJson] so the BLE callback
      * path can wake the suspending caller the moment the buffer becomes
      * complete. Non-null only while a [fetchJson] call is in flight.
@@ -115,32 +129,48 @@ class BleTransportFallback(
      * [chunkBuffer]; once [totalChunks] distinct indices are present the next
      * call to [assembleBytes] will return the full reassembled byte array.
      *
+     * Phase 9 (M-9): the return value is the reassembled byte array when THIS
+     * frame completes the stream, or null in every other case — refused,
+     * buffered-but-incomplete, or cap-reset. Cap violations (declared
+     * TotalBytes over [maxStreamBytes], or the accumulated buffered bytes
+     * crossing it) trigger a full stream reset ([chunkBuffer] + counters
+     * cleared) and the offending frame is NEVER buffered — a peer lying about
+     * stream size cannot pin megabytes of memory in the reassembly engine.
+     *
      * Thread-safety: mutable state is mutated under the instance monitor
      * ([stateLock]). The completion hook (if any) is captured under the lock
      * and invoked OUTSIDE the lock so its body (which calls [assembleBytes]
      * → re-acquires the lock) stays predictable.
      */
-    fun onFrameReceived(frame: ByteArray) {
-        val payload = BleProtocol.decodeFrame(frame)?.payload ?: return
-        if (payload.isEmpty()) return
-        if (payload[0] != BleProtocol.CMD_JSON_CHUNK) return
+    fun onFrameReceived(frame: ByteArray): ByteArray? {
+        val payload = BleProtocol.decodeFrame(frame)?.payload ?: return null
+        if (payload.isEmpty()) return null
+        if (payload[0] != BleProtocol.CMD_JSON_CHUNK) return null
 
         // Minimum header = CmdID(1) + TotalChunks(2) + ChunkIndex(2)
         //                 + TotalBlocks(2) + ChunkLen(2) = 9 bytes.
-        if (payload.size < 9) return
+        if (payload.size < 9) return null
 
         val total = readUint16BE(payload, 1)
         val index = readUint16BE(payload, 3)
         val blocks = readUint16BE(payload, 5)
         val chunkLen = readUint16BE(payload, 7)
-        if (chunkLen != payload.size - 9) return // length field must match bytes present
-        if (index < 0 || index >= total) return
+        if (chunkLen != payload.size - 9) return null // length field must match bytes present
+        if (index < 0 || index >= total) return null
 
         // Capture the hook to invoke AFTER releasing the lock. Null when no
         // [fetchJson] is in flight, or when this frame should not
         // wake the caller (incomplete buffer, no state transition).
         var hookToFire: (() -> Unit)? = null
         synchronized(stateLock) {
+            // M-9: reject an over-cap declared TotalBytes IMMEDIATELY —
+            // before any timeout bookkeeping or buffering. Reset the whole
+            // stream so nothing of the offending batch survives.
+            if (blocks > maxStreamBytes) {
+                resetLocked(totalChunksFallback = 0, blocksFallback = 0)
+                return null
+            }
+
             val now = nowMs()
             if (now - lastFrameAtMs > frameTimeoutMs) {
                 // Frame arrived after the per-frame deadline → consume one retry.
@@ -152,13 +182,14 @@ class BleTransportFallback(
                     chunkBuffer.clear()
                     totalChunks = 0
                     totalBlocks = 0
+                    bufferedBytes = 0
                     lastFrameAtMs = now
                     // Wake the suspending caller (if any) so it observes the
                     // timeout/exhaustion rather than waiting on its own
                     // deadline. Cleared first so its body cannot re-register.
                     hookToFire = completionHook
                     completionHook = null
-                    return
+                    return null
                 }
             }
             lastFrameAtMs = now
@@ -174,7 +205,17 @@ class BleTransportFallback(
 
             // De-dupe: a retransmitted index is silently dropped (idempotent).
             val wasMissing = !chunkBuffer.containsKey(index)
-            chunkBuffer.putIfAbsent(index, payload.copyOfRange(9, 9 + chunkLen))
+            if (wasMissing) {
+                // M-9: the accumulated buffered byte count (including this
+                // chunk) must stay under the cap — a peer can lie with a small
+                // declared TotalBytes yet stream unbounded chunk bytes.
+                if (bufferedBytes + chunkLen > maxStreamBytes) {
+                    resetLocked(totalChunksFallback = 0, blocksFallback = 0)
+                    return null
+                }
+                chunkBuffer[index] = payload.copyOfRange(9, 9 + chunkLen)
+                bufferedBytes += chunkLen
+            }
 
             // If this chunk just completed the buffer, wake the suspending
             // caller (if any). Guard on wasMissing so duplicate frames do not
@@ -188,6 +229,8 @@ class BleTransportFallback(
         // reentrant so this would not actually deadlock, but keeping the hook
         // invocation lock-free bounds the lock hold time.)
         hookToFire?.invoke()
+        // Completed by THIS frame → surface the reassembled bytes directly.
+        return if (hookToFire != null) assembleBytes() else null
     }
 
     /**
@@ -319,6 +362,12 @@ class BleTransportFallback(
     /** Number of retry attempts consumed so far. Exposed for tests/diagnostics. */
     fun attemptsUsed(): Int = synchronized(stateLock) { attemptsUsed }
 
+    /**
+     * Phase 9 (M-9): bytes currently pinned in the reassembly buffer.
+     * Exposed for tests/diagnostics to observe the cap's reset behavior.
+     */
+    fun bufferedByteCount(): Int = synchronized(stateLock) { bufferedBytes }
+
     /** Clear all chunk state and retry counters (e.g. on chapter change). */
     fun reset() {
         synchronized(stateLock) { resetLocked(totalChunksFallback = 0, blocksFallback = 0) }
@@ -326,6 +375,7 @@ class BleTransportFallback(
 
     private fun resetLocked(totalChunksFallback: Int, blocksFallback: Int) {
         chunkBuffer.clear()
+        bufferedBytes = 0
         totalChunks = totalChunksFallback
         totalBlocks = blocksFallback
         lastFrameAtMs = nowMs()
@@ -339,12 +389,27 @@ class BleTransportFallback(
     private fun readUint16BE(buf: ByteArray, offset: Int): Int =
         ((buf[offset].toInt() and 0xFF) shl 8) or (buf[offset + 1].toInt() and 0xFF)
 
-    private companion object {
+    companion object {
         // Tuned for stability over BLE's narrow/flaky throughput: each frame
         // gets more time to arrive, and the engine tolerates one extra
         // consecutive timeout before giving up. Overall per-request budget
         // rises from 9s (3s×3) to 20s (5s×4).
-        const val DEFAULT_FRAME_TIMEOUT_MS = 5_000L
-        const val DEFAULT_MAX_ATTEMPTS = 4
+        private const val DEFAULT_FRAME_TIMEOUT_MS = 5_000L
+        private const val DEFAULT_MAX_ATTEMPTS = 4
+
+        /**
+         * Phase 9 (M-9): hard ceiling on the bytes a single reassembled
+         * stream may pin — 1 MiB. A stream whose declared TotalBytes exceeds
+         * this, or whose accumulated buffered bytes would cross it, resets
+         * the whole stream and the offending frame is never buffered.
+         * NOTE: the wire TotalBytes field is uint16 (max 65535), so with the
+         * default cap only the ACCUMULATED path can trip in production from
+         * a well-formed peer; the declared-total path guards injectable
+         * smaller caps (tests) and any future wider field. The spec's
+         * "stream ID" injection vector is gone in the authed-v2 world (the
+         * Central is authenticated post-handshake), so only the byte cap
+         * remains (decision recorded in the spec revision note).
+         */
+        const val MAX_STREAM_BYTES = 1_048_576
     }
 }

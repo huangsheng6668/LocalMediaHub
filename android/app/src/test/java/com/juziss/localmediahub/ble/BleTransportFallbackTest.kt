@@ -292,4 +292,79 @@ class BleTransportFallbackTest {
         }
         assertNull("fetchJson must return null when chunks never arrive", result)
     }
+
+    // ------------------------------------------------------------------
+    // Phase 9 (Task 9, M-9): reassembly buffer byte cap.
+    // ------------------------------------------------------------------
+
+    /**
+     * Brief Step 4 case (verbatim shape). NOTE on semantics: the wire
+     * TotalBytes field is uint16, so `MAX_STREAM_BYTES + 1` (1048577)
+     * truncates to 1 on the wire — with the default 1 MiB cap this frame is
+     * rejected simply because the declared stream can never complete, and
+     * nothing is buffered for a later stream to trip over. The dedicated
+     * cap-triggering cases below ([declaredTotalOverCapResetsStream],
+     * [accumulatedBufferOverCapResetsStream]) use an injectable smaller cap
+     * to exercise the actual reset paths.
+     */
+    @Test
+    fun oversizedDeclaredTotalResetsStream() {
+        val t = BleTransportFallback()
+        val payload = BleProtocol.encodeJsonChunkPayload(
+            totalChunks = 65535, chunkIndex = 0, totalBytes = BleTransportFallback.MAX_STREAM_BYTES + 1,
+            chunk = ByteArray(10),
+        )
+        val res = t.onFrameReceived(BleProtocol.encodeFrame(payload))
+        assertNull(res) // 超限：拒绝并重置，绝不缓冲
+    }
+
+    /** A declared TotalBytes over the cap resets the stream and buffers nothing. */
+    @Test
+    fun declaredTotalOverCapResetsStream() {
+        val t = BleTransportFallback(maxStreamBytes = 64)
+        // Pre-buffer one legitimate chunk so the reset has state to clear.
+        t.onFrameReceived(
+            chunkFrame(totalChunks = 3, chunkIndex = 0, totalBlocks = 64, json = ByteArray(10)),
+        )
+        assertEquals(10, t.bufferedByteCount())
+
+        // totalBytes field says 65 > cap 64 → immediate reset, no buffering.
+        val res = t.onFrameReceived(
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeJsonChunkPayload(
+                    totalChunks = 3, chunkIndex = 1, totalBytes = 65, chunk = ByteArray(10),
+                ),
+            ),
+        )
+        assertNull(res)
+        assertEquals("over-cap declared total must clear the buffer", 0, t.bufferedByteCount())
+    }
+
+    /**
+     * Cumulative buffered bytes crossing the cap resets the stream mid-flight.
+     *
+     * NOTE (test correction): the declared TotalBytes field must stay ≤ the
+     * cap (60 ≤ 64) — otherwise the declared-total check fires on the FIRST
+     * frame and nothing accumulates. A declared 60 with 6×20B actually sent
+     * is exactly the lie the accumulated check exists to catch (the peer
+     * under-declares to dodge the declared check).
+     */
+    @Test
+    fun accumulatedBufferOverCapResetsStream() {
+        val t = BleTransportFallback(maxStreamBytes = 64)
+        // Three 20B chunks fit (60 ≤ 64)…
+        repeat(3) { i ->
+            t.onFrameReceived(
+                chunkFrame(totalChunks = 6, chunkIndex = i, totalBlocks = 60, json = ByteArray(20)),
+            )
+        }
+        assertEquals(60, t.bufferedByteCount())
+        // …but the fourth (60 + 20 = 80 > 64) trips the accumulated cap: the
+        // stream is reset and the offending chunk is NOT buffered.
+        val res = t.onFrameReceived(
+            chunkFrame(totalChunks = 6, chunkIndex = 3, totalBlocks = 60, json = ByteArray(20)),
+        )
+        assertNull(res)
+        assertEquals("accumulated over-cap must clear the buffer", 0, t.bufferedByteCount())
+    }
 }
