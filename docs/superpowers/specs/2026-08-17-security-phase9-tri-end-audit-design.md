@@ -91,6 +91,7 @@ redact 中间件只改 `req.URL.RawQuery`（`server.go:202-213`），但 Echo v4
 1. **BodyLimit**：全局挂 `echoMw.BodyLimit("4M")`（放行最大的合法 body 是批量缩略图请求与 admin config roots，4M 足够）。
 2. **认证失败限速**：`BearerToken` 中间件内嵌每 IP 失败退避（复用 `ratelimit.go` 的桶结构：401 响应计数，超阈后固定窗口内直接 429），不动现有业务限流。
 3. **缩略图磁盘缓存上限**：`thumbnail.go` 落盘后异步检查目录总大小，超上限（默认 512MB，config `thumbnails.cache_max_mb`）按 mtime LRU 删除最旧文件；`/images/*` 与 `/videos/*/thumbnail` 限速 30/min/IP。
+   （修订 2026-08-17：实际落地为 **60/min/IP**（`server.go` 的 `rateLimitWhen(isThumbnailRequest, RateLimit(60, time.Minute))` 与 `/images/*` 的 `RateLimit(60, time.Minute)`）。网格页并发批量加载缩略图时 30/min 会误伤正常客户端；60/min 在保留"钝化文件名枚举洪水"效果的同时给合法 UI 留出余量。）
 
 （M-5 慢速下载并发闸本 phase 不做，理由见 §7。）
 

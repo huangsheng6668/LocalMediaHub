@@ -23,18 +23,21 @@
 
 | 方法 | 路径 | 说明 | 需 Token |
 |---|---|---|---|
-| GET | `/api/v1/folders` | 根文件夹列表 | 否 |
-| GET | `/api/v1/folders/{path}/browse` | 浏览指定目录 | 否 |
-| GET | `/api/v1/videos` | 视频列表（分页） | 否 |
-| GET | `/api/v1/images` | 图片列表（分页） | 否 |
-| GET | `/api/v1/videos/{path}/stream` | 视频流（Range） | 否 |
-| GET | `/api/v1/images/{path}/thumbnail` | 缩略图 | 否 |
-| GET | `/api/v1/images/{path}/original` | 原图 | 否 |
-| GET | `/api/v1/search` | 搜索（支持 `path` 限定作用域） | 否 |
+| GET | `/api/v1/folders` | 根文件夹列表 | 是（空 token 开放模式透传） |
+| GET | `/api/v1/folders/{path}/browse` | 浏览指定目录 | 是（空 token 开放模式透传） |
+| GET | `/api/v1/videos` | 视频列表（分页） | 是（空 token 开放模式透传） |
+| GET | `/api/v1/images` | 图片列表（分页） | 是（空 token 开放模式透传） |
+| GET | `/api/v1/texts` | 文本列表 | 是（空 token 开放模式透传） |
+| GET | `/api/v1/videos/{path}/stream` | 视频流（Range） | 是（空 token 开放模式透传） |
+| GET | `/api/v1/images/{path}/thumbnail` | 缩略图 | 是（空 token 开放模式透传） |
+| GET | `/api/v1/images/{path}/original` | 原图 | 是（空 token 开放模式透传） |
+| GET | `/api/v1/search` | 搜索（支持 `path` 限定作用域） | 是（空 token 开放模式透传） |
 | GET | `/api/v1/media/thumbnail` | 绝对路径缩略图 | 是 |
 | GET | `/api/v1/media/original` | 绝对路径原图 | 是 |
 | GET | `/api/v1/media/stream` | 绝对路径视频流（Range） | 是 |
 | GET | `/api/v1/media/duration` | 媒体时长 | 是 |
+
+> Phase 9 (H-2/I-3) 起，上表媒体读端点与 `/texts` 均挂 Bearer Token 中间件；`config.yaml` 未配置 token（开放模式）时中间件为透传 no-op，既有部署行为不变。
 
 ### 关键文件
 
@@ -62,9 +65,9 @@
 
 | 方法 | 路径 | 说明 | 需 Token |
 |---|---|---|---|
-| GET | `/api/v1/books/info?path=<abs>` | 图书元信息（标题 / 章节列表 / 总字数） | 否 |
-| GET | `/api/v1/books/chapter?path=<abs>&index=<n>` | 章节内容（blocks 数组，含文本与图片块） | 否 |
-| GET | `/api/v1/books/image?path=<abs>&manifest=<id>` | epub 内部图片字节（`<img>` 标签使用，Token 可走 query fallback） | 是 |
+| GET | `/api/v1/books/info?path=<abs>` | 图书元信息（标题 / 章节列表 / 总字数） | 是（空 token 开放模式透传） |
+| GET | `/api/v1/books/chapter?path=<abs>&index=<n>` | 章节内容（blocks 数组，含文本与图片块） | 是（空 token 开放模式透传） |
+| GET | `/api/v1/books/image?path=<abs>&manifest=<id>` | epub 内部图片字节（`<img>` 标签使用，Token 可走 query fallback） | 是（sig/HMAC 签名优先） |
 
 ### 关键文件
 
@@ -105,18 +108,20 @@
 
 ## 标签 / 收藏 / 书签
 
-### API 端点（标签，无需 Token）
+### API 端点（标签）
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET | `/api/v1/tags` | 标签列表 |
-| POST | `/api/v1/tags` | 创建标签 |
-| DELETE | `/api/v1/tags/{id}` | 删除标签 |
-| POST | `/api/v1/tags/{id}/files/{path}` | 给文件打标签 |
-| DELETE | `/api/v1/tags/{id}/files/{path}` | 移除文件标签 |
-| GET | `/api/v1/tags/{id}/files` | 标签下文件 |
-| GET | `/api/v1/tags/{id}/media` | 标签下媒体（分页） |
-| GET | `/api/v1/tags/file-tags` | 批量获取文件标签映射 |
+全部标签端点（含读）均挂 Bearer Token 中间件（Phase 9 I-3 起读端点也纳入）；空 token 开放模式下中间件透传，行为不变。
+
+| 方法 | 路径 | 说明 | 需 Token |
+|---|---|---|---|
+| GET | `/api/v1/tags` | 标签列表 | 是 |
+| POST | `/api/v1/tags` | 创建标签 | 是 |
+| DELETE | `/api/v1/tags/{id}` | 删除标签 | 是 |
+| POST | `/api/v1/tags/{id}/files/{path}` | 给文件打标签 | 是 |
+| DELETE | `/api/v1/tags/{id}/files/{path}` | 移除文件标签 | 是 |
+| GET | `/api/v1/tags/{id}/files` | 标签下文件 | 是 |
+| GET | `/api/v1/tags/{id}/media` | 标签下媒体（分页） | 是 |
+| GET | `/api/v1/tags/file-tags` | 批量获取文件标签映射 | 是 |
 
 ### 关键文件
 
