@@ -37,14 +37,30 @@ type tinyGoCentralScanner struct {
 
 	// opMu serializes Scan / Connect / Disconnect. tinygo-org/bluetooth v0.15.0
 	// on Windows (via winrt-go + go-ole) crashes the whole process with a
-	// native fault when two of these race — a concurrent Scan yields
+	// native fault when two of these race — a concurrent Scan yields a
 	// "a scan is already in progress" and a Disconnect racing a dying GATT
 	// session dereferences a freed COM IUnknown* inside GattSession.Close
 	// (signal 0xc0000005). The auto-connect retry path in the Android client
 	// can fire a second scan+connect while the first is still winding down, so
 	// the Central MUST handle these operations strictly one at a time.
 	opMu sync.Mutex
+
+	// notifyQueue holds every State-characteristic notification received
+	// since connectLocked armed the ONE persistent subscription handler.
+	// Real-device Phase 9 finding: arming per WaitNotify call dropped any
+	// frame that arrived while no call was blocked (the phone answers a
+	// challenge within milliseconds, and its second-direction challenge
+	// lands right after the response satisfies the waiting call) — the
+	// handshake then dead-waited and the data-phase chunk stream would have
+	// lost frames the same way. A bounded queue bridges the gaps; frames are
+	// consumed by WaitNotify with no re-arming race left.
+	notifyQueue chan []byte
 }
+
+// notifyQueueCap bounds the bridging queue. The peer's chunker throttles to
+// one in-flight frame per round trip, so 64 frames is generous headroom for
+// a burst; overflow drops the NEWEST frame with a log line (fail-visible).
+const notifyQueueCap = 64
 
 // NewCentralScanner enables the default Bluetooth adapter and returns a
 // Central-role scanner. Returns (nil, err) when the adapter is missing,
@@ -188,6 +204,9 @@ func (t *tinyGoCentralScanner) connectLocked(ctx context.Context, id string) (er
 	t.disconnectLocked()
 	t.cmdChar = nil
 	t.stateChar = nil
+	// Drop the persistent notification bridge with the dead session; frames
+	// still in flight land in a detached channel and are garbage-collected.
+	t.notifyQueue = nil
 
 	addr, err := bluetooth.ParseMAC(id)
 	if err != nil {
@@ -270,8 +289,40 @@ func (t *tinyGoCentralScanner) connectLocked(ctx context.Context, id string) (er
 	}
 	// Phase 9 (Task 10): MTU step of the connect flow. See requestMtu247.
 	t.requestMtu247()
+
+	// Arm the ONE persistent notification handler for this connection's
+	// lifetime. Real-device finding: arming inside each WaitNotify dropped
+	// frames that arrived while no call was blocked (see notifyQueue).
+	t.notifyQueue = make(chan []byte, notifyQueueCap)
+	if err := t.stateChar.EnableNotifications(t.enqueueNotify); err != nil {
+		log.Printf("BLE EnableNotifications (persistent) err=%v", err)
+		t.notifyQueue = nil
+		return err
+	}
 	log.Printf("BLE Connect success for device=%s", id)
 	return nil
+}
+
+// enqueueNotify is the persistent State-characteristic handler installed
+// once per connection by connectLocked. Task 11 (M-6): log redaction — only
+// length and the leading frame-type byte are logged, never contents (frames
+// carry auth nonces/MACs and library data).
+func (t *tinyGoCentralScanner) enqueueNotify(data []byte) {
+	cp := append([]byte(nil), data...)
+	if len(cp) == 0 {
+		log.Printf("BLE notify frame len=0 (ignored)")
+		return
+	}
+	log.Printf("BLE notify frame len=%d frameType=%#02x", len(cp), cp[0])
+	q := t.notifyQueue
+	if q == nil {
+		return
+	}
+	select {
+	case q <- cp:
+	default:
+		log.Printf("BLE notify queue full; dropping frame len=%d frameType=%#02x", len(cp), cp[0])
+	}
 }
 
 // requestMtu247 is the Task 10 MTU step of the connect flow.
@@ -312,6 +363,12 @@ func (t *tinyGoCentralScanner) Disconnect() {
 	t.opMu.Lock()
 	defer t.opMu.Unlock()
 	t.disconnectLocked()
+	// Drop the session-bound state along with the link; WaitNotify on a
+	// disconnected scanner fails fast instead of dead-waiting on a queue
+	// that can never fill again.
+	t.notifyQueue = nil
+	t.cmdChar = nil
+	t.stateChar = nil
 }
 
 // disconnectLocked is the unlocked body. Caller MUST hold t.opMu.
@@ -360,31 +417,14 @@ func (t *tinyGoCentralScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 	if t.stateChar == nil {
 		return nil, errNoStateChar
 	}
-
-	notifyCh := make(chan []byte, 1)
-	handler := func(data []byte) {
-		cp := append([]byte(nil), data...)
-		// Task 11 (M-6): log redaction — the raw payload hex dump (data=%x) is
-		// gone; only the length and the leading frame-type byte (0x01 v1 /
-		// 0x02 v2) survive so diagnostics can still spot short/garbage frames
-		// without logging frame contents (which carry auth nonces/MACs).
-		if len(cp) > 0 {
-			log.Printf("BLE WaitNotify received callback len=%d frameType=%#02x", len(cp), cp[0])
-		} else {
-			log.Printf("BLE WaitNotify received callback len=0")
-		}
-		select {
-		case notifyCh <- cp:
-		default:
-		}
+	q := t.notifyQueue
+	if q == nil {
+		// Defensive: connectLocked always arms the queue before returning
+		// success; nil here means a post-Disconnect or failed-connect call.
+		return nil, errNoStateChar
 	}
-	if err := t.stateChar.EnableNotifications(handler); err != nil {
-		log.Printf("BLE EnableNotifications err=%v", err)
-		return nil, err
-	}
-
 	select {
-	case data := <-notifyCh:
+	case data := <-q:
 		return data, nil
 	case <-ctx.Done():
 		log.Printf("BLE WaitNotify ctx.Done err=%v", ctx.Err())
