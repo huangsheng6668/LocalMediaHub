@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { migrateV1toV2 } from './readerPrefs.js';
+import * as readerPrefs from './readerPrefs.js';
 
 test('defaults include new typography fields', () => {
     const s = migrateV1toV2(null);
@@ -26,4 +27,16 @@ test('migrate keeps valid custom colors and drops invalid', () => {
 
 test('migrate keeps CUSTOM theme', () => {
     assert.equal(migrateV1toV2({ theme: 'CUSTOM' }).theme, 'CUSTOM');
+});
+
+test('THEME_LABELS is frozen and aligned with THEME_PRESETS', () => {
+    assert.ok(readerPrefs.THEME_LABELS, 'THEME_LABELS must be exported');
+    assert.ok(Object.isFrozen(readerPrefs.THEME_LABELS));
+    const presetKeys = Object.keys(readerPrefs.THEME_PRESETS);
+    const labelKeys = Object.keys(readerPrefs.THEME_LABELS);
+    assert.deepEqual([...labelKeys].sort(), [...presetKeys].sort());
+    for (const v of Object.values(readerPrefs.THEME_LABELS)) {
+        assert.equal(typeof v, 'string');
+        assert.ok(v.length > 0);
+    }
 });

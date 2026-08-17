@@ -38,6 +38,19 @@ export const THEME_PRESETS = {
     AUTO:           null,
 };
 
+// 主题展示名（settings 页网格）。settings.js 的 // XSS-SAFE: 豁免以"本常量已冻结
+// 且值全部为字面量"为前提 —— 勿在此对象中放入任何动态/用户数据。
+export const THEME_LABELS = Object.freeze({
+    DAY: '日间',
+    DAY_BRIGHT: '纯白',
+    EYE_CARE: '护眼米色',
+    EYE_CARE_GREEN: '护眼绿',
+    PARCHMENT: '羊皮纸',
+    NIGHT: '深灰夜间',
+    NIGHT_BLACK: '纯黑夜间',
+    AUTO: '跟随系统',
+});
+
 // 翻页动画样式（Task 2/3 依赖）
 export const PAGE_TURN_STYLES = ['NONE', 'COVER', 'SIMULATION', 'DRAG'];
 
