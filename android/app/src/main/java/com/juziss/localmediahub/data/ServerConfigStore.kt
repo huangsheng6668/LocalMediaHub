@@ -34,6 +34,7 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
         private val KEY_AUTH_TOKEN = stringPreferencesKey("auth_token")
         private val KEY_APP_THEME = stringPreferencesKey("app_theme")
         private val KEY_BLE_ENABLED = booleanPreferencesKey("ble_enabled")
+        private val KEY_LAST_CONNECTED_BLE_ADDRESS = stringPreferencesKey("last_connected_ble_address")
     }
 
     private val gson = Gson()
@@ -70,6 +71,10 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
         prefs[KEY_BLE_ENABLED] ?: false
     }
 
+    open val lastConnectedBleAddress: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[KEY_LAST_CONNECTED_BLE_ADDRESS]
+    }
+
     val knownServers: Flow<List<KnownServer>> = context.dataStore.data.map { prefs ->
         decodeKnownServers(prefs[KEY_KNOWN_SERVERS])
     }
@@ -83,6 +88,18 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
     suspend fun saveBleEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_BLE_ENABLED] = enabled
+        }
+    }
+
+    suspend fun saveLastConnectedBleAddress(address: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LAST_CONNECTED_BLE_ADDRESS] = address
+        }
+    }
+
+    suspend fun clearLastConnectedBleAddress() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_LAST_CONNECTED_BLE_ADDRESS)
         }
     }
 
