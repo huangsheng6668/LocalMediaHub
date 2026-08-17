@@ -125,6 +125,33 @@ func TestCentralHandshakeRetriesThroughPairingWindow(t *testing.T) {
 	}
 }
 
+func TestCentralHandshakeRecoversFromCccdArmRace(t *testing.T) {
+	// Real-device sequencing race (found once link encryption was optional):
+	// the challenge is written before WaitNotify arms the CCCD, so the
+	// phone's instant reply is dropped by the stack. Each attempt has its
+	// own notify deadline and re-writes the challenge, so the second
+	// attempt's response lands on the already-armed subscription.
+	peer := newBlePeerFake(centralTestToken)
+	peer.silentChallengeFirstN = 1
+	c := NewCentral(peer)
+	c.SetAuthToken(centralTestToken)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect must recover from the dropped first response: %v", err)
+	}
+	if c.State() != "connected" {
+		t.Fatalf("state=%q want connected", c.State())
+	}
+	key := DeriveBleAuthKey(centralTestToken)
+	peer.push(EncodeAuthedFrame([]byte("pong"), 0, key))
+	echo, err := c.Send(context.Background(), []byte("ping"))
+	if err != nil {
+		t.Fatalf("Send after recovered handshake: %v", err)
+	}
+	if string(echo) != "pong" {
+		t.Fatalf("echo=%q want pong", string(echo))
+	}
+}
+
 func TestCentralSendEncodesAndReturnsEcho(t *testing.T) {
 	key := DeriveBleAuthKey(centralTestToken)
 	peer := newBlePeerFake(centralTestToken)
@@ -258,6 +285,12 @@ type blePeerFake struct {
 	// lands (the Central must retry and then succeed).
 	failChallengeFirstN int
 
+	// silentChallengeFirstN accepts the first N challenge writes but queues
+	// no response — models the CCCD-arm sequencing race where the phone's
+	// instant notification is dropped because our subscription had not
+	// landed yet; the Central's re-challenge on the next attempt recovers.
+	silentChallengeFirstN int
+
 	mu        sync.Mutex
 	frames    [][]byte
 	nextIdx   int
@@ -289,6 +322,10 @@ func (p *blePeerFake) WriteCommand(ctx context.Context, payload []byte) error {
 			if p.failChallengeFirstN > 0 {
 				p.failChallengeFirstN--
 				return errors.New("async operation failed with status 3: Bluetooth ATT error (code 0x0005)")
+			}
+			if p.silentChallengeFirstN > 0 {
+				p.silentChallengeFirstN--
+				return nil // write accepted, but the notification was lost
 			}
 			dir, nonce, derr := DecodeAuthChallengePayload(frame.Payload)
 			if derr != nil || dir != AuthDirCentralToPeripheral {

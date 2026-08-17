@@ -43,12 +43,17 @@ var ErrHandshakeFailed = errors.New("ble: authentication handshake failed")
 // needs 1-3s to encrypt before our CCCD write stops failing with ATT 0x05.
 const bleHandshakeTimeout = 10 * time.Second
 
-// handshakeAttempts / handshakeRetryBackoff pace the challenge-exchange
-// retries that cover the pairing window described above. The caller's HTTP
-// budget (~11s) bounds the whole connect, so 4 attempts fit comfortably.
+// handshakeAttempts / handshakeRetryBackoff / handshakeAttemptNotifyWait pace
+// the challenge-exchange retries. Each attempt re-writes the challenge and
+// waits at most handshakeAttemptNotifyWait for the first notification, so a
+// response lost to the CCCD-arm sequencing race (or an ATT 0x05 during
+// optional link encryption) costs one short attempt instead of the whole
+// budget. 3 attempts × 2.5s + backoffs fits the 10s handshake window and the
+// caller's ~15s HTTP budget with GATT establishment time.
 const (
-	handshakeAttempts     = 4
-	handshakeRetryBackoff = 1500 * time.Millisecond
+	handshakeAttempts          = 3
+	handshakeRetryBackoff      = 500 * time.Millisecond
+	handshakeAttemptNotifyWait = 2500 * time.Millisecond
 )
 
 // authListenerHandshakePoll is how long RunApiListener pauses between checks
@@ -296,9 +301,16 @@ func (c *Central) handshakeLocked(ctx context.Context) error {
 	// takes 1-3s to encrypt the link. Until then the phone's stack rejects
 	// our CCCD write with ATT 0x05 (insufficient authentication) — and the
 	// challenge write itself is a write-without-response that the phone's
-	// bond guard silently drops. Retry the challenge write + first notify
-	// arm until the handshake budget expires; the same nonce1 is reused, so
-	// a late-arriving response to an earlier attempt still verifies.
+	// bond guard silently drops.
+	//
+	// Real-device sequencing race (found once encryption was optional): the
+	// challenge write is issued BEFORE WaitNotify arms the CCCD subscription,
+	// so a phone that answers instantly can fire its notification while our
+	// CCCD is still unwritten — the stack drops it and nothing re-arrives.
+	// Each attempt therefore gets its OWN notify deadline and re-writes the
+	// challenge: on the second attempt the CCCD is long since armed and the
+	// fresh response is guaranteed to land. The same nonce1 is reused, so a
+	// late-arriving response to an earlier attempt still verifies.
 	var pendingFrame []byte
 	for attempt := 1; ; attempt++ {
 		if err := hsCtx.Err(); err != nil {
@@ -306,17 +318,19 @@ func (c *Central) handshakeLocked(ctx context.Context) error {
 		}
 		err := c.scanner.WriteCommand(hsCtx, EncodeFrame(EncodeAuthChallengePayload(AuthDirCentralToPeripheral, nonce1)))
 		if err == nil {
+			attemptCtx, cancel := context.WithTimeout(hsCtx, handshakeAttemptNotifyWait)
 			var raw []byte
-			raw, err = c.scanner.WaitNotify(hsCtx)
+			raw, err = c.scanner.WaitNotify(attemptCtx)
+			cancel()
 			if err == nil {
 				pendingFrame = raw
 				break
 			}
 		}
-		if attempt >= handshakeAttempts {
+		if attempt >= handshakeAttempts || hsCtx.Err() != nil {
 			return fmt.Errorf("%w: challenge exchange: %w", ErrHandshakeFailed, err)
 		}
-		slog.Warn("BLE handshake attempt failed; retrying while pairing/encryption may still be in progress",
+		slog.Warn("BLE handshake attempt produced no response; retrying with a fresh challenge",
 			"attempt", attempt, "err", err)
 		select {
 		case <-hsCtx.Done():
