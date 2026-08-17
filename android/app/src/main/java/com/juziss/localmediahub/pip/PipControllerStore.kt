@@ -4,7 +4,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import java.lang.ref.WeakReference
 
 /**
- * 进程级单例，桥接 [PipActionReceiver]（BroadcastReceiver，无 Compose 上下文）
+ * 进程级单例，桥接 BroadcastReceiver（无 Compose 上下文）
  * 与 Composable 内创建的 ExoPlayer 实例。
  *
  * 用 WeakReference 防止 Activity 退出后仍持有 ExoPlayer 导致泄漏。如果

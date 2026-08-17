@@ -285,7 +285,7 @@ class MediaRepository @Inject constructor(
         return bleFetchOrHttp<BrowseResult>(
             httpCall = {
                 val data = httpGetRaw<BrowseResult>(
-                    "$baseUrl/api/v1/folders/$route/browse$query",
+                    "$baseUrl/api/v1/folders/${encodePathSegments(route)}/browse$query",
                     browseType,
                     forceNetwork = forceNetwork,
                 )
@@ -300,11 +300,11 @@ class MediaRepository @Inject constructor(
     }
 
     suspend fun getFolderFilesRecursive(relativePath: String): NetworkResult<List<MediaFile>> =
-        httpGet("$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/files",
+        httpGet("$baseUrl/api/v1/folders/${encodePathSegments(normalizeRoutePath(relativePath))}/files",
             object : TypeToken<List<MediaFile>>() {}.type)
 
     suspend fun downloadFolderZip(relativePath: String): NetworkResult<ResponseBody> =
-        httpStream("$baseUrl/api/v1/folders/${normalizeRoutePath(relativePath)}/download")
+        httpStream("$baseUrl/api/v1/folders/${encodePathSegments(normalizeRoutePath(relativePath))}/download")
 
     // ── Search ────────────────────────────────────────────────
 
@@ -374,11 +374,11 @@ class MediaRepository @Inject constructor(
         httpEmpty("$baseUrl/api/v1/tags/$tagId", "DELETE")
 
     suspend fun tagFile(tagId: String, filePath: String): NetworkResult<Map<String, String>> =
-        httpPost("$baseUrl/api/v1/tags/$tagId/files/${normalizeRoutePath(filePath)}", "{}",
+        httpPost("$baseUrl/api/v1/tags/$tagId/files/${encodePathSegments(normalizeRoutePath(filePath))}", "{}",
             object : TypeToken<Map<String, String>>() {}.type)
 
     suspend fun untagFile(tagId: String, filePath: String): NetworkResult<Map<String, String>> =
-        httpEmpty("$baseUrl/api/v1/tags/$tagId/files/${normalizeRoutePath(filePath)}", "DELETE")
+        httpEmpty("$baseUrl/api/v1/tags/$tagId/files/${encodePathSegments(normalizeRoutePath(filePath))}", "DELETE")
             .let { result ->
                 if (result is NetworkResult.Success) {
                     NetworkResult.Success(mapOf("status" to "ok"))
@@ -656,3 +656,20 @@ class MediaRepository @Inject constructor(
  * transport is fine and re-sending the request would only repeat the failure.
  */
 private class HttpStatusException(val code: Int) : Exception("HTTP $code")
+
+/**
+ * Task 12 (L-6): Percent-encodes a `/`-separated relative path for safe use
+ * as URL path segments (e.g. `/api/v1/folders/<route>/browse`).
+ *
+ * Each segment goes through [URLEncoder.encode] individually so characters
+ * that are illegal or ambiguous inside a path segment (`#`, `?`, `&`, `+`,
+ * spaces, CJK, …) are escaped, while the `/` separators stay literal so the
+ * server wildcard route still resolves the same directory. `URLEncoder` is
+ * query-string oriented and encodes a space as `+`; in a path segment `+` is
+ * a literal character and the Go server (`url.PathUnescape`) would NOT turn
+ * it back into a space, so `+` is re-encoded to `%20`.
+ */
+internal fun encodePathSegments(path: String): String =
+    path.split("/").joinToString("/") { segment ->
+        URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+    }

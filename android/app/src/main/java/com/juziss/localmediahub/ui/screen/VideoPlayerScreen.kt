@@ -288,7 +288,7 @@ fun VideoPlayerScreen(
     }
 
     DisposableEffect(exoPlayer) {
-        // 让 PipActionReceiver 能拿到 ExoPlayer 实例
+        // 让进程级 PipControllerStore 能拿到 ExoPlayer 实例
         PipControllerStore.bind(exoPlayer)
         onDispose {
             wrappedOnProgress(exoPlayer.currentPosition, exoPlayer.duration)

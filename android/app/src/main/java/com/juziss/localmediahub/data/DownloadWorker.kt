@@ -33,6 +33,30 @@ class DownloadWorker(
         fun downloadsStore(): DownloadsStore
     }
 
+    companion object {
+        /** L-7: absolute cap on total uncompressed bytes a single folder zip may produce (4GB). */
+        const val MAX_UNCOMPRESSED_BYTES = 4L * 1024 * 1024 * 1024
+
+        /**
+         * Task 12 (L-7): zip-bomb budget predicate (pure, unit-tested).
+         *
+         * Aborts once the cumulative extracted size exceeds 2x the declared
+         * (compressed) size; when nothing was declared (`declared == 0`, e.g.
+         * a chunked response) a flat 64MB allowance applies instead. The
+         * absolute [MAX_UNCOMPRESSED_BYTES] cap applies regardless.
+         *
+         * Note: the budget is `declared * 2` directly (NOT
+         * `maxOf(declared * 2, 64MB)`) — the tests pin the semantics that a
+         * 3x-declared overage aborts even below 64MB; the 64MB figure is the
+         * *undeclared-size fallback*, not a floor raised above `declared * 2`.
+         */
+        fun shouldAbortUnzip(extracted: Long, declared: Long): Boolean {
+            if (extracted > MAX_UNCOMPRESSED_BYTES) return true
+            val budget = if (declared > 0) declared * 2 else 64L * 1024 * 1024
+            return extracted > budget
+        }
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val entryPoint = EntryPointAccessors.fromApplication(
             applicationContext,
@@ -260,7 +284,24 @@ class DownloadWorker(
                         val entries = zipFile.entries()
                         val buffer = ByteArray(64 * 1024)
                         var extractedCount = 0
-                        while (entries.hasMoreElements()) {
+
+                        // L-7: zip-bomb guard inputs. `declared` is the
+                        // compressed size we budget the extraction against:
+                        // prefer the HTTP Content-Length; this server streams
+                        // the zip chunked (no length), so fall back to the
+                        // fully-downloaded temp zip's on-disk size — the same
+                        // quantity, exact.
+                        val declaredSize = responseBody.contentLength().takeIf { it > 0 }
+                            ?: tempFile.length()
+                        var extractedBytes = 0L
+                        // Tracks every file THIS run created (including the
+                        // half-written one), so an abort can scrub the
+                        // half-extracted output without touching unrelated
+                        // downloads already living in destDirectory.
+                        val extractedThisRun = mutableListOf<File>()
+                        var budgetExceeded = false
+
+                        while (entries.hasMoreElements() && !budgetExceeded) {
                             val zipEntry = entries.nextElement()
                             if (!zipEntry.isDirectory) {
                                 val extractedFile = safeResolveChild(destDirectory, zipEntry.name)
@@ -268,15 +309,25 @@ class DownloadWorker(
                                     continue
                                 }
                                 extractedFile.parentFile?.mkdirs()
+                                extractedThisRun.add(extractedFile)
 
                                 zipFile.getInputStream(zipEntry).use { zipInputStream ->
                                     FileOutputStream(extractedFile).use { outputStream ->
                                         var len: Int
                                         while (zipInputStream.read(buffer).also { len = it } > 0) {
                                             outputStream.write(buffer, 0, len)
+                                            extractedBytes += len
+                                            // Check inside the copy loop so a
+                                            // single inflated entry cannot blow
+                                            // past the budget unchecked.
+                                            if (shouldAbortUnzip(extractedBytes, declaredSize)) {
+                                                budgetExceeded = true
+                                                break
+                                            }
                                         }
                                     }
                                 }
+                                if (budgetExceeded) break
 
                                 extractedCount++
                                 val entryFileName = File(zipEntry.name).name
@@ -300,6 +351,13 @@ class DownloadWorker(
                                     )
                                 }
                             }
+                        }
+
+                        if (budgetExceeded) {
+                            // Scrub the half-extracted output, then surface as
+                            // a hard failure (outer catch -> Result.failure).
+                            extractedThisRun.forEach { it.deleteRecursively() }
+                            throw SecurityException("unzip budget exceeded")
                         }
                     }
                 } finally {

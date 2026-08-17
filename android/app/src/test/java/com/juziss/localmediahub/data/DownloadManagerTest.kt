@@ -42,4 +42,11 @@ class DownloadManagerTest {
         val dest = newTempDir()
         assertFalse(isInside(dest, dest))
     }
+
+    @Test
+    fun unzipAbortsBeyondDeclaredBudget() {
+        assertFalse(DownloadWorker.shouldAbortUnzip(extracted = 1_000, declared = 10_000))
+        assertTrue(DownloadWorker.shouldAbortUnzip(extracted = 30_000, declared = 10_000)) // 3x declared
+        assertTrue(DownloadWorker.shouldAbortUnzip(extracted = 5L * 1024 * 1024 * 1024, declared = 0)) // 绝对上限
+    }
 }

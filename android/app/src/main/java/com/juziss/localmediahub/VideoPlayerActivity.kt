@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.core.content.ContextCompat
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.pip.PipController
@@ -78,11 +79,10 @@ class VideoPlayerActivity : ComponentActivity() {
             addAction(PipController.ACTION_PIP_REWIND)
             addAction(PipController.ACTION_PIP_FORWARD)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(pipReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(pipReceiver, filter)
-        }
+        // M-7: 统一经 ContextCompat 以 RECEIVER_NOT_EXPORTED 注册（所有 API 级别）。
+        // API<33 时 ContextCompat 兼容降级；本 App 自己的 RemoteAction PendingIntent
+        // 仍可送达（同 App 广播不受 NOT_EXPORTED 限制），其它 App 无法伪造注入。
+        ContextCompat.registerReceiver(this, pipReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
 
         setContent {
             LocalMediaHubTheme {

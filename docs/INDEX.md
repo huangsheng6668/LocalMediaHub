@@ -218,7 +218,7 @@
 
 - 独立 `VideoPlayerActivity` 承载 PiP 浮窗
 - `VideoPlayerIntentBuilder` 构造启动 Intent
-- `PipController` + `PipControllerStore` + `PipActionReceiver` 处理 PiP action
+- `PipController` + `PipControllerStore` 处理 PiP action（`VideoPlayerActivity` 内动态注册接收器，统一 `ContextCompat.RECEIVER_NOT_EXPORTED`）
 - `exitingFromPip` 标志区分"关闭浮窗"vs"切后台"，关闭浮窗后 `onStop` 自动 `finish()` 释放 ExoPlayer
 
 ### 续播
