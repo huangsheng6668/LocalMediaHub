@@ -112,6 +112,7 @@ func TestCentralHandshakeRetriesThroughPairingWindow(t *testing.T) {
 	if c.State() != "connected" {
 		t.Fatalf("state=%q want connected", c.State())
 	}
+	startApiListenerForTest(t, c)
 	// Authenticated data path must work end to end after the retried
 	// handshake (first outbound data frame is seq 0).
 	key := DeriveBleAuthKey(centralTestToken)
@@ -141,6 +142,7 @@ func TestCentralHandshakeRecoversFromCccdArmRace(t *testing.T) {
 	if c.State() != "connected" {
 		t.Fatalf("state=%q want connected", c.State())
 	}
+	startApiListenerForTest(t, c)
 	key := DeriveBleAuthKey(centralTestToken)
 	peer.push(EncodeAuthedFrame([]byte("pong"), 0, key))
 	echo, err := c.Send(context.Background(), []byte("ping"))
@@ -152,6 +154,47 @@ func TestCentralHandshakeRecoversFromCccdArmRace(t *testing.T) {
 	}
 }
 
+func TestCentralSendEchoRoutesThroughCompetingListener(t *testing.T) {
+	// Real-device finding: the API listener runs continuously against the
+	// same notify stream as Send, so whoever dequeues a frame must route it
+	// — the listener hands echo replies to echoCh, Send hands API requests
+	// to handleNotifyFrame. With the listener RUNNING, Send must still get
+	// its echo back no matter who wins each dequeue.
+	key := DeriveBleAuthKey(centralTestToken)
+	peer := newBlePeerFake(centralTestToken)
+	c := NewCentral(peer)
+	c.SetAuthToken(centralTestToken)
+	c.SetApiProvider(&jsonBlockProvider{body: []byte(`hi`)})
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	listenerCtx, stopListener := context.WithCancel(context.Background())
+	defer stopListener()
+	go c.RunApiListener(listenerCtx)
+
+	// Queue a legit API request (listener's domain) BEFORE the echo: Send
+	// may dequeue either frame first and must route the non-echo one.
+	req, encErr := EncodeApiReqPayload(EndpointBookChapter, "/books/novel.txt", 0)
+	if encErr != nil {
+		t.Fatalf("EncodeApiReqPayload: %v", encErr)
+	}
+	peer.push(EncodeAuthedFrame(req, 0, key))
+	peer.push(EncodeAuthedFrame([]byte{byte(CmdEcho), 'p', 'o', 'n', 'g'}, 1, key))
+
+	echo, err := c.Send(context.Background(), []byte("ping"))
+	if err != nil {
+		t.Fatalf("Send with competing listener: %v", err)
+	}
+	// Either Send dequeued the echo directly (payload verbatim) or the
+	// listener routed it through echoCh — both return the same payload.
+	if string(echo) != string([]byte{byte(CmdEcho), 'p', 'o', 'n', 'g'}) {
+		t.Fatalf("echo=%q want pong payload", echo)
+	}
+	// Drain any straggler wait so the listener goroutine can exit cleanly.
+	stopListener()
+}
+
 func TestCentralSendEncodesAndReturnsEcho(t *testing.T) {
 	key := DeriveBleAuthKey(centralTestToken)
 	peer := newBlePeerFake(centralTestToken)
@@ -160,6 +203,7 @@ func TestCentralSendEncodesAndReturnsEcho(t *testing.T) {
 	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
 		t.Fatalf("Connect error: %v", err)
 	}
+	startApiListenerForTest(t, c)
 	// Queue the peer's v2 echo reply (seq 0 = first frame of the connection).
 	peer.push(EncodeAuthedFrame([]byte("pong"), 0, key))
 	echo, err := c.Send(context.Background(), []byte("ping"))
@@ -301,6 +345,17 @@ type blePeerFake struct {
 
 func newBlePeerFake(token string) *blePeerFake {
 	return &blePeerFake{peerKey: DeriveBleAuthKey(token)}
+}
+
+// startApiListenerForTest runs the notify stream's sole consumer for tests
+// that exercise Send — echo replies are routed by the listener (echoCh), so
+// a Send without it would wait out its context.
+func startApiListenerForTest(t *testing.T, c *Central) {
+	t.Helper()
+	c.SetApiProvider(&jsonBlockProvider{body: []byte(`hi`)})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go c.RunApiListener(ctx)
 }
 
 // push queues a notification frame the fake phone will deliver via WaitNotify.

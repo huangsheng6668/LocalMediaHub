@@ -139,6 +139,14 @@ type Central struct {
 	// Connect's v1 handshake writes take neither lock (they run under c.mu
 	// before authenticated flips true, so they can never overlap data writes).
 	sendMu sync.Mutex
+
+	// echoCh (buffer 1) carries echo replies from the listener — the notify
+	// stream's SOLE consumer — to a waiting Send. Real-device Phase 9
+	// finding: with Send and the listener both dequeuing, whichever grabbed
+	// the echo starved the other; a single consumer with per-destination
+	// routing removes the race entirely. Stale replies with no waiter are
+	// dropped on the floor.
+	echoCh chan []byte
 }
 
 // ApiProvider returns the JSON response body for an endpoint/path/index triple
@@ -152,7 +160,7 @@ type ApiProvider interface {
 }
 
 func NewCentral(s CentralScanner) *Central {
-	return &Central{scanner: s, state: "disconnected"}
+	return &Central{scanner: s, state: "disconnected", echoCh: make(chan []byte, 1)}
 }
 
 // SetAuthToken derives and stores the BLE auth key from the server's Bearer
@@ -407,9 +415,11 @@ func (c *Central) handshakeLocked(ctx context.Context) error {
 //
 // I-1: the seq reservation and radio write go through sendAuthedFrame
 // (sendMu) so a concurrent ServeApiRequest chunk stream cannot interleave
-// out of seq order with this write. The WaitNotify for the echo happens
-// AFTER sendMu is released — holding a radio wait under the write lock would
-// stall unrelated chunk streams for the whole echo round-trip.
+// out of seq order with this write. The echo wait (echoCh, fed by the
+// listener) happens AFTER sendMu is released — holding a radio wait under
+// the write lock would stall unrelated chunk streams for the whole echo
+// round-trip. The listener validated the reply's MAC and seq before
+// routing it, so no re-validation happens here.
 func (c *Central) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	c.mu.Lock()
 	if c.state != "connected" {
@@ -427,31 +437,16 @@ func (c *Central) Send(ctx context.Context, payload []byte) ([]byte, error) {
 	if err := c.sendAuthedFrame(ctx, scanner, payload, key); err != nil {
 		return nil, err
 	}
-	raw, err := scanner.WaitNotify(ctx)
-	if err != nil {
-		return nil, err
+	// The listener is the notify stream's sole consumer: it validates the
+	// reply (MAC + strictly-increasing seq) and routes echo payloads here.
+	// Stale echoes from an earlier Send are dropped by the buffer, so the
+	// first frame delivered on this channel is ours.
+	select {
+	case resp := <-c.echoCh:
+		return resp, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	respPayload, respSeq, derr := DecodeAuthedFrame(raw, key)
-	if derr != nil {
-		c.mu.Lock()
-		c.scanner.Disconnect()
-		c.state = "disconnected"
-		c.resetAuthLocked()
-		c.mu.Unlock()
-		return nil, derr
-	}
-	c.mu.Lock()
-	rerr := c.acceptRemoteSeqLocked(respSeq)
-	c.mu.Unlock()
-	if rerr != nil {
-		c.mu.Lock()
-		c.scanner.Disconnect()
-		c.state = "disconnected"
-		c.resetAuthLocked()
-		c.mu.Unlock()
-		return nil, rerr
-	}
-	return respPayload, nil
 }
 
 func (c *Central) Disconnect() {
@@ -616,6 +611,8 @@ func (c *Central) runApiListener(ctx context.Context, retryBackoff time.Duration
 			continue
 		}
 
+		// Sole consumer of the notify stream (see Send): dequeues are never
+		// raced, and every frame is routed to its destination here.
 		raw, err := c.scanner.WaitNotify(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -700,9 +697,15 @@ func (c *Central) handleNotifyFrame(ctx context.Context, raw []byte) {
 		return
 	}
 	if CmdID(payload[0]) != CmdApiReq {
-		// Non-API notifications (e.g. echo replies from the connectivity
-		// loop) are ignored by the listener; the connection-verification
-		// path uses Send() directly.
+		// Echo reply for a waiting Send — the echo protocol mirrors the raw
+		// payload we wrote (no command prefix), so anything authenticated
+		// that is not an API request is an echo. The listener is the sole
+		// consumer, so no one else can starve the delivery; stale replies
+		// with no waiter are dropped by the buffer.
+		select {
+		case c.echoCh <- payload:
+		default:
+		}
 		return
 	}
 	// Dispatch in a goroutine so a slow request (large book, disk I/O)
