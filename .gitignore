@@ -69,3 +69,5 @@ server/=*
 Thumbs.db
 Desktop.ini
 android/app/src/main/res/font/*.ttf
+# Dead keystore (password lost 2026-08-17, kept for record)
+localmediahub.keystore.unrecoverable.bak
