@@ -47,12 +47,12 @@ android {
 
     signingConfigs {
         create("release") {
-            if (releaseKeystoreValid) {
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String?
-                storeFile = keystoreProperties["storeFile"]?.let { rootProject.file(it) }
-                storePassword = keystoreProperties["storePassword"] as String?
-            } else if (allowDebugSigning) {
+            // Explicit opt-in wins over a structurally-valid keystore.properties:
+            // the file only proves storeFile/keyAlias exist, not that its
+            // passwords unlock the store (a placeholder recovery template is
+            // "valid" here) — without this ordering the debug fallback would be
+            // unreachable exactly when it is needed.
+            if (allowDebugSigning) {
                 // Explicit local-testing opt-in only (Chain-I: a debug-signed
                 // APK can be resigned by anyone, enabling supply-chain
                 // attacks — hence the loud warning).
@@ -65,6 +65,11 @@ android {
                 keyPassword = "android"
                 storePassword = "android"
                 storeFile = JFile("${System.getProperty("user.home")}/.android/debug.keystore")
+            } else if (releaseKeystoreValid) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String?
+                storeFile = keystoreProperties["storeFile"]?.let { rootProject.file(it) }
+                storePassword = keystoreProperties["storePassword"] as String?
             }
             // else: deliberately left unpopulated. Any Release-variant task in
             // the graph fails fast in the whenReady guard below BEFORE a task
