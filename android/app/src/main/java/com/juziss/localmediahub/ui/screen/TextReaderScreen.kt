@@ -21,6 +21,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -45,6 +46,7 @@ import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
@@ -58,6 +60,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -107,6 +110,8 @@ import com.juziss.localmediahub.ui.component.reader.DragOutcome
 import com.juziss.localmediahub.ui.component.reader.shouldDragTakeOver
 import com.juziss.localmediahub.ui.component.reader.resolveDragOutcome
 import com.juziss.localmediahub.ui.component.reader.toCustomReaderColors
+import com.juziss.localmediahub.ble.BleConnState
+import com.juziss.localmediahub.viewmodel.BleSettingsViewModel
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
@@ -125,7 +130,11 @@ import kotlin.math.roundToInt
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
+fun TextReaderScreen(
+    viewModel: TextReaderViewModel,
+    onBack: () -> Unit,
+    bleViewModel: BleSettingsViewModel? = null,
+) {
     val book by viewModel.book.collectAsState()
     val blocks by viewModel.chapterBlocks.collectAsState()
     val scrollChapters by viewModel.scrollChapters.collectAsState()
@@ -140,6 +149,23 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     val chromeVisible by viewModel.chromeVisible.collectAsState()
     @Suppress("unused")
     val isBleDegraded by viewModel.isBleDegraded.collectAsState()
+
+    val context = LocalContext.current
+    val isHiltAvailable = remember(context) {
+        context is dagger.hilt.internal.GeneratedComponentManager<*> ||
+        context is dagger.hilt.internal.GeneratedComponent ||
+        (context as? android.app.Activity) is dagger.hilt.internal.GeneratedComponentManager<*> ||
+        (context as? android.app.Activity) is dagger.hilt.internal.GeneratedComponent
+    }
+
+    val bleVm: BleSettingsViewModel? = when {
+        bleViewModel != null -> bleViewModel
+        isHiltAvailable -> androidx.hilt.navigation.compose.hiltViewModel()
+        else -> null
+    }
+
+    val bleEnabled by bleVm?.bleEnabled?.collectAsState() ?: remember { mutableStateOf(false) }
+    val bleConnState by bleVm?.connectionState?.collectAsState() ?: remember { mutableStateOf(BleConnState.DISABLED) }
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -196,7 +222,6 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
     }
 
     val listState = rememberLazyListState()
-    val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
     var tocTab by remember { mutableStateOf(0) } // 0 = 目录, 1 = 书签
 
@@ -733,12 +758,48 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
                     if (isLoading) {
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
                     }
-                    error?.let {
-                        Text(
-                            it,
-                            modifier = Modifier.align(Alignment.Center).padding(16.dp),
-                            color = MaterialTheme.colorScheme.error,
-                        )
+                    error?.let { errText ->
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            Text(
+                                text = errText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = TextAlign.Center,
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Button(
+                                    onClick = {
+                                        scope.launch {
+                                            viewModel.loadChapter(idx, resetScroll = true)
+                                        }
+                                    },
+                                ) {
+                                    Text(stringResource(R.string.retry))
+                                }
+
+                                if (bleEnabled && bleConnState != BleConnState.CONNECTED) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            bleVm?.autoConnect()
+                                            scope.launch {
+                                                viewModel.loadChapter(idx, resetScroll = true)
+                                            }
+                                        },
+                                    ) {
+                                        Text(stringResource(R.string.ble_connect_and_retry))
+                                    }
+                                }
+                            }
+                        }
                     }
                     // Task 3: BLE 降级传输徽标（3 秒自动消失，文本不可改动 —— spec §1.2 step 4）
                     AnimatedVisibility(
@@ -902,6 +963,9 @@ fun TextReaderScreen(viewModel: TextReaderViewModel, onBack: () -> Unit) {
             settings = settings,
             onChange = { viewModel.updateSettings(it) },
             onDismiss = { showSettings = false },
+            bleEnabled = bleEnabled,
+            bleConnState = bleConnState,
+            onBleConnect = { bleVm?.autoConnect() },
         )
     }
 }

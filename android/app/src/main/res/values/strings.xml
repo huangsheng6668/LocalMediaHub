@@ -341,6 +341,16 @@
     <string name="ble_err_no_echo">未收到 BLE GATT Echo 回声响应</string>
     <string name="ble_err_send_fmt">发送失败: %1$s</string>
 
+    <!-- ── BLE in-place status capsule & error auto-recovery (Task 4) ── -->
+    <string name="ble_status_capsule_connected">蓝牙备用通道已就绪</string>
+    <string name="ble_status_capsule_idle">蓝牙备用通道未连接</string>
+    <string name="ble_status_capsule_connecting">蓝牙通道连接中…</string>
+    <string name="ble_status_capsule_disabled">蓝牙备用通道未启用</string>
+    <string name="ble_connect_now">立即连接</string>
+    <string name="ble_connect_and_retry">连接蓝牙并重试</string>
+    <string name="ble_remembered_device_fmt">已记忆设备：%1$s</string>
+    <string name="retry">重试</string>
+
     <!-- ── Generic errors ──────────────────────────────────── -->
     <string name="error_unknown">未知错误</string>
 </resources>

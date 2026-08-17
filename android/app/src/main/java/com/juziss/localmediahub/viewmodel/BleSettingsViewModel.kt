@@ -79,6 +79,12 @@ class BleSettingsViewModel @Inject constructor(
      */
     val connectionState: StateFlow<BleConnState> = controller.connectionState
 
+    /**
+     * Last connected device MAC address stored in DataStore (null if none).
+     */
+    val lastConnectedMac: StateFlow<String?> = store.lastConnectedBleAddress
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     // --- Task 9: scan / connect / send echo state ---------------------------
 
     private val _devices = MutableStateFlow<List<BleDevice>>(emptyList())

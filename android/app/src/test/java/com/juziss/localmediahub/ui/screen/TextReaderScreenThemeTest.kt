@@ -188,4 +188,43 @@ class TextReaderScreenThemeTest {
         composeRule.waitForIdle()
         assertEquals(1, nextChapterCalls)
     }
+
+    @Test
+    fun error_recovery_panel_renders_retry_and_ble_connect_buttons() {
+        var retryClicked = false
+        var bleRetryClicked = false
+        val bleEnabled = true
+        val bleConnState = com.juziss.localmediahub.ble.BleConnState.DISCONNECTED
+        val errorText = "加载章节失败"
+
+        composeRule.setContent {
+            ReaderThemeScope(theme = ReaderTheme.DAY) {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = errorText,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    androidx.compose.foundation.layout.Row {
+                        androidx.compose.material3.Button(onClick = { retryClicked = true }) {
+                            Text("重试")
+                        }
+                        if (bleEnabled && bleConnState != com.juziss.localmediahub.ble.BleConnState.CONNECTED) {
+                            androidx.compose.material3.OutlinedButton(onClick = { bleRetryClicked = true }) {
+                                Text("连接蓝牙并重试")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText(errorText).assertIsDisplayed()
+        composeRule.onNodeWithText("重试").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("连接蓝牙并重试").assertIsDisplayed().performClick()
+        assertEquals(true, retryClicked)
+        assertEquals(true, bleRetryClicked)
+    }
 }

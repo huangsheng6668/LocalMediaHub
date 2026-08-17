@@ -42,6 +42,13 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.Color
+import com.juziss.localmediahub.ble.BleConnState
+
 /**
  * Modal bottom sheet exposing the V2 reader preferences. Each control fires
  * [onChange] immediately — there is no Apply button. The caller persists the
@@ -61,13 +68,22 @@ fun ReaderSettingsSheet(
     settings: ReaderSettings,
     onChange: (ReaderSettings) -> Unit,
     onDismiss: () -> Unit,
+    bleEnabled: Boolean = false,
+    bleConnState: BleConnState = BleConnState.DISABLED,
+    onBleConnect: () -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
-        ReaderSettingsSheetContent(settings = settings, onChange = onChange)
+        ReaderSettingsSheetContent(
+            settings = settings,
+            onChange = onChange,
+            bleEnabled = bleEnabled,
+            bleConnState = bleConnState,
+            onBleConnect = onBleConnect,
+        )
     }
 }
 
@@ -81,6 +97,9 @@ fun ReaderSettingsSheet(
 fun ReaderSettingsSheetContent(
     settings: ReaderSettings,
     onChange: (ReaderSettings) -> Unit,
+    bleEnabled: Boolean = false,
+    bleConnState: BleConnState = BleConnState.DISABLED,
+    onBleConnect: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -324,7 +343,78 @@ fun ReaderSettingsSheetContent(
                 .testTag("autoScrollSlider"),
         )
 
+        HorizontalDivider(Modifier.padding(vertical = 12.dp))
+
+        // ── 蓝牙备用通道 ──
+        Section(stringResource(R.string.ble_channel_title))
+        BleStatusCapsuleRow(
+            bleEnabled = bleEnabled,
+            bleConnState = bleConnState,
+            onBleConnect = onBleConnect,
+        )
+
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+fun BleStatusCapsuleRow(
+    bleEnabled: Boolean,
+    bleConnState: BleConnState,
+    onBleConnect: () -> Unit,
+) {
+    val (dotColor, statusTextRes) = when {
+        !bleEnabled || bleConnState == BleConnState.DISABLED ->
+            MaterialTheme.colorScheme.outline to R.string.ble_status_capsule_disabled
+        bleConnState == BleConnState.CONNECTED ->
+            Color(0xFF4CAF50) to R.string.ble_status_capsule_connected
+        bleConnState == BleConnState.CONNECTING ->
+            Color(0xFFFFB300) to R.string.ble_status_capsule_connecting
+        else ->
+            MaterialTheme.colorScheme.outline to R.string.ble_status_capsule_idle
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("bleStatusCapsule"),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(dotColor)
+                    .testTag("bleStatusDot")
+            )
+            Text(
+                text = stringResource(statusTextRes),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            if (bleEnabled && bleConnState != BleConnState.CONNECTED) {
+                OutlinedButton(
+                    onClick = onBleConnect,
+                    enabled = bleConnState != BleConnState.CONNECTING,
+                    modifier = Modifier.testTag("bleConnectNowBtn"),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.ble_connect_now),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+        }
     }
 }
 

@@ -269,6 +269,20 @@ class BleSettingsViewModelTest {
         assertEquals("AA:BB", vm.store.lastConnectedBleAddress.first())
     }
 
+    @Test
+    fun lastConnectedMac_reflectsSavedAddressFromStore() = runTest {
+        val api = fakeApi(scanFailCount = 0)
+        val vm = buildVm(api = api, serverConfigured = false, bleEnabled = true)
+        runCurrent()
+
+        assertNull(vm.lastConnectedMac.value)
+
+        vm.store.saveLastConnectedBleAddress("11:22:33:44:55:66")
+        runCurrent()
+
+        assertEquals("11:22:33:44:55:66", vm.lastConnectedMac.value)
+    }
+
     // --- Test helpers ------------------------------------------------------
 
     /**

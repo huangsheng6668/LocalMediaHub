@@ -10,6 +10,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import com.juziss.localmediahub.ble.BleConnState
 import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
 import com.juziss.localmediahub.data.PageTurnStyle
@@ -331,5 +332,70 @@ class ReaderSettingsSheetTest {
         PageTurnStyle.entries.forEach { style ->
             composeRule.onNodeWithText(style.label).assertIsNotEnabled()
         }
+    }
+
+    @Test
+    fun ble_status_capsule_renders_disabled_when_ble_disabled() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = {},
+                bleEnabled = false,
+                bleConnState = BleConnState.DISABLED,
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("蓝牙备用通道未启用").assertExists()
+        composeRule.onNodeWithText("立即连接").assertDoesNotExist()
+    }
+
+    @Test
+    fun ble_status_capsule_renders_idle_and_connect_button_fires_callback() {
+        var connectClicked = false
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = {},
+                bleEnabled = true,
+                bleConnState = BleConnState.IDLE,
+                onBleConnect = { connectClicked = true },
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("蓝牙备用通道未连接").assertExists()
+        composeRule.onNodeWithText("立即连接")
+            .assertExists()
+            .performSemanticsAction(SemanticsActions.OnClick)
+        assertEquals(true, connectClicked)
+    }
+
+    @Test
+    fun ble_status_capsule_renders_connecting_and_disables_connect_button() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = {},
+                bleEnabled = true,
+                bleConnState = BleConnState.CONNECTING,
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("蓝牙通道连接中…").assertExists()
+        composeRule.onNodeWithText("立即连接").assertIsNotEnabled()
+    }
+
+    @Test
+    fun ble_status_capsule_renders_connected_and_hides_connect_button() {
+        composeRule.setContent {
+            ReaderSettingsSheetContent(
+                settings = ReaderSettings(),
+                onChange = {},
+                bleEnabled = true,
+                bleConnState = BleConnState.CONNECTED,
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("蓝牙备用通道已就绪").assertExists()
+        composeRule.onNodeWithText("立即连接").assertDoesNotExist()
     }
 }

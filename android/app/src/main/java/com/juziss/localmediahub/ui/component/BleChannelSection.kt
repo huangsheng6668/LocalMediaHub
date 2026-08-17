@@ -83,6 +83,7 @@ fun BleChannelSection(
     val bleScanning by viewModel.scanning.collectAsState()
     val bleEchoResult by viewModel.echoResult.collectAsState()
     val bleErrorText by viewModel.errorText.collectAsState()
+    val lastConnectedMac by viewModel.lastConnectedMac.collectAsState()
 
     // Runtime permission launcher for BLE. On Android 12+ both BLUETOOTH_SCAN
     // and BLUETOOTH_CONNECT are runtime permissions; on older API levels they
@@ -152,6 +153,7 @@ fun BleChannelSection(
             connectionState = bleConnState,
             echoResult = bleEchoResult,
             errorText = bleErrorText,
+            lastConnectedMac = lastConnectedMac,
             onScan = { viewModel.scan() },
             onConnect = { viewModel.connect(it) },
             onAutoConnect = { viewModel.autoConnect() },
@@ -264,6 +266,7 @@ internal fun BleDeviceScanCard(
     connectionState: BleConnState,
     echoResult: String?,
     errorText: String? = null,
+    lastConnectedMac: String? = null,
     onScan: () -> Unit,
     onConnect: (BleDevice) -> Unit,
     onAutoConnect: () -> Unit,
@@ -298,6 +301,14 @@ internal fun BleDeviceScanCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            if (!lastConnectedMac.isNullOrBlank()) {
+                Text(
+                    text = stringResource(R.string.ble_remembered_device_fmt, lastConnectedMac),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             Button(
                 onClick = onAutoConnect,
