@@ -188,6 +188,9 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// to a 500 instead of crashing the whole process.
 	s.Echo.Use(echoMw.Recover())
 	s.Echo.Use(echoMw.Logger())
+	// Phase 9 (M-1): 全局请求体上限。合法最大 body 是 admin config roots
+	// 与批量缩略图请求，4MiB 远超需求；防 LAN 内超大 JSON 打内存。
+	s.Echo.Use(echoMw.BodyLimit("4M"))
 	// Round 32 Task 5 (S2): redact ?token= from access log.
 	// CRITICAL: registered AFTER echoMw.Logger() above. Echo middleware
 	// executes in LIFO order on the request side, so a middleware registered

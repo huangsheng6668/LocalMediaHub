@@ -733,6 +733,24 @@ func TestMediaReadEndpointsOpenModePassthrough(t *testing.T) {
 	}
 }
 
+// TestBodyLimitRejectsOversizedPayload is the Phase 9 (M-1) gate: a global
+// request-body cap must reject oversized JSON with 413 before the handler
+// buffers it. Open mode (empty token) isolates the body-limit concern from
+// authentication. The ~5MiB payload exceeds the 4M limit; without the
+// middleware the handler would Bind the full body into memory first.
+func TestBodyLimitRejectsOversizedPayload(t *testing.T) {
+	s := newAuthTestServer(t, "") // 开放模式，排除认证干扰
+	big := strings.NewReader(`{"roots":["` + strings.Repeat("A", 5<<20) + `"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/config", big)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set("Authorization", "Bearer x") // 开放模式下无实际作用，保持形态
+	rec := httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body = %d, want 413", rec.Code)
+	}
+}
+
 // TestTokenRedactRewritesRequestURI is the Phase 9 (H-3) end-to-end gate: it
 // boots a REAL Server via New(cfg) so the production registerRoutes middleware
 // chain — including the actual echoMw.Logger() — runs against the request.
