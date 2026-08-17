@@ -403,8 +403,25 @@ func (s *TagsService) CleanDeletedPath(path string) error {
 	defer s.mu.RUnlock()
 
 	normPath := filepath.Clean(path)
-	prefix := normPath + string(filepath.Separator) + "%"
+	// Phase 9 (L-4): the prefix is a user-supplied path, so its % and _ must
+	// be escaped (with the ESCAPE '\' clause below) or a directory literally
+	// named "100%_great" would also wipe "100Xgreat", "100X_great", etc.
+	// The trailing separator is part of the escaped literal too: on Windows
+	// the separator IS the escape character, so appending sep+"%" raw would
+	// escape the final % back into a literal and match nothing. The wildcard
+	// is appended AFTER escaping, unescaped by construction.
+	prefix := escapeLikePattern(normPath+string(filepath.Separator)) + "%"
 
-	_, err := s.db.Exec("DELETE FROM associations WHERE file_path = ? OR file_path LIKE ?", normPath, prefix)
+	_, err := s.db.Exec("DELETE FROM associations WHERE file_path = ? OR file_path LIKE ? ESCAPE '\\'", normPath, prefix)
 	return err
+}
+
+// escapeLikePattern neutralizes SQL LIKE wildcards in s so the result matches
+// only its literal characters when used in a `LIKE ? ESCAPE '\'` predicate:
+// backslash is escaped first so the escapes themselves cannot be re-interpreted.
+func escapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }

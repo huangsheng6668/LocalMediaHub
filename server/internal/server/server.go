@@ -253,13 +253,28 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// endpoints). See allowedCORSOrigins for details.
 	s.Echo.Use(middleware.CORS(allowedCORSOrigins(s.Config.Server.Port)))
 
+	// Auth middleware: gates sensitive endpoints on the configured token.
+	// Empty token = open mode (passthrough), logged at startup.
+	// Phase 9 (M-2): per-IP auth-failure backoff on the same instance —
+	// 10 failed attempts per IP per 60s window escalates to 429, throttling
+	// online token brute-forcing. Successful auth resets the IP counter.
+	// Declared before the pprof block so the /debug/pprof group can share it
+	// (Phase 9 L-2).
+	authFailLimiter := middleware.NewAuthFailureLimiter(10, time.Minute)
+	authMw := middleware.BearerToken(s.Config.Server.Token, authFailLimiter)
+
 	// pprof endpoints for live profiling. Round 32 S3: routes are OFF by
 	// default and only registered when the operator explicitly opts in via
 	// config.debug.pprof=true OR the --debug-pprof CLI flag (flag wins).
 	// PrivateNetOnly is retained as defense-in-depth so even when enabled,
 	// heap/goroutine data is only reachable from private/loopback IPs.
+	// Phase 9 (L-2): authMw is layered on top — in token mode the profiles
+	// additionally require the Bearer token (heap/goroutine dumps can embed
+	// secrets and every LAN peer is a "private" IP, so PrivateNetOnly alone
+	// is not a meaningful gate there). Open mode keeps the previous
+	// PrivateNetOnly-only semantics (BearerToken is a passthrough).
 	if s.Config.Debug.Pprof {
-		pprofGroup := s.Echo.Group("/debug/pprof", middleware.PrivateNetOnly())
+		pprofGroup := s.Echo.Group("/debug/pprof", middleware.PrivateNetOnly(), authMw)
 		pprofGroup.Any("/*", echo.WrapHandler(http.DefaultServeMux))
 	}
 
@@ -272,13 +287,8 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	api := s.Echo.Group("/api/v1")
 
-	// Auth middleware: gates sensitive endpoints on the configured token.
-	// Empty token = open mode (passthrough), logged at startup.
-	// Phase 9 (M-2): per-IP auth-failure backoff on the same instance —
-	// 10 failed attempts per IP per 60s window escalates to 429, throttling
-	// online token brute-forcing. Successful auth resets the IP counter.
-	authFailLimiter := middleware.NewAuthFailureLimiter(10, time.Minute)
-	authMw := middleware.BearerToken(s.Config.Server.Token, authFailLimiter)
+	// authMw is declared above the pprof block and shared by every gated
+	// group below (admin / system / media / books / ble + /debug/pprof).
 
 	api.GET("/health", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})

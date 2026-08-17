@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -292,6 +293,54 @@ func BenchmarkGetTagsForFiles(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		_ = svc.GetTagsForFiles(queryPaths)
+	}
+}
+
+// TestCleanDeletedPathEscapesLikeWildcards is the Phase 9 (L-4) gate:
+// CleanDeletedPath builds a LIKE prefix pattern from a user-supplied path, so
+// SQL wildcards inside directory names (% or _) must not broaden the match.
+// Files "D:\Media\100%_great\a.mp4" and "D:\Media\100Xgreat\b.mp4": after
+// CleanDeletedPath("D:\Media\100%_great") the first file's tag associations
+// must be cleared while the bystander (which an UNESCAPED "100%_great" pattern
+// would wrongly match: % → "X", _ → one char) keeps exactly one.
+func TestCleanDeletedPathEscapesLikeWildcards(t *testing.T) {
+	dir := t.TempDir()
+	svc, err := NewTagsService(dir)
+	if err != nil {
+		t.Fatalf("NewTagsService: %v", err)
+	}
+	defer svc.Close()
+
+	tag, err := svc.CreateTag("Wild", "#FF00FF")
+	if err != nil {
+		t.Fatalf("CreateTag: %v", err)
+	}
+
+	sep := string(filepath.Separator)
+	target := filepath.Clean("D:" + sep + "Media" + sep + "100%_great" + sep + "a.mp4")
+	bystander := filepath.Clean("D:" + sep + "Media" + sep + "100Xgreat" + sep + "b.mp4")
+	for _, p := range []string{target, bystander} {
+		if _, err := svc.AssociateFile(tag.ID, p); err != nil {
+			t.Fatalf("AssociateFile(%q): %v", p, err)
+		}
+	}
+
+	if err := svc.CleanDeletedPath("D:" + sep + "Media" + sep + "100%_great"); err != nil {
+		t.Fatalf("CleanDeletedPath: %v", err)
+	}
+
+	countFor := func(p string) int {
+		var n int
+		if err := svc.db.QueryRow("SELECT COUNT(*) FROM associations WHERE file_path = ?", p).Scan(&n); err != nil {
+			t.Fatalf("SELECT COUNT for %q: %v", p, err)
+		}
+		return n
+	}
+	if got := countFor(target); got != 0 {
+		t.Fatalf("deleted-path file associations: got %d, want 0 (prefix match must clear them)", got)
+	}
+	if got := countFor(bystander); got != 1 {
+		t.Fatalf("bystander file associations: got %d, want 1 (LIKE wildcards in the path must be escaped)", got)
 	}
 }
 

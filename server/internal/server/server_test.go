@@ -562,6 +562,85 @@ func TestPprofEnabledViaConfig(t *testing.T) {
 	}
 }
 
+// newPprofTestServer boots a real Server via New(cfg) with pprof enabled
+// (Debug.Pprof=true) and the given bearer token ("" = open mode), mirroring
+// newAuthTestServer. Built for the Phase 9 (L-2) pprof token-gate tests.
+func newPprofTestServer(t *testing.T, token string) *Server {
+	t.Helper()
+	cfg := &config.Config{
+		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0, Token: token},
+		Scan:   config.ScanConfig{Roots: []string{t.TempDir()}, VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: filepath.Join(t.TempDir(), "thumb"), MaxSize: 64, Format: "jpeg",
+		},
+	}
+	cfg.Debug.Pprof = true
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Stop(); err != nil {
+			t.Logf("Stop: %v", err)
+		}
+	})
+	return s
+}
+
+// TestPprofRequiresTokenInTokenMode is the Phase 9 (L-2) gate: /debug/pprof
+// must additionally be Bearer-gated in token mode. PrivateNetOnly alone is not
+// enough — heap/goroutine profiles can embed secrets, and any LAN device sits
+// on a private IP, so loopback-adjacent clients must present the token too:
+// no token → 401, wrong token → 401, valid token → 200.
+func TestPprofRequiresTokenInTokenMode(t *testing.T) {
+	s := newPprofTestServer(t, "sekrit-token")
+
+	// No token → 401 (auth middleware rejects before the pprof handler).
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.RemoteAddr = "127.0.0.1:1234" // loopback so PrivateNetOnly passes
+	rec := httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /debug/pprof/ without token = %d, want 401", rec.Code)
+	}
+
+	// Wrong token → 401.
+	req = httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	rec = httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /debug/pprof/ with wrong token = %d, want 401", rec.Code)
+	}
+
+	// Valid token → 200 (loopback passes PrivateNetOnly, auth passes, pprof
+	// index responds).
+	req = httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("Authorization", "Bearer sekrit-token")
+	rec = httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /debug/pprof/ with valid token = %d, want 200", rec.Code)
+	}
+}
+
+// TestPprofOpenModeStillPrivateNetOnly pins open-mode semantics for the
+// Phase 9 (L-2) change: with no token configured the auth middleware is a
+// passthrough, so /debug/pprof keeps its previous PrivateNetOnly-only
+// behavior — loopback access still returns 200 without any credentials.
+func TestPprofOpenModeStillPrivateNetOnly(t *testing.T) {
+	s := newPprofTestServer(t, "") // open mode
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	rec := httptest.NewRecorder()
+	s.Echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("open mode loopback GET /debug/pprof/ = %d, want 200", rec.Code)
+	}
+}
+
 // TestRedactMiddleware_TokenRedactedFromLogButVisibleToDownstream verifies
 // the two correctness invariants of the inline redact middleware mounted in
 // registerRoutes (Round 32 Task 5 S2):
