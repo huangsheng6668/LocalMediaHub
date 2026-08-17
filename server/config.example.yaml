@@ -1,10 +1,10 @@
 server:
   host: "0.0.0.0"
   port: 8000
-  # Auth token for admin/system/media API endpoints.
-  # Empty (default) = open mode (any LAN host can access — for trusted home networks only).
-  # Set to a long random string to require `Authorization: Bearer <token>` on protected routes.
-  # Generate one with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+  # Bearer token：留空 = 开放模式（同网段任何人可访问全部 API，仅删除接口受限）。
+  # 强烈建议家用共享 Wi-Fi 下设置长随机串，例如：
+  #   python -c "import secrets; print(secrets.token_urlsafe(32))"
+  # 注意：token 为空时 BLE 通道不可用（Phase 9 起握手需要 token 派生密钥）。
   token: ""
 
 scan:

@@ -27,7 +27,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `security_headers.go` — CSP / XFO / nosniff / Referrer-Policy（**必须在 CORS 之前挂载**）
   - `ratelimit.go` — per-route rate limit（挂在 scan trigger + delete）+ **LRU 容量上限**（默认 4096，防伪造 `X-Forwarded-For` 内存膨胀；确定性淘汰：expired-first → oldest lastSeen → insertion seq）
   - `private_net.go` — 私网/loopback 限制（pprof 用）
-- **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）/ `server/internal/ble/`（**实验性** BLE GATT 控制通道，**server=Central**：`protocol.go` 帧 codec + `central.go`（Scan/Connect/Send 状态机）+ `central_adapter.go`（`bluetooth` build tag）/ `central_adapter_stub.go`（默认构建 fallback）。`/api/v1/ble/scan|connect|send` HTTP handler 在 `internal/server/handler/ble.go`（复用 Bearer Token）。非致命启动，BLE 不可用 server 继续 Wi-Fi/HTTP。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)）
+- **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）/ `server/internal/ble/`（**实验性** BLE GATT 控制通道，**server=Central**：`protocol.go` 帧 codec + `central.go`（Scan/Connect/Send 状态机）+ `central_adapter.go`（`bluetooth` build tag）/ `central_adapter_stub.go`（默认构建 fallback）。`/api/v1/ble/scan|connect|send` HTTP handler 在 `internal/server/handler/ble.go`（复用 Bearer Token；GATT 数据链路 Phase 9 起为 v2 帧认证，密钥从 token 派生）。非致命启动，BLE 不可用 server 继续 Wi-Fi/HTTP。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)）
 - **配置**：`server/config.yaml`（运行时）/ `server/config.example.yaml`（模板）
 
 ### Android (Kotlin / Compose)
@@ -200,6 +200,14 @@ node --test
 - 接受 header（`Authorization: Bearer <token>`）与 query（`?token=`）双 fallback（query 仅为 `<img src>` 这种无法加 header 的场景）
 - **SHA256 + constant-time 比较**，防 timing attack 与 length leakage
 
+### 认证覆盖（Phase 9）
+
+- 媒体读端点（folders / videos / images / texts / search）挂 Bearer auth；空 token 开放模式透传
+
+### BLE 帧认证（Phase 9）
+
+- `server/internal/ble/protocol.go` v2 帧（seq+HMAC）与双 nonce 握手，密钥从 token 派生，两端对称（`BleProtocol.kt`）
+
 ### Books 图片签名 token（Round 32 S2）
 
 `server/internal/service/book_signing.go` + `server/internal/server/handler/books.go`：
@@ -292,4 +300,4 @@ node --test
 
 ## 详细文档
 
-完整索引见 [`docs/INDEX.md`](docs/INDEX.md)：API 端点表 / 关键文件指针 / 历史 spec & plan / 安全 Phase 1-8 总览 / 迁移与升级历史。
+完整索引见 [`docs/INDEX.md`](docs/INDEX.md)：API 端点表 / 关键文件指针 / 历史 spec & plan / 安全 Phase 1-9 总览 / 迁移与升级历史。

@@ -139,7 +139,7 @@
 
 服务端启动时若 `scan.roots` 和 `system.allowed_roots` 均为空且 `scan.auto_detect_roots: false`，**拒绝启动**（fail-safe）。
 
-### Phase 1-8 总览
+### Phase 1-9 总览
 
 | Phase | 主题 | spec 路径 | 状态 |
 |---|---|---|---|
@@ -151,6 +151,7 @@
 | 6 | CI | — | 未启动 |
 | 7 | APK 签名 fail-fast + `allowBackup=false` | `docs/superpowers/specs/2026-07-10-security-phase7-apk-signing-design.md` | 完成 |
 | 8 | 杂项 P2（rate limit / blocked roots / ffmpeg kill on disconnect / sanitize path errors） | `docs/superpowers/specs/2026-07-11-security-phase8-misc-p2-design.md` | 完成 |
+| 9 | 三端审计修复（媒体端点 auth / BodyLimit / 认证失败限速 / 缩略图缓存上限 / BLE HMAC 认证与 GATT 加固 / 杂项 P4） | `docs/superpowers/specs/2026-08-17-security-phase9-tri-end-audit-design.md` | 完成 |
 
 ### 路径校验三件套（`server/internal/service/path.go`）
 
