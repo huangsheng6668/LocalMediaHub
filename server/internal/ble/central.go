@@ -521,7 +521,7 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 	}
 
 	written := 0
-	for _, payload := range chunkPayloads {
+	for i, payload := range chunkPayloads {
 		// Each chunk goes out as a v2 authed frame via sendAuthedFrame: the
 		// seq reservation and the radio write are one critical section (I-1
 		// fix), so concurrent per-request dispatch goroutines always put
@@ -537,6 +537,20 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 			return written, werr
 		}
 		written++
+		if i == len(chunkPayloads)-1 {
+			break
+		}
+		// Real-device finding: back-to-back write-without-response bursts
+		// (a full book manifest is hundreds of chunks) overflow the Android
+		// GATT server's internal queue and drop frames silently — the phone
+		// then never completes reassembly. Pace the stream at ~100 writes/s
+		// (≈20KB/s at the 200-byte chunk cap), which Android absorbs
+		// reliably. Cancellable so a dead ctx does not keep writing.
+		select {
+		case <-ctx.Done():
+			return written, ctx.Err()
+		case <-time.After(jsonChunkWriteInterval):
+		}
 	}
 	return written, nil
 }
@@ -551,6 +565,12 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 // perceived connect latency once a client actually shows up (the loop exits the
 // retry path on the first successful WaitNotify).
 const apiListenerRetryBackoff = 1 * time.Second
+
+// jsonChunkWriteInterval paces ServeApiRequest's chunk stream: back-to-back
+// write-without-response bursts overflow the Android GATT server's queue and
+// drop frames silently (real-device Phase 9 finding — a full book manifest
+// never reassembled). ~100 writes/s ≈ 20KB/s at the 200-byte chunk cap.
+const jsonChunkWriteInterval = 10 * time.Millisecond
 
 // RunApiListener is the long-lived CMD_API_REQ dispatcher mandated by spec
 // §3.1. It loops over the scanner's one-shot WaitNotify, decodes each notified

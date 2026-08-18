@@ -278,6 +278,10 @@ class BleTransportFallback(
      *   `frameTimeoutMs * maxAttempts` to mirror the engine's own retry
      *   budget; coerce to at least one [frameTimeoutMs] so a misconfigured
      *   small `maxAttempts` still leaves room for at least one frame.
+     *   Real-device note: that mirror value (20s) proved too small for full
+     *   book JSON manifests, so production defaults to the generous
+     *   [DEFAULT_FETCH_TOTAL_TIMEOUT_MS] backstop — the per-frame stall
+     *   machinery is the real give-up signal.
      * @return the reassembled chunk bytes decoded as a UTF-8 string, or null
      *   on timeout / dispatch failure / incomplete buffer.
      */
@@ -285,7 +289,7 @@ class BleTransportFallback(
         @Suppress("UNUSED_PARAMETER") endpoint: Byte,
         @Suppress("UNUSED_PARAMETER") path: String = "",
         @Suppress("UNUSED_PARAMETER") index: Int = 0,
-        timeoutMs: Long = (frameTimeoutMs * maxAttempts).coerceAtLeast(frameTimeoutMs),
+        timeoutMs: Long = DEFAULT_FETCH_TOTAL_TIMEOUT_MS,
         dispatch: () -> Unit = {},
     ): String? {
         val bytes = fetchBytes(timeoutMs, dispatch) ?: return null
@@ -396,6 +400,19 @@ class BleTransportFallback(
         // rises from 9s (3s×3) to 20s (5s×4).
         private const val DEFAULT_FRAME_TIMEOUT_MS = 5_000L
         private const val DEFAULT_MAX_ATTEMPTS = 4
+
+        /**
+         * Real-device Phase 9 finding: opening a book pulls the FULL book
+         * JSON (chapter manifest included) — tens to hundreds of KB, i.e.
+         * hundreds of 200-byte chunks. The old total budget of
+         * frameTimeout×attempts (20s) guaranteed a timeout for large
+         * manifests before the first byte could be rendered. The total
+         * budget is now a generous backstop; the REAL give-up signal is the
+         * per-frame stall machinery above (maxAttempts consecutive
+         * frameTimeout gaps with no progress), which still fails a genuinely
+         * dead stream after ~20s of silence.
+         */
+        const val DEFAULT_FETCH_TOTAL_TIMEOUT_MS = 60_000L
 
         /**
          * Phase 9 (M-9): hard ceiling on the bytes a single reassembled
