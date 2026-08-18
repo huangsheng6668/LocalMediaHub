@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
@@ -108,6 +109,14 @@ class MediaRepositoryFailoverTest {
         /** PC → phone data seq, strictly increasing per connection. */
         private val pcSeq = java.util.concurrent.atomic.AtomicLong(0)
 
+        /**
+         * Per-request response cursor: each CMD_API_REQ consumes ONE queued
+         * payload (in order). Replaying the whole list per request would make
+         * consecutive segment fetches (segmented-chapter streaming) receive
+         * segment 0 again.
+         */
+        private val respIdx = java.util.concurrent.atomic.AtomicInteger(0)
+
         override fun startAdvertising() { advertising = true }
         override fun stopAdvertising() { advertising = false }
         override fun setOnAdvertisingStarted(cb: (Boolean) -> Unit) {}
@@ -170,14 +179,16 @@ class MediaRepositoryFailoverTest {
             val p = authed.payload
             if (p.isEmpty() || p[0] != BleProtocol.CMD_API_REQ) return true
             // Minimum header = CmdID(1) + Endpoint(1) + PathLen(1) + Index(2) = 5
-            // bytes (path may be empty).
+            // bytes (path may be empty). An optional trailing Index2 (2B BE,
+            // the segmented-chapter block offset) may follow the legacy
+            // layout — mirroring Go's DecodeApiReqPayload tolerance.
             require(p.size >= 5) {
                 "api req payload too short: ${p.size}"
             }
             val endpoint = p[1]
             val pathLen = p[2].toInt() and 0xFF
-            require(p.size == 3 + pathLen + 2) {
-                "api req PathLen=$pathLen but payload has ${p.size - 5} path bytes"
+            require(p.size == 3 + pathLen + 2 || p.size == 3 + pathLen + 4) {
+                "api req PathLen=$pathLen but payload size ${p.size} fits neither legacy nor index2 layout"
             }
             val decodedPath = String(p, 3, pathLen, Charsets.UTF_8)
             val indexOff = 3 + pathLen
@@ -195,18 +206,17 @@ class MediaRepositoryFailoverTest {
             require(decodedIndex in 0..0xFFFF) {
                 "decoded index out of uint16 range: $decodedIndex"
             }
-            responsePayloads.forEach { chunk ->
-                scope.launch {
-                    delay(chunkDelayMs)
-                    // Task 10: the peripheral seam is raw pass-through now, so
-                    // v2 authed frames ride the SAME cb the handshake used —
-                    // exactly the bytes a real bonded Central would write.
-                    cb?.invoke(
-                        BleProtocol.encodeAuthedFrame(
-                            chunk, pcSeq.getAndIncrement().toULong(), authKey,
-                        ),
-                    )
-                }
+            val chunk = responsePayloads.getOrNull(respIdx.getAndIncrement()) ?: return true
+            scope.launch {
+                delay(chunkDelayMs)
+                // Task 10: the peripheral seam is raw pass-through now, so
+                // v2 authed frames ride the SAME cb the handshake used —
+                // exactly the bytes a real bonded Central would write.
+                cb?.invoke(
+                    BleProtocol.encodeAuthedFrame(
+                        chunk, pcSeq.getAndIncrement().toULong(), authKey,
+                    ),
+                )
             }
             return true
         }
@@ -311,6 +321,39 @@ class MediaRepositoryFailoverTest {
             repo.isBleDegraded.value)
     }
 
+    /**
+     * Segmented degraded reading: getBookChapter with onAppend returns the
+     * FIRST segment synchronously (fast open), then streams the remaining
+     * segments in appendScope, invoking onAppend per segment.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun segmentedChapterStreamsRemainingBlocksInBackground() = runTest {
+        val seg0 = """{"offset":0,"total":2,"blocks":[{"type":"text","value":"part1"}]}"""
+        val seg1 = """{"offset":1,"total":2,"blocks":[{"type":"text","value":"part2"}]}"""
+        val payloads = listOf(
+            chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = seg0.toByteArray()),
+            chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = seg1.toByteArray()),
+        )
+        val repo = repoWithBle(
+            this, MutableStateFlow(BleConnState.CONNECTED), payloads,
+            expectedEndpoint = BleProtocol.ENDPOINT_BOOK_CHAPTER_SEGMENT,
+        )
+        val appended = mutableListOf<String>()
+        val result = repo.getBookChapter(
+            path = "/book.txt", index = 0,
+            onAppend = { more -> more.forEach { appended.add(it.value ?: "") } },
+            appendScope = this,
+        )
+        assertTrue("expected Success from segmented BLE failover, got $result",
+            result is NetworkResult.Success)
+        assertEquals("part1", (result as NetworkResult.Success).data.blocks.single().value)
+        // Let the background continuation loop deliver segment 1.
+        advanceUntilIdle()
+        assertEquals(listOf("part2"), appended)
+        assertTrue(repo.isBleDegraded.value)
+    }
+
     @Test
     fun doesNotFailOverWhenBleDisconnected() = runTest {
         val json = "[{\"type\":\"text\",\"value\":\"ble-body\"}]".toByteArray(Charsets.UTF_8)
@@ -378,10 +421,10 @@ class MediaRepositoryFailoverTest {
     @Test
     fun bleDegradedEvents_emitsOncePerBleServedChapter() = runTest {
         val json = "[{\"type\":\"text\",\"value\":\"ble-body\"}]".toByteArray(Charsets.UTF_8)
-        // SimulatingPeripheralManager replays the same payload list on every
-        // notify; BleTransportFallback.reset() between cycles makes each fetch
-        // independent, so a single-chunk list suffices for both fetches.
+        // SimulatingPeripheralManager consumes ONE queued payload per notify,
+        // so both fetches get their own (identical) response.
         val singleChapterPayloads = listOf(
+            chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json),
             chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json),
         )
         val repo = repoWithBle(this, MutableStateFlow(BleConnState.CONNECTED), singleChapterPayloads)

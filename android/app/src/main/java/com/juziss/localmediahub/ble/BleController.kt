@@ -460,13 +460,15 @@ class BleController @Inject constructor(
      * @param index pagination / chapter index. Serialized uint16 big-endian;
      *   negative values are programmer error and masked to their low 16 bits.
      */
-    fun requestApi(endpoint: Byte, path: String, index: Int): Boolean {
+    fun requestApi(endpoint: Byte, path: String, index: Int, index2: Int = 0): Boolean {
         val pathBytes = path.toByteArray(Charsets.UTF_8)
         // PathLen is a single byte (max 255); a longer path cannot be encoded
         // without truncation, which would make the server fetch a wrong
         // resource. Match the Go encoder's ErrPathTooLong rejection: drop.
         if (pathBytes.size > 0xFF) return false
-        val payload = ByteArray(1 + 1 + 1 + pathBytes.size + 2)
+        // Trailing uint16 index2 (block offset for ENDPOINT_BOOK_CHAPTER_
+        // SEGMENT; 0 otherwise). Legacy Go decoders read it as index2=0.
+        val payload = ByteArray(1 + 1 + 1 + pathBytes.size + 2 + 2)
         var p = 0
         payload[p++] = BleProtocol.CMD_API_REQ
         payload[p++] = endpoint
@@ -477,6 +479,8 @@ class BleController @Inject constructor(
         // and are masked to their low 16 bits.
         payload[p++] = ((index shr 8) and 0xFF).toByte()
         payload[p++] = (index and 0xFF).toByte()
+        payload[p++] = ((index2 shr 8) and 0xFF).toByte()
+        payload[p++] = (index2 and 0xFF).toByte()
         synchronized(authLock) {
             if (!authenticated) return false
             return notifyAuthedFrameLocked(payload)

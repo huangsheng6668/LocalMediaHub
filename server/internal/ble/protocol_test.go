@@ -77,7 +77,7 @@ func TestApiReqProtocolFraming(t *testing.T) {
 	if frame[0] != 0x01 {
 		t.Fatalf("expected version 1, got %d", frame[0])
 	}
-	endpoint, path, idx, err := DecodeApiReqPayload(frame[3:])
+	endpoint, path, idx, _, err := DecodeApiReqPayload(frame[3:])
 	if err != nil || endpoint != EndpointBookChapter || path != "/books/test.txt" || idx != 1 {
 		t.Fatalf("decode failed endpoint=%x path=%s idx=%d err=%v", endpoint, path, idx, err)
 	}
@@ -106,7 +106,7 @@ func TestApiReqFramingAllEndpoints(t *testing.T) {
 			if payload[0] != byte(CmdApiReq) {
 				t.Fatalf("cmdID=%x want %x", payload[0], CmdApiReq)
 			}
-			ep, path, idx, err := DecodeApiReqPayload(payload)
+			ep, path, idx, _, err := DecodeApiReqPayload(payload)
 			if err != nil {
 				t.Fatalf("decode err=%v", err)
 			}
@@ -296,5 +296,22 @@ func TestAuthChallengeResponsePayload(t *testing.T) {
 	rn, rm, err := DecodeAuthResponsePayload(resp)
 	if err != nil || !bytes.Equal(rn, nonce) || !hmac.Equal(rm, mac) {
 		t.Fatalf("response payload broken: %v", err)
+	}
+}
+
+func TestApiReqSegmentPayloadIndex2RoundTrip(t *testing.T) {
+	payload, err := EncodeApiReqSegmentPayload(EndpointBookChapterSegment, "/books/novel.txt", 3, 456)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	ep, path, idx, idx2, derr := DecodeApiReqPayload(payload)
+	if derr != nil || ep != EndpointBookChapterSegment || path != "/books/novel.txt" || idx != 3 || idx2 != 456 {
+		t.Fatalf("round trip: %v %q %d %d %v", ep, path, idx, idx2, derr)
+	}
+	// Legacy payloads (no trailing field) decode with index2 = 0.
+	legacy, _ := EncodeApiReqPayload(EndpointBookChapter, "/b.txt", 7)
+	_, _, _, legacyIdx2, lerr := DecodeApiReqPayload(legacy)
+	if lerr != nil || legacyIdx2 != 0 {
+		t.Fatalf("legacy decode must yield index2=0: %d %v", legacyIdx2, lerr)
 	}
 }

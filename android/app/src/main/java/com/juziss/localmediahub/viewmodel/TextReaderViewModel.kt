@@ -171,7 +171,11 @@ class TextReaderViewModel @Inject constructor(
         _chromeVisible.value = !_readerSettings.value.immersiveMode
     }
 
-    private suspend fun fetchBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> {
+    private suspend fun fetchBookChapter(
+        path: String,
+        index: Int,
+        onAppend: ((List<com.juziss.localmediahub.data.Block>) -> Unit)? = null,
+    ): NetworkResult<BookChapterContent> {
         val b = _book.value
         val localPath = activeLocalPath
         if (isLocalMode || localPath != null) {
@@ -183,7 +187,12 @@ class TextReaderViewModel @Inject constructor(
                 }
             }
         }
-        val r = repo.getBookChapter(path, index)
+        // Segmented BLE degraded reading: appendScope ties the background
+        // segment loop to viewModelScope (chapter switch / VM clear cancels
+        // it); onAppend updates BOTH render states below, guarded by the
+        // chapter index so a stale in-flight segment cannot pollute the
+        // next chapter.
+        val r = repo.getBookChapter(path, index, onAppend = onAppend, appendScope = viewModelScope)
         if (r is NetworkResult.Error && localPath != null && b != null) {
             val localRes = localBookRepo.getLocalBookChapter(localPath, b, index)
             if (localRes is NetworkResult.Success<BookChapterContent>) {
@@ -191,6 +200,23 @@ class TextReaderViewModel @Inject constructor(
             }
         }
         return r
+    }
+
+    /**
+     * Appends a late-arriving BLE chapter segment to both render states
+     * (chapter mode's block list and scroll mode's chapter entry). Called
+     * from the repository's background segment loop.
+     */
+    private fun appendChapterBlocks(index: Int, more: List<com.juziss.localmediahub.data.Block>) {
+        if (_currentIndex.value != index || more.isEmpty()) return
+        _chapterBlocks.value = _chapterBlocks.value + more
+        _scrollChapters.value = _scrollChapters.value.map { ch ->
+            if (ch.chapterIndex == index) {
+                ch.copy(blocks = ch.blocks + more)
+            } else {
+                ch
+            }
+        }
     }
 
     /**
@@ -203,7 +229,9 @@ class TextReaderViewModel @Inject constructor(
         _isLoading.value = true
         _error.value = null
         var success = false
-        when (val r = fetchBookChapter(b.path, index)) {
+        when (val r = fetchBookChapter(b.path, index) { more ->
+            appendChapterBlocks(index, more)
+        }) {
             is NetworkResult.Success<BookChapterContent> -> {
                 _currentIndex.value = index
                 _chapterBlocks.value = r.data.blocks

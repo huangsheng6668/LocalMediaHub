@@ -74,7 +74,7 @@ class TextReaderViewModelReaderTest {
         coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
         val repo = mockk<MediaRepository>(relaxed = true)
         coEvery { repo.getBookInfo(any()) } returns NetworkResult.Success(fakeBook())
-        coEvery { repo.getBookChapter(any(), any()) } returns
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
             NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
 
         val vm = createVm(repo, store)
@@ -124,7 +124,7 @@ class TextReaderViewModelReaderTest {
         coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
         val repo = mockk<MediaRepository>(relaxed = true)
         coEvery { repo.getBookInfo(any()) } returns NetworkResult.Success(fakeBook())
-        coEvery { repo.getBookChapter(any(), any()) } returns
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
             NetworkResult.Success(
                 BookChapterContent("C0", listOf(Block(type = "text", value = "preview")))
             )
@@ -153,7 +153,7 @@ class TextReaderViewModelReaderTest {
         coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
         val repo = mockk<MediaRepository>(relaxed = true)
         coEvery { repo.getBookInfo(any()) } returns NetworkResult.Success(fakeBook())
-        coEvery { repo.getBookChapter(any(), any()) } returns
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
             NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "p"))))
         val vm = createVm(repo, store)
         vm.loadBook("/b.txt")
@@ -178,7 +178,7 @@ class TextReaderViewModelReaderTest {
         coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
         val repo = mockk<MediaRepository>(relaxed = true)
         coEvery { repo.getBookInfo(any()) } returns NetworkResult.Success(fakeBook())
-        coEvery { repo.getBookChapter(any(), any()) } returns
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
             NetworkResult.Success(
                 BookChapterContent(
                     "C0",
@@ -207,7 +207,7 @@ class TextReaderViewModelReaderTest {
             flowOf(ReaderSettings(immersiveMode = true))
         val repo = mockk<MediaRepository>(relaxed = true)
         coEvery { repo.getBookInfo(any()) } returns NetworkResult.Success(fakeBook())
-        coEvery { repo.getBookChapter(any(), any()) } returns
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
             NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
 
         val vm = createVm(repo, store)

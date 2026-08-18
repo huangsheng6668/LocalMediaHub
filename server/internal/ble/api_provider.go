@@ -70,12 +70,12 @@ func newBleApiProvider(cfg *config.Config, books bookService) ApiProvider {
 	return &bleApiProvider{cfg: cfg, books: books}
 }
 
-// HandleBleRequest routes the decoded (endpoint, path, index) to the matching
-// data source and returns the marshalled JSON body. Unknown endpoints yield
-// ErrUnknownEndpoint; provider-internal errors (path validation failures, I/O
-// errors, parser errors) are surfaced unchanged for ServeApiRequest to return
-// to the listener.
-func (p *bleApiProvider) HandleBleRequest(ctx context.Context, endpoint byte, path string, index int) ([]byte, error) {
+// HandleBleRequest routes the decoded (endpoint, path, index, index2) to the
+// matching data source and returns the marshalled JSON body. Unknown endpoints
+// yield ErrUnknownEndpoint; provider-internal errors (path validation
+// failures, I/O errors, parser errors) are surfaced unchanged for
+// ServeApiRequest to return to the listener.
+func (p *bleApiProvider) HandleBleRequest(ctx context.Context, endpoint byte, path string, index, index2 int) ([]byte, error) {
 	switch endpoint {
 	case EndpointBookChapter:
 		resolved, err := p.validateBookPath(path)
@@ -87,6 +87,16 @@ func (p *bleApiProvider) HandleBleRequest(ctx context.Context, endpoint byte, pa
 			return nil, err
 		}
 		return json.Marshal(blocks)
+	case EndpointBookChapterSegment:
+		resolved, err := p.validateBookPath(path)
+		if err != nil {
+			return nil, err
+		}
+		blocks, err := p.books.GetChapterBlocks(ctx, resolved, index, "")
+		if err != nil {
+			return nil, err
+		}
+		return marshalChapterSegment(blocks, index2)
 	case EndpointFolders:
 		folders := make([]models.Folder, 0)
 		for _, root := range p.cfg.Scan.GetRoots() {
@@ -266,4 +276,56 @@ func classifyByExts(ext string, video, image, text map[string]bool) string {
 	default:
 		return ""
 	}
+}
+
+// chapterSegmentBudgetBytes is the target JSON size of one
+// EndpointBookChapterSegment response (~2s of streaming at the MTU-sized
+// chunk throughput). A chapter larger than this is delivered in multiple
+// segments; the reader renders segment 0 immediately and streams the rest.
+const chapterSegmentBudgetBytes = 180 * 1024
+
+// chapterSegmentResponse is the wire wrapper for EndpointBookChapterSegment.
+// The reader uses Total to know when the chapter is complete and Offset to
+// request the next segment.
+type chapterSegmentResponse struct {
+	Offset int                `json:"offset"`
+	Total  int                `json:"total"`
+	Blocks []bookparser.Block `json:"blocks"`
+}
+
+// marshalChapterSegment slices blocks at blockOffset by a byte budget and
+// wraps the slice with its bookkeeping. Deterministic for a given parsed
+// chapter (the same parse always yields the same blocks), so consecutive
+// segment requests at growing offsets stitch back into the full chapter.
+func marshalChapterSegment(blocks []bookparser.Block, blockOffset int) ([]byte, error) {
+	// Out-of-range offsets (uint16 can't be negative; a stale offset past a
+	// chapter's end after a re-parse) clamp to an empty tail segment — the
+	// reader sees empty blocks plus the true Total and stops cleanly instead
+	// of erroring the whole stream.
+	if blockOffset > len(blocks) {
+		blockOffset = len(blocks)
+	}
+	// Estimate each block's marshalled size from its text/src payload; the
+	// JSON envelope adds ~30 stable bytes per block, folded into the budget
+	// slop. This avoids marshalling a 3MB chapter once just to slice it.
+	end := blockOffset
+	budget := 0
+	for end < len(blocks) {
+		b := blocks[end]
+		size := len(b.Value) + len(b.Src) + 48
+		if end > blockOffset && budget+size > chapterSegmentBudgetBytes {
+			break
+		}
+		budget += size
+		end++
+	}
+	seg := chapterSegmentResponse{
+		Offset: blockOffset,
+		Total:  len(blocks),
+		Blocks: blocks[blockOffset:end],
+	}
+	if seg.Blocks == nil {
+		seg.Blocks = []bookparser.Block{}
+	}
+	return json.Marshal(seg)
 }

@@ -54,7 +54,7 @@ type jsonBlockProvider struct {
 	}
 }
 
-func (p *jsonBlockProvider) HandleBleRequest(_ context.Context, endpoint byte, path string, index int) ([]byte, error) {
+func (p *jsonBlockProvider) HandleBleRequest(_ context.Context, endpoint byte, path string, index, _ int) ([]byte, error) {
 	p.last.ep = endpoint
 	p.last.path = path
 	p.last.idx = index

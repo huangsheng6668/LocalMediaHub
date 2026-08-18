@@ -11,6 +11,8 @@ import (
 
 	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/service/bookparser"
+	"encoding/json"
+	"strings"
 )
 
 // stubApiProvider is a minimal ApiProvider for unit testing the routing layer
@@ -26,7 +28,7 @@ type stubApiProvider struct {
 	err      error
 }
 
-func (s *stubApiProvider) HandleBleRequest(_ context.Context, endpoint byte, path string, index int) ([]byte, error) {
+func (s *stubApiProvider) HandleBleRequest(_ context.Context, endpoint byte, path string, index, _ int) ([]byte, error) {
 	s.calls = append(s.calls, struct {
 		ep   byte
 		path string
@@ -355,7 +357,7 @@ func TestBleApiProviderRejectsBookPathOutsideRoots(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			p, rec := newBleProviderWithBooks(t, nil)
-			_, err := p.HandleBleRequest(context.Background(), tc.endpoint, tc.path, tc.index)
+			_, err := p.HandleBleRequest(context.Background(), tc.endpoint, tc.path, tc.index, 0)
 			if err == nil {
 				t.Fatalf("expected path-traversal rejection for %q, got nil error", tc.path)
 			}
@@ -390,7 +392,7 @@ func TestBleApiProviderRejectsBrowsePathOutsideRoots(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body, err := p.HandleBleRequest(context.Background(), EndpointBrowseFolder, tc.path, 0)
+			body, err := p.HandleBleRequest(context.Background(), EndpointBrowseFolder, tc.path, 0, 0)
 			if err == nil {
 				t.Fatalf("expected browse rejection for %q, got a listing (body=%q)", tc.path, string(body))
 			}
@@ -448,11 +450,59 @@ func TestBleApiProviderRejectsBookPathWrongExtension(t *testing.T) {
 
 	// An absolute path inside root with a non-text extension. The validation
 	// gate must reject it before BookService is consulted.
-	_, err := p.HandleBleRequest(context.Background(), EndpointBookInfo, root+"/secret.bin", 0)
+	_, err := p.HandleBleRequest(context.Background(), EndpointBookInfo, root+"/secret.bin", 0, 0)
 	if err == nil {
 		t.Fatalf("expected extension-rejection, got nil error")
 	}
 	if rec.calls != 0 {
 		t.Fatalf("BookService must NOT be called for rejected extension; got %d call(s)", rec.calls)
+	}
+}
+
+func TestMarshalChapterSegmentSlicesByBudget(t *testing.T) {
+	// 4000 blocks x 100B text each = ~400KB total; budget is 180KB, so the
+	// chapter must split across multiple segments that stitch back exactly.
+	var blocks []bookparser.Block
+	for i := 0; i < 4000; i++ {
+		blocks = append(blocks, bookparser.Block{Type: "text", Value: strings.Repeat("x", 100)})
+	}
+	var got []bookparser.Block
+	off := 0
+	segments := 0
+	for {
+		raw, err := marshalChapterSegment(blocks, off)
+		if err != nil {
+			t.Fatalf("segment %d: %v", segments, err)
+		}
+		var resp chapterSegmentResponse
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("segment %d unmarshal: %v", segments, err)
+		}
+		if resp.Offset != off || resp.Total != len(blocks) {
+			t.Fatalf("segment %d bookkeeping: offset=%d want %d, total=%d want %d",
+				segments, resp.Offset, off, resp.Total, len(blocks))
+		}
+		got = append(got, resp.Blocks...)
+		off += len(resp.Blocks)
+		segments++
+		if len(resp.Blocks) == 0 {
+			break
+		}
+		if segments > 10 {
+			t.Fatal("runaway segment loop")
+		}
+	}
+	if len(got) != len(blocks) {
+		t.Fatalf("stitched %d blocks, want %d", len(got), len(blocks))
+	}
+	// Out-of-range offset clamps to an empty tail, not an error.
+	raw, err := marshalChapterSegment(blocks, len(blocks)+50)
+	if err != nil {
+		t.Fatalf("clamped tail: %v", err)
+	}
+	var tail chapterSegmentResponse
+	_ = json.Unmarshal(raw, &tail)
+	if len(tail.Blocks) != 0 || tail.Total != len(blocks) {
+		t.Fatalf("clamped tail shape: %+v", tail)
 	}
 }

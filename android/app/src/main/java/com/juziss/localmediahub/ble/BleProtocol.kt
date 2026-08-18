@@ -110,6 +110,15 @@ object BleProtocol {
     /** Book metadata API. */
     const val ENDPOINT_BOOK_INFO: Byte = 0x04
 
+    /**
+     * Segmented chapter-blocks API (degraded-reading throughput fix): a
+     * single-chapter txt novel can be megabytes, so the reader pulls the
+     * chapter in ~180KB segments. `index` selects the chapter; `index2`
+     * (the request's trailing uint16) is the BLOCK OFFSET of the segment.
+     * Response shape: {"offset":N,"total":T,"blocks":[...]}.
+     */
+    const val ENDPOINT_BOOK_CHAPTER_SEGMENT: Byte = 0x05
+
     /** Per-chunk payload cap (spec §1.2). Pure advisory; not enforced here. */
     const val MAX_CHUNK_PAYLOAD_BYTES = 200
 

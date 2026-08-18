@@ -520,8 +520,9 @@ class BleControllerTest {
         val index = 7
         val pathBytes = path.toByteArray(Charsets.UTF_8)
 
-        // Hand-build the expected payload exactly as the Go encoder does.
-        val expectedPayload = ByteArray(1 + 1 + 1 + pathBytes.size + 2)
+        // Hand-build the expected payload exactly as the Go encoder does
+        // (plus the trailing index2 field: 0 for legacy endpoints).
+        val expectedPayload = ByteArray(1 + 1 + 1 + pathBytes.size + 2 + 2)
         var q = 0
         expectedPayload[q++] = BleProtocol.CMD_API_REQ               // 0x11
         expectedPayload[q++] = BleProtocol.ENDPOINT_BROWSE_FOLDER    // 0x03
@@ -530,6 +531,8 @@ class BleControllerTest {
         q += pathBytes.size
         expectedPayload[q++] = ((index shr 8) and 0xFF).toByte()     // Index high byte
         expectedPayload[q++] = (index and 0xFF).toByte()             // Index low byte
+        expectedPayload[q++] = 0                                     // Index2 high byte
+        expectedPayload[q++] = 0                                     // Index2 low byte
 
         val notified = controller.requestApi(
             endpoint = BleProtocol.ENDPOINT_BROWSE_FOLDER,
@@ -571,7 +574,9 @@ class BleControllerTest {
         val index = 4
         val pathBytes = path.toByteArray(Charsets.UTF_8)
 
-        val expectedPayload = ByteArray(1 + 1 + 1 + pathBytes.size + 2)
+        // Trailing index2 field (0 for legacy endpoints) is part of the wire
+        // layout since the segmented-chapter endpoint was introduced.
+        val expectedPayload = ByteArray(1 + 1 + 1 + pathBytes.size + 2 + 2)
         var q = 0
         expectedPayload[q++] = BleProtocol.CMD_API_REQ
         expectedPayload[q++] = BleProtocol.ENDPOINT_BOOK_CHAPTER
@@ -580,6 +585,8 @@ class BleControllerTest {
         q += pathBytes.size
         expectedPayload[q++] = ((index shr 8) and 0xFF).toByte()
         expectedPayload[q++] = (index and 0xFF).toByte()
+        expectedPayload[q++] = 0
+        expectedPayload[q++] = 0
 
         val notified = controller.requestApi(
             endpoint = BleProtocol.ENDPOINT_BOOK_CHAPTER,

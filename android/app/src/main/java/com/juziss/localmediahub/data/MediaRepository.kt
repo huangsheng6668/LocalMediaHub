@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -454,7 +455,47 @@ class MediaRepository @Inject constructor(
      * chapter path does NOT reuse the generic [bleFetchOrHttp] — it keeps its
      * own 3-branch try/catch and shares the failover behavior inline.
      */
-    suspend fun getBookChapter(path: String, index: Int): NetworkResult<BookChapterContent> {
+    /**
+     * BLE segment response wrapper (mirrors Go `chapterSegmentResponse`):
+     * the segmented chapter endpoint returns the slice plus bookkeeping so
+     * the reader knows when the chapter is complete and where the next
+     * segment starts.
+     */
+    private data class ChapterSegment(
+        val offset: Int,
+        val total: Int,
+        val blocks: List<Block> = emptyList(),
+    )
+
+    /**
+     * Fetches one chapter segment over the authenticated BLE channel.
+     * Returns null on timeout / reassembly failure / parse failure.
+     */
+    private suspend fun fetchChapterSegmentViaBle(
+        path: String,
+        chapter: Int,
+        blockOffset: Int,
+    ): ChapterSegment? {
+        val json = bleTransportFallback.fetchJson(
+            BleProtocol.ENDPOINT_BOOK_CHAPTER_SEGMENT, path, chapter,
+        ) {
+            bleController.requestApi(
+                BleProtocol.ENDPOINT_BOOK_CHAPTER_SEGMENT, path, chapter, blockOffset,
+            )
+        } ?: return null
+        return try {
+            gson.fromJson(json, ChapterSegment::class.java)
+        } catch (parseErr: Exception) {
+            null
+        }
+    }
+
+    suspend fun getBookChapter(
+        path: String,
+        index: Int,
+        onAppend: ((List<Block>) -> Unit)? = null,
+        appendScope: kotlinx.coroutines.CoroutineScope? = null,
+    ): NetworkResult<BookChapterContent> {
         val url = "$baseUrl/api/v1/books/chapter" +
             "?path=${URLEncoder.encode(path, "UTF-8")}&index=$index"
         return try {
@@ -469,6 +510,32 @@ class MediaRepository @Inject constructor(
             // Transport-level failure: candidate for BLE failover.
             if (bleController.connectionState.value != BleConnState.CONNECTED) {
                 e.toNetworkError()
+            } else if (onAppend != null && appendScope != null) {
+                // Segmented degraded reading: a single-chapter txt novel can
+                // be megabytes, so pull the chapter in ~180KB server-side
+                // segments. Segment 0 is fetched synchronously and returned
+                // (the reader renders within ~2s); the remaining segments
+                // stream in the caller's scope, appending as they land. The
+                // caller's onAppend is expected to guard staleness (chapter
+                // switched mid-stream); scope cancellation stops the loop.
+                val first = fetchChapterSegmentViaBle(path, index, 0)
+                    ?: return e.toNetworkError()
+                var offset = first.blocks.size
+                if (offset < first.total) {
+                    appendScope.launch {
+                        while (offset < first.total &&
+                            bleController.connectionState.value == BleConnState.CONNECTED
+                        ) {
+                            val seg = fetchChapterSegmentViaBle(path, index, offset) ?: break
+                            if (seg.blocks.isEmpty()) break
+                            onAppend(seg.blocks)
+                            offset += seg.blocks.size
+                        }
+                    }
+                }
+                setBleDegraded(true)
+                _bleDegradedEvents.tryEmit(Unit)
+                NetworkResult.Success(BookChapterContent(title = "", blocks = first.blocks))
             } else {
                 val json = bleTransportFallback.fetchJson(
                     BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index,

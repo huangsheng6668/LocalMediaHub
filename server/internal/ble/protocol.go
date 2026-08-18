@@ -76,6 +76,13 @@ const (
 	EndpointBrowseFolder byte = 0x03
 	// EndpointBookInfo routes to the book metadata API. path is the book file.
 	EndpointBookInfo byte = 0x04
+	// EndpointBookChapterSegment routes to the SEGMENTED chapter-blocks API
+	// (real-device degraded-reading throughput fix): a single-chapter txt
+	// novel can be megabytes, so the reader pulls the chapter in ~180KB
+	// segments — segment 0 renders immediately, the rest stream in behind.
+	// path is the book file, index is the chapter, and the optional trailing
+	// index2 field (uint16 BE) is the BLOCK OFFSET of the requested segment.
+	EndpointBookChapterSegment byte = 0x05
 )
 
 // API-request / chunk transport header sizes (excluding the variable Path /
@@ -292,27 +299,46 @@ func EncodeApiReqPayload(endpoint byte, path string, index int) ([]byte, error) 
 	return out, nil
 }
 
+// EncodeApiReqSegmentPayload builds a CMD_API_REQ payload for endpoints that
+// take a second uint16 operand (EndpointBookChapterSegment's block offset):
+//   [CmdID 1B][Endpoint 1B][PathLen 1B][Path Bytes][Index 2B BE][Index2 2B BE]
+func EncodeApiReqSegmentPayload(endpoint byte, path string, index, index2 int) ([]byte, error) {
+	base, err := EncodeApiReqPayload(endpoint, path, index)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, len(base)+2)
+	copy(out, base)
+	binary.BigEndian.PutUint16(out[len(base):], uint16(index2))
+	return out, nil
+}
+
 // DecodeApiReqPayload parses a CMD_API_REQ payload (the bytes after the
-// 3-byte physical header). Returns endpoint, path, index, or an error if the
-// payload is malformed.
+// 3-byte physical header). Returns endpoint, path, index, index2 (block
+// offset for EndpointBookChapterSegment; 0 when the trailing field is
+// absent, i.e. for every legacy endpoint), or an error if the payload is
+// malformed.
 //
 // Contract: on ANY error path the returned values are zero values. The caller
 // therefore MUST treat a non-nil error as terminal.
-func DecodeApiReqPayload(payload []byte) (endpoint byte, path string, index int, err error) {
+func DecodeApiReqPayload(payload []byte) (endpoint byte, path string, index, index2 int, err error) {
 	if len(payload) < apiReqFixedOverhead {
-		return 0, "", 0, ErrTruncated
+		return 0, "", 0, 0, ErrTruncated
 	}
 	if CmdID(payload[0]) != CmdApiReq {
-		return 0, "", 0, ErrBadCmdID
+		return 0, "", 0, 0, ErrBadCmdID
 	}
 	endpoint = payload[1]
 	pathLen := int(payload[2])
 	if len(payload) < apiReqFixedOverhead+pathLen {
-		return 0, "", 0, ErrTruncated
+		return 0, "", 0, 0, ErrTruncated
 	}
 	path = string(payload[3 : 3+pathLen])
 	index = int(binary.BigEndian.Uint16(payload[3+pathLen : 5+pathLen]))
-	return endpoint, path, index, nil
+	if len(payload) >= apiReqFixedOverhead+pathLen+2 {
+		index2 = int(binary.BigEndian.Uint16(payload[5+pathLen : 7+pathLen]))
+	}
+	return endpoint, path, index, index2, nil
 }
 
 // EncodeJsonChunkPayload builds the payload for CMD_JSON_CHUNK (spec §2.2):

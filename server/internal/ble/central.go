@@ -160,7 +160,9 @@ type Central struct {
 // time dependency on package service (avoids a cycle and keeps the listener
 // unit-testable with a stub).
 type ApiProvider interface {
-	HandleBleRequest(ctx context.Context, endpoint byte, path string, index int) ([]byte, error)
+	// index2 is the optional trailing operand (block offset for
+	// EndpointBookChapterSegment; 0 for legacy endpoints).
+	HandleBleRequest(ctx context.Context, endpoint byte, path string, index, index2 int) ([]byte, error)
 }
 
 func NewCentral(s CentralScanner) *Central {
@@ -491,7 +493,7 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 	// DecodeApiReqPayload's contract: any malformed payload (short, or leading
 	// byte != CmdApiReq) yields a non-nil error with zero return values. The
 	// error return below is the sole validation gate.
-	endpoint, path, index, err := DecodeApiReqPayload(notifyPayload)
+	endpoint, path, index, index2, err := DecodeApiReqPayload(notifyPayload)
 	if err != nil {
 		return 0, err
 	}
@@ -514,7 +516,7 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 		return 0, ErrNotAuthenticated
 	}
 
-	jsonBytes, err := provider.HandleBleRequest(ctx, endpoint, path, index)
+	jsonBytes, err := provider.HandleBleRequest(ctx, endpoint, path, index, index2)
 	if err != nil {
 		return 0, err
 	}
