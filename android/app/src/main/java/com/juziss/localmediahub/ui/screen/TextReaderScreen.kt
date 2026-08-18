@@ -169,6 +169,7 @@ fun TextReaderScreen(
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
     // ===== 分章模式翻页控制器（Task 10/11） =====
     val totalChaptersCount = book?.chapters?.size ?: 1
@@ -199,9 +200,14 @@ fun TextReaderScreen(
             val oldBlocks = blocks
             val oldIdx = idx // 必须在 loadChapter 前捕获，避免 overlay 标题显示为新章标题
             val target = pageTurnController.turnTo(direction) { t ->
-                viewModel.loadChapter(t, resetScroll = true)
+                val ok = viewModel.loadChapter(t, resetScroll = true)
+                if (ok) {
+                    listState.scrollToItem(0, 0)
+                }
+                ok
             }
             if (target == null) return@launch
+            listState.scrollToItem(0, 0)
             when (style) {
                 PageTurnStyle.NONE -> Unit // blocks 已刷新，直接显示新章
                 PageTurnStyle.COVER, PageTurnStyle.DRAG -> {
@@ -221,7 +227,6 @@ fun TextReaderScreen(
         }
     }
 
-    val listState = rememberLazyListState()
     var showSettings by remember { mutableStateOf(false) }
     var tocTab by remember { mutableStateOf(0) } // 0 = 目录, 1 = 书签
 
@@ -568,11 +573,11 @@ fun TextReaderScreen(
                 }
             }
 
-            // 分章模式：blocks 变化时(切章)自动滚动到顶部,
-            // 解决 nextChapter/prevChapter 异步竞争导致新章节停在旧滚动位置的问题。
-            LaunchedEffect(blocks) {
-                if (!isScrollMode && blocks.isNotEmpty()) {
-                    listState.scrollToItem(0)
+            // 分章模式：章节变更时自动滚动到顶部,
+            // 解决翻页与切章时停在旧滚动位置的问题。
+            LaunchedEffect(idx, isScrollMode) {
+                if (!isScrollMode) {
+                    listState.scrollToItem(0, 0)
                 }
             }
 
@@ -715,6 +720,7 @@ fun TextReaderScreen(
                                         when (outcome) {
                                             DragOutcome.COMMIT -> scope.launch {
                                                 progress.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
+                                                listState.scrollToItem(0, 0)
                                                 incoming = null
                                                 drag.takenOver = false
                                                 drag.preloaded = false
@@ -993,7 +999,7 @@ private fun ChapterModeContent(
         contentPadding = PaddingValues(vertical = 16.dp),
     ) {
         // item 0: 章节大标题
-        item {
+        item(key = "title_$idx") {
             val chapterTitle = book?.chapters?.getOrNull(idx)?.title ?: ""
             Text(
                 text = chapterTitle,
@@ -1016,7 +1022,10 @@ private fun ChapterModeContent(
             )
         }
 
-        itemsIndexed(blocks) { blockIdx, block ->
+        itemsIndexed(
+            items = blocks,
+            key = { blockIdx, _ -> "ch_${idx}_$blockIdx" },
+        ) { blockIdx, block ->
             BlockItem(
                 block = block,
                 blockIdx = blockIdx,
@@ -1031,7 +1040,7 @@ private fun ChapterModeContent(
         }
 
         // 末尾 ❖（点击跳下一章）
-        item {
+        item(key = "end_$idx") {
             Text(
                 text = "❖",
                 style = MaterialTheme.typography.titleMedium,

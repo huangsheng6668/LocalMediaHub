@@ -7,6 +7,12 @@ server:
   # 注意：token 为空时 BLE 通道不可用（Phase 9 起握手需要 token 派生密钥）。
   token: ""
 
+  # 零接触配对（默认关闭）：开启后局域网内任何设备可经 POST /api/v1/pair
+  # 免认证获取一次 token，App 在局域网内即可全自动完成 HTTP 认证与 BLE
+  # 握手的密钥配置，无需手动抄 token。这是有意向局域网开放 token 的便利
+  # 开关——仅在首次配对期间打开，手机连上后请改回 false。
+  lan_pairing: false
+
 scan:
   # Media roots. If empty AND system.allowed_roots is empty AND auto_detect_roots
   # is false, the server REFUSES TO START (Phase 3 safety default).

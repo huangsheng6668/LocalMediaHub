@@ -39,10 +39,27 @@ export async function getBookInfo(path) {
     return apiRequest(`/api/v1/books/info?path=${encodeURIComponent(path)}`);
 }
 
+const CHAPTER_CACHE_MAX = 100;
+const chapterCache = new Map();
+
+export function clearChapterCache() {
+    chapterCache.clear();
+}
+
 export async function getBookChapter(path, index) {
-    return apiRequest(
+    const key = `${path}::${index}`;
+    if (chapterCache.has(key)) {
+        return chapterCache.get(key);
+    }
+    const data = await apiRequest(
         `/api/v1/books/chapter?path=${encodeURIComponent(path)}&index=${encodeURIComponent(index)}`
     );
+    if (chapterCache.size >= CHAPTER_CACHE_MAX) {
+        const oldestKey = chapterCache.keys().next().value;
+        chapterCache.delete(oldestKey);
+    }
+    chapterCache.set(key, data);
+    return data;
 }
 
 // getAuthToken exposes the current bearer token so non-fetch consumers (e.g.

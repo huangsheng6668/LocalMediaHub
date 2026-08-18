@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -142,6 +143,10 @@ class ConnectionViewModel @Inject constructor(
                 when (val result = repository.healthCheck()) {
                     is NetworkResult.Success -> {
                         serverConfigStore.saveServerConfig(ip, port)
+                        // Zero-touch pairing: if no token is stored yet and the
+                        // server has lan_pairing enabled, fetch it now so HTTP
+                        // auth AND the BLE handshake key configure themselves.
+                        tryPairIfTokenless()
                         _connectionState.value = ConnectionState.Connected(url)
                     }
                     is NetworkResult.Error -> {
@@ -154,6 +159,24 @@ class ConnectionViewModel @Inject constructor(
                     e.message ?: getApplication<Application>().getString(R.string.error_unknown)
                 )
             }
+        }
+    }
+
+    /**
+     * Zero-touch pairing helper: fetches the bearer token via
+     * POST /api/v1/pair when the stored token is empty and the server opted
+     * into `server.lan_pairing`. Silent by design — a null result (pairing
+     * disabled / unreachable) simply leaves manual token entry as-is.
+     */
+    private suspend fun tryPairIfTokenless() {
+        try {
+            val stored = serverConfigStore.authToken.firstOrNull()
+            if (stored.isNullOrBlank()) {
+                val granted = repository.tryLanPairing() ?: return
+                serverConfigStore.saveAuthToken(granted)
+                serverConfig.setToken(granted)
+            }
+        } catch (_: Exception) {
         }
     }
 

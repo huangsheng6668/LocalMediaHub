@@ -396,6 +396,36 @@ class MediaRepositoryFailoverTest {
         }
     }
 
+    /**
+     * Chapter cache: a revisited chapter (breaker open, complete cache entry)
+     * is served with NO further BLE traffic — only two radio responses are
+     * queued; the third fetch would fail without the cache hit.
+     */
+    @Test
+    fun chapterCacheServesRevisitedChapterWithoutRadioTraffic() = runTest {
+        val json = "[{\"type\":\"text\",\"value\":\"cached-body\"}]".toByteArray(Charsets.UTF_8)
+        val payloads = listOf(
+            chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json),
+            chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json),
+        )
+        val repo = repoWithBle(this, MutableStateFlow(BleConnState.CONNECTED), payloads)
+        com.juziss.localmediahub.ble.BleDegradedState.httpBlockedUntilMs = 0L
+        try {
+            val r1 = repo.getBookChapter(path = "/book.txt", index = 0)
+            assertTrue(r1 is NetworkResult.Success)
+            val r2 = repo.getBookChapter(path = "/book.txt", index = 1)
+            assertTrue(r2 is NetworkResult.Success)
+            // No third queued payload: without the cache this fetch returns
+            // the fallback error; with it, the chapter 0 copy is served.
+            val r3 = repo.getBookChapter(path = "/book.txt", index = 0)
+            assertTrue("revisited chapter must come from the cache, got $r3",
+                r3 is NetworkResult.Success)
+            assertEquals("cached-body", (r3 as NetworkResult.Success).data.blocks.single().value)
+        } finally {
+            com.juziss.localmediahub.ble.BleDegradedState.httpBlockedUntilMs = 0L
+        }
+    }
+
     @Test
     fun doesNotFailOverWhenBleDisconnected() = runTest {
         val json = "[{\"type\":\"text\",\"value\":\"ble-body\"}]".toByteArray(Charsets.UTF_8)

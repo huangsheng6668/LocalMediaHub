@@ -38,6 +38,18 @@ class TextReaderViewModel @Inject constructor(
     private var isLocalMode = false
     private var activeLocalPath: String? = null
 
+    private val chapterCache = object : LinkedHashMap<String, BookChapterContent>(50, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BookChapterContent>?): Boolean {
+            return size > 100
+        }
+    }
+
+    fun clearChapterCache() {
+        synchronized(chapterCache) {
+            chapterCache.clear()
+        }
+    }
+
     private val _book = MutableStateFlow<Book?>(null)
     val book: StateFlow<Book?> = _book.asStateFlow()
 
@@ -45,6 +57,22 @@ class TextReaderViewModel @Inject constructor(
     val currentIndex: StateFlow<Int> = _currentIndex.asStateFlow()
 
     private val _chapterBlocks = MutableStateFlow<List<Block>>(emptyList())
+
+    /**
+     * Wall time of the last scroll-mode list RESET caused by explicit chapter
+     * navigation (resetScroll). Real-device finding: the collapse drops
+     * firstVisibleItemIndex to 0, which the "prepend previous chapter near
+     * list top" effect immediately treats as backward reading — re-loading
+     * the chapter the user just LEFT and snapping the view back to its old
+     * position. The prepend path is suppressed for a short window after
+     * every navigation reset.
+     */
+    private var lastScrollChaptersResetAtMs = 0L
+
+    private companion object {
+        /** How long backward-prepending stays suppressed after navigation. */
+        const val SCROLL_PRELOAD_SUPPRESS_MS = 1_500L
+    }
     val chapterBlocks: StateFlow<List<Block>> = _chapterBlocks.asStateFlow()
 
     private val _scrollChapters = MutableStateFlow<List<com.juziss.localmediahub.data.ScrollModeChapter>>(emptyList())
@@ -176,13 +204,20 @@ class TextReaderViewModel @Inject constructor(
         index: Int,
         onAppend: ((List<com.juziss.localmediahub.data.Block>) -> Unit)? = null,
     ): NetworkResult<BookChapterContent> {
+        val cacheKey = "$path:$index"
+        synchronized(chapterCache) {
+            chapterCache[cacheKey]?.let { return NetworkResult.Success(it) }
+        }
         val b = _book.value
         val localPath = activeLocalPath
         if (isLocalMode || localPath != null) {
             val targetPath = localPath ?: path
             if (b != null) {
                 val localRes = localBookRepo.getLocalBookChapter(targetPath, b, index)
-                if (localRes is NetworkResult.Success<BookChapterContent> || isLocalMode) {
+                if (localRes is NetworkResult.Success<BookChapterContent>) {
+                    synchronized(chapterCache) { chapterCache[cacheKey] = localRes.data }
+                    return localRes
+                } else if (isLocalMode) {
                     return localRes
                 }
             }
@@ -193,9 +228,14 @@ class TextReaderViewModel @Inject constructor(
         // chapter index so a stale in-flight segment cannot pollute the
         // next chapter.
         val r = repo.getBookChapter(path, index, onAppend = onAppend, appendScope = viewModelScope)
+        if (r is NetworkResult.Success<BookChapterContent>) {
+            synchronized(chapterCache) { chapterCache[cacheKey] = r.data }
+            return r
+        }
         if (r is NetworkResult.Error && localPath != null && b != null) {
             val localRes = localBookRepo.getLocalBookChapter(localPath, b, index)
             if (localRes is NetworkResult.Success<BookChapterContent>) {
+                synchronized(chapterCache) { chapterCache[cacheKey] = localRes.data }
                 return localRes
             }
         }
@@ -242,6 +282,9 @@ class TextReaderViewModel @Inject constructor(
                 )
                 if (resetScroll || _scrollChapters.value.isEmpty()) {
                     _scrollChapters.value = listOf(newCh)
+                    if (resetScroll) {
+                        lastScrollChaptersResetAtMs = System.currentTimeMillis()
+                    }
                 } else {
                     val existing = _scrollChapters.value.find { it.chapterIndex == index }
                     if (existing == null) {
@@ -353,6 +396,16 @@ class TextReaderViewModel @Inject constructor(
      * 向前加载单章（顶部触发用）。
      */
     suspend fun loadPreviousChapterForScroll(): Int {
+        // Navigation-reset suppression (see lastScrollChaptersResetAtMs): a
+        // chapter switch collapses the list and parks firstVisibleItemIndex
+        // at 0 — that is NOT backward reading, and prepending the chapter the
+        // user just left (then compensating the scroll) is exactly the
+        // "next chapter opens at the previous position" bug.
+        if (System.currentTimeMillis() - lastScrollChaptersResetAtMs <
+            SCROLL_PRELOAD_SUPPRESS_MS
+        ) {
+            return 0
+        }
         val b = _book.value ?: return 0
         val currentList = _scrollChapters.value
         val firstIdx = currentList.minOfOrNull { it.chapterIndex } ?: _currentIndex.value

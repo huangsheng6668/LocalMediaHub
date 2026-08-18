@@ -34,6 +34,12 @@ type ServerConfig struct {
 	Host  string `yaml:"host" json:"host"`
 	Port  int    `yaml:"port" json:"port"`
 	Token string `yaml:"token,omitempty" json:"token,omitempty"`
+	// LanPairing opts into POST /api/v1/pair: an unauthenticated LAN
+	// requester may fetch the bearer token once (zero-touch app setup —
+	// HTTP auth AND the BLE handshake key both derive from it). This
+	// deliberately exposes the token to the LAN; intended for trusted home
+	// networks during initial pairing, to be switched off afterwards.
+	LanPairing bool `yaml:"lan_pairing" json:"lan_pairing"`
 }
 
 type ScanConfig struct {

@@ -219,3 +219,14 @@ test('DRAG: dispose detaches pointer listeners (no drag handling after dispose)'
     assert.equal(contentEl.querySelector('.text-reader__chapter-section').dataset.chapterIndex, '0');
     teardownJsdom();
 });
+
+test('turnTo resets contentEl.scrollTop to 0 across styles', async () => {
+    for (const style of ['NONE', 'COVER', 'SIMULATION']) {
+        const { contentEl, api } = setup(0, 3, style);
+        contentEl.scrollTop = 1500;
+        await api.turnTo('next');
+        assert.equal(contentEl.scrollTop, 0, `style ${style} should reset scrollTop to 0`);
+        api.dispose();
+        teardownJsdom();
+    }
+});

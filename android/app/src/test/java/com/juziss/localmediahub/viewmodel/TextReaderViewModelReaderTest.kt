@@ -239,4 +239,35 @@ class TextReaderViewModelReaderTest {
         vm.toggleChrome()
         assertFalse(vm.chromeVisible.value)
     }
+
+    @Test
+    fun chapter_caching_avoids_duplicate_repo_calls() = runTest(dispatcher) {
+        val store = mockk<RecentActivityStore>(relaxed = true)
+        coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
+        val repo = mockk<MediaRepository>(relaxed = true)
+        coEvery { repo.getBookInfo(any()) } returns NetworkResult.Success(fakeBook())
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
+            NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body0")))) andThen
+            NetworkResult.Success(BookChapterContent("C1", listOf(Block(type = "text", value = "body1"))))
+
+        val vm = createVm(repo, store)
+        vm.clearChapterCache()
+        dispatcher.scheduler.advanceUntilIdle()
+
+        // First load of chapter 0 calls repo
+        vm.loadBook("/b.txt")
+        dispatcher.scheduler.advanceUntilIdle()
+        coVerify(exactly = 1) { repo.getBookChapter("/b.txt", 0, any(), any()) }
+
+        // Switch to chapter 1
+        vm.loadChapter(1)
+        dispatcher.scheduler.advanceUntilIdle()
+        coVerify(exactly = 1) { repo.getBookChapter("/b.txt", 1, any(), any()) }
+
+        // Switch back to chapter 0 -> served from chapterCache, repo NOT called again
+        vm.loadChapter(0)
+        dispatcher.scheduler.advanceUntilIdle()
+        coVerify(exactly = 1) { repo.getBookChapter("/b.txt", 0, any(), any()) }
+        assertEquals("body0", vm.chapterBlocks.value.firstOrNull()?.value)
+    }
 }

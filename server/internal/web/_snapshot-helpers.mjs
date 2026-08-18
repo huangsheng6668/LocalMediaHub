@@ -39,6 +39,14 @@ export function setupJsdom() {
             removeItem: (k) => { delete store[k]; },
         };
     })();
+    global.sessionStorage = (() => {
+        const store = {};
+        return {
+            getItem: (k) => (k in store ? store[k] : null),
+            setItem: (k, v) => { store[k] = String(v); },
+            removeItem: (k) => { delete store[k]; },
+        };
+    })();
     return { dom, window, document: window.document };
 }
 
@@ -49,4 +57,5 @@ export function teardownJsdom() {
     delete global.requestAnimationFrame;
     delete global.cancelAnimationFrame;
     delete global.localStorage;
+    delete global.sessionStorage;
 }

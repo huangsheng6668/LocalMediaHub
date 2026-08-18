@@ -119,6 +119,65 @@ class MediaRepository @Inject constructor(
         com.juziss.localmediahub.ble.BleDegradedState.httpBlockedUntilMs = 0L
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    //  Chapter cache (real-device degraded-reading finding): revisiting a
+    //  chapter over BLE re-streamed the whole payload — multi-second waits
+    //  for content the app had already downloaded. The cache short-circuits
+    //  ONLY the degraded path (with Wi-Fi alive the HTTP fetch stays
+    //  authoritative and refreshes the entry); segmented BLE fetches append
+    //  into the cached list as segments land, so a revisit mid-stream also
+    //  hits the completed cache.
+    // ════════════════════════════════════════════════════════════════════════
+    private data class ChapterCacheEntry(val total: Int, val blocks: MutableList<Block>)
+
+    private val chapterCacheMu = Any()
+    private val chapterCache =
+        LinkedHashMap<String, ChapterCacheEntry>(32, 0.75f, /*accessOrder=*/true)
+    private var chapterCacheBytes = 0L
+
+    private fun approxChapterBytes(blocks: List<Block>): Long =
+        blocks.sumOf { (it.value?.length ?: 0) + (it.src?.length ?: 0) + 48L }
+
+    private fun chapterCachePut(key: String, total: Int, blocks: List<Block>) {
+        synchronized(chapterCacheMu) {
+            chapterCache.remove(key)?.let { chapterCacheBytes -= approxChapterBytes(it.blocks) }
+            val entry = ChapterCacheEntry(total, blocks.toMutableList())
+            chapterCache[key] = entry
+            chapterCacheBytes += approxChapterBytes(entry.blocks)
+            // LRU eviction (LinkedHashMap accessOrder=true iterates LRU-first).
+            val iter = chapterCache.entries.iterator()
+            while (iter.hasNext() &&
+                (chapterCache.size > CHAPTER_CACHE_MAX_ENTRIES || chapterCacheBytes > CHAPTER_CACHE_MAX_BYTES)
+            ) {
+                val eldest = iter.next()
+                chapterCacheBytes -= approxChapterBytes(eldest.value.blocks)
+                iter.remove()
+            }
+        }
+    }
+
+    /** Appends late-arriving BLE segments to the cached chapter, if present. */
+    private fun chapterCacheAppend(key: String, more: List<Block>) {
+        synchronized(chapterCacheMu) {
+            chapterCache[key]?.blocks?.addAll(more)
+        }
+    }
+
+    /** Complete cached chapter, or null (absent / still streaming). */
+    private fun chapterCacheGetComplete(key: String): List<Block>? {
+        synchronized(chapterCacheMu) {
+            val e = chapterCache[key] ?: return null
+            if (e.blocks.size < e.total) return null
+            return e.blocks.toList()
+        }
+    }
+
+    private companion object {
+        /** 16 chapters / 8 MiB — roughly one long novel's working set. */
+        const val CHAPTER_CACHE_MAX_ENTRIES = 16
+        const val CHAPTER_CACHE_MAX_BYTES = 8L * 1024 * 1024
+    }
+
     private fun setBleDegraded(value: Boolean) {
         _isBleDegraded.value = value
         BleDegradedState.setBleDegraded(value)
@@ -384,6 +443,28 @@ class MediaRepository @Inject constructor(
             }
         }
 
+    // ── LAN pairing (zero-touch setup) ────────────────────────
+
+    /**
+     * Zero-touch pairing: while the server runs with `server.lan_pairing:
+     * true`, an unauthenticated POST /api/v1/pair returns the bearer token
+     * once, letting the app auto-configure HTTP auth AND the BLE handshake
+     * key without hand-copying the token. Returns the granted token, or null
+     * when pairing is disabled / unreachable / open-auth mode. Never throws.
+     */
+    suspend fun tryLanPairing(): String? = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder().url("$baseUrl/api/v1/pair").post("".toRequestBody(null)).build()
+            http.newCall(request).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val body = resp.body?.string() ?: return@withContext null
+                gson.fromJson(body, Map::class.java)?.get("token") as? String
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     // ── Tags ──────────────────────────────────────────────────
 
     suspend fun getTags(): NetworkResult<List<Tag>> =
@@ -522,6 +603,11 @@ class MediaRepository @Inject constructor(
         val url = "$baseUrl/api/v1/books/chapter" +
             "?path=${URLEncoder.encode(path, "UTF-8")}&index=$index"
         if (httpFastPathBlocked()) {
+            // Revisited chapter with the complete copy already cached —
+            // serve instantly, no radio traffic at all.
+            chapterCacheGetComplete("$path#$index")?.let { blocks ->
+                return NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))
+            }
             // Breaker open and BLE connected — serve straight over BLE, no
             // HTTP attempt (see bleFetchOrHttp for the rationale).
             return getBookChapterViaBle(path, index, onAppend, appendScope, syntheticTransportError())
@@ -529,6 +615,7 @@ class MediaRepository @Inject constructor(
         return try {
             val content = httpGetRaw<BookChapterContent>(url, BookChapterContent::class.java)
             recordHttpSuccess()
+            chapterCachePut("$path#$index", content.blocks.size, content.blocks)
             setBleDegraded(false)
             NetworkResult.Success(content)
         } catch (e: HttpStatusException) {
@@ -568,6 +655,8 @@ class MediaRepository @Inject constructor(
             // is expected to guard staleness (chapter switched mid-stream);
             // scope cancellation stops the loop.
             val first = fetchChapterSegmentViaBle(path, index, 0) ?: return fallback
+            val cacheKey = "$path#$index"
+            chapterCachePut(cacheKey, first.total, first.blocks)
             var offset = first.blocks.size
             if (offset < first.total) {
                 appendScope.launch {
@@ -577,6 +666,7 @@ class MediaRepository @Inject constructor(
                         val seg = fetchChapterSegmentViaBle(path, index, offset) ?: break
                         if (seg.blocks.isEmpty()) break
                         onAppend(seg.blocks)
+                        chapterCacheAppend(cacheKey, seg.blocks)
                         offset += seg.blocks.size
                     }
                 }
@@ -606,6 +696,7 @@ class MediaRepository @Inject constructor(
         if (blocks == null) {
             return fallback
         }
+        chapterCachePut("$path#$index", blocks.size, blocks)
         setBleDegraded(true)
         _bleDegradedEvents.tryEmit(Unit)
         return NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))

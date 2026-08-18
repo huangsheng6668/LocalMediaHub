@@ -586,7 +586,12 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 if (chIdx < chapterCount - 1) {
                     const nextSec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${chIdx + 1}"]`);
                     if (nextSec) nextSec.scrollIntoView({ behavior: 'smooth' });
-                    else loadNextScrollChapter();
+                    else {
+                        loadNextScrollChapter().then(() => {
+                            const sec = els.content.querySelector(`.text-reader__chapter-section[data-chapter-index="${chIdx + 1}"]`);
+                            if (sec) sec.scrollIntoView({ behavior: 'smooth' });
+                        });
+                    }
                 } else showToast('已经是最后一章了', 'info');
             } else {
                 pageTurnApi.turnTo('next').then((ok) => { if (!ok) showToast('已经是最后一章了', 'info'); });

@@ -41,6 +41,7 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
     async function swapInstant(section) {
         contentEl.innerHTML = ''; // XSS-SAFE: clearing
         contentEl.appendChild(section);
+        contentEl.scrollTop = 0;
     }
 
     // COVER: layer old + new, translate, then settle. Uses a transitionend
@@ -66,6 +67,7 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
                 newSection.classList.remove('text-reader__page--incoming');
                 newSection.style.transition = '';
                 newSection.style.transform = '';
+                contentEl.scrollTop = 0;
                 resolve();
             };
             newSection.addEventListener('transitionend', finish, { once: true });
@@ -96,6 +98,7 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
                 contentEl.removeChild(oldSection);
                 newSection.style.transition = '';
                 newSection.style.transform = '';
+                contentEl.scrollTop = 0;
                 resolve();
             };
             newSection.addEventListener('transitionend', finish, { once: true });
@@ -320,6 +323,7 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
                 targetSection.style.transition = '';
                 targetSection.style.transform = '';
                 contentEl.appendChild(targetSection);
+                contentEl.scrollTop = 0;
             }
             return Promise.resolve();
         }
@@ -341,6 +345,7 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
                 targetSection.style.inset = '';
                 targetSection.style.transition = '';
                 targetSection.style.transform = '';
+                contentEl.scrollTop = 0;
                 resolve();
             };
             targetSection.addEventListener('transitionend', finish, { once: true });

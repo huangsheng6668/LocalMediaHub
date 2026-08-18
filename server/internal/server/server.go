@@ -294,6 +294,11 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 
+	// LAN app pairing (zero-touch setup): unauthenticated by design, gated by
+	// the opt-in `server.lan_pairing` config flag and rate-limited. See
+	// handler.Pair for the security trade-off notes.
+	api.POST("/pair", h.Pair, middleware.RateLimit(5, time.Minute))
+
 	// Folders
 	// Phase 9 (H-2): media read endpoints are auth-gated. Previously the
 	// media library could be enumerated and streamed anonymously by anyone on
