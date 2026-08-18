@@ -50,3 +50,7 @@ func (stubCentralScanner) WaitNotify(context.Context) ([]byte, error) {
 // build-tag-guarded), so this stub path is never reached with a non-nil
 // recorder.
 func (stubCentralScanner) SetConnectRecorder(ConnectRecorder) {}
+
+// MTU is always 0 on the stub: no session is ever established, so chunk
+// sizing falls back to the legacy default shape.
+func (stubCentralScanner) MTU() int { return 0 }

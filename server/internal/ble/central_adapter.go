@@ -55,6 +55,10 @@ type tinyGoCentralScanner struct {
 	// lost frames the same way. A bounded queue bridges the gaps; frames are
 	// consumed by WaitNotify with no re-arming race left.
 	notifyQueue chan []byte
+
+	// negotiatedMTU is the ATT MTU read back after connect (0 until then).
+	// Chunk sizing reads it via MTU(); guarded by opMu.
+	negotiatedMTU int
 }
 
 // notifyQueueCap bounds the bridging queue. The peer's chunker throttles to
@@ -207,6 +211,7 @@ func (t *tinyGoCentralScanner) connectLocked(ctx context.Context, id string) (er
 	// Drop the persistent notification bridge with the dead session; frames
 	// still in flight land in a detached channel and are garbage-collected.
 	t.notifyQueue = nil
+	t.negotiatedMTU = 0
 
 	addr, err := bluetooth.ParseMAC(id)
 	if err != nil {
@@ -350,11 +355,21 @@ func (t *tinyGoCentralScanner) requestMtu247() {
 		log.Printf("BLE MTU readback failed err=%v; assuming 23-byte default, short-frame fallback applies", err)
 		return
 	}
+	t.negotiatedMTU = int(mtu)
 	if int(mtu) >= 247 {
 		log.Printf("BLE negotiated ATT MTU=%d (>=247): full-size frames fit a single PDU", mtu)
 	} else {
 		log.Printf("BLE negotiated ATT MTU=%d (<247): single-PDU writes capped at %d bytes; short-frame fallback applies", mtu, mtu-3)
 	}
+}
+
+// MTU returns the negotiated ATT MTU for the current session (0 before a
+// successful connect / readback). Callers size chunk payloads from it — see
+// Central.ServeApiRequest.
+func (t *tinyGoCentralScanner) MTU() int {
+	t.opMu.Lock()
+	defer t.opMu.Unlock()
+	return t.negotiatedMTU
 }
 
 // Disconnect drops the GATT connection and clears cached characteristics.
@@ -367,6 +382,7 @@ func (t *tinyGoCentralScanner) Disconnect() {
 	// disconnected scanner fails fast instead of dead-waiting on a queue
 	// that can never fill again.
 	t.notifyQueue = nil
+	t.negotiatedMTU = 0
 	t.cmdChar = nil
 	t.stateChar = nil
 }
@@ -409,7 +425,9 @@ func (t *tinyGoCentralScanner) WriteCommand(_ context.Context, payload []byte) e
 		log.Printf("BLE WriteWithoutResponse err=%v, falling back to Write...", err)
 		n, err = t.cmdChar.Write(payload)
 	}
-	log.Printf("BLE WriteCommand wrote n=%d err=%v", n, err)
+	// A large book streams thousands of writes; keep the per-write success
+	// line out of the default log (errors still log loudly).
+	slog.Debug("BLE WriteCommand ok", "n", n)
 	return err
 }
 

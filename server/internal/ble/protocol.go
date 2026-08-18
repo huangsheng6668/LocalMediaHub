@@ -107,10 +107,16 @@ const FrameVersion byte = 0x01
 // mutual-challenge handshake completes, only v2 frames are accepted.
 const FrameVersion2 byte = 0x02
 
-const maxPayloadLen = 244 // fits in negotiated 247-byte MTU minus 3-byte header
+// maxPayloadLen caps a frame PAYLOAD on decode (encode sizes per negotiated
+// MTU, see ChunkJsonBytesSized). Real-device Phase 9: links negotiate MTU
+// 517 (ATT data ≤ 514), so the old 244 ceiling left most of each PDU unused.
+// 512 + 3 header + 24 auth trailer = 539... exceeds 514 — so 487 is the
+// largest payload that fits a 517 MTU. Round cap 488 to keep the Kotlin
+// mirror simple; senders still size by actual MTU.
+const maxPayloadLen = 488
 
 const authedOverhead = 8 + 16                              // seq + truncated HMAC
-const maxAuthedPayloadLen = maxPayloadLen - authedOverhead // 220
+const maxAuthedPayloadLen = maxPayloadLen - authedOverhead // 464
 
 var (
 	ErrTruncated  = errors.New("ble: frame truncated")
@@ -355,18 +361,30 @@ func DecodeJsonChunkPayload(payload []byte) (totalChunks, chunkIndex, totalBytes
 // with EncodeFrame before writing to the Command characteristic. The slice is
 // non-empty even for empty input (a single empty chunk signals "no content").
 func ChunkJsonBytes(jsonBytes []byte) ([][]byte, int, error) {
+	// Legacy spec §1.2 ceiling (≤200 B payloads incl. header) — kept for the
+	// fixed-size path; production uses ChunkJsonBytesSized with the link's
+	// negotiated MTU (see ServeApiRequest).
+	return ChunkJsonBytesSized(jsonBytes, maxChunkBytes-chunkFixedOverhead)
+}
+
+// ChunkJsonBytesSized splits jsonBytes into chunk payloads whose DATA portion
+// is at most maxDataBytes (clamped to what a v2 authed frame can carry).
+// Real-device Phase 9: links negotiate MTU 517, so sizing chunks from the
+// actual MTU (~478 data bytes) instead of the legacy ~191 gives a ~2.5x
+// throughput win on large book payloads.
+//
+// The TotalBytes wire field is uint16; bodies larger than 65535 wrap. The
+// receiver treats it as advisory (assembly completes by chunk COUNT, the
+// byte cap is enforced on accumulated bytes), so the wrap is harmless.
+func ChunkJsonBytesSized(jsonBytes []byte, maxDataBytes int) ([][]byte, int, error) {
 	totalBytes := len(jsonBytes)
 
-	// Per-chunk payload capacity = min(MTU ceiling, spec §1.2 ceiling) minus
-	// the fixed chunk header. Honoring the stricter 200 B cap satisfies both
-	// the wire layout (≤ maxPayloadLen) and the spec's operational constraint.
-	maxChunk := maxChunkBytes
-	if maxPayloadLen < maxChunk {
-		maxChunk = maxPayloadLen
+	maxChunk := maxDataBytes
+	if maxChunk > maxAuthedPayloadLen-chunkFixedOverhead {
+		maxChunk = maxAuthedPayloadLen - chunkFixedOverhead
 	}
-	maxChunk -= chunkFixedOverhead
-	if maxChunk <= 0 {
-		return nil, 0, ErrTooLarge
+	if maxChunk < 32 {
+		maxChunk = 32
 	}
 
 	totalChunks := (len(jsonBytes) + maxChunk - 1) / maxChunk
@@ -374,6 +392,9 @@ func ChunkJsonBytes(jsonBytes []byte) ([][]byte, int, error) {
 	// when the JSON body is empty.
 	if totalChunks == 0 {
 		totalChunks = 1
+	}
+	if totalChunks > 65535 {
+		return nil, 0, ErrTooLarge
 	}
 
 	frames := make([][]byte, 0, totalChunks)

@@ -73,6 +73,8 @@ func (f *fakeScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 // CentralScanner interface after the recorder seam was added.
 func (f *fakeScanner) SetConnectRecorder(ConnectRecorder) {}
 
+func (f *fakeScanner) MTU() int { return 247 }
+
 func TestCentralScanReturnsDevices(t *testing.T) {
 	fs := &fakeScanner{devices: []Device{{ID: "AA:BB", Name: "Pixel", RSSI: -45}}}
 	c := NewCentral(fs)

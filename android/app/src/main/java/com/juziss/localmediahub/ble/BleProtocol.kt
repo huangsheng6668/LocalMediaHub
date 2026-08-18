@@ -33,12 +33,21 @@ object BleProtocol {
      */
     const val FRAME_VERSION_2: Byte = 0x02
 
-    const val MAX_PAYLOAD_LEN = 244
+    /**
+     * Frame payload decode cap. Real-device Phase 9: links negotiate ATT
+     * MTU 517 (ATT data ≤ 514), and the Central sizes chunk payloads from
+     * the negotiated MTU, so the old 244 ceiling rejected legitimate
+     * large-chunk frames. Mirrors Go's `maxPayloadLen` (488): the largest
+     * v1 frame (491 B) and v2 authed frame (491 B) both fit a 517 MTU.
+     * Frames larger than the link MTU cannot arrive, so the cap is safe
+     * even when a peer negotiates a smaller MTU.
+     */
+    const val MAX_PAYLOAD_LEN = 488
 
     /** seq (8B) + truncated HMAC (16B) appended to a v2 payload. */
     private const val AUTHED_OVERHEAD = 8 + 16
 
-    /** Max payload of a v2 frame: 244 - 24 = 220 (Go `maxAuthedPayloadLen`). */
+    /** Max payload of a v2 frame: 488 - 24 = 464 (Go `maxAuthedPayloadLen`). */
     const val MAX_AUTHED_PAYLOAD_LEN = MAX_PAYLOAD_LEN - AUTHED_OVERHEAD
 
     // ---- Application-layer CmdID values (payload[0]) ----

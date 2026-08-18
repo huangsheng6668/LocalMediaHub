@@ -299,13 +299,12 @@ class BleTransportFallbackTest {
 
     /**
      * Brief Step 4 case (verbatim shape). NOTE on semantics: the wire
-     * TotalBytes field is uint16, so `MAX_STREAM_BYTES + 1` (1048577)
-     * truncates to 1 on the wire — with the default 1 MiB cap this frame is
-     * rejected simply because the declared stream can never complete, and
-     * nothing is buffered for a later stream to trip over. The dedicated
-     * cap-triggering cases below ([declaredTotalOverCapResetsStream],
-     * [accumulatedBufferOverCapResetsStream]) use an injectable smaller cap
-     * to exercise the actual reset paths.
+     * TotalBytes field is uint16, so `MAX_STREAM_BYTES + 1` truncates on the
+     * wire, and the declared value is ADVISORY only (it wraps for real
+     * >64KB book payloads — see the production M-9 note). This frame is
+     * simply buffered; the stream never completes (65535 chunks declared),
+     * so the result is null. The binding memory guard is the
+     * ACCUMULATED-bytes cap exercised by [accumulatedBufferOverCapResetsStream].
      */
     @Test
     fun oversizedDeclaredTotalResetsStream() {
@@ -315,35 +314,13 @@ class BleTransportFallbackTest {
             chunk = ByteArray(10),
         )
         val res = t.onFrameReceived(BleProtocol.encodeFrame(payload))
-        assertNull(res) // 超限：拒绝并重置，绝不缓冲
-    }
-
-    /** A declared TotalBytes over the cap resets the stream and buffers nothing. */
-    @Test
-    fun declaredTotalOverCapResetsStream() {
-        val t = BleTransportFallback(maxStreamBytes = 64)
-        // Pre-buffer one legitimate chunk so the reset has state to clear.
-        t.onFrameReceived(
-            chunkFrame(totalChunks = 3, chunkIndex = 0, totalBlocks = 64, json = ByteArray(10)),
-        )
-        assertEquals(10, t.bufferedByteCount())
-
-        // totalBytes field says 65 > cap 64 → immediate reset, no buffering.
-        val res = t.onFrameReceived(
-            BleProtocol.encodeFrame(
-                BleProtocol.encodeJsonChunkPayload(
-                    totalChunks = 3, chunkIndex = 1, totalBytes = 65, chunk = ByteArray(10),
-                ),
-            ),
-        )
-        assertNull(res)
-        assertEquals("over-cap declared total must clear the buffer", 0, t.bufferedByteCount())
+        assertNull(res) // stream incomplete → null
     }
 
     /**
      * Cumulative buffered bytes crossing the cap resets the stream mid-flight.
      *
-     * NOTE (test correction): the declared TotalBytes field must stay ≤ the
+     * NOTE: the declared TotalBytes field is advisory (uint16 wrap), so
      * cap (60 ≤ 64) — otherwise the declared-total check fires on the FIRST
      * frame and nothing accumulates. A declared 60 with 6×20B actually sent
      * is exactly the lie the accumulated check exists to catch (the peer

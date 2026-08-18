@@ -39,6 +39,8 @@ func (c *collectScanner) WaitNotify(context.Context) ([]byte, error) {
 // SetConnectRecorder is a no-op test double stub (see fakeScanner note).
 func (c *collectScanner) SetConnectRecorder(ConnectRecorder) {}
 
+func (c *collectScanner) MTU() int { return 247 }
+
 // jsonBlockProvider is a minimal ApiProvider that always returns a fixed JSON
 // body, recording the last (path, idx, ip) it was called with. Used to exercise
 // ServeApiRequest's multi-chunk stream path without depending on service.BookService.

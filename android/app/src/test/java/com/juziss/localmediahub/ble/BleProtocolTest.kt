@@ -105,26 +105,27 @@ class BleProtocolTest {
             hex("02000212aaffffffffffffffff438838b9ec4a236b17fbf4ecba946399"),
             BleProtocol.encodeAuthedFrame(byteArrayOf(0x12, 0xAA.toByte()), ULong.MAX_VALUE, key),
         )
-        // 221-byte payload is defensively truncated to 220 (Go parity). The
-        // Go reference frame for this input is 247 bytes total with length
-        // field 0x00DC and MAC tail b60f5ac22576b3777b78ff5e1f4cb79e — the
-        // truncated HMAC covers every preceding byte, so matching the Go MAC
-        // here locks the entire 220-byte layout without pasting the vector.
-        val big = ByteArray(221) { (it % 251).toByte() }
+        // 465-byte payload is defensively truncated to 464 (Go parity; caps
+        // raised for the MTU-517 chunk sizing). The Go reference frame for
+        // this input is 491 bytes total with length field 0x01D0 and MAC
+        // tail c8e057cc0051e0d95c8f3aec7104c204 — the truncated HMAC covers
+        // every preceding byte, so matching the Go MAC here locks the entire
+        // 464-byte layout without pasting the vector.
+        val big = ByteArray(465) { (it % 251).toByte() }
         val trunc = BleProtocol.encodeAuthedFrame(big, 0uL, key)
-        assertEquals(247, trunc.size)
+        assertEquals(491, trunc.size)
         assertEquals(0x02.toByte(), trunc[0])
-        assertEquals(0xDC, (trunc[1].toInt() and 0xFF) shl 8 or (trunc[2].toInt() and 0xFF))
+        assertEquals(0x01D0, (trunc[1].toInt() and 0xFF) shl 8 or (trunc[2].toInt() and 0xFF))
         assertArrayEquals(
-            hex("b60f5ac22576b3777b78ff5e1f4cb79e"),
+            hex("c8e057cc0051e0d95c8f3aec7104c204"),
             trunc.copyOfRange(trunc.size - 16, trunc.size),
         )
         // And the truncated frame still round-trips with seq 0.
         val decoded = BleProtocol.decodeAuthedFrame(trunc, key)
         assertNotNull(decoded)
         assertEquals(0uL, decoded?.seq)
-        assertEquals(220, decoded?.payload?.size)
-        assertEquals(0xDB.toByte(), decoded?.payload?.last())
+        assertEquals(464, decoded?.payload?.size)
+        assertEquals(0xD4.toByte(), decoded?.payload?.last())
     }
 
     /** seq must be strictly per-direction but the codec accepts any value; decode returns it verbatim. */

@@ -163,14 +163,11 @@ class BleTransportFallback(
         // wake the caller (incomplete buffer, no state transition).
         var hookToFire: (() -> Unit)? = null
         synchronized(stateLock) {
-            // M-9: reject an over-cap declared TotalBytes IMMEDIATELY —
-            // before any timeout bookkeeping or buffering. Reset the whole
-            // stream so nothing of the offending batch survives.
-            if (blocks > maxStreamBytes) {
-                resetLocked(totalChunksFallback = 0, blocksFallback = 0)
-                return null
-            }
-
+            // Phase 9 M-9 note: the declared TotalBytes field is uint16 and
+            // WRAPS for real book payloads larger than 64KB (a 3MB
+            // single-chapter txt novel is routine), so the declared value is
+            // advisory only — the binding cap is the accumulated-bytes check
+            // below. Assembly completes by chunk COUNT, not by TotalBytes.
             val now = nowMs()
             if (now - lastFrameAtMs > frameTimeoutMs) {
                 // Frame arrived after the per-frame deadline → consume one retry.
@@ -416,17 +413,13 @@ class BleTransportFallback(
 
         /**
          * Phase 9 (M-9): hard ceiling on the bytes a single reassembled
-         * stream may pin — 1 MiB. A stream whose declared TotalBytes exceeds
-         * this, or whose accumulated buffered bytes would cross it, resets
-         * the whole stream and the offending frame is never buffered.
-         * NOTE: the wire TotalBytes field is uint16 (max 65535), so with the
-         * default cap only the ACCUMULATED path can trip in production from
-         * a well-formed peer; the declared-total path guards injectable
-         * smaller caps (tests) and any future wider field. The spec's
-         * "stream ID" injection vector is gone in the authed-v2 world (the
-         * Central is authenticated post-handshake), so only the byte cap
-         * remains (decision recorded in the spec revision note).
+         * stream may pin — 8 MiB. Real-device finding: single-chapter txt
+         * novels (no chapter markers match) push the WHOLE book through one
+         * chapter request; the original 1 MiB cap hard-blocked anything
+         * larger with a silent reset. The declared-TotalBytes wire field is
+         * uint16 and wraps past 64KB, so it is advisory only — this ACCUMULATED
+         * byte cap is the binding memory guard.
          */
-        const val MAX_STREAM_BYTES = 1_048_576
+        const val MAX_STREAM_BYTES = 8_388_608
     }
 }

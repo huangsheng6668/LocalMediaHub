@@ -93,6 +93,10 @@ type CentralScanner interface {
 	WriteCommand(ctx context.Context, payload []byte) error
 	WaitNotify(ctx context.Context) ([]byte, error)
 
+	// MTU returns the negotiated ATT MTU for the current session (0 before a
+	// successful connect). ServeApiRequest sizes chunk payloads from it.
+	MTU() int
+
 	// SetConnectRecorder injects a ConnectRecorder that observes each Connect
 	// round's outcome. The real (bluetooth) scanner wires the recorder into
 	// connectLocked's deferred path; the stub is a no-op (no Connect ever
@@ -515,7 +519,15 @@ func (c *Central) ServeApiRequest(ctx context.Context, notifyPayload []byte) (in
 		return 0, err
 	}
 
-	chunkPayloads, _, err := ChunkJsonBytes(jsonBytes)
+	// Size chunks from the negotiated MTU (real-device Phase 9 throughput
+	// fix): a v2 frame carries 3+payload+24 bytes and ATT data is capped at
+	// MTU-3, so data bytes per chunk ≤ MTU-3-24-9(chunk header). A zero/low
+	// MTU readback falls back to the legacy ~200-byte chunk shape.
+	dataCap := scanner.MTU() - 3 - authedOverhead - chunkFixedOverhead
+	if dataCap < maxChunkBytes-chunkFixedOverhead {
+		dataCap = maxChunkBytes - chunkFixedOverhead
+	}
+	chunkPayloads, _, err := ChunkJsonBytesSized(jsonBytes, dataCap)
 	if err != nil {
 		return 0, err
 	}
@@ -569,8 +581,9 @@ const apiListenerRetryBackoff = 1 * time.Second
 // jsonChunkWriteInterval paces ServeApiRequest's chunk stream: back-to-back
 // write-without-response bursts overflow the Android GATT server's queue and
 // drop frames silently (real-device Phase 9 finding — a full book manifest
-// never reassembled). ~100 writes/s ≈ 20KB/s at the 200-byte chunk cap.
-const jsonChunkWriteInterval = 10 * time.Millisecond
+// never reassembled). 5ms ≈ 200 writes/s absorbed reliably on the test
+// device; with MTU-sized chunks (~478 data bytes) that is ~95KB/s.
+const jsonChunkWriteInterval = 5 * time.Millisecond
 
 // RunApiListener is the long-lived CMD_API_REQ dispatcher mandated by spec
 // §3.1. It loops over the scanner's one-shot WaitNotify, decodes each notified
