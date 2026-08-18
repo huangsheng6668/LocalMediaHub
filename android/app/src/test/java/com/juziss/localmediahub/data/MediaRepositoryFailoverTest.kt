@@ -264,6 +264,7 @@ class MediaRepositoryFailoverTest {
         fallback: BleTransportFallback = BleTransportFallback(),
         expectedEndpoint: Byte = BleProtocol.ENDPOINT_BOOK_CHAPTER,
         expectedPath: String = "/book.txt",
+        http: OkHttpClient = OkHttpClient(),
     ): MediaRepository {
         val peripheral = SimulatingPeripheralManager(
             responsePayloads = responsePayloads,
@@ -299,7 +300,7 @@ class MediaRepositoryFailoverTest {
             setBaseUrl("http://127.0.0.1:1")
         }
         return MediaRepository(
-            http = OkHttpClient(),
+            http = http,
             serverConfig = serverConfig,
             bleController = controller,
             bleTransportFallback = fallback,
@@ -352,6 +353,47 @@ class MediaRepositoryFailoverTest {
         advanceUntilIdle()
         assertEquals(listOf("part2"), appended)
         assertTrue(repo.isBleDegraded.value)
+    }
+
+    /**
+     * Transport circuit breaker (real-device degraded-reading finding):
+     * after a transport-level HTTP failure the second BLE-served request
+     * must NOT attempt HTTP at all — the dead connect timeout was the
+     * dominant open-a-book latency while Wi-Fi was off.
+     */
+    @Test
+    fun circuitBreakerSkipsHttpAfterTransportFailure() = runTest {
+        val json = "[{\"type\":\"text\",\"value\":\"ble-body\"}]".toByteArray(Charsets.UTF_8)
+        val httpAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+        val countingClient = OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                httpAttempts.incrementAndGet()
+                throw java.io.IOException("simulated dead Wi-Fi")
+            }
+            .build()
+        val payloads = listOf(
+            chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json),
+            chunkPayload(totalChunks = 1, chunkIndex = 0, totalBlocks = 1, json = json),
+        )
+        val repo = repoWithBle(
+            this, MutableStateFlow(BleConnState.CONNECTED), payloads,
+            http = countingClient,
+        )
+        com.juziss.localmediahub.ble.BleDegradedState.httpBlockedUntilMs = 0L
+        try {
+            val r1 = repo.getBookChapter(path = "/book.txt", index = 0)
+            assertTrue("first fetch must succeed via BLE, got $r1", r1 is NetworkResult.Success)
+            assertEquals("first fetch attempts HTTP once", 1, httpAttempts.get())
+
+            val r2 = repo.getBookChapter(path = "/book.txt", index = 1)
+            assertTrue("second fetch must succeed via BLE, got $r2", r2 is NetworkResult.Success)
+            assertEquals(
+                "breaker must skip the HTTP attempt on the second fetch",
+                1, httpAttempts.get(),
+            )
+        } finally {
+            com.juziss.localmediahub.ble.BleDegradedState.httpBlockedUntilMs = 0L
+        }
     }
 
     @Test

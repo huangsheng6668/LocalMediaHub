@@ -113,7 +113,13 @@ object OkHttpModule {
         val builder = OkHttpClient.Builder()
             .cache(cache)
             .cookieJar(okhttp3.CookieJar.NO_COOKIES)
-            .connectTimeout(30, TimeUnit.SECONDS)
+            // Real-device degraded-reading finding: with Wi-Fi off (mobile
+            // data routing a 192.168.x.x SYN into a black hole), every
+            // request burned the FULL connect timeout before the BLE
+            // failover could start — opening a book meant two dead 30s
+            // waits. A healthy LAN establishes TCP in <100ms; 2s is generous
+            // headroom while capping the failover entry latency.
+            .connectTimeout(2, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .dispatcher(dispatcher)

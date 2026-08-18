@@ -96,6 +96,29 @@ class MediaRepository @Inject constructor(
      * holder; callers MUST use this instead of `_isBleDegraded.value = ...`
      * so the mirror never drifts.
      */
+    // ════════════════════════════════════════════════════════════════════════
+    //  Transport selection (real-device degraded-reading finding): while
+    //  Wi-Fi is down, EVERY request burned the full connect timeout on a
+    //  dead HTTP attempt before the BLE failover could start. The decision
+    //  now comes from the process-wide [com.juziss.localmediahub.ble
+    //  .BleDegradedState] (Wi-Fi association flag maintained by the
+    //  Application's ConnectivityManager callback + an HTTP failure
+    //  breaker): when HTTP is not allowed AND BLE is CONNECTED, skip the
+    //  HTTP attempt entirely. Any HTTP success re-arms the fast path.
+    // ════════════════════════════════════════════════════════════════════════
+    private fun httpFastPathBlocked(): Boolean =
+        bleController.connectionState.value == BleConnState.CONNECTED &&
+            !com.juziss.localmediahub.ble.BleDegradedState.httpAllowed(System.currentTimeMillis())
+
+    private fun recordHttpFailure() {
+        com.juziss.localmediahub.ble.BleDegradedState.httpBlockedUntilMs =
+            System.currentTimeMillis() + com.juziss.localmediahub.ble.BleDegradedState.HTTP_BACKOFF_MS
+    }
+
+    private fun recordHttpSuccess() {
+        com.juziss.localmediahub.ble.BleDegradedState.httpBlockedUntilMs = 0L
+    }
+
     private fun setBleDegraded(value: Boolean) {
         _isBleDegraded.value = value
         BleDegradedState.setBleDegraded(value)
@@ -498,8 +521,14 @@ class MediaRepository @Inject constructor(
     ): NetworkResult<BookChapterContent> {
         val url = "$baseUrl/api/v1/books/chapter" +
             "?path=${URLEncoder.encode(path, "UTF-8")}&index=$index"
+        if (httpFastPathBlocked()) {
+            // Breaker open and BLE connected — serve straight over BLE, no
+            // HTTP attempt (see bleFetchOrHttp for the rationale).
+            return getBookChapterViaBle(path, index, onAppend, appendScope, syntheticTransportError())
+        }
         return try {
             val content = httpGetRaw<BookChapterContent>(url, BookChapterContent::class.java)
+            recordHttpSuccess()
             setBleDegraded(false)
             NetworkResult.Success(content)
         } catch (e: HttpStatusException) {
@@ -508,63 +537,78 @@ class MediaRepository @Inject constructor(
             NetworkResult.Error("Server returned ${e.code}", e.code)
         } catch (e: IOException) {
             // Transport-level failure: candidate for BLE failover.
+            recordHttpFailure()
             if (bleController.connectionState.value != BleConnState.CONNECTED) {
                 e.toNetworkError()
-            } else if (onAppend != null && appendScope != null) {
-                // Segmented degraded reading: a single-chapter txt novel can
-                // be megabytes, so pull the chapter in ~180KB server-side
-                // segments. Segment 0 is fetched synchronously and returned
-                // (the reader renders within ~2s); the remaining segments
-                // stream in the caller's scope, appending as they land. The
-                // caller's onAppend is expected to guard staleness (chapter
-                // switched mid-stream); scope cancellation stops the loop.
-                val first = fetchChapterSegmentViaBle(path, index, 0)
-                    ?: return e.toNetworkError()
-                var offset = first.blocks.size
-                if (offset < first.total) {
-                    appendScope.launch {
-                        while (offset < first.total &&
-                            bleController.connectionState.value == BleConnState.CONNECTED
-                        ) {
-                            val seg = fetchChapterSegmentViaBle(path, index, offset) ?: break
-                            if (seg.blocks.isEmpty()) break
-                            onAppend(seg.blocks)
-                            offset += seg.blocks.size
-                        }
-                    }
-                }
-                setBleDegraded(true)
-                _bleDegradedEvents.tryEmit(Unit)
-                NetworkResult.Success(BookChapterContent(title = "", blocks = first.blocks))
             } else {
-                val json = bleTransportFallback.fetchJson(
-                    BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index,
-                ) {
-                    bleController.requestApi(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index)
-                }
-                if (json == null) {
-                    // BLE timed out / reassembly failed — surface the original
-                    // HTTP error and DO NOT raise isBleDegraded.
-                    e.toNetworkError()
-                } else {
-                    val blocks = try {
-                        gson.fromJson<List<Block>>(
-                            json,
-                            object : TypeToken<List<Block>>() {}.type,
-                        )
-                    } catch (parseErr: Exception) {
-                        null
-                    }
-                    if (blocks == null) {
-                        e.toNetworkError()
-                    } else {
-                        setBleDegraded(true)
-                        _bleDegradedEvents.tryEmit(Unit)
-                        NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))
+                getBookChapterViaBle(path, index, onAppend, appendScope, e.toNetworkError())
+            }
+        }
+    }
+
+    /**
+     * The BLE branch of [getBookChapter] (segmented when the caller supplies
+     * [onAppend]/[appendScope], whole-chapter otherwise), shared by the
+     * failover and breaker-open paths. [fallback] is returned when BLE
+     * cannot deliver.
+     */
+    private suspend fun getBookChapterViaBle(
+        path: String,
+        index: Int,
+        onAppend: ((List<Block>) -> Unit)?,
+        appendScope: kotlinx.coroutines.CoroutineScope?,
+        fallback: NetworkResult<BookChapterContent>,
+    ): NetworkResult<BookChapterContent> {
+        if (onAppend != null && appendScope != null) {
+            // Segmented degraded reading: a single-chapter txt novel can be
+            // megabytes, so pull the chapter in ~180KB server-side segments.
+            // Segment 0 is fetched synchronously and returned (the reader
+            // renders within ~2s); the remaining segments stream in the
+            // caller's scope, appending as they land. The caller's onAppend
+            // is expected to guard staleness (chapter switched mid-stream);
+            // scope cancellation stops the loop.
+            val first = fetchChapterSegmentViaBle(path, index, 0) ?: return fallback
+            var offset = first.blocks.size
+            if (offset < first.total) {
+                appendScope.launch {
+                    while (offset < first.total &&
+                        bleController.connectionState.value == BleConnState.CONNECTED
+                    ) {
+                        val seg = fetchChapterSegmentViaBle(path, index, offset) ?: break
+                        if (seg.blocks.isEmpty()) break
+                        onAppend(seg.blocks)
+                        offset += seg.blocks.size
                     }
                 }
             }
+            setBleDegraded(true)
+            _bleDegradedEvents.tryEmit(Unit)
+            return NetworkResult.Success(BookChapterContent(title = "", blocks = first.blocks))
         }
+        val json = bleTransportFallback.fetchJson(
+            BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index,
+        ) {
+            bleController.requestApi(BleProtocol.ENDPOINT_BOOK_CHAPTER, path, index)
+        }
+        if (json == null) {
+            // BLE timed out / reassembly failed — surface the fallback error
+            // and DO NOT raise isBleDegraded (no traffic was served).
+            return fallback
+        }
+        val blocks = try {
+            gson.fromJson<List<Block>>(
+                json,
+                object : TypeToken<List<Block>>() {}.type,
+            )
+        } catch (parseErr: Exception) {
+            null
+        }
+        if (blocks == null) {
+            return fallback
+        }
+        setBleDegraded(true)
+        _bleDegradedEvents.tryEmit(Unit)
+        return NetworkResult.Success(BookChapterContent(title = "", blocks = blocks))
     }
 
     /**
@@ -608,46 +652,77 @@ class MediaRepository @Inject constructor(
         path: String = "",
         index: Int = 0,
         type: java.lang.reflect.Type,
-    ): NetworkResult<T> = try {
-        NetworkResult.Success(httpCall())
-    } catch (e: HttpStatusException) {
-        // Server responded with a non-2xx status — NOT a transport outage,
-        // so failover does not apply. Surface the original error code.
-        NetworkResult.Error("Server returned ${e.code}", e.code)
-    } catch (e: IOException) {
-        // Transport-level failure: candidate for BLE failover.
-        if (bleController.connectionState.value != BleConnState.CONNECTED) {
-            e.toNetworkError()
-        } else {
-            val json = bleTransportFallback.fetchJson(endpoint, path, index) {
-                bleController.requestApi(endpoint, path, index)
-            }
-            if (json == null) {
-                // BLE link was CONNECTED but no payload arrived / reassembly
-                // failed within the timeout budget. Surface the original HTTP
-                // error and DO NOT raise isBleDegraded (no traffic was served).
+    ): NetworkResult<T> {
+        if (httpFastPathBlocked()) {
+            // Breaker open (no Wi-Fi / recent transport failure) and BLE is
+            // connected — skip the HTTP attempt entirely; the synthetic
+            // transport error plays the role of the original IOException as
+            // the failure fallback of the BLE branch.
+            return serveViaBle(endpoint, path, index, type, syntheticTransportError())
+        }
+        return try {
+            val value = httpCall()
+            recordHttpSuccess()
+            NetworkResult.Success(value)
+        } catch (e: HttpStatusException) {
+            // Server responded with a non-2xx status — NOT a transport outage,
+            // so failover does not apply. Surface the original error code.
+            NetworkResult.Error("Server returned ${e.code}", e.code)
+        } catch (e: IOException) {
+            // Transport-level failure: candidate for BLE failover.
+            recordHttpFailure()
+            if (bleController.connectionState.value != BleConnState.CONNECTED) {
                 e.toNetworkError()
             } else {
-                try {
-                    val parsed = gson.fromJson<T>(json, type)
-                    setBleDegraded(true)
-                    // I2: emit a one-shot degradation event so the reader
-                    // re-shows the 3-second badge on EVERY BLE-served request,
-                    // not just the first one after the value flips true.
-                    // tryEmit is safe here: extraBufferCapacity = 1 guarantees
-                    // no blocking; a slow consumer simply drops an emission it
-                    // has not yet collected (acceptable — the next request
-                    // re-emits).
-                    _bleDegradedEvents.tryEmit(Unit)
-                    NetworkResult.Success(parsed)
-                } catch (parseErr: Exception) {
-                    // JSON deserialization failed — surface the original HTTP
-                    // error rather than a misleading parse message.
-                    e.toNetworkError()
-                }
+                serveViaBle(endpoint, path, index, type, e.toNetworkError())
             }
         }
     }
+
+    /**
+     * The BLE-serving branch shared by the failover and breaker-open paths.
+     * [fallback] is what the caller observes when BLE cannot deliver (no
+     * payload within the budget, or a parse failure) — normally the original
+     * HTTP transport error.
+     */
+    private suspend fun <T> serveViaBle(
+        endpoint: Byte,
+        path: String,
+        index: Int,
+        type: java.lang.reflect.Type,
+        fallback: NetworkResult<T>,
+    ): NetworkResult<T> {
+        val json = bleTransportFallback.fetchJson(endpoint, path, index) {
+            bleController.requestApi(endpoint, path, index)
+        }
+        if (json == null) {
+            // BLE link was CONNECTED but no payload arrived / reassembly
+            // failed within the timeout budget. DO NOT raise isBleDegraded
+            // (no traffic was served).
+            return fallback
+        }
+        return try {
+            val parsed = gson.fromJson<T>(json, type)
+            setBleDegraded(true)
+            // I2: emit a one-shot degradation event so the reader re-shows
+            // the 3-second badge on EVERY BLE-served request, not just the
+            // first one after the value flips true. tryEmit is safe here:
+            // extraBufferCapacity = 1 guarantees no blocking; a slow consumer
+            // simply drops an emission it has not collected (acceptable — the
+            // next request re-emits).
+            _bleDegradedEvents.tryEmit(Unit)
+            NetworkResult.Success(parsed)
+        } catch (parseErr: Exception) {
+            // JSON deserialization failed — surface the fallback error rather
+            // than a misleading parse message.
+            fallback
+        }
+    }
+
+    /** Error used when the breaker-open path skips HTTP and BLE then fails. */
+    private fun <T> syntheticTransportError(): NetworkResult<T> =
+        NetworkResult.Error("HTTP fast path blocked (no Wi-Fi / breaker open) and BLE transfer failed")
+
 
     /**
      * Streaming variant of [getBookInfo]: returns the raw JSON [ResponseBody]

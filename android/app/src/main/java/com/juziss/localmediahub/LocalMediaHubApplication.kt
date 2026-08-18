@@ -85,6 +85,47 @@ class LocalMediaHubApplication : Application(), SingletonImageLoader.Factory {
                 maxAgeDays = DISK_CACHE_MAX_AGE_DAYS,
             )
         }
+        registerWifiTransportMonitor()
+    }
+
+    /**
+     * Global Wi-Fi transport monitor (degraded-reading latency fix): keeps
+     * [com.juziss.localmediahub.ble.BleDegradedState.wifiOnline] live via a
+     * ConnectivityManager network callback, so transport selection can be
+     * decided from process-wide state instead of burning the HTTP connect
+     * timeout on every request while Wi-Fi is off. Registration failures
+     * (exotic device restrictions) leave the default `wifiOnline = true`,
+     * i.e. the previous try-HTTP-first behavior — fail-open to the old path.
+     */
+    private fun registerWifiTransportMonitor() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return
+        // TRANSPORT_WIFI only (association), NOT NET_CAPABILITY_VALIDATED:
+        // a home LAN without internet never validates, and actual server
+        // reachability is already covered by the HTTP failure breaker.
+        val request = android.net.NetworkRequest.Builder()
+            .addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                com.juziss.localmediahub.ble.BleDegradedState.wifiOnline = true
+            }
+
+            override fun onLost(network: android.net.Network) {
+                com.juziss.localmediahub.ble.BleDegradedState.wifiOnline = false
+            }
+        }
+        try {
+            cm.registerNetworkCallback(request, callback)
+            // Seed the initial value: a Wi-Fi network may already be up.
+            com.juziss.localmediahub.ble.BleDegradedState.wifiOnline =
+                cm.activeNetwork?.let { net ->
+                    cm.getNetworkCapabilities(net)?.hasTransport(
+                        android.net.NetworkCapabilities.TRANSPORT_WIFI,
+                    ) == true
+                } == true
+        } catch (e: Exception) {
+            android.util.Log.w("LocalMediaHubApp", "wifi monitor registration failed: ${e.message}")
+        }
     }
 
     override fun newImageLoader(context: Context): ImageLoader {
