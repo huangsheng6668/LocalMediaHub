@@ -658,6 +658,8 @@ private fun ManualConnectionCard(
                 },
                 shape = RoundedCornerShape(10.dp)
             )
+            var showAdvanced by rememberSaveable { mutableStateOf(tokenInput.isNotBlank()) }
+
             OutlinedTextField(
                 value = port,
                 onValueChange = onPortChange,
@@ -671,17 +673,34 @@ private fun ManualConnectionCard(
                 },
                 shape = RoundedCornerShape(10.dp)
             )
-            OutlinedTextField(
-                value = tokenInput,
-                onValueChange = onTokenChange,
-                label = { Text(stringResource(R.string.auth_token_label)) },
-                placeholder = { Text(stringResource(R.string.auth_token_placeholder)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showAdvanced = !showAdvanced }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = if (showAdvanced) stringResource(R.string.conn_hide_advanced_options)
+                           else stringResource(R.string.conn_advanced_options),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (showAdvanced) {
+                OutlinedTextField(
+                    value = tokenInput,
+                    onValueChange = onTokenChange,
+                    label = { Text(stringResource(R.string.auth_token_label)) },
+                    placeholder = { Text(stringResource(R.string.auth_token_placeholder)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                )
+            }
             Button(
                 onClick = onConnect,
                 modifier = Modifier.fillMaxWidth(),

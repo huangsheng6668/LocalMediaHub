@@ -101,6 +101,8 @@
     <string name="conn_connect_btn">手动连接服务器</string>
     <string name="auth_token_label">访问令牌（可选）</string>
     <string name="auth_token_placeholder">服务端开启了鉴权时填写</string>
+    <string name="conn_advanced_options">高级选项（访问令牌）</string>
+    <string name="conn_hide_advanced_options">收起高级选项</string>
 
     <!-- ── Browse screen ───────────────────────────────────── -->
     <string name="browse_search_hint">搜索媒体文件...</string>
