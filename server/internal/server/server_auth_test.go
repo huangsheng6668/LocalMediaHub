@@ -3,7 +3,9 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -87,3 +89,35 @@ func TestServerOpenModeWhenTokenEmpty(t *testing.T) {
 		t.Errorf("status = 401, want non-401 (open mode should pass through)")
 	}
 }
+
+func TestServerOpenModeAllowsDeletion(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("hello"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	cfg := newAuthTestConfig(t, "")
+	cfg.System.EnableDelete = true
+	cfg.Scan.Roots = []string{tmpDir}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	defer srv.Stop()
+
+	body := `{"path":"` + filepath.ToSlash(testFile) + `","recursive":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/delete", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	srv.Echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if _, err := os.Stat(testFile); !os.IsNotExist(err) {
+		t.Errorf("expected test file to be deleted, but it still exists")
+	}
+}
+

@@ -219,11 +219,7 @@ func LoadFromBytes(data []byte) (*Config, error) {
 // one-shot override).
 func LogSecurityWarnings(cfg *Config, autoFromFlag bool) {
 	if cfg.Server.Token == "" {
-		slog.Warn("==============================================================")
-		slog.Warn(" SERVER IS RUNNING IN OPEN AUTH MODE (no token configured).")
-		slog.Warn(" Any host on the LAN can call admin/system/media endpoints.")
-		slog.Warn(" Set 'server.token' in config.yaml to enable authentication.")
-		slog.Warn("==============================================================")
+		slog.Info("Auth: running in open LAN mode (no token configured)")
 	} else {
 		slog.Info("Auth: token-based authentication enabled for admin/system/media routes")
 	}
@@ -231,11 +227,7 @@ func LogSecurityWarnings(cfg *Config, autoFromFlag bool) {
 	if cfg.System.EnableDelete {
 		slog.Warn("==============================================================")
 		slog.Warn(" REMOTE DELETE IS ENABLED (system.enable_delete: true).")
-		slog.Warn(" Authenticated clients can delete files under system.allowed_roots.")
-		if cfg.Server.Token == "" {
-			slog.Warn(" WARNING: server.token is empty — /api/v1/system/delete will")
-			slog.Warn(" reject every request (403) until a token is configured.")
-		}
+		slog.Warn(" Clients can delete files under allowed_roots.")
 		slog.Warn(" Disable 'system.enable_delete' in config.yaml unless you")
 		slog.Warn(" genuinely need this feature.")
 		slog.Warn("==============================================================")
