@@ -61,6 +61,8 @@ type StreamingService struct {
 }
 
 func NewStreamingService(ffmpegPath string) *StreamingService {
+	// 自定义 ffmpeg 目录前插 PATH：exec 调用点统一使用字面量二进制名
+	activateToolDir(ffmpegPath)
 	return &StreamingService{ffmpegPath: ffmpegPath}
 }
 
@@ -136,12 +138,13 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 
 // serveTranscoded pipes ffmpeg stdout to the response writer.
 func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Request, filePath string) error {
-	ffmpegCmd := s.ffmpegPath
-	if ffmpegCmd == "" {
-		ffmpegCmd = "ffmpeg"
+	// 进入子进程 argv 前净化工具路径与媒体路径（CWE-78 边界）
+	filePath, ferr := sanitizeMediaArg(filePath)
+	if ferr != nil {
+		return ferr
 	}
 
-	if _, err := exec.LookPath(ffmpegCmd); err != nil {
+	if _, err := exec.LookPath(ffmpegBin); err != nil {
 		return fmt.Errorf("ffmpeg not found, cannot transcode")
 	}
 
@@ -186,7 +189,7 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, ffmpegCmd, args...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	// Windows ffmpeg subprocess may not respond to CTRL_BREAK_EVENT that
 	// Go's default CommandContext sends. Force kill on context cancellation.
 	cmd.Cancel = func() error {
@@ -247,17 +250,10 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *StreamingService) GetVideoDuration(filePath string) (float64, error) {
-	ffprobeCmd := "ffprobe"
-	if s.ffmpegPath != "" {
-		dir := filepath.Dir(s.ffmpegPath)
-		base := filepath.Base(s.ffmpegPath)
-		if strings.Contains(base, "ffmpeg") {
-			ffprobeName := strings.Replace(base, "ffmpeg", "ffprobe", 1)
-			derived := filepath.Join(dir, ffprobeName)
-			if _, err := exec.LookPath(derived); err == nil {
-				ffprobeCmd = derived
-			}
-		}
+	// 进入子进程 argv 前净化媒体路径（CWE-78 边界）
+	filePath, ferr := sanitizeMediaArg(filePath)
+	if ferr != nil {
+		return 0, ferr
 	}
 
 	args := []string{
@@ -267,7 +263,7 @@ func (s *StreamingService) GetVideoDuration(filePath string) (float64, error) {
 		filePath,
 	}
 
-	cmd := exec.Command(ffprobeCmd, args...)
+	cmd := exec.Command("ffprobe", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, fmt.Errorf("ffprobe error: %w", err)

@@ -3,7 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -50,7 +50,7 @@ type ThumbnailService struct {
 	format     string
 	sem        chan struct{}
 	ffmpegPath string
-	// memCache stores JPEG bytes keyed by md5(sourcePath + "|" + modTime).
+	// memCache stores JPEG bytes keyed by sha256(sourcePath + "|" + modTime).
 	// Both GenerateThumbnailBytes and GenerateSystemThumbnailBytes share this
 	// cache. The shared key is safe because the underlying
 	// generateThumbnailFromFile pipeline uses the same maxSize/format/quality
@@ -104,6 +104,8 @@ type ThumbnailService struct {
 }
 
 func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath string) (*ThumbnailService, error) {
+	// 自定义 ffmpeg 目录前插 PATH：exec 调用点统一使用字面量二进制名
+	activateToolDir(ffmpegPath)
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return nil, err
 	}
@@ -139,10 +141,7 @@ func NewThumbnailService(cacheDir string, maxSize int, format string, ffmpegPath
 }
 
 func (s *ThumbnailService) getFFmpegCmd() string {
-	if s.ffmpegPath != "" {
-		return s.ffmpegPath
-	}
-	return "ffmpeg"
+	return ffmpegBin
 }
 
 func (s *ThumbnailService) HasFFmpeg() bool {
@@ -152,16 +151,17 @@ func (s *ThumbnailService) HasFFmpeg() bool {
 }
 
 func (s *ThumbnailService) getFFprobeCmd() string {
-	if s.ffmpegPath != "" {
-		return ffprobeSibling(s.ffmpegPath)
-	}
-	return "ffprobe"
+	return ffprobeBin
 }
 
 // videoDuration returns the file's duration in seconds via ffprobe, or
 // (0, false) if ffprobe is unavailable or the probe fails.
 func (s *ThumbnailService) videoDuration(sourcePath string) (float64, bool) {
-	cmd := exec.Command(s.getFFprobeCmd(),
+	sourcePath, err := sanitizeMediaArg(sourcePath)
+	if err != nil {
+		return 0, false
+	}
+	cmd := exec.Command("ffprobe",
 		"-v", "error",
 		"-show_entries", "format=duration",
 		"-of", "default=noprint_wrappers=1:nokey=1",
@@ -230,11 +230,20 @@ func (s *ThumbnailService) VideoDuration(sourcePath string) (float64, bool) {
 // 通过 stdout pipe 直接返回 image.Image，避免临时文件 IO。
 // 失败时返回 error，由 caller 决定 fallback 策略。
 func (s *ThumbnailService) extractVideoFrameToImage(sourcePath, seek string) (image.Image, error) {
+	// 进入子进程 argv 前净化路径与 seek 参数（CWE-78 边界）
+	sourcePath, err := sanitizeMediaArg(sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	seek, err = sanitizeSeekArg(seek)
+	if err != nil {
+		return nil, err
+	}
 	// 限制 ffmpeg 子进程执行时间，防止损坏视频导致永久挂起
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, s.getFFmpegCmd(),
+	cmd := exec.CommandContext(ctx, "ffmpeg",
 		"-y", "-ss", seek, "-i", sourcePath,
 		"-vframes", "1",
 		"-f", "image2pipe",
@@ -383,16 +392,16 @@ func isVideoFile(filePath string) bool {
 
 func (s *ThumbnailService) GetThumbnailPath(sourcePath string, modTime time.Time) string {
 	key := sourcePath + "|" + modTime.Format(time.RFC3339Nano)
-	hash := fmt.Sprintf("%x", md5.Sum([]byte(key)))
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 	return filepath.Join(s.cacheDir, hash+".jpg")
 }
 
-// thumbnailCacheKey returns the md5 hash used as both disk cache filename
+// thumbnailCacheKey returns the sha256 hash used as both disk cache filename
 // (sans .jpg) and memory cache key. MUST match GetThumbnailPath's format
 // exactly — both use RFC3339Nano, NOT UnixNano().
 func (s *ThumbnailService) thumbnailCacheKey(sourcePath string, modTime time.Time) string {
 	key := sourcePath + "|" + modTime.Format(time.RFC3339Nano)
-	return fmt.Sprintf("%x", md5.Sum([]byte(key)))
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 }
 
 func (s *ThumbnailService) generateThumbnailFromFile(sourcePath string, cachePath string) (string, error) {
@@ -462,7 +471,7 @@ func (s *ThumbnailService) GenerateSystemThumbnail(sourcePath string) (string, e
 	}
 
 	key := sourcePath + "|" + fi.ModTime().Format(time.RFC3339Nano)
-	hash := fmt.Sprintf("%x", md5.Sum([]byte(key)))
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(key)))
 	cachePath := filepath.Join(systemCacheDir, hash+".jpg")
 
 	if _, err := os.Stat(cachePath); err == nil {
@@ -665,7 +674,7 @@ func (s *ThumbnailService) GenerateThumbnailBytes(sourcePath string) ([]byte, er
 
 // GenerateSystemThumbnailBytes is the bytes-equivalent of GenerateSystemThumbnail.
 // System thumbnails live under cacheDir/system/ but share the same memory
-// cache (keyed by md5(path + modtime) which is unique per source file).
+// cache (keyed by sha256(path + modtime) which is unique per source file).
 func (s *ThumbnailService) GenerateSystemThumbnailBytes(sourcePath string) ([]byte, error) {
 	return s.generateBytesVia(sourcePath, s.GenerateSystemThumbnail)
 }

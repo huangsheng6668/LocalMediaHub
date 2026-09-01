@@ -3,6 +3,7 @@ package systray
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/getlantern/systray"
 )
@@ -45,7 +46,10 @@ func (t *Tray) onReady() {
 		for {
 			select {
 			case <-mCopy.ClickedCh:
-				exec.Command("cmd", "/c", fmt.Sprintf("echo %s | clip", t.srvURL)).Start()
+				// 通过 stdin 喂给 clip.exe，避免把 URL 拼进 cmd /c 字符串（CWE-78）
+				clipCmd := exec.Command("clip")
+				clipCmd.Stdin = strings.NewReader(t.srvURL)
+				clipCmd.Start()
 			case <-mQuit.ClickedCh:
 				t.running = false
 				if t.onQuit != nil {

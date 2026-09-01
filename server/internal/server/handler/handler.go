@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
 	"net/http"
@@ -161,7 +161,7 @@ func serveThumbnailBytes(c echo.Context, sourcePath string, thumbBytes []byte) e
 	h := c.Response().Header()
 	h.Set("Cache-Control", "public, max-age=86400")
 
-	sum := md5.Sum(thumbBytes)
+	sum := sha256.Sum256(thumbBytes)
 	etag := `"` + hex.EncodeToString(sum[:]) + `"`
 	h.Set("ETag", etag)
 
