@@ -96,6 +96,8 @@ data class BookChapter(
     @SerializedName("char_start") val charStart: Int = 0,
     @SerializedName("char_end") val charEnd: Int = 0,
     @SerializedName("manifest_id") val manifestId: String? = null,
+    val volume: String = "",
+    @SerializedName("vol_index") val volIndex: Int = -1,
 ) : Parcelable
 
 /**

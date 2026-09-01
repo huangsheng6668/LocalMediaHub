@@ -57,6 +57,26 @@ class LocalBookRepositoryTest {
         assertEquals("text", content.blocks[0].type)
     }
 
+    @Test
+    fun testParseTxtFile_crlfOffsetsStayAligned() {
+        // CRLF 文件：decodeTxtBytes 统一换行符后，章节偏移不得随行数漂移
+        val content = "第一章 A\r\nline1\r\nline2\r\nline3\r\nline4\r\nline5\r\n" +
+            "line6\r\nline7\r\nline8\r\nline9\r\nline10\r\n第二章 B\r\n这是第二章的正文内容"
+        val txtFile = tempFolder.newFile("crlf_novel.txt")
+        txtFile.writeText(content, Charsets.UTF_8)
+
+        val bookResult = repo.getLocalBookInfo(txtFile.absolutePath, "books/crlf_novel.txt")
+        assertTrue(bookResult is NetworkResult.Success<Book>)
+        val book = (bookResult as NetworkResult.Success<Book>).data
+        assertEquals(2, book.chapters.size)
+
+        val chapterResult = repo.getLocalBookChapter(txtFile.absolutePath, book, 1)
+        assertTrue(chapterResult is NetworkResult.Success<BookChapterContent>)
+        val blocks = (chapterResult as NetworkResult.Success<BookChapterContent>).data.blocks
+        // 第二章切片从标题行开始，而不是漂移到第一章的正文行
+        assertEquals("第二章 B", blocks.first().value)
+    }
+
     private fun chapter11Content(res: NetworkResult<BookChapterContent>): BookChapterContent {
         return (res as NetworkResult.Success<BookChapterContent>).data
     }
