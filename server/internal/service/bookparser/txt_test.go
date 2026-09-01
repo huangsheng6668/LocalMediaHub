@@ -457,6 +457,78 @@ func TestTxtVolumeHierarchy(t *testing.T) {
 	assert.Equal(t, 1, b.Chapters[3].VolIndex)
 }
 
+// Regression for 《重返乐园》: a heading line that carries BOTH a volume and a
+// chapter counter ("第一卷 第1章" bare, "【第二卷 第1章】" bracketed) must be a
+// chapter of that volume — not a volume marker. Previously every such line was
+// swallowed by the volume branch, leaving the TOC with no real chapters.
+func TestTxtCompoundVolumeChapterHeading(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "compound_vol_chap.txt")
+	content := strings.Join([]string{
+		"《重返乐园》（全105章完结）",
+		"",
+		"【第一卷 卷简介】",
+		"卷简介内容。",
+		"",
+		"第一卷 第1章",
+		"开篇正文内容。",
+		"一回到家，妈妈就一头扑到自己的床上：“哎呀，今天累死了。”",
+		"本章正文结束。",
+		"",
+		"第一卷 第2章",
+		"承转正文内容。",
+		"",
+		"【第二卷 卷简介】",
+		"简介正文。",
+		"",
+		"【第二卷 第1章】",
+		"新卷开篇内容。",
+		"",
+		"【第二卷 第2章】",
+		"新卷次章内容。",
+	}, "\n")
+	writeBytes(t, p, []byte(content))
+
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 5) // 序言 + 4 compound chapter headings
+
+	assert.Equal(t, "序言", b.Chapters[0].Title)
+
+	assert.Equal(t, "第一卷 第1章", b.Chapters[1].Title)
+	assert.Equal(t, "第一卷", b.Chapters[1].Volume)
+	assert.Equal(t, 0, b.Chapters[1].VolIndex)
+
+	assert.Equal(t, "第一卷 第2章", b.Chapters[2].Title)
+	assert.Equal(t, "第一卷", b.Chapters[2].Volume)
+	assert.Equal(t, 0, b.Chapters[2].VolIndex)
+
+	assert.Equal(t, "【第二卷 第1章】", b.Chapters[3].Title)
+	assert.Equal(t, "第二卷", b.Chapters[3].Volume)
+	assert.Equal(t, 1, b.Chapters[3].VolIndex)
+
+	assert.Equal(t, "【第二卷 第2章】", b.Chapters[4].Title)
+	assert.Equal(t, "第二卷", b.Chapters[4].Volume)
+	assert.Equal(t, 1, b.Chapters[4].VolIndex)
+}
+
+// Regression for 《重返乐园》: prose lines starting with a bare numeral followed
+// by a counter word from the chapter class ("一回到家…") must NOT be treated as
+// chapter headers. Without the 第 prefix the numeral+counter form must be
+// followed by a separator or end-of-line.
+func TestTxtBareNumeralProseNotChapter(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "bare_prose.txt")
+	content := "第1章 开始\n一回到家，妈妈就一头扑到自己的床上：“哎呀，今天累死了。”\n一部分记忆涌上心头。\n第2章 结束\n正文内容。"
+	writeBytes(t, p, []byte(content))
+
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 2)
+	assert.Equal(t, "第1章 开始", b.Chapters[0].Title)
+	assert.Equal(t, "第2章 结束", b.Chapters[1].Title)
+}
+
 func TestTxtVolumeFallbackAndDecorativePatterns(t *testing.T) {
 	dir := t.TempDir()
 

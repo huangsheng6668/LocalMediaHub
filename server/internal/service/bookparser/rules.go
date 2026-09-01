@@ -17,7 +17,12 @@ var volumeRules = []*regexp.Regexp{
 }
 
 var chapterRules = []*regexp.Regexp{
-	regexp.MustCompile(`^[^\p{L}\p{N}]*(?:第\s*)?[一二三四五六七八九十百千零0-9０-９]+(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*[章节回卷集部篇]`),
+	// With the 第 prefix keep the loose form: compact titles like "第4章我成了神手" are common.
+	regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[一二三四五六七八九十百千零0-9０-９]+(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*[章节回卷集部篇]`),
+	// Without 第, the numeral+counter form must be followed by a separator (or end
+	// of line) — otherwise prose like "一回到家…" or "一部分记忆…" is mistaken for
+	// a chapter heading.
+	regexp.MustCompile(`^[^\p{L}\p{N}]*[一二三四五六七八九十百千零0-9０-９]+(?:\s*[-~～至到—–—]\s*[一二三四五六七八九十百千零0-9０-９]+)?\s*完?\s*[章节回卷集部篇](?:$|[\s　：:～~、，,;；_—【\[（()（）\-])`),
 	// Allow decorative prefix before brackets (e.g., ＊＊＊（３）)
 	regexp.MustCompile(`^[^\p{L}\p{N}]*[【\[（(]\s*第?\s*[一二三四五六七八九十百千零0-9０-９\s]+\s*[章节回]?\s*[】\]）)]\s*.*`),
 	regexp.MustCompile(`^(?:={3,}|-{3,}|\*{3,}|━{3,})\s*第?\s*[一二三四五六七八九十0-9]+.*`),

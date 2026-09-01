@@ -27,6 +27,15 @@ var (
 	authorNoteRegex          = regexp.MustCompile(`^(前言|后记|序言|序章|编者按|作者的话)[：:]`)
 	pagePrefixRegex          = regexp.MustCompile(`^[^\p{L}\p{N}]*第\s*[0-9一二三四五六七八九十]+\s*页[\s　]+`)
 	inlineChapterSuffixRegex = regexp.MustCompile(`^(.+?)((?:第\s*)?[一二三四五六七八九十百千零0-9０-９]{1,4}\s*[章节回])\s*$`)
+
+	// A heading line carrying BOTH a volume and a chapter counter, e.g.
+	// "第一卷 第1章" or "【第二卷 第1章】". Without this check the volume
+	// branch in splitChapters swallows such lines whole and the book loses
+	// every chapter (only the volume fallback could rescue it).
+	compoundVolChapRegex = regexp.MustCompile(`^[【\[\s　]*(第\s*[一二三四五六七八九十百千零0-9０-９]+\s*卷)[\s　]*[】\]]?[\s　]*[:：]?[\s　]*(?:第\s*)?[一二三四五六七八九十百千零0-9０-９]+\s*完?\s*[章节回]`)
+	// Core "第X卷" token of a volume title, used to decide whether a compound
+	// heading enters a new volume (vs. restating the current one).
+	volCoreRegex = regexp.MustCompile(`第\s*[一二三四五六七八九十百千零0-9０-９]+\s*卷`)
 )
 
 func isEndMarker(trim string) bool {
@@ -211,7 +220,17 @@ func splitChapters(text, fallbackTitle string) []Chapter {
 		trim := strings.TrimSpace(line)
 		trim = pagePrefixRegex.ReplaceAllString(trim, "")
 
-		if isVol, volTitle := IsVolumeHeader(trim); isVol {
+		// "第一卷 第1章" / "【第二卷 第1章】": a chapter of the stated volume, not a
+		// volume marker. Update volume tracking, then fall through to the regular
+		// chapter-header handling below (it advances off) so dedupe logic stays in
+		// one place.
+		if m := compoundVolChapRegex.FindStringSubmatch(trim); m != nil && utf8.RuneCountInString(trim) <= 100 {
+			vol := strings.TrimSpace(m[1])
+			if cleanTitleForComparison(volCoreRegex.FindString(currentVolume)) != cleanTitleForComparison(vol) {
+				currentVolIdx++
+			}
+			currentVolume = vol
+		} else if isVol, volTitle := IsVolumeHeader(trim); isVol {
 			volMarks = append(volMarks, volMark{title: volTitle, start: off})
 			currentVolume = volTitle
 			currentVolIdx++
