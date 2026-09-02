@@ -76,3 +76,15 @@ input:focus, textarea:focus, select:focus {
     background: rgba(255, 255, 255, 0.2);
 }
 
+/* Global focus ring + reduced motion (Task 5, modern-neutral shared primitives).
+   Note: form controls keep their border+ring focus style instead of the outline
+   (see the input:focus rule above and the form primitives in components.css). */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+

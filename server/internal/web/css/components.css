@@ -1,169 +1,147 @@
-/* from style.css L431-541 (premium buttons) */
-/* Premium Buttons */
+/* Shared component primitives — modern-neutral language.
+   Provenance (pre-split style.css): buttons L431-541, widget-card/info-item L585-655,
+   glass modal L1097-1162, toast L1628-1665, auth modal L1817-1908. */
+
+/* ── Buttons: modern-neutral ── */
 .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
+    display: inline-flex; align-items: center; gap: var(--space-2);
     padding: 8px 14px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
-    background: var(--surface-card);
+    font-size: 13px; font-weight: 500;
+    font-family: var(--font-sans);
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    color: var(--text-primary);
     cursor: pointer;
-    transition: var(--transition-quick);
+    transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
 }
-
-.btn:hover {
-    background: var(--surface-hover);
-}
-
-.btn:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.btn:active {
-    transform: scale(0.98);
-}
+.btn:hover { background: var(--surface-hover); border-color: var(--accent); }
+.btn:active { transform: translateY(0.5px); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .btn-primary {
-    background: var(--accent);
+    background: var(--accent); border-color: var(--accent);
     color: var(--text-on-accent);
-    border-color: transparent;
-    box-shadow: var(--shadow-sm);
 }
-
-.btn-primary:hover {
-    background: var(--accent-hover);
-    color: var(--text-on-accent);
-    box-shadow: var(--shadow-md);
-}
-
-.btn-primary:focus-visible {
-    box-shadow: 0 0 0 3px var(--accent-soft);
-}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
 .btn-theme-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    background: var(--surface-card);
+    width: 36px; height: 36px; padding: 0; justify-content: center;
+    background: transparent; border-color: transparent;
     color: var(--text-secondary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: var(--transition-quick);
 }
+.btn-theme-toggle:hover { background: var(--surface-hover); border-color: transparent; color: var(--text-primary); }
 
-.btn-theme-toggle:hover {
-    color: var(--accent);
-    background: var(--surface-hover);
+.btn-sort-order, .btn-search {
+    height: 34px; padding: 0 10px; background: var(--surface-card);
 }
+.btn-search svg { display: block; }
 
-.btn-theme-toggle:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 3px var(--accent-soft);
+.btn-close {
+    width: 32px; height: 32px; padding: 0; justify-content: center;
+    background: transparent; border: none; border-radius: var(--radius-sm);
+    font-size: 16px; color: var(--text-secondary); cursor: pointer;
 }
+.btn-close:hover { background: var(--surface-hover); color: var(--text-primary); }
 
+/* Legacy button variants (not covered by the block above), retokenized to
+   canonical vars. Unused in markup today; kept per class-name contract. */
 .btn-secondary {
-    background-color: rgba(255, 255, 255, 0.08);
-    color: var(--text-main);
-    border: 1px solid var(--border-color);
+    background: var(--surface-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
 }
 
 .btn-secondary:hover {
-    background-color: rgba(255, 255, 255, 0.12);
+    background: var(--surface-hover);
 }
 
 .btn-danger {
-    background: var(--error-gradient);
-    color: var(--text-white);
+    background: var(--error);
+    color: var(--text-on-accent);
+    border-color: transparent;
 }
 
 .btn-danger:hover {
-    box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+    box-shadow: var(--shadow-md);
 }
 
-.btn-close {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 20px;
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 50%;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: var(--transition-quick);
+/* Retokenized copies of view-owned button rules (css/views/video.css keeps the
+   legacy-alias originals until Task 7's alias sweep; mapping per its table:
+   --text-main→--text-primary, --text-white→--text-on-accent,
+   --border-color→--border-subtle). */
+.btn-transcode {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    padding: 6px 12px;
+    font-size: 12px;
 }
 
-.btn-close:hover {
-    background-color: rgba(255, 255, 255, 0.1);
-    color: var(--text-white);
+.btn-transcode.active {
+    background: var(--accent);
+    color: var(--text-on-accent);
+    border-color: transparent;
+    box-shadow: 0 0 10px rgba(124, 58, 237, 0.3);
 }
 
-/* from style.css L585,592-607 (widget-card — shared dashboard/bookshelf) */
-/* Dashboard Widgets & Info Lists */
+.video-delete-btn {
+    display: none;
+    background-color: var(--error);
+    border-color: transparent;
+    margin-right: 8px;
+    font-size: 12px;
+    padding: 6px 12px;
+    color: var(--text-on-accent);
+}
+
+/* ── Form primitives ── */
+input[type="text"], input[type="password"], select, textarea {
+    font-family: var(--font-sans); font-size: 13px;
+    color: var(--text-primary);
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+textarea { resize: vertical; line-height: 1.6; }
+
+/* ── Cards & info lists (shared dashboard/settings; .stat-card lands in Task 8) ── */
 .widget-card {
     background: var(--surface-card);
-    border: 1px solid var(--border-soft);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     padding: var(--space-5);
     box-shadow: var(--shadow-sm);
 }
-
 .widget-card h2 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 20px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border-color);
+    font-size: 15px; font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 var(--space-4);
 }
 
-/* from style.css L623-655 (server-info-list + info-item family — shared dashboard/settings) */
 .server-info-list {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--space-4);
 }
 
 .info-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 12px;
-    border-bottom: 1px dashed var(--border-color);
-    font-size: 14px;
+    display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-4);
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-soft);
 }
+.info-item:last-child { border-bottom: none; }
+.info-label { font-size: 13px; color: var(--text-secondary); }
+.info-value { font-size: 13px; color: var(--text-primary); text-align: right; word-break: break-all; }
 
-.info-item:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-}
-
-.info-label {
-    color: var(--text-muted);
-}
-
-.info-value {
-    font-weight: 500;
-    color: var(--text-main);
-    background-color: rgba(255, 255, 255, 0.04);
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-color);
-}
-
-/* from style.css L1097-1162 (glass modal framework) */
-/* Premium Glass Modal Framework */
+/* ── Modal framework ── */
 .overlay-modal {
     position: fixed;
     inset: 0;
@@ -184,16 +162,22 @@
 .modal-backdrop {
     position: absolute;
     inset: 0;
-    background-color: rgba(0, 0, 0, 0.5);
+    background-color: rgba(0, 0, 0, 0.35);
+}
+
+/* Dark themes get a slightly heavier scrim. */
+[data-theme="night"] .modal-backdrop,
+[data-theme="night_black"] .modal-backdrop {
+    background-color: rgba(0, 0, 0, 0.45);
 }
 
 .modal-wrapper {
     background-color: var(--surface-card);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     width: 90%;
     max-width: 800px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+    box-shadow: var(--shadow-md);
     position: relative;
     z-index: 101;
     overflow: hidden;
@@ -207,7 +191,7 @@
 
 .modal-header {
     height: 56px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-subtle);
     padding: 0 20px;
     display: flex;
     align-items: center;
@@ -229,8 +213,14 @@
     padding: 24px;
 }
 
-/* from style.css L1628-1665 (toast notifications) */
-/* Toast Notifications styling */
+/* ── Empty state ── */
+.empty-state {
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-6);
+}
+
+/* ── Toast notifications ── */
 .toast-container {
     position: fixed;
     bottom: 24px;
@@ -243,14 +233,14 @@
 
 .toast {
     background-color: var(--surface-card);
-    color: var(--text-main);
-    border: 1px solid var(--border-color);
-    border-left: 4px solid var(--primary-light);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-left: 4px solid var(--accent);
     border-radius: var(--radius-md);
     padding: 12px 20px;
     font-size: 13px;
     font-weight: 500;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-md);
     min-width: 220px;
     animation: slideIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
@@ -268,17 +258,13 @@
     border-left-color: var(--error);
 }
 
-/* from style.css L1817-1908 (Round 28 auth token modal) */
 /* ─── Round 28 Task 12: Auth Token Modal ───
    Round 29 fix (final review Finding 3): every selector here is scoped under
    #auth-modal. The earlier unscoped rules (.modal-backdrop, .modal-actions,
    .modal-input, .modal-content, .modal.hidden) collided with the EXISTING
-   global modal styles at lines ~792/.modal-backdrop and ~831/.modal-actions
-   used by the file-tags modal, video player modal, etc. The unscoped
-   .modal-backdrop in particular reset background/blurs on those modals and
-   the unscoped .modal-actions clobbered their flex layout. The auth modal's
-   root element carries id="auth-modal" (see index.html), so all rules below
-   are namespaced to it. */
+   global modal styles used by the file-tags modal, video player modal, etc.
+   The auth modal's root element carries id="auth-modal" (see index.html),
+   so all rules below are namespaced to it. */
 
 #auth-modal.hidden {
     display: none;
@@ -287,7 +273,14 @@
 #auth-modal .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.35);
+}
+
+/* Dark-theme scrim for the auth modal needs id-scoped specificity to beat
+   the #auth-modal .modal-backdrop rule above. */
+[data-theme="night"] #auth-modal .modal-backdrop,
+[data-theme="night_black"] #auth-modal .modal-backdrop {
+    background: rgba(0, 0, 0, 0.45);
 }
 
 #auth-modal .modal-content {
@@ -295,32 +288,32 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background: var(--bg-card, var(--surface-card));
+    background: var(--surface-card);
     padding: 24px;
     border-radius: var(--radius-lg);
     min-width: 320px;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
     box-shadow: var(--shadow-md);
     z-index: 101;
 }
 
 #auth-modal .modal-input {
     width: 100%;
-    padding: 8px;
+    padding: 8px 10px;
     margin: 12px 0;
-    background-color: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    color: var(--text-main);
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 13px;
     outline: none;
-    transition: var(--transition-quick);
+    transition: border-color .15s ease, box-shadow .15s ease;
 }
 
 #auth-modal .modal-input:focus {
-    border-color: var(--primary-light);
-    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 #auth-modal .modal-actions {
@@ -331,33 +324,30 @@
 }
 
 #auth-modal .modal-actions button {
-    padding: 8px 16px;
-    border-radius: var(--radius-md);
-    font-size: 14px;
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: var(--transition-quick);
+    transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease;
     font-family: var(--font-sans);
-    border: none;
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-card);
+    color: var(--text-primary);
 }
 
 #auth-modal .modal-actions button.primary {
     background: var(--accent);
-    color: var(--text-white);
+    border-color: var(--accent);
+    color: var(--text-on-accent);
 }
 
 #auth-modal .modal-actions button.primary:hover {
-    box-shadow: 0 0 16px rgba(124, 58, 237, 0.4);
-    opacity: 0.95;
-}
-
-#auth-modal .modal-actions button:not(.primary) {
-    background-color: rgba(255, 255, 255, 0.08);
-    color: var(--text-main);
-    border: 1px solid var(--border-color);
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
 }
 
 #auth-modal .modal-actions button:not(.primary):hover {
-    background-color: rgba(255, 255, 255, 0.12);
+    background: var(--surface-hover);
+    border-color: var(--accent);
 }
-
