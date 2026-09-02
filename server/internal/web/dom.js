@@ -14,6 +14,7 @@ export const elements = {
 
     pageTitle: document.getElementById('page-title'),
     btnTriggerScan: document.getElementById('btn-trigger-scan'),
+    btnThemeToggle: document.getElementById('btn-theme-toggle'),
     toastContainer: document.getElementById('toast-container'),
 
     // Views

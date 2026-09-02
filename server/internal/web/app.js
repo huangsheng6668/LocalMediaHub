@@ -33,6 +33,7 @@ export function applyGlobalAppTheme() {
     const cssTheme = themeMap[themeKey] || 'day';
     document.documentElement.dataset.theme = cssTheme;
     document.body.dataset.readerTheme = themeKey;
+    updateThemeToggleIcon(themeKey === 'NIGHT' || themeKey === 'NIGHT_BLACK' ? 'night' : 'day');
 }
 
 function showAuthModal(url) {
@@ -148,6 +149,19 @@ function setupEventListeners() {
         elements.authTokenInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') saveAuthAndRetry();
             if (e.key === 'Escape') hideAuthModal();
+        });
+    }
+
+    // Header day/night toggle: flips the persisted theme key; the
+    // reader-prefs-changed event re-runs applyGlobalAppTheme, so the
+    // chrome updates without a reload.
+    if (elements.btnThemeToggle) {
+        elements.btnThemeToggle.addEventListener('click', () => {
+            const s = readerPrefs.getSettings();
+            const resolved = s.theme === 'AUTO'
+                ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'NIGHT' : 'DAY')
+                : (s.theme || 'DAY');
+            readerPrefs.saveSettings({ theme: resolved === 'NIGHT' ? 'DAY' : 'NIGHT' });
         });
     }
 
