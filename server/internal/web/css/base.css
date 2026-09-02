@@ -88,3 +88,7 @@ input:focus, textarea:focus, select:focus {
     }
 }
 
+/* Tabular numerals utility (Task 8): equal-width digits so stat values and
+   file sizes don't jitter as numbers change. Used by dashboard stat cards
+   and recent-media size column. */
+.num-tabular { font-variant-numeric: tabular-nums; }

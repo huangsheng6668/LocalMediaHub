@@ -1,45 +1,41 @@
-/* from style.css L542-584 (dashboard statistics grid) */
+/* from style.css L542-584 (dashboard statistics grid) — Task 8 redesign:
+   stat cards now carry an icon chip + label/value body (.stat-card__*). */
 /* Dashboard Statistics Grid */
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-4);
     margin-bottom: 32px;
 }
 
 .stat-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
     background: var(--surface-card);
-    border: 1px solid var(--border-soft);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     padding: var(--space-5);
-    display: flex;
-    align-items: center;
-    gap: 20px;
     box-shadow: var(--shadow-sm);
+    transition: box-shadow .15s ease, transform .15s ease;
 }
-
-.stat-icon {
-    font-size: 32px;
-    background-color: rgba(124, 58, 237, 0.1);
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.stat-card__icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    background: var(--accent-soft);
+    color: var(--accent-text);
 }
-
-.stat-info h3 {
-    font-size: 13px;
-    color: var(--text-muted);
-    font-weight: 500;
-    margin-bottom: 4px;
-}
-
-.stat-value {
-    font-size: 28px;
-    font-weight: 700;
+.stat-card__label { margin: 0; font-size: 13px; color: var(--text-secondary); }
+.stat-card__value {
+    margin: 2px 0 0;
+    font-size: 26px;
+    font-weight: 600;
     color: var(--text-primary);
+    line-height: 1.1;
 }
 
 /* from style.css L586-591 (dashboard widgets grid) */
@@ -65,7 +61,34 @@
     text-align: center;
 }
 
-/* from style.css L2948-2950 (CSP-safe dashboard-recent classes) */
-.dashboard-recent-item { cursor: pointer; }
-.dashboard-recent-size { font-size: 11px; }
-
+/* Recent media rows (Task 8): thumbnail + name + size, replacing the old
+   info-item based rows (.dashboard-recent-item/.dashboard-recent-size). */
+.recent-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background-color .15s ease;
+}
+.recent-item:hover { background: var(--surface-hover); }
+.recent-item__thumb {
+    width: 64px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    background: var(--surface-hover);
+    flex: none;
+}
+.recent-item__thumb--fallback { display: grid; place-items: center; color: var(--text-muted); }
+.recent-item__name {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.recent-item__size { font-size: 12px; color: var(--text-muted); flex: none; }
