@@ -91,6 +91,25 @@
         padding: 6px 10px;
         font-size: 13px;
     }
+    /* Tag manager: the 320px fixed creator column + 24px gap leaves ~7px for
+       the tag list at 375px — collapse to a single stacked column. */
+    .tag-manager-container {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    /* Video controls row: 36px buttons + volume slider + time display exceed
+       375px at the base 16px gaps — tighten gaps, shorten the slider, and
+       let the row wrap instead of squeezing. */
+    .controls-left, .controls-right {
+        gap: 8px;
+    }
+    .controls-buttons-row {
+        flex-wrap: wrap;
+        row-gap: 4px;
+    }
+    .video-volume-bar {
+        width: 40px;
+    }
 }
 
 /* from style.css L1909-1984 (Round 16 C3 full-screen modal on phone) */

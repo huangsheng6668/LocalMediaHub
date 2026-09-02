@@ -10,6 +10,24 @@ import { formatSize, encodeRoutePath, safeBtoa } from './utils.js';
 import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 
+// ── Inline SVG icon vocabulary (mirrors index.html / Task 6 icons) ──
+// Monochrome currentColor stroke icons replace the former emoji glyphs in
+// card templates. Sizes match the old emoji footprint: 32px in the card
+// preview area, 16px inside chips/action buttons, 14px for the play glyph.
+const svgIcon = (inner, size) =>
+    `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+
+const ICONS = {
+    folder: () => svgIcon('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', 32),
+    drive: () => svgIcon('<line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/>', 32),
+    doc: () => svgIcon('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>', 32),
+    video: () => svgIcon('<rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 10 6-3v10l-6-3"/>', 32),
+    image: () => svgIcon('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.35-4.35a1 1 0 0 0-1.42 0L5 21"/>', 32),
+    trash: () => svgIcon('<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>', 16),
+    // Filled play triangle (same path as the video-controls play icon).
+    play: () => `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>`
+};
+
 // Reflect the current browse location in the URL hash via history.replaceState
 // (fires no hashchange, so no re-render loop) — a refresh or a shared link
 // then restores the same directory instead of resetting to the root.
@@ -68,7 +86,7 @@ export async function loadRoots() {
         return `
             <div class="media-card" data-action="browse" data-path="${safePath}">
                 <div class="card-preview">
-                    <span class="card-preview-icon">📁</span>
+                    <span class="card-preview-icon">${ICONS.folder()}</span>
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>
@@ -98,7 +116,7 @@ export async function loadSystemDrives() {
                 return `
                     <div class="media-card" data-action="browse" data-path="${safePath}">
                         <div class="card-preview">
-                            <span class="card-preview-icon">💾</span>
+                            <span class="card-preview-icon">${ICONS.drive()}</span>
                         </div>
                         <div class="card-details">
                             <div class="card-title">${escapeHtml(drive)}</div>
@@ -215,7 +233,7 @@ export function renderBrowserList() {
     state.currentFiles = sortMediaItems(state.currentFiles, state.sortField, state.sortOrder, false);
 
     if (state.currentFolders.length === 0 && state.currentFiles.length === 0) {
-        elements.browserList.innerHTML = '<div class="browser-empty-grid">📁 当前目录为空（无媒体文件）</div>'; // XSS-SAFE: hardcoded literal
+        elements.browserList.innerHTML = '<div class="browser-empty-grid">当前目录为空（无媒体文件）</div>'; // XSS-SAFE: hardcoded literal
         return;
     }
 
@@ -228,10 +246,10 @@ export function renderBrowserList() {
         html += `
             <div class="media-card" data-action="browse" data-path="${safePath}">
                 <div class="card-preview">
-                    <span class="card-preview-icon">📁</span>
+                    <span class="card-preview-icon">${ICONS.folder()}</span>
                 </div>
                 <div class="card-actions-overlay">
-                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" data-action="delete-folder" data-index="${index}">🗑️</button>` : ''}
+                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" data-action="delete-folder" data-index="${index}">${ICONS.trash()}</button>` : ''}
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>
@@ -257,7 +275,9 @@ export function renderBrowserList() {
         if (isText) {
             const ext = (file.extension || '').toLowerCase();
             const isUnsupportedText = !['.txt', '.epub'].includes(ext);
-            const docIcon = ext === '.epub' ? '📘' : '📄';
+            // Both .txt and .epub use the doc icon; the extension badge
+            // (TXT/EPUB) in card-meta distinguishes the two formats.
+            const docIcon = ICONS.doc();
             const safeName = escapeHtml(file.name);
             const safeExt = escapeHtml(file.extension);
             const unsupportedBadge = isUnsupportedText
@@ -272,7 +292,7 @@ export function renderBrowserList() {
                     </div>
                     <div class="card-actions-overlay">
 
-                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">🗑️</button>` : ''}
+                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">${ICONS.trash()}</button>` : ''}
                     </div>
                     <div class="card-details">
                         <div class="card-title" title="${safeName}">${safeName}</div>
@@ -287,7 +307,9 @@ export function renderBrowserList() {
             return;
         }
 
-        const fallbackIcon = isVideo ? '🎬' : '🖼️';
+        // Keyword consumed by the thumbnail error handler below (maps to the
+        // SVG vocabulary — never interpolated raw into the DOM).
+        const fallbackIcon = isVideo ? 'video' : 'image';
         let previewHtml = '';
         let playOverlay = '';
 
@@ -305,7 +327,7 @@ export function renderBrowserList() {
             previewHtml = `<img src="${escapeHtml(videoUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}" loading="lazy" decoding="async">`;
             playOverlay = `
                 <div class="play-overlay">
-                    <div class="play-button-circle">▶</div>
+                    <div class="play-button-circle">${ICONS.play()}</div>
                 </div>
             `;
         } else {
@@ -324,7 +346,7 @@ export function renderBrowserList() {
                 </div>
                 <div class="card-actions-overlay">
 
-                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">🗑️</button>` : ''}
+                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">${ICONS.trash()}</button>` : ''}
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>
@@ -452,7 +474,10 @@ export function setupBrowserListeners(elements) {
                 img.style.display = 'none';
                 const fallback = document.createElement('span');
                 fallback.className = 'card-preview-icon';
-                fallback.textContent = wrapper.dataset.fallbackIcon || '🖼️';
+                // Fixed literal SVG from the ICONS map; the dataset keyword only
+                // selects between two literals and is never interpolated.
+                // XSS-SAFE: pure-literal icon markup, no dynamic interpolation
+                fallback.innerHTML = wrapper.dataset.fallbackIcon === 'video' ? ICONS.video() : ICONS.image();
                 wrapper.appendChild(fallback);
             }
         }

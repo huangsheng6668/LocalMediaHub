@@ -48,25 +48,13 @@
     color: var(--text-primary);
 }
 
+/* Geometry (height 34px / card bg / border) comes from components.css
+   (.btn base + .btn-sort-order sizing); only the arrow flavor lives here. */
 .btn-sort-order {
-    background: transparent;
     color: var(--accent);
-    border: none;
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
     font-size: 14px;
     font-weight: 700;
     line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: all .15s ease;
-}
-
-.btn-sort-order:hover {
-    background: var(--surface-hover);
-    color: var(--accent);
 }
 
 .breadcrumbs {
@@ -107,23 +95,10 @@
 
 .search-box input {
     width: 240px;
-    padding: 6px 10px;
-    font-size: 13px;
 }
 
-.btn-search {
-    background: var(--surface-card);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-subtle);
-    padding: 6px 10px;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-}
-
-.btn-search:hover {
-    background: var(--surface-hover);
-    color: var(--accent);
-}
+/* .btn-search is fully owned by components.css (.btn base + sizing);
+   no browser-local overrides needed. */
 
 /* Media Browser Grid */
 .browser-grid {
@@ -140,17 +115,17 @@
     border-radius: var(--radius-lg);
     overflow: hidden;
     cursor: pointer;
-    transition: all .3s cubic-bezier(.4,0,.2,1);
+    transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
     display: flex;
     flex-direction: column;
     position: relative;
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-sm);
 }
 
 .media-card:hover {
-    transform: translateY(-6px);
+    transform: translateY(-2px);
     border-color: var(--accent);
-    box-shadow: 0 12px 24px -10px rgba(124, 58, 237, 0.3);
+    box-shadow: var(--shadow-md);
 }
 
 /* Card Header/Preview Area */
@@ -176,7 +151,14 @@
 }
 
 .card-preview-icon {
-    font-size: 32px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.card-preview-icon svg {
+    display: block;
 }
 
 /* Special video play icon overlay */
@@ -226,7 +208,7 @@
 
 .card-title {
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -234,7 +216,7 @@
 }
 
 .card-meta {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
     display: flex;
     justify-content: space-between;

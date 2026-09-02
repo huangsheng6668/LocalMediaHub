@@ -79,9 +79,9 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: #7c3aed;
+    background: var(--accent);
     cursor: pointer;
-    box-shadow: 0 0 8px #7c3aed;
+    box-shadow: 0 0 8px var(--accent);
     transition: transform 0.1s ease;
 }
 
@@ -94,9 +94,9 @@
     height: 12px;
     border: none;
     border-radius: 50%;
-    background: #7c3aed;
+    background: var(--accent);
     cursor: pointer;
-    box-shadow: 0 0 8px #7c3aed;
+    box-shadow: 0 0 8px var(--accent);
     transition: transform 0.1s ease;
 }
 
@@ -116,14 +116,15 @@
     gap: 16px;
 }
 
+/* Uniform circular control buttons on the dark overlay */
 .video-control-btn {
     background: none;
     border: none;
     color: var(--text-primary);
     font-size: 16px;
     cursor: pointer;
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -132,7 +133,7 @@
 }
 
 .video-control-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.12);
     color: var(--text-on-accent);
 }
 
@@ -218,8 +219,9 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #fff;
+    background: var(--accent);
     cursor: pointer;
+    box-shadow: 0 0 8px var(--accent);
 }
 
 .video-volume-bar::-moz-range-thumb {
@@ -227,8 +229,9 @@
     height: 10px;
     border: none;
     border-radius: 50%;
-    background: #fff;
+    background: var(--accent);
     cursor: pointer;
+    box-shadow: 0 0 8px var(--accent);
 }
 
 /* Transcode toggle (.btn-transcode) and delete (.video-delete-btn) buttons

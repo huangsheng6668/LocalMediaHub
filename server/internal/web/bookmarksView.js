@@ -70,17 +70,19 @@ export function renderBookmarks() {
         row.style.padding = '16px 20px';
         row.style.backgroundColor = 'var(--surface-card)';
         row.style.border = '1px solid var(--border-subtle)';
-        row.style.borderRadius = 'var(--radius-lg)';
+        row.style.borderRadius = 'var(--radius-md)';
         row.style.cursor = 'pointer';
         row.style.transition = 'all 0.2s ease';
         row.style.boxShadow = 'var(--shadow-md)';
-        
+
         row.addEventListener('mouseenter', () => {
             row.style.borderColor = 'var(--accent)';
+            row.style.backgroundColor = 'var(--surface-hover)';
             row.style.transform = 'translateY(-2px)';
         });
         row.addEventListener('mouseleave', () => {
             row.style.borderColor = 'var(--border-subtle)';
+            row.style.backgroundColor = 'var(--surface-card)';
             row.style.transform = 'none';
         });
         

@@ -1,8 +1,9 @@
 /* from style.css L1069-1096 (system settings card) */
-/* System Settings Card Details */
+/* System Settings Card Details — same treatment as .widget-card
+   (components.css): surface-card + border-subtle + radius-lg + shadow-sm */
 .settings-card {
     background: var(--surface-card);
-    border: 1px solid var(--border-soft);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     padding: var(--space-5);
     box-shadow: var(--shadow-sm);
@@ -31,5 +32,38 @@
 .settings-global-theme-grid {
     grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
     margin-top: 10px;
+}
+
+/* Theme cards on the settings page (rendered by settings.js with the shared
+   reader-settings__theme-card class — previously unstyled here). Mirrors the
+   .reader-settings__theme-opt card from the reader settings dialog, but with
+   global (non-reader) tokens. */
+.settings-global-theme-grid .reader-settings__theme-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 4px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-primary);
+    transition: border-color .15s ease, background-color .15s ease;
+}
+
+.settings-global-theme-grid .reader-settings__theme-card input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.settings-global-theme-grid .reader-settings__theme-card:hover {
+    border-color: var(--accent);
+}
+
+.settings-global-theme-grid .reader-settings__theme-card:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
 }
 
