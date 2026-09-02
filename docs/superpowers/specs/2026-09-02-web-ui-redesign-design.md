@@ -75,6 +75,9 @@ server/internal/web/
     layout.css        — sidebar / main-header / view-container / 响应式断点
     components.css    — btn / card / stat-card / input / select / modal /
                         toast / badge / empty-state / dropdown 等
+    responsive.css    — 全部 @media 断点规则（**必须最后加载**：断点规则要
+                        在层叠上压过视图规则；这也是它独立成文件而非并入
+                        layout.css 的原因）
     views/
       dashboard.css   browser.css   bookshelf.css  bookmarks.css
       settings.css    reader.css    video.css      lightbox.css
@@ -181,7 +184,7 @@ server/internal/web/
 | `dashboard.js` | 统计图标 / 最近媒体行模板（缩略图 + SVG）、保持 `// XSS-SAFE:` 纪律 |
 | `bookshelf.js` | `renderCard` 书封结构（类名新增 `bookshelf-card__cover` 等，渐变 class 由书名 hash 决定） |
 | `bookmarksView.js` | ① 模板内 emoji→SVG；② 5 处 CSSOM 别名引用迁移到规范名（`var(--border-color)` → `var(--border-subtle)`、`var(--primary)` → `var(--accent)`、`var(--text-white)` → `var(--text-primary)`） |
-| `browserView.js` | emoji→SVG；`encodeRoutePath` 改为具名导出供 dashboard.js 复用 |
+| `browserView.js` | emoji→SVG（`encodeRoutePath` 已由 `utils.js` 导出，无需改动） |
 | `boot.js` | 修复主题键不一致：改读 `reader_settings` JSON 的 `theme`（含 AUTO 解析 + 内置最小 themeMap 副本） |
 | `app.js` | 接线 `#btn-theme-toggle`（DAY↔NIGHT，走 `saveSettings` 事件管线）；`applyGlobalAppTheme` 内调用 `updateThemeToggleIcon` |
 | `readerPrefs.js` | 删除零消费的 `getChromeTheme` / `saveChromeTheme` 与 `chrome_theme` 键（boot.js 改造后无人引用） |
