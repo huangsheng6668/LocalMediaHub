@@ -23,15 +23,20 @@ Web 管理界面（`server/internal/web/`）当前为暖纸色阅读向设计，
 
 ### 色彩
 
-中性灰阶表面 + 每主题一个 accent。**Token 变量名契约不变**（`--surface-app` /
+中性灰阶表面 + 每主题一个 accent。**保留**的规范变量名（`:root` 现有契约，重写取值不改名）：`--surface-app` /
 `--surface-card` / `--surface-sidebar` / `--surface-hover` / `--text-primary` /
 `--text-secondary` / `--text-muted` / `--text-on-accent` / `--accent` /
 `--accent-hover` / `--accent-soft` / `--accent-text` / `--border-soft` /
 `--border-subtle` / `--shadow-sm` / `--shadow-md` / `--radius-sm|md|lg` /
-`--space-1..6` / `--error` / `--secondary` / `--font-sans` 等），重写的是取值。
-旧别名变量（`--bg-main` / `--primary` / `--primary-light` / `--text-main` /
-`--text-white` / `--border-color` / `--transition-smooth` / `--transition-quick`）
-在组件重写过程中迁移到规范名后**删除**。
+`--space-1..6` / `--error` / `--secondary` / `--font-sans`。
+**删除**的旧别名变量完整清单（已逐一核实）：`--bg-main` / `--bg-card` /
+`--bg-sidebar` / `--bg-elevated`（仅出现在 reader 覆盖块）/ `--primary` /
+`--primary-light` / `--text-main` / `--text-white` / `--border-color` /
+`--border-radius-lg`（含 fallback 写法）/ `--transition-smooth` /
+`--transition-quick`（JS 无引用，组件改用新交互态规则）。删除前必须 grep
+审计全部消费者，
+已知 **JS 侧 CSSOM 引用 5 处**（bookmarksView.js：`var(--border-color)`×2、
+`var(--primary)`、`var(--text-white)`，见 JS 改动清单）需先迁移到规范名。
 
 7 套调色板目标值（实施时可在对比度校验后微调，明度/彩度关系不变）：
 
@@ -97,22 +102,47 @@ server/internal/web/
 | 浏览页 / 书架 / 书签 / 设置 / 视频 / 灯箱各段 | 对应 `views/*.css` |
 | CSP-safe 替换段（原 inline style 的类） | 按归属拆入对应文件 |
 
-## 主题系统（机制不动）
+## 主题系统（机制不动 + 两处既有缺陷修复）
 
 - `reader_settings.theme` → `applyGlobalAppTheme()` → `<html data-theme>`，
-  `AUTO` 跟随系统；`boot.js` 防 FOUC——**全部保持现状**。
-- 工作量在 `themes.css`：重写 7 套调色板取值 + `body[data-reader-theme]`
+  `AUTO` 跟随系统——**机制保持现状**。
+- 工作量在 `themes.css`：重写 7 套 chrome 调色板取值 + `body[data-reader-theme]`
   覆盖块迁入（阅读区背景/文字仍由阅读主题独立控制）。
-- 设置页主题 swatch 色值（`reader-settings__theme-swatch[data-theme=…]` 的
-  硬编码 hex）与新调色板同步更新；swatch 用 CSS 类实现，守 CSP。
+- **阅读面板主题不在本次范围**：7 套阅读主题色值存于 `readerPrefs.js` 的
+  `THEME_PRESETS`（JS 数据，经 `textReader.js` 的 `setVar('--reader-*')` 注入），
+  保持原值。设置页 swatch 的硬编码 hex 表达的就是这些阅读主题背景色，
+  **不随 chrome 调色板同步修改**；swatch 规则里 `var(--reader-border,
+  var(--border-color))` / `var(--reader-fg, var(--text-main))` 的别名回退在
+  别名迁移时改为规范名回退。
+
+### 既有缺陷 1：boot.js 主题键不一致（FOUC 闪错主题）
+
+`boot.js` 读 `chrome_theme` 键，但该键**没有任何代码写入**（`saveChromeTheme`
+零调用方）——每次加载都回退系统偏好，忽略用户在设置里选的主题（选了 NIGHT
+仍先渲染 day 再切换）。修复：`boot.js` 改为解析 `reader_settings` JSON 的
+`theme` 字段（含 AUTO → matchMedia 解析 → 与 app.js 相同的 themeMap 落到
+`data-theme`），boot.js 是非模块脚本需自带一份最小映射副本。`chrome_theme`
+键与 `getChromeTheme` / `saveChromeTheme` 导出一并删除（已确认零消费）。
+
+### 既有缺陷 2：header 日/夜切换按钮是死按钮
+
+`#btn-theme-toggle` 无任何 click 监听，`updateThemeToggleIcon()` 在 app.js
+定义后从未被调用。修复：接线——点击在 DAY ↔ NIGHT 间切换并
+`readerPrefs.saveSettings({ theme })`（走统一 `reader-prefs-changed` 事件
+管线，阅读器不重绘 chrome 主题不受影响），图标更新复用现成的
+`updateThemeToggleIcon` 并在 `applyGlobalAppTheme` 内调用。
 
 ## 痛点视图升级
 
 ### 仪表盘
 
 - 统计卡：SVG 图标容器 + 大数字（tabular-nums）+ 标签层级重排。
-- 「最近打开的媒体」：行卡加视频缩略图（复用 `GET /api/v1/thumbnail?path=`，
-  `loading="lazy"`，加载失败回退图标），文件名 + 大小排版层级化。
+- 「最近打开的媒体」：行卡加视频缩略图。**复用 browserView.js 的既有 URL
+  构造**：`/api/v1/videos/<encodeRoutePath(file.path)>/thumbnail`（dashboard
+  最近列表本就是 videos-only，且 `/api/v1/videos/*` asset 路由是公开的、无需
+  `?token=`——挂 auth 的是 `/api/v1/videos` 列表端点），`loading="lazy"` +
+  `decoding="async"`，`onerror` 回退 SVG 图标（复用浏览页 capture-phase 错误
+  委托模式）。`encodeRoutePath` 从 browserView.js 导出复用，勿复制实现。
 - 「服务信息」卡与最近媒体卡宽度配比平衡；书架嵌入区跟随新书架卡样式。
 
 ### 书架
@@ -128,7 +158,15 @@ server/internal/web/
 
 - TOC 抽屉 / 书签面板 / 设置 dialog / 自动滚动面板 / 顶部进度条统一到新
   token 与圆角/阴影/焦点态；翻页动画类名与关键帧**原样保留**（测试依赖行为）。
-- 阅读区（正文）背景/文字仍由阅读主题控制，不随本次改动变化。
+- 阅读区（正文）背景/文字仍由阅读主题（`THEME_PRESETS` → `--reader-*` 变量）
+  控制，不随本次改动变化。
+- **别名迁移的隐蔽依赖**：现 `body[data-reader-theme]` 覆盖块重映射的目标
+  全是旧别名（`--bg-card` / `--bg-elevated` / `--text-main` / `--text-white` /
+  `--text-muted` / `--border-color`）。组件与 reader.css 改用规范名消费后，
+  覆盖块必须**同步改为重映射规范名**（`--surface-card` / `--text-primary` /
+  `--text-muted` / `--border-subtle` 等），否则阅读器内 chrome 主题接管会
+  静默失效（drawer/dialog 回落全局主题）。`--reader-*` 注入端（textReader.js
+  `setVar`）不动。
 
 ### 其余视图
 
@@ -142,8 +180,15 @@ server/internal/web/
 | `index.html` | emoji→SVG、新增 `<link>`、移除 tokens.css link、书架卡容器结构微调 |
 | `dashboard.js` | 统计图标 / 最近媒体行模板（缩略图 + SVG）、保持 `// XSS-SAFE:` 纪律 |
 | `bookshelf.js` | `renderCard` 书封结构（类名新增 `bookshelf-card__cover` 等，渐变 class 由书名 hash 决定） |
-| `browserView.js` / `bookmarksView.js` 等 | 模板内 emoji→SVG |
-| 业务逻辑 / 路由 / readerPrefs / 存储 | **零改动** |
+| `bookmarksView.js` | ① 模板内 emoji→SVG；② 5 处 CSSOM 别名引用迁移到规范名（`var(--border-color)` → `var(--border-subtle)`、`var(--primary)` → `var(--accent)`、`var(--text-white)` → `var(--text-primary)`） |
+| `browserView.js` | emoji→SVG；`encodeRoutePath` 改为具名导出供 dashboard.js 复用 |
+| `boot.js` | 修复主题键不一致：改读 `reader_settings` JSON 的 `theme`（含 AUTO 解析 + 内置最小 themeMap 副本） |
+| `app.js` | 接线 `#btn-theme-toggle`（DAY↔NIGHT，走 `saveSettings` 事件管线）；`applyGlobalAppTheme` 内调用 `updateThemeToggleIcon` |
+| `readerPrefs.js` | 删除零消费的 `getChromeTheme` / `saveChromeTheme` 与 `chrome_theme` 键（boot.js 改造后无人引用） |
+| `package.json` | 删除 `"build:tokens"` 脚本（随 tools/build-tokens.mjs 一起清理） |
+| 业务逻辑 / 路由 / 存储格式 | **零改动** |
+
+favicon 由 `favicon.go` 程序化生成并独立路由，不在 embed 清单内，本次不受影响。
 
 ## CSP 与安全合规
 
@@ -161,7 +206,10 @@ server/internal/web/
 3. `cd server && go build ./...` —— 验证新 embed 指令与资源路径。
 4. 视觉验证：`--headless` 起 server，浏览器工具逐视图截图（仪表盘 / 浏览 /
    书架 / 阅读器 / 设置 / 视频 / 灯箱），day、night、night_black 三主题必查，
-   其余主题抽验；检查对比度（正文 ≥ 4.5:1）与 focus 可见性。
+   其余主题抽验；检查对比度（正文 ≥ 4.5:1）与 focus 可见性。主题专项：
+   ① 设置选 NIGHT 后硬刷新无 FOUC 闪白；② header 日/夜按钮切换即时生效；
+   ③ NIGHT 阅读主题下打开 TOC drawer 与设置 dialog，确认 chrome 主题接管
+   未失效（排查别名重定向遗漏）。
 5. Android / Rust 子系统不受影响，无需跑其测试。
 
 ## 风险与缓解
@@ -169,15 +217,20 @@ server/internal/web/
 | 风险 | 缓解 |
 |---|---|
 | 2985 行 CSS 拆分漏段/错序导致样式回归 | 拆分映射表逐段核对；`<link>` 顺序固定；拆完先跑视觉抽验再改组件 |
-| 类名/变量重命名破坏 JS 或测试 | 铁律：不改选择器名；别名变量删除前全局 grep 确认零引用 |
+| 类名/变量重命名破坏 JS 或测试 | 铁律：不改选择器名；别名变量删除前全局 grep 确认零引用（bookmarksView.js 5 处已知） |
+| reader 覆盖块目标仍是旧别名，阅读器 chrome 主题接管静默失效 | 别名迁移时同步把覆盖块重映射目标改为规范名；视觉验证阶段在 NIGHT 阅读主题下打开 drawer/dialog 专项核对 |
+| boot.js / 主题按钮改造引入回归 | 两处改动各自独立 commit；day/night/AUTO 三态下刷新验证无 FOUC；`node --test`（readerPrefs 系列）守护 |
 | reader.css 迁移破坏翻页动画/沉浸模式 | 关键帧与类名原样搬运，`node --test`（pageTurn/theme 系列）守护 |
 | embed 指令遗漏新目录 | `go build` + 启动后 `GET /css/base.css` 等冒烟请求 |
 | 7 套主题对比度不足 | 调色板表为基准，视觉验证阶段逐主题核对文字对比度 |
 
 ## 实施顺序（每步一个 commit）
 
-1. 拆分迁移：style.css → css/ 多文件 + web.go embed + 删 tokens.css（行为零变化）
-2. themes.css：7 套调色板重写 + swatch 同步
-3. components.css + base.css：组件按新语言重写，index.html emoji→SVG
-4. 仪表盘 + 书架升级（含 JS 模板）
+1. 拆分迁移：style.css → css/ 多文件 + web.go embed + 删 tokens.css 与
+   build:tokens 脚本（行为零变化）
+2. themes.css：7 套 chrome 调色板重写 + reader 覆盖块别名重定向 + 主题系统
+   两处既有缺陷修复（boot.js 键不一致、header 切换按钮接线）
+3. components.css + base.css：组件按新语言重写，index.html emoji→SVG，
+   bookmarksView.js 别名 CSSOM 迁移，随后删除别名变量
+4. 仪表盘 + 书架升级（含 JS 模板与缩略图）
 5. 阅读器 chrome + 其余视图收尾，全量视觉验证
