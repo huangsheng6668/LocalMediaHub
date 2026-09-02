@@ -35,7 +35,7 @@ function renderLightboxImage() {
 
     if (state.lightboxStitchMode) {
         elements.btnImageModeToggle.classList.add('active');
-        elements.btnImageModeToggle.textContent = '📖 单张模式';
+        elements.btnImageModeToggle.textContent = '单张模式';
 
         elements.lightboxSingleView.style.display = 'none';
         elements.lightboxStitchView.style.display = 'flex';
@@ -73,7 +73,7 @@ function renderLightboxImage() {
         }
     } else {
         elements.btnImageModeToggle.classList.remove('active');
-        elements.btnImageModeToggle.textContent = '📖 拼接模式';
+        elements.btnImageModeToggle.textContent = '拼接模式';
 
         elements.lightboxSingleView.style.display = 'flex';
         elements.lightboxStitchView.style.display = 'none';
