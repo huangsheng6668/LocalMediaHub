@@ -10,6 +10,30 @@
 // so the most-recently-read book shows up first.
 const PREFIX = 'book_progress:';
 
+// Deterministic gradient pick: same title → same cover color, always one of
+// g1..g8. Gradients live in CSS classes (CSP-safe, no inline styles).
+export function coverGradientClass(title) {
+    let h = 0;
+    const s = String(title || '');
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return `bookshelf-card__cover--g${(h % 8) + 1}`;
+}
+
+export function relativeTime(ts) {
+    if (!ts) return '';
+    const diff = Date.now() - ts;
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return '刚刚';
+    if (m < 60) return `${m} 分钟前`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h} 小时前`;
+    const d = Math.floor(h / 24);
+    if (d < 30) return `${d} 天前`;
+    const mo = Math.floor(d / 30);
+    if (mo < 12) return `${mo} 个月前`;
+    return `${Math.floor(mo / 12)} 年前`;
+}
+
 // Scan localStorage for book_progress:* entries whose path ends in .txt/.epub
 // (defensive: legacy keys or unrelated entries should be ignored), parse each
 // payload, then sort by lastReadAt descending.
@@ -41,15 +65,21 @@ function baseName(path) {
 function renderCard(entry) {
     const card = document.createElement('div');
     card.className = 'bookshelf-card';
-    const chapterText = `第 ${(entry.chapterIndex || 0) + 1} 章`;
-    // XSS-SAFE: pure-literal template; user data (title/progress) is set via textContent below
+    const title = baseName(entry.path);
+    const meta = `第 ${(entry.chapterIndex || 0) + 1} 章 · ${relativeTime(entry.lastReadAt)}`;
+    // XSS-SAFE: pure-literal template; user data (title/meta) is set via textContent below
     card.innerHTML = `
-        <div class="bookshelf-card__icon">📄</div>
-        <div class="bookshelf-card__title"></div>
-        <div class="bookshelf-card__progress"></div>
+        <div class="bookshelf-card__cover ${coverGradientClass(title)}">
+            <span class="bookshelf-card__cover-title"></span>
+        </div>
+        <div class="bookshelf-card__meta">
+            <div class="bookshelf-card__title"></div>
+            <div class="bookshelf-card__progress"></div>
+        </div>
     `;
-    card.querySelector('.bookshelf-card__title').textContent = baseName(entry.path);
-    card.querySelector('.bookshelf-card__progress').textContent = chapterText;
+    card.querySelector('.bookshelf-card__cover-title').textContent = title.slice(0, 8);
+    card.querySelector('.bookshelf-card__title').textContent = title;
+    card.querySelector('.bookshelf-card__progress').textContent = meta;
     card.addEventListener('click', () => {
         location.hash = '#/read?path=' + encodeURIComponent(entry.path);
     });
