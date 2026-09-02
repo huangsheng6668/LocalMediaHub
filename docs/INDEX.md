@@ -254,7 +254,7 @@
 - HomeComponents 卡片 elevation 2dp → 0dp + 1px outline-soft 描边；圆角统一（HeroCard 20dp / 大卡 16dp / 小卡 12dp）；图标统一 Outlined；HeroCard 按钮分级（Button 主 + OutlinedButton 次）
 - HomeScreen section 间距 22→28dp、横滚边距 8dp；响应式 padding（WindowSizeClass：Compact 20 / Medium 24 / Expanded 32dp，Grid 多列留后续）
 - Web style.css day/night accent 对齐 Android；新增 `--border-soft` / `--accent-text`
-- 关键文件：`ui/theme/Theme.kt`、`ui/theme/ColorTokens.kt`、`ui/component/home/HomeComponents.kt`、`ui/screen/HomeScreen.kt`、`server/internal/web/style.css`
+- 关键文件：`ui/theme/Theme.kt`、`ui/theme/ColorTokens.kt`、`ui/component/home/HomeComponents.kt`、`ui/screen/HomeScreen.kt`、`server/internal/web/css/`（base/themes/layout/components/responsive + views/*.css）
 - HTML 对照预览：`docs/ui-redesign/ui-redesign-preview.html`
 - spec：`docs/superpowers/specs/2026-07-26-ui-redesign-design.md`｜plan：`docs/superpowers/plans/2026-07-26-ui-redesign-implementation.md`
 
@@ -303,6 +303,8 @@
 - `docs/superpowers/specs/2026-07-06-web-responsive-design.md`
 - `docs/superpowers/specs/2026-07-11-security-phase5-xss-lint-design.md`
 - `docs/superpowers/specs/2026-07-17-text-reader-design.md`（reader 模块）
+- `docs/superpowers/specs/2026-09-02-web-ui-redesign-design.md`（现代中性风视觉重写：style.css 拆分为 css/ 分层多文件）
+- `docs/superpowers/plans/2026-09-02-web-ui-redesign.md`（对应实施 plan）
 
 ---
 

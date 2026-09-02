@@ -18,9 +18,9 @@ import (
 //     usage and its only <form> is method="dialog" which never navigates.
 //
 // style-src no longer carries 'unsafe-inline': every inline style="" attribute
-// was migrated to CSS classes (see style.css "CSP-safe replacements" section),
-// and dynamic styling goes through CSSOM property assignment, which CSP does
-// not block.
+// was migrated to CSS classes (see the "CSP-safe replacements" sections in
+// the css/ stylesheets), and dynamic styling goes through CSSOM property
+// assignment, which CSP does not block.
 //
 // Not added (intentional):
 //   - Strict-Transport-Security: only meaningful under HTTPS, and TLS is a

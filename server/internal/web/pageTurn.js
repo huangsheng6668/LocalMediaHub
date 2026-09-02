@@ -90,7 +90,7 @@ export function renderPageTurn({ contentEl, getStyle, loadChapterSection, getCur
             oldSection.classList.add('text-reader__page--curling');
             oldSection.dataset.curlSign = String(sign);
             newSection.style.transform = 'translateX(0)';
-            // CSS @keyframes 驱动 clip-path（见 style.css），这里仅触发 + 收尾
+            // CSS @keyframes 驱动 clip-path（见 css/views/reader.css），这里仅触发 + 收尾
             let done = false;
             const finish = () => {
                 if (done) return;

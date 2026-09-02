@@ -161,7 +161,8 @@ function setupEventListeners() {
             const resolved = s.theme === 'AUTO'
                 ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'NIGHT' : 'DAY')
                 : (s.theme || 'DAY');
-            readerPrefs.saveSettings({ theme: resolved === 'NIGHT' ? 'DAY' : 'NIGHT' });
+            const nextTheme = (resolved === 'NIGHT' || resolved === 'NIGHT_BLACK') ? 'DAY' : 'NIGHT';
+            readerPrefs.saveSettings({ theme: nextTheme });
         });
     }
 
@@ -171,7 +172,7 @@ function setupEventListeners() {
 }
 
 // Update the sun/moon icon visibility based on the current chrome theme.
-// Module-level (referenced by setupEventListeners above).
+// Module-level (referenced by applyGlobalAppTheme).
 function updateThemeToggleIcon(theme) {
     document.querySelectorAll('.theme-toggle-icon').forEach(el => {
         el.hidden = (el.dataset.icon !== (theme === 'night' ? 'moon' : 'sun'));
