@@ -61,7 +61,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .btn-sort-order:hover {
@@ -75,7 +75,7 @@
 }
 
 .crumb {
-    color: var(--primary-light);
+    color: var(--accent-text);
     cursor: pointer;
     font-weight: 500;
 }
@@ -136,11 +136,11 @@
 /* Media Cards: General */
 .media-card {
     background-color: var(--surface-card);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     overflow: hidden;
     cursor: pointer;
-    transition: var(--transition-smooth);
+    transition: all .3s cubic-bezier(.4,0,.2,1);
     display: flex;
     flex-direction: column;
     position: relative;
@@ -149,7 +149,7 @@
 
 .media-card:hover {
     transform: translateY(-6px);
-    border-color: var(--primary-light);
+    border-color: var(--accent);
     box-shadow: 0 12px 24px -10px rgba(124, 58, 237, 0.3);
 }
 
@@ -168,7 +168,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: var(--transition-smooth);
+    transition: all .3s cubic-bezier(.4,0,.2,1);
 }
 
 .media-card:hover .card-preview img {
@@ -188,7 +188,7 @@
     align-items: center;
     justify-content: center;
     opacity: 0.8;
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .media-card:hover .play-overlay {
@@ -204,15 +204,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-white);
+    color: var(--text-on-accent);
     font-size: 14px;
     border: 1px solid rgba(255, 255, 255, 0.2);
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .media-card:hover .play-button-circle {
     transform: scale(1.1);
-    background-color: var(--primary);
+    background-color: var(--accent);
 }
 
 /* Card Details Area */
@@ -258,7 +258,7 @@
     gap: 6px;
     z-index: 5;
     opacity: 0;
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .media-card:hover .card-actions-overlay,
@@ -278,11 +278,11 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: var(--text-muted);
     cursor: pointer;
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .card-action-btn:hover {
-    color: var(--text-white);
+    color: var(--text-on-accent);
     transform: scale(1.1);
 }
 
@@ -293,7 +293,7 @@
 }
 
 .card-action-btn.delete-btn:hover {
-    color: var(--text-white);
+    color: var(--text-on-accent);
     background-color: rgba(239, 68, 68, 0.85);
     border-color: rgba(239, 68, 68, 0.85);
     box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
@@ -309,7 +309,7 @@
 
 .tag-creator-card, .tag-list-card {
     background-color: var(--surface-card);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     padding: 24px;
     box-shadow: var(--shadow-md);
@@ -336,18 +336,18 @@
 
 .form-group input, .form-group textarea {
     background-color: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     padding: 12px;
-    color: var(--text-main);
+    color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: 14px;
     outline: none;
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .form-group input:focus, .form-group textarea:focus {
-    border-color: var(--primary-light);
+    border-color: var(--accent);
     box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
 }
 
@@ -362,7 +362,7 @@
     border-radius: 50%;
     border: 2px solid transparent;
     cursor: pointer;
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .color-dot:hover {
@@ -370,7 +370,7 @@
 }
 
 .color-dot.active {
-    border-color: var(--text-white);
+    border-color: var(--text-on-accent);
     box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
 }
 
@@ -388,7 +388,7 @@
     border-radius: var(--radius-md);
     font-size: 13px;
     font-weight: 500;
-    color: var(--text-white);
+    color: var(--text-primary);
     border: 1px solid rgba(255, 255, 255, 0.15);
 }
 
@@ -398,7 +398,7 @@
     color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
     font-size: 14px;
-    transition: var(--transition-quick);
+    transition: all .15s ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -409,7 +409,7 @@
 
 .btn-tag-delete:hover {
     background-color: rgba(255, 255, 255, 0.2);
-    color: var(--text-white);
+    color: var(--text-primary);
 }
 
 /* from style.css L2924-2947 (CSP-safe replacements: browser-empty-grid / browser-status-note / card-badge--unsupported) */

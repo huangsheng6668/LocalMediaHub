@@ -102,39 +102,19 @@
     --error: #F87171; --secondary: #4ADE80;
 }
 
-/* ── 临时别名块：映射旧变量到规范名，供未迁移消费者引用。
-      Task 7 别名清剿时整块删除。 ── */
-:root,
-[data-theme="day"], [data-theme="day_bright"], [data-theme="eye_care"],
-[data-theme="eye_care_green"], [data-theme="parchment"],
-[data-theme="night"], [data-theme="night_black"] {
-    --bg-main:  var(--surface-app);
-    --bg-card:  var(--surface-card);
-    --bg-sidebar: var(--surface-sidebar);
-    --primary:  var(--accent);
-    --primary-light: var(--accent-text);
-    --text-main: var(--text-primary);
-    --text-white: var(--text-primary);
-    --border-color: var(--border-subtle);
-    --border-radius-lg: var(--radius-lg);
-    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-quick: all 0.15s ease;
-}
-
 /* from style.css L2821-2836 (body[data-reader-theme] app-variable overrides) */
-/* 整体覆盖 App 变量：当 body 有 data-reader-theme 属性时（不限值），
-   阅读器子树内的 --bg-card / --text-main / --text-muted / --border-color
-   都被 reader theme 接管。Phase 2 Task 2.2 §5 (Chrome Theming)。 */
+/* 整体覆盖 App 变量：reader 子树内的表面/文字/边框 token 被 reader theme 接管。 */
 body[data-reader-theme][data-active-tab="read"] .view-container,
 body[data-reader-theme] .text-reader,
 body[data-reader-theme] .text-reader__drawer,
 body[data-reader-theme] dialog#reader-settings-dialog,
 body[data-reader-theme] .text-reader__autoscroll-panel {
-    --bg-card: var(--reader-chrome-bg);
-    --bg-elevated: var(--reader-chrome-bg);
-    --text-main: var(--reader-fg);
-    --text-white: var(--reader-fg);
+    --surface-card: var(--reader-chrome-bg);
+    --surface-hover: rgba(0, 0, 0, 0.08);
+    --text-primary: var(--reader-fg);
+    --text-secondary: var(--reader-fg);
     --text-muted: var(--reader-muted);
-    --border-color: var(--reader-border);
+    --border-subtle: var(--reader-border);
+    --border-soft: var(--reader-border);
 }
 

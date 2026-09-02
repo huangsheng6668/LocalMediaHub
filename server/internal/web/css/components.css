@@ -66,10 +66,9 @@
     box-shadow: var(--shadow-md);
 }
 
-/* Retokenized copies of view-owned button rules (css/views/video.css keeps the
-   legacy-alias originals until Task 7's alias sweep; mapping per its table:
-   --text-main→--text-primary, --text-white→--text-on-accent,
-   --border-color→--border-subtle). */
+/* View-owned button rules, single home since the Task 7 alias sweep
+   (css/views/video.css legacy copies removed; components.css wins by
+   being the only definition). */
 .btn-transcode {
     background-color: rgba(255, 255, 255, 0.08);
     color: var(--text-primary);
@@ -82,7 +81,7 @@
     background: var(--accent);
     color: var(--text-on-accent);
     border-color: transparent;
-    box-shadow: 0 0 10px rgba(124, 58, 237, 0.3);
+    box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .video-delete-btn {

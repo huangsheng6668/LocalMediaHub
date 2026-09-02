@@ -69,18 +69,18 @@ export function renderBookmarks() {
         row.style.alignItems = 'center';
         row.style.padding = '16px 20px';
         row.style.backgroundColor = 'var(--surface-card)';
-        row.style.border = '1px solid var(--border-color)';
+        row.style.border = '1px solid var(--border-subtle)';
         row.style.borderRadius = 'var(--radius-lg)';
         row.style.cursor = 'pointer';
         row.style.transition = 'all 0.2s ease';
         row.style.boxShadow = 'var(--shadow-md)';
         
         row.addEventListener('mouseenter', () => {
-            row.style.borderColor = 'var(--primary)';
+            row.style.borderColor = 'var(--accent)';
             row.style.transform = 'translateY(-2px)';
         });
         row.addEventListener('mouseleave', () => {
-            row.style.borderColor = 'var(--border-color)';
+            row.style.borderColor = 'var(--border-subtle)';
             row.style.transform = 'none';
         });
         
@@ -92,7 +92,7 @@ export function renderBookmarks() {
         const bookTitle = document.createElement('span');
         bookTitle.style.fontSize = '14px';
         bookTitle.style.fontWeight = 'bold';
-        bookTitle.style.color = 'var(--text-white)';
+        bookTitle.style.color = 'var(--text-primary)';
         bookTitle.textContent = baseName(bm.bookPath);
         
         const preview = document.createElement('span');

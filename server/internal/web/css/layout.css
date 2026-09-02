@@ -75,7 +75,7 @@
     font-weight: 500;
     font-size: 14px;
     border-radius: var(--radius-md);
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .menu-item:hover {
@@ -195,7 +195,7 @@
     padding: 8px;
     flex-direction: column;
     gap: 4px;
-    color: var(--text-main); /* #f3f4f6 — visible on dark --bg-main */
+    color: var(--text-primary); /* visible on dark --surface-sidebar */
 }
 .hamburger-btn span {
     display: block;

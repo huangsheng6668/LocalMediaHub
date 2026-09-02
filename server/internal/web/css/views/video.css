@@ -119,7 +119,7 @@
 .video-control-btn {
     background: none;
     border: none;
-    color: var(--text-main);
+    color: var(--text-primary);
     font-size: 16px;
     cursor: pointer;
     width: 32px;
@@ -133,7 +133,7 @@
 
 .video-control-btn:hover {
     background: rgba(255, 255, 255, 0.08);
-    color: var(--text-white);
+    color: var(--text-on-accent);
 }
 
 .video-control-btn:active {
@@ -231,21 +231,9 @@
     cursor: pointer;
 }
 
-/* Transcode Toggle Button Styling */
-.btn-transcode {
-    background-color: rgba(255, 255, 255, 0.08);
-    color: var(--text-main);
-    border: 1px solid var(--border-color);
-    padding: 6px 12px;
-    font-size: 12px;
-}
-
-.btn-transcode.active {
-    background: var(--accent);
-    color: var(--text-white);
-    border-color: transparent;
-    box-shadow: 0 0 10px rgba(124, 58, 237, 0.3);
-}
+/* Transcode toggle (.btn-transcode) and delete (.video-delete-btn) buttons
+   live in css/components.css (retokenized single home) — the legacy copies
+   that used to shadow them were removed in the Task 7 alias sweep. */
 
 /* Tag Selector Checkboxes wrapper */
 .tag-selector-wrapper {
@@ -260,7 +248,7 @@
     background-color: rgba(0, 0, 0, 0.2);
     padding: 8px 12px;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
 }
 
 .tag-selector-list {
@@ -276,11 +264,11 @@
     align-items: center;
     justify-content: space-between;
     background-color: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     padding: 10px 14px;
     cursor: pointer;
-    transition: var(--transition-quick);
+    transition: all .15s ease;
 }
 
 .tag-selector-item:hover {
@@ -288,20 +276,9 @@
 }
 
 .tag-selector-item input[type="checkbox"] {
-    accent-color: var(--primary);
+    accent-color: var(--accent);
     width: 16px;
     height: 16px;
     cursor: pointer;
-}
-
-/* from style.css L2975-2984 (CSP-safe video-delete-btn) */
-.video-delete-btn {
-    display: none;
-    background-color: var(--error);
-    border-color: transparent;
-    margin-right: 8px;
-    font-size: 12px;
-    padding: 6px 12px;
-    color: var(--text-white);
 }
 

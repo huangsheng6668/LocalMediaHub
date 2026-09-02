@@ -14,17 +14,17 @@
     font-weight: 600;
     margin-bottom: 20px;
     padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-subtle);
 }
 
 .settings-static {
     background-color: rgba(0, 0, 0, 0.2);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     padding: 10px 12px;
     font-family: monospace;
     font-size: 13px;
-    color: var(--primary-light);
+    color: var(--accent-text);
 }
 
 /* from style.css L2970-2974 (CSP-safe settings-global-theme-grid) */
