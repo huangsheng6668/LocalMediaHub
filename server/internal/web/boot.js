@@ -1,14 +1,26 @@
 // FOUC prevention: set <html data-theme> BEFORE stylesheets apply.
-// Loaded via <script src="boot.js"> in <head>, ahead of <link rel="stylesheet">.
-// Must NOT be inline — project CSP is script-src 'self' (no 'unsafe-inline').
+// Reads reader_settings.theme — the same key readerPrefs.js /
+// app.js applyGlobalAppTheme consume — so the pre-paint theme always
+// matches the post-boot theme. (The legacy chrome_theme key was never
+// written by any code and ignored the user's chosen theme.)
+// Non-module script: carries a minimal copy of app.js's theme map.
 (function () {
-    try {
-        var t = localStorage.getItem('chrome_theme');
-        if (t !== 'day' && t !== 'night') {
-            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+    var MAP = {
+        DAY: 'day', DAY_BRIGHT: 'day_bright', EYE_CARE: 'eye_care',
+        EYE_CARE_GREEN: 'eye_care_green', PARCHMENT: 'parchment',
+        NIGHT: 'night', NIGHT_BLACK: 'night_black'
+    };
+    function resolve() {
+        try {
+            var raw = localStorage.getItem('reader_settings');
+            var key = raw ? (JSON.parse(raw).theme || 'DAY') : 'DAY';
+            if (key === 'AUTO') {
+                key = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'NIGHT' : 'DAY';
+            }
+            return MAP[key] || 'day';
+        } catch (_) {
+            return 'day';
         }
-        document.documentElement.dataset.theme = t;
-    } catch (_) {
-        document.documentElement.dataset.theme = 'day';
     }
+    document.documentElement.dataset.theme = resolve();
 })();
