@@ -1,0 +1,363 @@
+/* from style.css L431-541 (premium buttons) */
+/* Premium Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition-quick);
+}
+
+.btn:hover {
+    background: var(--surface-hover);
+}
+
+.btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.btn:active {
+    transform: scale(0.98);
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: var(--text-on-accent);
+    border-color: transparent;
+    box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+    color: var(--text-on-accent);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-primary:focus-visible {
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.btn-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: var(--surface-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition-quick);
+}
+
+.btn-theme-toggle:hover {
+    color: var(--accent);
+    background: var(--surface-hover);
+}
+
+.btn-theme-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.btn-secondary {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.btn-danger {
+    background: var(--error-gradient);
+    color: var(--text-white);
+}
+
+.btn-danger:hover {
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.4);
+}
+
+.btn-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-quick);
+}
+
+.btn-close:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-white);
+}
+
+/* from style.css L585,592-607 (widget-card — shared dashboard/bookshelf) */
+/* Dashboard Widgets & Info Lists */
+.widget-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    box-shadow: var(--shadow-sm);
+}
+
+.widget-card h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* from style.css L623-655 (server-info-list + info-item family — shared dashboard/settings) */
+.server-info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.info-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed var(--border-color);
+    font-size: 14px;
+}
+
+.info-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.info-label {
+    color: var(--text-muted);
+}
+
+.info-value {
+    font-weight: 500;
+    color: var(--text-main);
+    background-color: rgba(255, 255, 255, 0.04);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+/* from style.css L1097-1162 (glass modal framework) */
+/* Premium Glass Modal Framework */
+.overlay-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.overlay-modal.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-wrapper {
+    background-color: var(--surface-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    width: 90%;
+    max-width: 800px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+    position: relative;
+    z-index: 101;
+    overflow: hidden;
+    transform: scale(0.95);
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.overlay-modal.active .modal-wrapper {
+    transform: scale(1);
+}
+
+.modal-header {
+    height: 56px;
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-title {
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.modal-body {
+    padding: 24px;
+}
+
+/* from style.css L1628-1665 (toast notifications) */
+/* Toast Notifications styling */
+.toast-container {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 200;
+}
+
+.toast {
+    background-color: var(--surface-card);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--primary-light);
+    border-radius: var(--radius-md);
+    padding: 12px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+    min-width: 220px;
+    animation: slideIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.toast.success {
+    border-left-color: var(--secondary);
+}
+
+.toast.error {
+    border-left-color: var(--error);
+}
+
+/* from style.css L1817-1908 (Round 28 auth token modal) */
+/* ─── Round 28 Task 12: Auth Token Modal ───
+   Round 29 fix (final review Finding 3): every selector here is scoped under
+   #auth-modal. The earlier unscoped rules (.modal-backdrop, .modal-actions,
+   .modal-input, .modal-content, .modal.hidden) collided with the EXISTING
+   global modal styles at lines ~792/.modal-backdrop and ~831/.modal-actions
+   used by the file-tags modal, video player modal, etc. The unscoped
+   .modal-backdrop in particular reset background/blurs on those modals and
+   the unscoped .modal-actions clobbered their flex layout. The auth modal's
+   root element carries id="auth-modal" (see index.html), so all rules below
+   are namespaced to it. */
+
+#auth-modal.hidden {
+    display: none;
+}
+
+#auth-modal .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+}
+
+#auth-modal .modal-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-card, var(--surface-card));
+    padding: 24px;
+    border-radius: var(--radius-lg);
+    min-width: 320px;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-md);
+    z-index: 101;
+}
+
+#auth-modal .modal-input {
+    width: 100%;
+    padding: 8px;
+    margin: 12px 0;
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    outline: none;
+    transition: var(--transition-quick);
+}
+
+#auth-modal .modal-input:focus {
+    border-color: var(--primary-light);
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+}
+
+#auth-modal .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+#auth-modal .modal-actions button {
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-quick);
+    font-family: var(--font-sans);
+    border: none;
+}
+
+#auth-modal .modal-actions button.primary {
+    background: var(--accent);
+    color: var(--text-white);
+}
+
+#auth-modal .modal-actions button.primary:hover {
+    box-shadow: 0 0 16px rgba(124, 58, 237, 0.4);
+    opacity: 0.95;
+}
+
+#auth-modal .modal-actions button:not(.primary) {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+}
+
+#auth-modal .modal-actions button:not(.primary):hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+

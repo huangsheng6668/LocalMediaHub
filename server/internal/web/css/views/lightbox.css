@@ -1,0 +1,171 @@
+/* from style.css L1458-1627 (lightbox incl. stitch scrollbar) */
+/* Image Preview Lightbox Framework */
+.lightbox-wrapper {
+    max-width: 100vw;
+    max-height: 100vh;
+    width: 100vw;
+    height: 100vh;
+    border: none;
+    border-radius: 0;
+    background-color: rgba(0, 0, 0, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: none !important;
+}
+
+.lightbox-close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 110;
+    color: #ffffff;
+    font-size: 24px;
+}
+
+.lightbox-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background-color: rgba(0, 0, 0, 0.5);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    cursor: pointer;
+    transition: var(--transition-quick);
+    z-index: 105;
+}
+
+.lightbox-nav:hover {
+    background-color: var(--primary);
+    border-color: transparent;
+}
+
+.nav-prev { left: 24px; }
+.nav-next { right: 24px; }
+
+.lightbox-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 80%;
+    height: 80%;
+}
+
+.lightbox-content img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
+}
+
+.lightbox-caption {
+    margin-top: 16px;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+}
+
+/* Lightbox Mode Toggle Button */
+.lightbox-toggle-mode {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    z-index: 110;
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lightbox-toggle-mode:hover {
+    background-color: var(--primary);
+    border-color: transparent;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(138, 75, 243, 0.3);
+}
+
+.lightbox-toggle-mode.active {
+    background-color: var(--primary-light);
+    border-color: transparent;
+}
+
+/* Lightbox View modes */
+.lightbox-single-view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
+.lightbox-stitch-view {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    overflow-y: auto;
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    background-color: rgba(5, 5, 8, 0.98);
+    gap: 24px;
+    padding: 80px 0 40px 0;
+}
+
+/* Custom scrollbar for modern design inside stitch view */
+.lightbox-stitch-view::-webkit-scrollbar {
+    width: 8px;
+}
+.lightbox-stitch-view::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+}
+.lightbox-stitch-view::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+.lightbox-stitch-view::-webkit-scrollbar-thumb:hover {
+    background: var(--primary);
+}
+
+.stitch-image-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 90%;
+    max-width: 800px;
+}
+
+.stitch-image-item img {
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.stitch-image-caption {
+    margin-top: 8px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+    text-align: center;
+}
+

@@ -1,0 +1,78 @@
+/* from style.css L1-18 (web reader @font-face) */
+/* Web reader fonts (Phase 3). woff2 files are embedded via web.Assets
+   and served at /fonts/*.woff2 — see web.go embed directive. font-display:
+   swap ensures text remains visible during the (first-load) font fetch. */
+@font-face {
+    font-family: "LXGW WenKai";
+    src: url("/fonts/LXGWWenKai-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Noto Serif SC";
+    src: url("/fonts/NotoSerifSC-Regular.woff2") format("woff2");
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* from style.css L208-245 (reset & global styles + native form control colors) */
+/* Reset & Global Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    background-color: var(--surface-app);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    overflow: hidden;
+    height: 100vh;
+}
+
+/* Native form controls: explicit colors so they don't fall back to
+   browser-default white-on-black in night mode. */
+input, textarea, select {
+    background-color: var(--surface-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    font: inherit;
+}
+
+input::placeholder, textarea::placeholder {
+    color: var(--text-muted);
+}
+
+input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* from style.css L1666-1684 (custom scrollbar) */
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+

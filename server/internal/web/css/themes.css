@@ -1,0 +1,207 @@
+/* from style.css L19-207 (core design tokens + data-theme palettes) */
+/* Core Design Tokens — DAY (default) */
+:root,
+[data-theme="day"] {
+    color-scheme: light;
+    --surface-app:     #FAF8F3;
+    --surface-card:    #FFFFFF;
+    --surface-sidebar: #F2EFE7;
+    --surface-hover:   rgba(199, 91, 57, 0.08);
+
+    --text-primary:    #2B2B2B;
+    --text-secondary:  #5A5A57;
+    --text-muted:      #7A7A78;
+    --text-on-accent:  #FFFFFF;
+
+    --accent:          #B96D1D;
+    --accent-hover:    #9E5C16;
+    --accent-soft:     rgba(185, 109, 29, 0.12);
+    --accent-text:     #965410;
+    --border-soft:     #E2D9C6;
+
+    --border-subtle:   #E5E2D8;
+    --shadow-sm:       0 1px 2px rgba(43, 43, 43, 0.04), 0 1px 3px rgba(43, 43, 43, 0.06);
+    --shadow-md:       0 4px 12px rgba(43, 43, 43, 0.08);
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+
+    --bg-main:     var(--surface-app);
+    --bg-card:     var(--surface-card);
+    --bg-sidebar:  var(--surface-sidebar);
+    --primary:     var(--accent);
+    --primary-light: var(--accent);
+    --text-main:   var(--text-primary);
+    --text-white:  var(--text-primary);
+    --border-color: var(--border-subtle);
+    --error: #C0392B;
+    --secondary: #4F8A6B;
+    --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-quick: all 0.15s ease;
+}
+
+[data-theme="day_bright"] {
+    color-scheme: light;
+    --surface-app:     #F8F9FA;
+    --surface-card:    #FFFFFF;
+    --surface-sidebar: #E9ECEF;
+    --surface-hover:   rgba(13, 110, 253, 0.08);
+    --text-primary:    #212529;
+    --text-secondary:  #495057;
+    --text-muted:      #6C757D;
+    --text-on-accent:  #FFFFFF;
+    --accent:          #0D6EFD;
+    --accent-hover:    #0B5ED7;
+    --accent-soft:     rgba(13, 110, 253, 0.12);
+    --border-subtle:   #DEE2E6;
+    --bg-main:     var(--surface-app);
+    --bg-card:     var(--surface-card);
+    --bg-sidebar:  var(--surface-sidebar);
+    --text-main:   var(--text-primary);
+    --text-white:  var(--text-primary);
+    --border-color: var(--border-subtle);
+}
+
+[data-theme="eye_care"] {
+    color-scheme: light;
+    --surface-app:     #F5EBDC;
+    --surface-card:    #FAF3E8;
+    --surface-sidebar: #EBDCC8;
+    --surface-hover:   rgba(140, 98, 57, 0.1);
+    --text-primary:    #3D3126;
+    --text-secondary:  #5C4B3D;
+    --text-muted:      #7A6654;
+    --text-on-accent:  #FFFFFF;
+    --accent:          #8C6239;
+    --accent-hover:    #734F2D;
+    --accent-soft:     rgba(140, 98, 57, 0.12);
+    --border-subtle:   #D9C8B2;
+    --bg-main:     var(--surface-app);
+    --bg-card:     var(--surface-card);
+    --bg-sidebar:  var(--surface-sidebar);
+    --text-main:   var(--text-primary);
+    --text-white:  var(--text-primary);
+    --border-color: var(--border-subtle);
+}
+
+[data-theme="eye_care_green"] {
+    color-scheme: light;
+    --surface-app:     #B9C7B6;
+    --surface-card:    #C3D0C2;
+    --surface-sidebar: #ACBCAB;
+    --surface-hover:   rgba(31, 46, 32, 0.10);
+    --text-primary:    #1F2E20;
+    --text-secondary:  #384C3A;
+    --text-muted:      #4D5E4F;
+    --text-on-accent:  #FFFFFF;
+    --accent:          #2C5030;
+    --accent-hover:    #203E24;
+    --accent-soft:     rgba(44, 80, 48, 0.14);
+    --border-subtle:   #9BB098;
+    --bg-main:     var(--surface-app);
+    --bg-card:     var(--surface-card);
+    --bg-sidebar:  var(--surface-sidebar);
+    --text-main:   var(--text-primary);
+    --text-white:  var(--text-primary);
+    --border-color: var(--border-subtle);
+}
+
+[data-theme="parchment"] {
+    color-scheme: light;
+    --surface-app:     #F4ECD8;
+    --surface-card:    #FBF6E9;
+    --surface-sidebar: #E8DFC9;
+    --surface-hover:   rgba(107, 76, 42, 0.1);
+    --text-primary:    #3B3224;
+    --text-secondary:  #574B38;
+    --text-muted:      #756750;
+    --text-on-accent:  #FFFFFF;
+    --accent:          #6B4C2A;
+    --accent-hover:    #543B20;
+    --accent-soft:     rgba(107, 76, 42, 0.12);
+    --border-subtle:   #D6CBAE;
+    --bg-main:     var(--surface-app);
+    --bg-card:     var(--surface-card);
+    --bg-sidebar:  var(--surface-sidebar);
+    --text-main:   var(--text-primary);
+    --text-white:  var(--text-primary);
+    --border-color: var(--border-subtle);
+}
+
+[data-theme="night"] {
+    color-scheme: dark;
+    --surface-app:     #1A1A1F;
+    --surface-card:    #232328;
+    --surface-sidebar: #16161A;
+    --surface-hover:   rgba(232, 145, 90, 0.16);
+
+    --text-primary:    #C9C9CE;
+    --text-secondary:  #A8A8AD;
+    --text-muted:      #84848A;
+    --text-on-accent:  #FFFFFF;
+
+    --accent:          #E8915A;
+    --accent-hover:    #F0A066;
+    --accent-soft:     rgba(232, 145, 90, 0.16);
+    --accent-text:     #F2A878;
+    --border-soft:     #3A3A40;
+    --primary-light:   var(--accent-hover);
+
+    --border-subtle:   #2D2D33;
+    --shadow-sm:       0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md:       0 4px 12px rgba(0, 0, 0, 0.5);
+    --bg-main:     var(--surface-app);
+    --bg-card:     var(--surface-card);
+    --bg-sidebar:  var(--surface-sidebar);
+    --text-main:   var(--text-primary);
+    --text-white:  #FFFFFF;
+    --border-color: var(--border-subtle);
+}
+
+[data-theme="night_black"] {
+    color-scheme: dark;
+    --surface-app:     #000000;
+    --surface-card:    #121212;
+    --surface-sidebar: #0A0A0A;
+    --surface-hover:   rgba(255, 255, 255, 0.12);
+    --text-primary:    #E0E0E0;
+    --text-secondary:  #AAAAAA;
+    --text-muted:      #777777;
+    --text-on-accent:  #000000;
+    --accent:          #E0E0E0;
+    --accent-hover:    #FFFFFF;
+    --accent-soft:     rgba(255, 255, 255, 0.12);
+    --border-subtle:   #222222;
+    --bg-main:     var(--surface-app);
+    --bg-card:     var(--surface-card);
+    --bg-sidebar:  var(--surface-sidebar);
+    --text-main:   var(--text-primary);
+    --text-white:  #FFFFFF;
+    --border-color: var(--border-subtle);
+}
+
+/* from style.css L2821-2836 (body[data-reader-theme] app-variable overrides) */
+/* 整体覆盖 App 变量：当 body 有 data-reader-theme 属性时（不限值），
+   阅读器子树内的 --bg-card / --text-main / --text-muted / --border-color
+   都被 reader theme 接管。Phase 2 Task 2.2 §5 (Chrome Theming)。 */
+body[data-reader-theme][data-active-tab="read"] .view-container,
+body[data-reader-theme] .text-reader,
+body[data-reader-theme] .text-reader__drawer,
+body[data-reader-theme] dialog#reader-settings-dialog,
+body[data-reader-theme] .text-reader__autoscroll-panel {
+    --bg-card: var(--reader-chrome-bg);
+    --bg-elevated: var(--reader-chrome-bg);
+    --text-main: var(--reader-fg);
+    --text-white: var(--reader-fg);
+    --text-muted: var(--reader-muted);
+    --border-color: var(--reader-border);
+}
+

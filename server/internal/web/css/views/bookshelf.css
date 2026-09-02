@@ -1,0 +1,54 @@
+/* from style.css L2639-2691 (bookshelf card grid) */
+/* Bookshelf (Task 16): grid of clickable cards used both by the
+   #/bookshelf full-page route and the dashboard "我的书架" section. */
+.dashboard-bookshelf {
+    margin-top: 24px;
+}
+
+.bookshelf-section {
+    /* Uses widget-card styling via the shared class; this selector only
+       reserves space for future tweaks. */
+}
+
+.bookshelf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+}
+
+.bookshelf-card {
+    cursor: pointer;
+    background-color: var(--surface-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.bookshelf-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.bookshelf-card__icon {
+    font-size: 28px;
+    line-height: 1;
+}
+
+.bookshelf-card__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bookshelf-card__progress {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+

@@ -1,0 +1,172 @@
+/* from style.css L1723-1816 (Round 16 C2 responsive breakpoints) */
+/* ─── Round 16 C2: Responsive Breakpoints ─── */
+
+/* Tablet: 768-1023px — sidebar collapses to drawer, stat-grid → 2 cols */
+@media (max-width: 1023px) {
+    .hamburger-btn {
+        display: flex;
+    }
+    .app-container {
+        grid-template-columns: 1fr; /* 移除 260px 固定列，全宽 */
+    }
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        transform: translateX(-100%);
+        transition: transform 0.25s ease;
+        z-index: 60; /* backdrop(50) < sidebar(60) < modals(100) */
+        width: 260px; /* 保持与桌面端一致的宽度 */
+    }
+    .sidebar.open {
+        transform: translateX(0);
+    }
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .dashboard-widgets {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Phone: ≤767px — single column, denser UI */
+@media (max-width: 767px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    .main-header {
+        height: auto; /* 释放固定 72px 高度，允许自然流式布局 */
+        padding: 12px 16px;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .main-header h1 {
+        font-size: 18px;
+        flex: 1;
+        order: 2; /* hamburger ← title ← actions */
+    }
+    .hamburger-btn {
+        order: 1;
+    }
+    .header-actions {
+        order: 3;
+        width: 100%; /* 按钮独占一行 */
+    }
+    .header-actions .btn {
+        padding: 6px 10px;
+        font-size: 13px;
+    }
+    .view-container {
+        padding: 12px;
+    }
+    .browser-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 8px;
+    }
+    .media-card {
+        font-size: 12px;
+    }
+    .breadcrumbs {
+        font-size: 13px;
+        flex-wrap: wrap;
+    }
+    .search-box {
+        width: 100%;
+        margin-bottom: 8px;
+    }
+    .info-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    .info-label {
+        font-size: 12px;
+    }
+    .info-value {
+        font-size: 14px;
+        word-break: break-all;
+    }
+    .tag-chip {
+        padding: 6px 10px;
+        font-size: 13px;
+    }
+}
+
+/* from style.css L1909-1984 (Round 16 C3 full-screen modal on phone) */
+/* ─── Round 16 C3: Full-screen modal on phone ─── */
+
+@media (max-width: 767px) {
+    /* Video player + image lightbox modals: full viewport on phone.
+       Uses !important to override existing max-width: 800px on .modal-wrapper
+       (lightbox-wrapper is already 100vw/100vh at base but is included for
+       consistency and to absorb any future base-style change). */
+    .overlay-modal {
+        padding: 0 !important;
+    }
+    .modal-wrapper,
+    .lightbox-wrapper {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: none !important;
+        max-height: none !important;
+        border-radius: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    /* Modal content fills the wrapper.
+       Note: .video-modal-content is a spec-assumed name; the actual video
+       player uses .video-player-wrapper. .lightbox-content exists. */
+    .video-player-wrapper,
+    .lightbox-content,
+    .lightbox-single-view {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 0;
+    }
+    /* Media elements scale to viewport.
+       Note: spec used .lightbox-img but the actual element is #lightbox-img
+       (an ID, not a class). Video target is the <video> inside .video-player-wrapper. */
+    .video-player-wrapper video,
+    #lightbox-img {
+        width: 100%;
+        height: auto;
+        max-height: 85vh;
+        object-fit: contain;
+    }
+    /* Close buttons: larger touch target, top-right corner.
+       .btn-close on phone gets dark translucent backdrop for visibility over
+       arbitrary modal content; .lightbox-close already has z-index 110 / dark
+       UI at base, but we still nudge position + size.
+       Base .btn-close fixes width/height: 32px (style.css:258-259), so the
+       padding alone is inert — we override width/height to auto and enforce
+       WCAG 44px minimum touch target. */
+    .btn-close,
+    .lightbox-close {
+        top: 8px !important;
+        right: 8px !important;
+        width: auto !important;
+        height: auto !important;
+        min-width: 44px;
+        min-height: 44px;
+        font-size: 24px;
+        padding: 8px 12px;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        border-radius: 50%;
+        z-index: 110;
+    }
+    /* Hide prev/next arrow buttons on phone — overlay too dense.
+       Spec also lists .lightbox-prev / .lightbox-next but those classes do
+       not exist in the project; actual markup uses .lightbox-nav.nav-prev /
+       .lightbox-nav.nav-next, both covered by .lightbox-nav.
+       Users close + reopen; swipe gesture is YAGNI for this round. */
+    .lightbox-nav {
+        display: none !important;
+    }
+}
+

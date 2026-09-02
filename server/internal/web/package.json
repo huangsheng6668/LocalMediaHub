@@ -4,7 +4,6 @@
   "private": true,
   "description": "Build-time tooling for the LocalMediaHub web manager.",
   "scripts": {
-    "build:tokens": "node tools/build-tokens.mjs",
     "test": "node --test"
   },
   "devDependencies": {

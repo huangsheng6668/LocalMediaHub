@@ -1,0 +1,439 @@
+/* from style.css L656-1068 (browser toolbar / grid / cards / tag manager) */
+/* Media Browser Toolbar */
+.browser-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-5);
+    gap: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.browser-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.sort-box {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    padding: 3px 8px;
+    border-radius: var(--radius-md);
+}
+
+.sort-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.sort-select {
+    background: transparent;
+    color: var(--text-primary);
+    border: none;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 3px 4px;
+    cursor: pointer;
+    outline: none;
+}
+
+.sort-select option {
+    background: var(--surface-card);
+    color: var(--text-primary);
+}
+
+.btn-sort-order {
+    background: transparent;
+    color: var(--accent);
+    border: none;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-quick);
+}
+
+.btn-sort-order:hover {
+    background: var(--surface-hover);
+    color: var(--accent);
+}
+
+.breadcrumbs {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.crumb {
+    color: var(--primary-light);
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.crumb:hover {
+    text-decoration: underline;
+}
+
+.crumb::after {
+    content: "›";
+    margin-left: 8px;
+    color: var(--text-muted);
+}
+
+.crumb.active {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.crumb.active::after {
+    display: none;
+}
+
+.search-box {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.search-box input {
+    width: 240px;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+.btn-search {
+    background: var(--surface-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    padding: 6px 10px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.btn-search:hover {
+    background: var(--surface-hover);
+    color: var(--accent);
+}
+
+/* Media Browser Grid */
+.browser-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 20px;
+    padding-bottom: 40px;
+}
+
+/* Media Cards: General */
+.media-card {
+    background-color: var(--surface-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    box-shadow: var(--shadow-md);
+}
+
+.media-card:hover {
+    transform: translateY(-6px);
+    border-color: var(--primary-light);
+    box-shadow: 0 12px 24px -10px rgba(124, 58, 237, 0.3);
+}
+
+/* Card Header/Preview Area */
+.card-preview {
+    height: 120px;
+    background-color: rgba(255, 255, 255, 0.03);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.card-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: var(--transition-smooth);
+}
+
+.media-card:hover .card-preview img {
+    transform: scale(1.05);
+}
+
+.card-preview-icon {
+    font-size: 32px;
+}
+
+/* Special video play icon overlay */
+.play-overlay {
+    position: absolute;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.8;
+    transition: var(--transition-quick);
+}
+
+.media-card:hover .play-overlay {
+    background-color: rgba(0, 0, 0, 0.2);
+    opacity: 1;
+}
+
+.play-button-circle {
+    width: 36px;
+    height: 36px;
+    background-color: rgba(0, 0, 0, 0.6);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-white);
+    font-size: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: var(--transition-quick);
+}
+
+.media-card:hover .play-button-circle {
+    transform: scale(1.1);
+    background-color: var(--primary);
+}
+
+/* Card Details Area */
+.card-details {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-grow: 1;
+}
+
+.card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.card-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-badge {
+    background-color: rgba(255, 255, 255, 0.08);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 10px;
+}
+
+/* Favorite and Tag icons on Cards */
+.card-actions-overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 6px;
+    z-index: 5;
+    opacity: 0;
+    transition: var(--transition-quick);
+}
+
+.media-card:hover .card-actions-overlay,
+.media-card.tagged .card-actions-overlay {
+    opacity: 1;
+}
+
+.card-action-btn {
+    width: 28px;
+    height: 28px;
+    background-color: rgba(0, 0, 0, 0.7);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: var(--transition-quick);
+}
+
+.card-action-btn:hover {
+    color: var(--text-white);
+    transform: scale(1.1);
+}
+
+.card-action-btn.active {
+    color: var(--error);
+    background-color: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.card-action-btn.delete-btn:hover {
+    color: var(--text-white);
+    background-color: rgba(239, 68, 68, 0.85);
+    border-color: rgba(239, 68, 68, 0.85);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+}
+
+/* Tag Manager & Creator Grid Layout */
+.tag-manager-container {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 24px;
+    align-items: start;
+}
+
+.tag-creator-card, .tag-list-card {
+    background-color: var(--surface-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    box-shadow: var(--shadow-md);
+}
+
+.tag-creator-card h2, .tag-list-card h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.form-group input, .form-group textarea {
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    outline: none;
+    transition: var(--transition-quick);
+}
+
+.form-group input:focus, .form-group textarea:focus {
+    border-color: var(--primary-light);
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+}
+
+.color-picker-grid {
+    display: flex;
+    gap: 10px;
+}
+
+.color-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: var(--transition-quick);
+}
+
+.color-dot:hover {
+    transform: scale(1.1);
+}
+
+.color-dot.active {
+    border-color: var(--text-white);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+}
+
+.tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-white);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.btn-tag-delete {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    font-size: 14px;
+    transition: var(--transition-quick);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+}
+
+.btn-tag-delete:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-white);
+}
+
+/* from style.css L2924-2947 (CSP-safe replacements: browser-empty-grid / browser-status-note / card-badge--unsupported) */
+/* ══ CSP-safe replacements for former inline style="" attributes ══
+   (style-src 'unsafe-inline' was removed — these classes carry the old
+   per-element styles) */
+
+.browser-empty-grid {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 48px;
+    color: var(--text-muted);
+}
+.browser-empty-grid p { margin-top: 8px; }
+.browser-empty-grid .btn-browse-drives { margin-top: 16px; }
+
+.browser-status-note {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 48px;
+}
+
+.card-badge--unsupported {
+    background-color: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+}
+
