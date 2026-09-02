@@ -32,14 +32,23 @@ function updateSpeedMenuActive(rate) {
     });
 }
 
+// Dual-span icon state toggle (mirrors updateThemeToggleIcon in app.js):
+// control buttons carry two <span data-icon="..."> wrappers (one hidden),
+// e.g. play/pause and volume-on/volume-off; show exactly one by name.
+function setControlIcon(button, name) {
+    button.querySelectorAll('[data-icon]').forEach(el => {
+        el.hidden = el.dataset.icon !== name;
+    });
+}
+
 // Custom controls: Play / Pause toggle
 function togglePlayPause() {
     if (elements.videoPlayer.paused) {
         elements.videoPlayer.play();
-        elements.btnVideoPlayPause.textContent = '⏸';
+        setControlIcon(elements.btnVideoPlayPause, 'pause');
     } else {
         elements.videoPlayer.pause();
-        elements.btnVideoPlayPause.textContent = '▶';
+        setControlIcon(elements.btnVideoPlayPause, 'play');
     }
 }
 
@@ -240,12 +249,12 @@ export function setupVideoPlayerListeners(elements) {
     elements.btnVideoPlayPause.addEventListener('click', togglePlayPause);
     elements.videoPlayer.addEventListener('click', togglePlayPause);
 
-    // Sync play/pause state to button text
+    // Sync play/pause state to button icon
     elements.videoPlayer.addEventListener('play', () => {
-        elements.btnVideoPlayPause.textContent = '⏸';
+        setControlIcon(elements.btnVideoPlayPause, 'pause');
     });
     elements.videoPlayer.addEventListener('pause', () => {
-        elements.btnVideoPlayPause.textContent = '▶';
+        setControlIcon(elements.btnVideoPlayPause, 'play');
         // 暂停时 flush 进度
         if (state.playingFile && state.videoDuration > 0) {
             const posMs = (state.transcodeStartOffset + elements.videoPlayer.currentTime) * 1000;
@@ -329,17 +338,17 @@ export function setupVideoPlayerListeners(elements) {
         const vol = parseFloat(e.target.value);
         elements.videoPlayer.volume = vol;
         elements.videoPlayer.muted = (vol === 0);
-        elements.btnVideoMute.textContent = vol === 0 ? '🔇' : '🔊';
+        setControlIcon(elements.btnVideoMute, vol === 0 ? 'volume-off' : 'volume-on');
     });
 
     // Custom controls: Mute Button
     elements.btnVideoMute.addEventListener('click', () => {
         elements.videoPlayer.muted = !elements.videoPlayer.muted;
         if (elements.videoPlayer.muted) {
-            elements.btnVideoMute.textContent = '🔇';
+            setControlIcon(elements.btnVideoMute, 'volume-off');
             elements.videoVolume.value = 0;
         } else {
-            elements.btnVideoMute.textContent = '🔊';
+            setControlIcon(elements.btnVideoMute, 'volume-on');
             elements.videoVolume.value = elements.videoPlayer.volume;
         }
     });
@@ -409,7 +418,7 @@ export function setupVideoPlayerListeners(elements) {
             elements.videoPlayer.volume = vol;
             elements.videoVolume.value = vol;
             elements.videoPlayer.muted = false;
-            elements.btnVideoMute.textContent = '🔊';
+            setControlIcon(elements.btnVideoMute, 'volume-on');
         }
         // ArrowDown: Volume down
         else if (e.key === 'ArrowDown') {
@@ -419,7 +428,7 @@ export function setupVideoPlayerListeners(elements) {
             elements.videoVolume.value = vol;
             if (vol === 0) {
                 elements.videoPlayer.muted = true;
-                elements.btnVideoMute.textContent = '🔇';
+                setControlIcon(elements.btnVideoMute, 'volume-off');
             }
         }
     });
@@ -437,6 +446,6 @@ export function setupVideoPlayerListeners(elements) {
         elements.videoPlayer.volume = vol;
         elements.videoPlayer.muted = (vol === 0);
         elements.videoVolume.value = vol;
-        elements.btnVideoMute.textContent = vol === 0 ? '🔇' : '🔊';
+        setControlIcon(elements.btnVideoMute, vol === 0 ? 'volume-off' : 'volume-on');
     }, { passive: false });
 }
