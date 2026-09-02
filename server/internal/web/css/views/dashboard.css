@@ -45,6 +45,15 @@
     gap: 24px;
 }
 
+/* Grid items default to min-width:auto, so the recent list's nowrap
+   .recent-item__name titles inflate the first column's min-content width
+   and starve the service-info card to ~240px (label squeezed vertical).
+   min-width:0 lets both 1fr columns resolve equally; the title itself
+   keeps its own min-width:0 + ellipsis so it truncates instead. */
+.dashboard-widgets > .widget-card {
+    min-width: 0;
+}
+
 /* from style.css L608-622 (recent list) */
 .recent-list {
     min-height: 180px;
