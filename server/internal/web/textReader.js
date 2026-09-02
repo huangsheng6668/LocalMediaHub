@@ -42,7 +42,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     // XSS-SAFE: pure-literal skeleton; book content rendered via textContent / DOM API
     container.innerHTML = `
         <div class="text-reader">
-            <div class="text-reader__progress-bar"></div>
+            <div class="text-reader__progress-track"><div class="text-reader__progress-bar"></div></div>
             <header class="text-reader__header">
                 <button class="text-reader__back" type="button" aria-label="返回">←</button>
                 <span class="text-reader__title">加载中...</span>
@@ -57,7 +57,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         </div>
         <div class="text-reader__drawer text-reader__drawer--hidden" aria-hidden="true"></div>
         <div class="text-reader__autoscroll-panel text-reader__autoscroll-panel--hidden" id="autoscroll-panel">
-            <button class="autoscroll-panel-btn" id="autoscroll-panel-play">⏸</button>
+            <button class="autoscroll-panel-btn" id="autoscroll-panel-play" aria-label="播放/暂停" title="播放/暂停"><span data-icon="pause"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none" aria-hidden="true"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg></span><span data-icon="play" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></span></button>
             <button class="autoscroll-panel-btn" id="autoscroll-panel-minus" title="减速">-</button>
             <span class="autoscroll-panel-text">速度: <span id="autoscroll-val-speed">5</span></span>
             <button class="autoscroll-panel-btn" id="autoscroll-panel-plus" title="加速">+</button>
@@ -348,7 +348,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
     const settingsApi = renderSettings(container);
 
-    // Header action buttons: Aa opens settings, ▶ toggles autoscroll.
+    // Header action buttons: Aa opens settings, play/pause SVG toggles autoscroll.
     const settingsBtn = document.createElement('button');
     settingsBtn.className = 'text-reader__icon-btn';
     settingsBtn.type = 'button';
@@ -359,7 +359,8 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     scrollBtn.className = 'text-reader__icon-btn';
     scrollBtn.type = 'button';
     scrollBtn.ariaLabel = '自动滚动';
-    scrollBtn.textContent = '▶';
+    // XSS-SAFE: pure-literal dual-span icon markup (hidden-toggle pattern)
+    scrollBtn.innerHTML = '<span data-icon="play"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></span><span data-icon="pause" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none" aria-hidden="true"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg></span>';
     scrollBtn.addEventListener('click', () => autoscrollApi.toggle());
     const headerRight = document.createElement('div');
     headerRight.className = 'text-reader__header-actions';

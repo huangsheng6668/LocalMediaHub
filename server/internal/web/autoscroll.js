@@ -22,21 +22,31 @@ export function renderAutoscroll({ panelEl, playBtn, minusBtn, plusBtn, speedVal
         rafId = requestAnimationFrame(loop);
     }
 
-    function start() {
-        if (running) return;
-        running = true;
-        if (panelEl) panelEl.classList.remove('text-reader__autoscroll-panel--hidden');
-        if (playBtn) playBtn.textContent = '⏸';
-        rafId = requestAnimationFrame(loop);
-    }
+// Dual-span hidden-toggle icon (same pattern as videoPlayer.js setControlIcon):
+// the button markup ships static <span data-icon="play|pause"> SVGs and this
+// helper flips `hidden` — replaces the old ⏸/▶ text glyph writes.
+function setPlayIcon(name) {
+    if (!playBtn) return;
+    playBtn.querySelectorAll('[data-icon]').forEach(el => {
+        el.hidden = el.dataset.icon !== name;
+    });
+}
 
-    function stop() {
-        running = false;
-        if (rafId !== null) cancelAnimationFrame(rafId);
-        rafId = null;
-        if (panelEl) panelEl.classList.add('text-reader__autoscroll-panel--hidden');
-        if (playBtn) playBtn.textContent = '▶';
-    }
+function start() {
+    if (running) return;
+    running = true;
+    if (panelEl) panelEl.classList.remove('text-reader__autoscroll-panel--hidden');
+    setPlayIcon('pause');
+    rafId = requestAnimationFrame(loop);
+}
+
+function stop() {
+    running = false;
+    if (rafId !== null) cancelAnimationFrame(rafId);
+    rafId = null;
+    if (panelEl) panelEl.classList.add('text-reader__autoscroll-panel--hidden');
+    setPlayIcon('play');
+}
 
     function toggle() {
         running ? stop() : start();

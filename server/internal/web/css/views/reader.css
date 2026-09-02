@@ -57,7 +57,7 @@ body[data-active-tab="read"] .text-reader {
     color: var(--reader-fg, var(--text-primary));
     width: 36px;
     height: 36px;
-    border-radius: 50%;
+    border-radius: var(--radius-md);
     cursor: pointer;
     font-size: 18px;
     line-height: 1;
@@ -66,9 +66,9 @@ body[data-active-tab="read"] .text-reader {
 }
 
 .text-reader__back:hover {
-    background-color: var(--accent);
+    background-color: var(--surface-hover);
     border-color: var(--accent);
-    color: var(--text-on-accent);
+    color: var(--accent);
 }
 
 .text-reader__title {
@@ -274,35 +274,38 @@ body[data-active-tab="read"] .text-reader {
 }
 
 .text-reader__icon-btn:hover {
-    background: var(--accent);
+    background: var(--surface-hover);
     border-color: var(--accent);
-    color: var(--text-on-accent);
+    color: var(--accent);
 }
 
 /* TOC tabs */
 .text-reader__tabs {
     display: flex;
+    gap: 4px;
     border-bottom: 1px solid var(--reader-border, var(--border-subtle));
     margin-bottom: 8px;
 }
 
 .text-reader__tab {
     flex: 1;
-    padding: 12px;
+    padding: 10px 12px;
     background: transparent;
     border: none;
-    color: var(--reader-fg, var(--text-muted));
-    opacity: 0.6;
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
     cursor: pointer;
-    border-bottom: 2px solid transparent;
     font-size: 13px;
-    transition: color 0.2s ease, opacity 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.text-reader__tab:hover {
+    background: var(--surface-hover);
 }
 
 .text-reader__tab--active {
-    color: var(--reader-fg, var(--text-primary));
-    opacity: 1;
-    border-bottom-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-text);
 }
 
 .text-reader__tab-panel {
@@ -322,13 +325,13 @@ body[data-active-tab="read"] .text-reader {
     color: var(--reader-fg, var(--text-primary));
     opacity: 0.85;
     cursor: pointer;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     font-size: 13px;
     transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 }
 
 .text-reader__drawer-item:hover {
-    background-color: rgba(124, 58, 237, 0.15);
+    background-color: var(--surface-hover);
     color: var(--accent);
     opacity: 1;
 }
@@ -348,7 +351,7 @@ body[data-active-tab="read"] .text-reader {
 
 /* 书签 tab：属于当前章节的书签弱标记（区别于 TOC 的强高亮，避免混淆选中语义）。 */
 .text-reader__drawer-item--current-chapter {
-    background-color: rgba(124, 58, 237, 0.08);
+    background-color: var(--accent-soft);
 }
 
 .text-reader__drawer-del {
@@ -397,7 +400,7 @@ dialog#reader-settings-dialog fieldset {
     border: 1px solid var(--border-subtle);
     margin-bottom: 12px;
     padding: 8px 12px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
 }
 
 dialog#reader-settings-dialog legend {
@@ -503,18 +506,25 @@ dialog#reader-settings-dialog menu {
     opacity: 0.85;
 }
 
-/* 顶部细进度条，支持沉浸模式与普通模式下置顶显示 */
-.text-reader__progress-bar {
+/* 顶部细进度条，支持沉浸模式与普通模式下置顶显示。
+   外层 track 常驻满宽（border-soft 轨道），内层 fill 宽度由 JS 按进度驱动。 */
+.text-reader__progress-track {
     position: fixed;
     top: 0;
     left: 0;
+    width: 100%;
     height: 3px;
-    width: 0%;
-    background-color: var(--accent, #6366f1);
-    box-shadow: 0 0 8px rgba(99, 102, 241, 0.6);
-    transition: width 0.15s ease-out;
+    background-color: var(--border-soft);
+    border-radius: var(--radius-md);
     z-index: 10000;
     pointer-events: none;
+}
+.text-reader__progress-bar {
+    height: 100%;
+    width: 0%;
+    background-color: var(--accent);
+    border-radius: var(--radius-md);
+    transition: width 0.15s ease-out;
 }
 
 /* === Phase 5: 沉浸模式 ===
@@ -582,7 +592,7 @@ body[data-reader-immersive="on"] .text-reader__content {
     background-color: var(--reader-bg, var(--surface-card));
     color: var(--reader-fg, var(--text-primary));
     border-left: 1px solid var(--reader-border, var(--border-subtle));
-    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-md);
     padding: 20px 16px;
     overflow-y: auto;
     z-index: 200;
@@ -610,13 +620,13 @@ body[data-reader-immersive="on"] .text-reader__content {
     text-decoration: none;
     font-size: 13px;
     padding: 8px 10px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     transition: all .15s ease, color 0.2s ease, opacity 0.2s ease;
     line-height: 1.4;
 }
 
 .text-reader__toc-item:hover {
-    background-color: rgba(124, 58, 237, 0.15);
+    background-color: var(--surface-hover);
     color: var(--accent);
     opacity: 1;
 }
@@ -655,7 +665,9 @@ body[data-reader-immersive="on"] .text-reader__content {
 }
 
 /* from style.css L2692-2754 (autoscroll panel) */
-/* Floating Autoscroll Control Panel */
+/* Floating Autoscroll Control Panel
+   Tokenized chrome: surface/border follow the reading theme via the
+   body[data-reader-theme] override block (panel is chrome, not content). */
 .text-reader__autoscroll-panel {
     position: absolute;
     bottom: 80px;
@@ -665,12 +677,12 @@ body[data-reader-immersive="on"] .text-reader__content {
     align-items: center;
     gap: 12px;
     padding: 10px 18px;
-    background: rgba(30, 30, 36, 0.75);
+    background: var(--surface-card);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 30px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
     z-index: 1000;
     transition: opacity 0.3s ease, transform 0.3s ease, visibility 0.3s;
     opacity: 1;
@@ -684,21 +696,24 @@ body[data-reader-immersive="on"] .text-reader__content {
 }
 
 .autoscroll-panel-btn, .autoscroll-panel-btn-mode {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
     color: var(--text-primary);
     padding: 6px 12px;
     font-size: 13px;
     font-weight: 500;
-    border-radius: 20px;
+    border-radius: var(--radius-md);
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     transition: all 0.2s ease;
 }
 
 .autoscroll-panel-btn:hover, .autoscroll-panel-btn-mode:hover {
-    background: var(--accent);
+    background: var(--surface-hover);
     border-color: var(--accent);
-    transform: scale(1.05);
+    color: var(--accent);
 }
 
 .autoscroll-panel-btn:active, .autoscroll-panel-btn-mode:active {
@@ -733,7 +748,7 @@ body[data-reader-immersive="on"] .text-reader__content {
     gap: 4px;
     padding: 8px 4px;
     border: 1px solid var(--reader-border, var(--border-subtle));
-    border-radius: var(--border-radius-md, 6px);
+    border-radius: var(--radius-md);
     cursor: pointer;
     font-size: 12px;
 }
@@ -744,7 +759,7 @@ body[data-reader-immersive="on"] .text-reader__content {
 }
 .reader-settings__theme-opt:has(input:checked) {
     border-color: var(--accent);
-    background: rgba(0, 122, 255, 0.08);
+    background: var(--accent-soft);
 }
 .reader-settings__theme-swatch {
     width: 28px;
@@ -780,7 +795,7 @@ body[data-reader-immersive="on"] .text-reader__content {
     height: 28px;
     padding: 0;
     border: 1px solid var(--reader-border, var(--border-subtle));
-    border-radius: 4px;
+    border-radius: var(--radius-md);
     background: none;
 }
 .reader-settings__color-row span { min-width: 2.5em; }
