@@ -116,7 +116,7 @@ export function initScrollNav(opts = {}) {
                 currentContainer.addEventListener('scroll', onScroll, { passive: true });
             }
         }
-        updateScrollFabVisibility(buttons, currentContainer, threshold);
+        scheduleVisibilityUpdate();
     }
 
     const onTopClick = () => {
