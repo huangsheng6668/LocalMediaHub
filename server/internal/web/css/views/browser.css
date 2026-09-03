@@ -120,6 +120,15 @@
     flex-direction: column;
     position: relative;
     box-shadow: var(--shadow-sm);
+    /* P2 (2026-09-03): skip layout/paint of off-screen cards. Large
+       directories inject thousands of cards in one innerHTML pass and the
+       browser otherwise lays out every node up front. content-visibility:
+       auto makes it skip off-screen cards; contain-intrinsic-size reserves
+       a placeholder height (120px preview + ~70px details) so the scrollbar
+       stays stable, and the leading `auto` keyword lets the browser remember
+       each card's real height once rendered, eliminating scroll jumps. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 190px;
 }
 
 .media-card:hover {
