@@ -12,7 +12,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **路由**：`server/internal/server/server.go`（`Server` struct 持有所有 service 引用；`Server.Stop` 关闭 scanner + tags DB）
 - **Handler**：`server/internal/server/handler/*.go`（只做参数解析与响应，不写业务逻辑；通过 `Handler` struct 持有 service 依赖，**不使用全局变量**）
 - **Service**：`server/internal/service/*.go`
-  - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + per-root 防抖 + `cacheByDir` 每目录索引 + per-root 并发 `g.SetLimit` + 输出按路径排序）
+  - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + per-root 防抖 + `cacheByDir` 每目录索引 + per-root 并发 `g.SetLimit` + 输出按路径排序）；快照持久化（2026-09-03）：`scanner_snapshot.go` Scan 后原子落盘 `.data/scan_snapshot.json`（30s 写节流）+ `StartWatching` 启动 hydrate（`cacheTime=SavedAt` 复用 stale-while-revalidate，roots/扩展名身份键不匹配即弃用），`NewScannerWithSnapshot` 为生产构造、`NewScanner` 保留给测试
   - `tags.go` — 标签系统（SQLite WAL + busy_timeout + `SetMaxOpenConns(max(4,NumCPU))` + 索引 + 批量 IN 查询 + JSON→SQLite 自动迁移，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）
   - `streaming.go` — 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`（修正 SeekCurrent 偏移），原生 Range）；转码路径（2026-09-03）：`transcode_encoder.go` 两级编码器探测（静态 `-encoders` + 运行时 testsrc 微编码，NVENC→QSV→AMF→libx264 兜底）+ `vcodec` allowlist 查表（客户端值永不进 argv）+ 会话并发信号量（`transcode.max_sessions`，缺省 3 / -1 不限），状态端点 `GET /api/v1/admin/transcode/status`
   - `thumbnail.go` — 缩略图（LANCZOS→Linear + MD5 缓存 + sync.Pool + hot path priority + `durations.json` ffprobe 缓存 + per-file `hotTracker`）

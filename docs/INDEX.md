@@ -43,6 +43,7 @@
 ### 关键文件
 
 - `server/internal/service/scanner.go`（TTL 缓存 + fsnotify 递归监听 + 2s 防抖 + `cacheByDir` 每目录索引）
+- `server/internal/service/scanner_snapshot.go`（扫描快照持久化：Scan 后原子落盘 `.data/scan_snapshot.json` + 启动 hydrate（`cacheTime=SavedAt` 复用 stale-while-revalidate）+ roots/扩展名身份键，spec 2026-09-03）
 - `server/internal/service/streaming.go`（`http.ServeContent` + 256KB `BufferedReadSeeker`，原生 Range）
 - `server/internal/service/transcode_encoder.go`（两级硬编探测链：静态 `-encoders` + 运行时 testsrc 微编码，NVENC→QSV→AMF→libx264 兜底；`vcodec` allowlist 契约 + 转码会话并发上限，spec 2026-09-03）
 - `server/internal/service/thumbnail.go`（LANCZOS + MD5 缓存 + sync.Pool + hot path priority）
@@ -58,6 +59,8 @@
 - `docs/superpowers/specs/2026-07-14-perf-round31-design.md`
 - `docs/superpowers/specs/2026-09-03-transcode-modernization-design.md`（硬件编码链 + 会话治理 + wire 契约固化）
 - `docs/superpowers/plans/2026-09-03-transcode-modernization.md`（对应实施 plan）
+- `docs/superpowers/specs/2026-09-03-scan-snapshot-persistence-design.md`（扫描快照持久化：冷启动免全量遍历）
+- `docs/superpowers/plans/2026-09-03-scan-snapshot-persistence.md`（对应实施 plan）
 
 ---
 
