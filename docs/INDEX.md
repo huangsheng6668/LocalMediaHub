@@ -224,6 +224,7 @@
 - `docs/superpowers/specs/2026-07-06-okhttp-json-cache-design.md`
 - `docs/superpowers/specs/2026-07-07-exoplayer-state-preservation-design.md`
 - `docs/superpowers/specs/2026-07-07-apk-size-optimization-design.md`
+- `docs/superpowers/specs/2026-09-03-android-transcode-fallback-design.md`（播放失败自动转码重试：codec 类错误一次性 fallback `transcode=true`，Phase C of 转码现代化）
 
 ---
 
