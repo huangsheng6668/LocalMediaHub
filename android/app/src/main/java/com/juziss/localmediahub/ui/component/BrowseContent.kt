@@ -8,9 +8,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -422,53 +419,48 @@ internal fun BrowseContent(
             }
         }
  
-        // Floating scroll buttons
-        if (files.isNotEmpty() || folders.isNotEmpty()) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FloatingActionButton(
-                    onClick = {
-                        scope.launch {
-                            if (useStaggeredGrid) staggeredState.scrollToItem(0)
-                            else gridState.scrollToItem(0)
-                        }
-                    },
-                    modifier = Modifier.size(40.dp),
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                    Icon(
-                        Icons.Filled.KeyboardArrowUp,
-                        contentDescription = stringResource(R.string.content_to_top),
-                        modifier = Modifier.size(24.dp),
-                    )
-                }
-                FloatingActionButton(
-                    onClick = {
-                        scope.launch {
-                            if (useStaggeredGrid) {
-                                val lastIndex = (images.size - 1).coerceAtLeast(0)
-                                staggeredState.scrollToItem(lastIndex)
-                            } else {
-                                val lastIndex = (folders.size + files.size - 1).coerceAtLeast(0)
-                                gridState.scrollToItem(lastIndex)
-                            }
-                        }
-                    },
-                    modifier = Modifier.size(40.dp),
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                    Icon(
-                        Icons.Filled.KeyboardArrowDown,
-                        contentDescription = stringResource(R.string.content_to_bottom),
-                        modifier = Modifier.size(24.dp),
-                    )
+        val totalItems = if (useStaggeredGrid) images.size else folders.size + files.size
+        val fabVisibility by remember(useStaggeredGrid, totalItems) {
+            derivedStateOf {
+                if (useStaggeredGrid) {
+                    val info = staggeredState.layoutInfo
+                    val visibleItems = info.visibleItemsInfo
+                    val firstIndex = staggeredState.firstVisibleItemIndex
+                    val firstOffset = staggeredState.firstVisibleItemScrollOffset
+                    val lastIndex = visibleItems.lastOrNull()?.index ?: 0
+                    calculateScrollFabVisibility(firstIndex, firstOffset, lastIndex, totalItems, visibleItems.size)
+                } else {
+                    val info = gridState.layoutInfo
+                    val visibleItems = info.visibleItemsInfo
+                    val firstIndex = gridState.firstVisibleItemIndex
+                    val firstOffset = gridState.firstVisibleItemScrollOffset
+                    val lastIndex = visibleItems.lastOrNull()?.index ?: 0
+                    calculateScrollFabVisibility(firstIndex, firstOffset, lastIndex, totalItems, visibleItems.size)
                 }
             }
         }
+
+        // Floating scroll buttons with smart visibility
+        ScrollFabGroup(
+            canScrollToTop = fabVisibility.canScrollToTop,
+            canScrollToBottom = fabVisibility.canScrollToBottom,
+            onScrollToTop = {
+                scope.launch {
+                    if (useStaggeredGrid) staggeredState.animateScrollToItem(0)
+                    else gridState.animateScrollToItem(0)
+                }
+            },
+            onScrollToBottom = {
+                scope.launch {
+                    val lastIndex = (totalItems - 1).coerceAtLeast(0)
+                    if (useStaggeredGrid) staggeredState.animateScrollToItem(lastIndex)
+                    else gridState.animateScrollToItem(lastIndex)
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 16.dp),
+        )
     }
 }
 
