@@ -33,7 +33,7 @@
 
 - **会话键**：`sha256(cleanPath + modTimeUnixNano + encoderName)[:16]` —— 同文件去重；文件变更自然换键。
 - **ffmpeg 参数**：`-y -i <sanitize后的path> -vcodec <enc> <knownEncoderArgs…> -acodec aac -f hls -hls_time 4 -hls_list_size 0 -hls_flags independent_segments -hls_segment_filename <dir>/seg%05d.ts <dir>/index.m3u8`（全片转码，无 `-ss`）。`independent_segments` 保证任意段起播。
-- **GetOrCreateHlsSession**：命中 → `Touch(lastAccess)` 返回；未命中 → mkdir + `acquireTranscodeSlot`（占 P0 信号量，ffmpeg 退出即释放）+ 后台跑 ffmpeg + 轮询等 `index.m3u8` 出现（200ms 步进，上限 8s；超时 503）。ffmpeg 退出码非 0 且分段时间 < 1 段 → 会话失败删除目录。
+- **GetOrCreateHlsSession**：命中 → `Touch(lastAccess)` 返回；未命中 → mkdir + `acquireTranscodeSlot`（占 P0 信号量，ffmpeg 退出即释放）+ 后台跑 ffmpeg + 轮询等 `index.m3u8` 出现（200ms 步进，上限 8s；超时杀进程并删除会话）。ffmpeg 任意非零退出 → 删除目录 + 出注册表（实施修正：截断的 playlist 比干净重启是更糟的陷阱，不保留部分成果）。短视频在轮询发现 playlist 前就成功结束属正常路径（done 通道 + 可用性双重检查）。
 - **回收 reaper**（60s 周期，惰性启动）：运行中且 `lastAccess` > 3min → kill + **删除目录**（未完成会话不留半成品）；已完成会话计入磁盘总量，超过 **4GiB 常量上限**（同 thumbnail 512MB 先例的姿态，YAGNI 不进 config）按 lastAccess 最旧淘汰。`CloseHLS()`（Server.Stop 接线）kill 全部运行中会话，保留已完成缓存。
 
 ### 3.2 端点（handler/media.go + server.go 路由）

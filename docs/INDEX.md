@@ -37,6 +37,8 @@
 | GET | `/api/v1/media/stream` | 绝对路径视频流（Range） | 是 |
 | GET | `/api/v1/media/duration` | 媒体时长 | 是 |
 | GET | `/api/v1/admin/transcode/status` | 转码状态（活跃会话 / 上限 / 编码器链，2026-09-03） | 是（admin 组，空 token 透传） |
+| GET | `/api/v1/media/hls/playlist` | HLS 转码 playlist（会话懒启动 + 去重 + 空闲回收，2026-09-03） | 是 |
+| GET | `/api/v1/media/hls/segment` | HLS 转码分段（段名白名单 `segNNNNN.ts`，4GiB LRU 磁盘缓存） | 是 |
 
 > Phase 9 (H-2/I-3) 起，上表媒体读端点与 `/texts` 均挂 Bearer Token 中间件；`config.yaml` 未配置 token（开放模式）时中间件为透传 no-op，既有部署行为不变。
 
@@ -46,6 +48,7 @@
 - `server/internal/service/scanner_snapshot.go`（扫描快照持久化：Scan 后原子落盘 `.data/scan_snapshot.json` + 启动 hydrate（`cacheTime=SavedAt` 复用 stale-while-revalidate）+ roots/扩展名身份键，spec 2026-09-03）
 - `server/internal/service/streaming.go`（`http.ServeContent` + 256KB `BufferedReadSeeker`，原生 Range）
 - `server/internal/service/transcode_encoder.go`（两级硬编探测链：静态 `-encoders` + 运行时 testsrc 微编码，NVENC→QSV→AMF→libx264 兜底；`vcodec` allowlist 契约 + 转码会话并发上限，spec 2026-09-03）
+- `server/internal/service/transcode_hls.go`（HLS 转码会话管理：会话键去重 + 空闲回收 + 4GiB LRU 缓存 + 段名白名单，`.cache/hls/`）
 - `server/internal/service/thumbnail.go`（LANCZOS + MD5 缓存 + sync.Pool + hot path priority）
 - `server/internal/service/path.go`（路径校验三件套，详见 [安全加固](#安全加固)）
 - `server/internal/server/handler/folders.go` / `videos.go` / `images.go` / `media.go` / `search.go`
@@ -61,6 +64,8 @@
 - `docs/superpowers/plans/2026-09-03-transcode-modernization.md`（对应实施 plan）
 - `docs/superpowers/specs/2026-09-03-scan-snapshot-persistence-design.md`（扫描快照持久化：冷启动免全量遍历）
 - `docs/superpowers/plans/2026-09-03-scan-snapshot-persistence.md`（对应实施 plan）
+- `docs/superpowers/specs/2026-09-03-hls-transcode-design.md`（HLS 转码分段输出：随机 seek + 完成即缓存，Phase B）
+- `docs/superpowers/plans/2026-09-03-hls-transcode.md`（对应实施 plan）
 
 ---
 
