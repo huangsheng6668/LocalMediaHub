@@ -49,8 +49,13 @@ export function renderBookmarks() {
     if (bookmarks.length === 0) {
         // XSS-SAFE: pure-literal template, no interpolation
         listEl.innerHTML = `
-            <div class="text-reader__empty bookmarks-empty-state">
-                暂无书签记录。您可以在媒体共享库中阅读小说，在段落上右侧悬浮并点击 “+” 添加书签。
+            <div class="empty-state bookmarks-empty-state">
+                <div class="empty-state__icon">
+                    <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <h3 class="empty-state__title">暂无书签记录</h3>
+                <p class="empty-state__desc">在媒体共享库中阅读小说时，在段落右侧悬浮并点击 “+” 即可添加书签。</p>
+                <a href="#/browser" class="btn btn-secondary empty-state__action">前往媒体库浏览</a>
             </div>
         `;
         return;

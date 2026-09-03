@@ -92,7 +92,17 @@ export function render(container) {
     container.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
     const list = loadAll();
     if (list.length === 0) {
-        container.innerHTML = '<div class="text-reader__error">暂无阅读历史</div>'; // XSS-SAFE: hardcoded literal
+        // XSS-SAFE: pure literal markup
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state__icon">
+                    <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                </div>
+                <h3 class="empty-state__title">暂无阅读历史</h3>
+                <p class="empty-state__desc">在媒体共享库中打开小说或书籍后，将自动在此记录阅读进度。</p>
+                <a href="#/browser" class="btn btn-primary empty-state__action">前往媒体库</a>
+            </div>
+        `;
         return;
     }
     const grid = document.createElement('div');
