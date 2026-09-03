@@ -7,6 +7,7 @@ import { formatTime, encodeRoutePath } from './utils.js';
 import { deleteMediaFile } from './delete.js';
 import { wheelToVolume } from './videoHelpers.js';
 import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoProgress.js';
+import { buildHlsPlaylistUrl, resolveHlsStrategy, needsTranscodeExt } from './hlsCompat.js';
 
 // <video> tags cannot send Authorization headers, so auth-gated stream URLs
 // (/api/v1/media/stream, /api/v1/system/stream) carry the bearer token as a
@@ -14,7 +15,7 @@ import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoP
 // Referrer-Policy: no-referrer keeps it out of referers). The public
 // /api/v1/videos/*/stream route needs no token.
 function withVideoAuthToken(url) {
-    if (!/\/api\/v1\/(media|system)\/stream/.test(url)) return url;
+    if (!/\/api\/v1\/(media|system)\/(stream|hls\/playlist)/.test(url)) return url;
     const token = getAuthToken();
     if (!token) return url;
     return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
@@ -24,6 +25,51 @@ function withVideoAuthToken(url) {
 let controlsTimeout;
 const PLAYBACK_SPEEDS = [0.75, 1, 1.25, 1.5, 2, 3];
 let lastProgressSaveMs = 0;
+
+// HLS era (spec 2026-09-03-hls-transcode-b2): the active HLS route for the
+// current video ('hlsjs' | 'native' | 'none') and the live hls.js instance.
+let hlsStrategy = 'none';
+let hls = null;
+
+function destroyHls() {
+    if (hls) {
+        try { hls.destroy(); } catch (e) { /* already torn down */ }
+        hls = null;
+    }
+}
+
+// applySource wires the player to url. strategy 'hlsjs' routes through
+// hls.js (auth headers injected on every request via xhrSetup, segments
+// included); anything else is a plain src assignment (native HLS gets the
+// token via query param, same as the legacy stream path). seekSec >= 0 is
+// applied once the stream is positioned (MANIFEST_PARSED / loadedmetadata).
+function applySource(url, strategy, seekSec) {
+    const video = elements.videoPlayer;
+    destroyHls();
+    if (strategy === 'hlsjs') {
+        const token = getAuthToken();
+        hls = new window.Hls({
+            xhrSetup: (xhr) => {
+                if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+            },
+        });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        if (seekSec > 0) {
+            hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+                video.currentTime = seekSec;
+            });
+        }
+        return;
+    }
+    video.src = withVideoAuthToken(url);
+    video.load();
+    if (seekSec > 0) {
+        video.addEventListener('loadedmetadata', function seekOnce() {
+            video.currentTime = seekSec;
+        }, { once: true });
+    }
+}
 
 // 更新倍速菜单高亮项（按当前 playbackRate）
 function updateSpeedMenuActive(rate) {
@@ -82,17 +128,19 @@ export async function openVideoPlayer(file) {
     elements.videoProgress.max = 100;
     elements.videoTimeDisplay.textContent = '00:00 / 加载中...';
 
-    // Auto transcode non-native formats (e.g. .ts, .mkv, .avi, .wmv, .flv)
-    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-    const needsTranscode = ['.ts', '.mkv', '.avi', '.wmv', '.flv'].includes(ext);
+    // Auto transcode non-native containers (e.g. .ts, .mkv, .avi, .wmv, .flv).
+    // HLS era: pick the playback route once per open — hls.js / native / none
+    // (none keeps the legacy single-pipe fMP4 path, zero regression).
+    const needsTranscode = needsTranscodeExt(file.name);
     state.useTranscode = needsTranscode;
-    state.vcodecMode = 'copy'; // default to fast remux (copy mode) to save server CPU!
+    state.vcodecMode = 'copy'; // legacy-path default; unused in HLS mode
+    hlsStrategy = needsTranscode ? resolveHlsStrategy(elements.videoPlayer) : 'none';
 
     elements.videoModalTitle.textContent = file.name;
     elements.btnVideoDelete.style.display = state.enableDelete ? 'block' : 'none';
     if (state.useTranscode) {
         elements.btnVideoTranscode.classList.add('active');
-        elements.btnVideoTranscode.textContent = '快速流';
+        elements.btnVideoTranscode.textContent = hlsStrategy === 'none' ? '快速流' : '转码';
     } else {
         elements.btnVideoTranscode.classList.remove('active');
         elements.btnVideoTranscode.textContent = '原画';
@@ -115,7 +163,11 @@ export async function openVideoPlayer(file) {
         url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}`;
     }
 
-    if (state.useTranscode) {
+    if (state.useTranscode && hlsStrategy !== 'none') {
+        // Unified HLS endpoint: ValidateAccessibleMediaPath covers scan roots
+        // AND system.allowed_roots, so both browse modes share it.
+        url = buildHlsPlaylistUrl(state.apiBase, file.path);
+    } else if (state.useTranscode) {
         url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0&vcodec=${state.vcodecMode}`;
         if (state.isSystemBrowse) {
             url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0&vcodec=${state.vcodecMode}`;
@@ -127,8 +179,8 @@ export async function openVideoPlayer(file) {
     let resumePositionMs = 0;
     if (saved && !isCompleted(saved.positionMs, saved.durationMs)) {
         resumePositionMs = saved.positionMs;
-        if (state.useTranscode) {
-            // 转码流：把 URL 里的 start=0 替换为续播秒数（ffmpeg 从该点转码）
+        if (state.useTranscode && hlsStrategy === 'none') {
+            // Legacy pipe only: seek by restarting the transcode at startSec.
             const startSec = Math.floor(resumePositionMs / 1000);
             url = url.replace('start=0', 'start=' + startSec);
             state.transcodeStartOffset = startSec * 1000;
@@ -145,15 +197,11 @@ export async function openVideoPlayer(file) {
     elements.videoSpeedMenu.hidden = true;
     updateSpeedMenuActive(1);
 
-    elements.videoPlayer.src = withVideoAuthToken(url);
     elements.modalVideoPlayer.classList.add('active');
-    elements.videoPlayer.load();
-    // 原画流续播：loadedmetadata 后 seekTo（转码流已用 start 参数）
-    if (resumePositionMs > 0 && !state.useTranscode) {
-        elements.videoPlayer.addEventListener('loadedmetadata', function resumeSeek() {
-            elements.videoPlayer.currentTime = resumePositionMs / 1000;
-        }, { once: true });
-    }
+    // HLS era: direct + HLS streams both resume via a post-metadata seek
+    // (native currentTime); only the legacy pipe keeps the start= param.
+    const resumeSec = resumePositionMs > 0 && hlsStrategy !== 'none' ? resumePositionMs / 1000 : 0;
+    applySource(url, state.useTranscode ? hlsStrategy : 'none', resumeSec);
     elements.videoPlayer.play();
 }
 
@@ -162,6 +210,8 @@ export function setupVideoPlayerListeners(elements) {
     // Close Video Modal
     elements.btnCloseVideoModal.addEventListener('click', () => {
         elements.videoPlayer.pause();
+        destroyHls();
+        hlsStrategy = 'none';
         // 关闭前 flush 最终进度
         if (state.playingFile && state.videoDuration > 0) {
             const posMs = (state.transcodeStartOffset + elements.videoPlayer.currentTime) * 1000;
@@ -186,31 +236,58 @@ export function setupVideoPlayerListeners(elements) {
         }
     });
 
-    // Transcode Video toggle inside video modal (cycles: 原画 -> 快速流/Remux -> 兼容转码 -> 原画)
+    // Transcode Video toggle inside video modal.
+    // HLS era: two-state cycle (原画 <-> 转码, native random seeking via
+    // currentTime). The legacy three-state cycle (原画 -> 快速流 -> 转码中)
+    // only applies when no HLS route is available (strategy 'none').
     elements.btnVideoTranscode.addEventListener('click', () => {
         if (!state.playingFile) return;
 
+        const absolutePos = state.transcodeStartOffset + elements.videoPlayer.currentTime;
+
+        if (hlsStrategy !== 'none') {
+            state.useTranscode = !state.useTranscode;
+            state.vcodecMode = 'copy'; // unused in HLS mode
+            if (state.useTranscode) {
+                elements.btnVideoTranscode.classList.add('active');
+                elements.btnVideoTranscode.textContent = '转码';
+                showToast('🔧 已切换至 HLS 转码流（支持任意进度拖动）', 'success');
+                applySource(buildHlsPlaylistUrl(state.apiBase, state.playingFile.path), hlsStrategy, absolutePos);
+            } else {
+                elements.btnVideoTranscode.classList.remove('active');
+                elements.btnVideoTranscode.textContent = '原画';
+                showToast('🚀 已切换至极速原文件直通流', 'success');
+                if (needsTranscodeExt(state.playingFile.name)) {
+                    showToast('⚠️ 当前视频容器缺乏浏览器原生支持，如画面黑屏请切回转码', 'info');
+                }
+                let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}`;
+                if (state.isSystemBrowse) {
+                    url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}`;
+                }
+                applySource(url, 'none', absolutePos);
+            }
+            state.transcodeStartOffset = 0;
+            elements.videoPlayer.play();
+            return;
+        }
+
+        // Legacy (no HLS route): original three-state cycle, seek by
+        // restarting the transcode at the absolute position.
         if (!state.useTranscode) {
-            // direct -> copy (Remux)
             state.useTranscode = true;
             state.vcodecMode = 'copy';
             showToast('🔧 已切换至极速容器封装流（CPU占用极低）', 'success');
         } else if (state.vcodecMode === 'copy') {
-            // copy -> libx264 (Full transcode)
             state.useTranscode = true;
             state.vcodecMode = 'libx264';
             showToast('🔧 已切换至 H.264 兼容性实时转码输出（CPU占用较高）', 'success');
         } else {
-            // libx264 -> direct (Original)
             state.useTranscode = false;
             showToast('🚀 已切换至极速原文件直通流', 'success');
-            const ext = state.playingFile.name.substring(state.playingFile.name.lastIndexOf('.')).toLowerCase();
-            if (['.ts', '.mkv', '.avi', '.wmv', '.flv'].includes(ext)) {
-                showToast('⚠️ 当前视频格式 (' + ext + ') 缺乏浏览器原生解码支持，如画面黑屏请切回快速流', 'info');
+            if (needsTranscodeExt(state.playingFile.name)) {
+                showToast('⚠️ 当前视频容器缺乏浏览器原生支持，如画面黑屏请切回快速流', 'info');
             }
         }
-
-        const absolutePos = state.transcodeStartOffset + elements.videoPlayer.currentTime;
 
         let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}`;
         if (state.isSystemBrowse) {
@@ -221,27 +298,14 @@ export function setupVideoPlayerListeners(elements) {
             state.transcodeStartOffset = Math.floor(absolutePos);
             url += `&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
             elements.btnVideoTranscode.classList.add('active');
-            if (state.vcodecMode === 'copy') {
-                elements.btnVideoTranscode.textContent = '快速流';
-            } else {
-                elements.btnVideoTranscode.textContent = '转码中';
-            }
+            elements.btnVideoTranscode.textContent = state.vcodecMode === 'copy' ? '快速流' : '转码中';
         } else {
             state.transcodeStartOffset = 0;
             elements.btnVideoTranscode.classList.remove('active');
             elements.btnVideoTranscode.textContent = '原画';
         }
 
-        elements.videoPlayer.src = withVideoAuthToken(url);
-        elements.videoPlayer.load();
-
-        if (!state.useTranscode) {
-            // Seek native player after loadedmetadata
-            elements.videoPlayer.addEventListener('loadedmetadata', function seekOnLoad() {
-                elements.videoPlayer.currentTime = absolutePos;
-            }, { once: true });
-        }
-
+        applySource(url, 'none', state.useTranscode ? 0 : absolutePos);
         elements.videoPlayer.play();
     });
 
@@ -282,16 +346,17 @@ export function setupVideoPlayerListeners(elements) {
     // Custom controls: Progress Bar Seek Release (Perform seek on release)
     elements.videoProgress.addEventListener('change', (e) => {
         const targetTime = parseFloat(e.target.value);
-        if (state.useTranscode) {
+        if (state.useTranscode && hlsStrategy === 'none') {
+            // Legacy pipe: seek by restarting the transcode at the target.
             state.transcodeStartOffset = Math.floor(targetTime);
             let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
             if (state.isSystemBrowse) {
                 url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
             }
-            elements.videoPlayer.src = withVideoAuthToken(url);
-            elements.videoPlayer.load();
+            applySource(url, 'none', 0);
             elements.videoPlayer.play();
         } else {
+            // Direct and HLS streams both seek natively.
             elements.videoPlayer.currentTime = targetTime;
         }
         state.isDraggingProgress = false;

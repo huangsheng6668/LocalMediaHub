@@ -385,6 +385,10 @@
     <!-- Toast Notification System -->
     <div class="toast-container" id="toast-container"></div>
 
-    <script type="module" src="app.js"></script>
+    <!-- Self-hosted hls.js (spec 2026-09-03-hls-transcode-b2): CSP script-src
+     'self' forbids CDNs; defer classic scripts execute before the deferred
+     module entry, exposing the global `Hls` to app modules. -->
+<script src="vendor/hls.min.js" defer></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>
