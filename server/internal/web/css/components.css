@@ -212,11 +212,74 @@ textarea { resize: vertical; line-height: 1.6; }
     padding: 24px;
 }
 
-/* ── Empty state ── */
+/* Empty State Component */
 .empty-state {
-    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 64px 24px;
     text-align: center;
-    padding: var(--space-6);
+}
+
+.empty-state__icon {
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--surface-hover);
+    color: var(--text-muted);
+    margin-bottom: 16px;
+}
+
+.empty-state__icon svg {
+    width: 32px;
+    height: 32px;
+    opacity: 0.7;
+}
+
+.empty-state__title {
+    margin: 0 0 8px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.empty-state__desc {
+    margin: 0 0 20px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    max-width: 380px;
+    line-height: 1.5;
+}
+
+.empty-state__action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Global Form Controls */
+.form-group textarea,
+.form-group input:not([type="checkbox"]):not([type="radio"]) {
+    width: 100%;
+    background: var(--surface-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 10px 12px;
+    transition: border-color .15s ease, box-shadow .15s ease;
+    box-sizing: border-box;
+}
+
+.form-group textarea:focus,
+.form-group input:not([type="checkbox"]):not([type="radio"]):focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 /* ── Toast notifications ── */
