@@ -101,6 +101,8 @@ import com.juziss.localmediahub.data.PageTurnStyle
 import com.juziss.localmediahub.data.ReadingMode
 import com.juziss.localmediahub.data.ScrollModeChapter
 import com.juziss.localmediahub.ui.component.reader.ReaderScrollbar
+import com.juziss.localmediahub.ui.component.ScrollFabGroup
+import com.juziss.localmediahub.ui.component.calculateScrollFabVisibility
 import com.juziss.localmediahub.ui.component.reader.ReaderSettingsSheet
 import com.juziss.localmediahub.ui.component.reader.PageTurnController
 import com.juziss.localmediahub.ui.component.reader.PageTurnDirection
@@ -573,6 +575,18 @@ fun TextReaderScreen(
                 }
             }
 
+            val readerFabVisibility by remember(listState) {
+                derivedStateOf {
+                    val info = listState.layoutInfo
+                    val visibleItems = info.visibleItemsInfo
+                    val totalItems = info.totalItemsCount
+                    val firstIndex = listState.firstVisibleItemIndex
+                    val firstOffset = listState.firstVisibleItemScrollOffset
+                    val lastIndex = visibleItems.lastOrNull()?.index ?: 0
+                    calculateScrollFabVisibility(firstIndex, firstOffset, lastIndex, totalItems, visibleItems.size)
+                }
+            }
+
             // 分章模式：章节变更时自动滚动到顶部,
             // 解决翻页与切章时停在旧滚动位置的问题。
             LaunchedEffect(idx, isScrollMode) {
@@ -954,6 +968,30 @@ fun TextReaderScreen(
                         },
                         modifier = Modifier.align(Alignment.CenterEnd),
                     )
+
+                    // 快速置顶/置底悬浮按钮组：与上下工具栏联动，全屏沉浸阅读时自动淡出防遮挡正文
+                    AnimatedVisibility(
+                        visible = chromeVisible,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 36.dp, bottom = 80.dp),
+                    ) {
+                        ScrollFabGroup(
+                            canScrollToTop = readerFabVisibility.canScrollToTop,
+                            canScrollToBottom = readerFabVisibility.canScrollToBottom,
+                            onScrollToTop = {
+                                scope.launch { listState.animateScrollToItem(0) }
+                            },
+                            onScrollToBottom = {
+                                val total = listState.layoutInfo.totalItemsCount
+                                if (total > 0) {
+                                    scope.launch { listState.animateScrollToItem(total - 1) }
+                                }
+                            },
+                        )
+                    }
                 }
             }
         }
