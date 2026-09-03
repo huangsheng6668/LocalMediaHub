@@ -70,6 +70,14 @@ type StreamingService struct {
 	// activeSessions counts sessions between acquire and release, exposed
 	// via TranscodeStatus for the admin endpoint.
 	activeSessions atomic.Int64
+
+	// ---- HLS transcode sessions (spec 2026-09-03-hls-transcode) ----
+	hlsDir        string
+	hlsMu         sync.Mutex
+	hlsSessions   map[string]*hlsSession
+	hlsReaperOnce sync.Once
+	hlsStop       chan struct{}
+	hlsDiskCap    int64
 }
 
 // NewStreamingService wires the transcode path. encoderPreference comes
@@ -88,6 +96,10 @@ func NewStreamingService(ffmpegPath string, encoderPreference []string, maxSessi
 		ffmpegPath:   ffmpegPath,
 		prober:       newEncoderProber(encoderPreference),
 		transcodeSem: sem,
+		hlsDir:       DefaultHlsCacheDir,
+		hlsSessions:  make(map[string]*hlsSession),
+		hlsStop:      make(chan struct{}),
+		hlsDiskCap:   DefaultHlsDiskCapBytes,
 	}
 }
 
