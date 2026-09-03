@@ -57,6 +57,15 @@ func (h *Handler) UpdateConfig(c echo.Context) error {
 	return c.JSON(http.StatusOK, h.cfg.Public())
 }
 
+// TranscodeStatus reports the transcode path state: active sessions, the
+// concurrency cap, and the resolved encoder probe chain. Mounted under the
+// admin group (Bearer-gated in token mode). The probe status is reported
+// WITHOUT forcing a probe — an empty auto/usable means "not probed yet".
+func (h *Handler) TranscodeStatus(c echo.Context) error {
+	setJsonCacheBrief(c)
+	return c.JSON(http.StatusOK, h.streaming.TranscodeStatus())
+}
+
 func (h *Handler) TriggerScan(c echo.Context) error {
 	h.scanner.InvalidateCache()
 	// Use the scanner's own background context so the scan outlives this

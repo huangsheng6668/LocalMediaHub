@@ -131,22 +131,22 @@ func New(cfg *config.Config) (*Server, error) {
 	// CRITICAL (Gotcha 1): assign h.BLECentral ONLY when bleCentral is non-nil.
 	// Assigning a nil *ble.Central would create a non-nil interface wrapping a
 	// nil pointer, which would defeat the handlers' nil check.
-		bleScanner, bleErr := ble.NewCentralScanner()
-		if bleErr != nil {
-			fmt.Printf("BLE Central disabled; /api/v1/ble/* will report unavailable: %v\n", bleErr)
-		} else {
-			s.bleScanner = bleScanner
-			bleCentral := ble.NewCentral(bleScanner)
-			// Phase 9 (H-1a) + 2026-08-30 open mode: derive the BLE auth key
-			// from the effective BLE secret — ble.token first, server.token
-			// fallback. Both empty = OPEN mode: no handshake, data frames
-			// ride unauthenticated v1 (mirrors the open-LAN HTTP posture;
-			// the WARN below states the accepted trade-off).
-			effBleSecret := cfg.BLE.EffectiveToken(cfg.Server.Token)
-			bleCentral.SetAuthToken(effBleSecret)
-			if effBleSecret == "" {
-				slog.Warn("BLE running in OPEN mode: any device in range can exchange data; set ble.token to require authentication")
-			}
+	bleScanner, bleErr := ble.NewCentralScanner()
+	if bleErr != nil {
+		fmt.Printf("BLE Central disabled; /api/v1/ble/* will report unavailable: %v\n", bleErr)
+	} else {
+		s.bleScanner = bleScanner
+		bleCentral := ble.NewCentral(bleScanner)
+		// Phase 9 (H-1a) + 2026-08-30 open mode: derive the BLE auth key
+		// from the effective BLE secret — ble.token first, server.token
+		// fallback. Both empty = OPEN mode: no handshake, data frames
+		// ride unauthenticated v1 (mirrors the open-LAN HTTP posture;
+		// the WARN below states the accepted trade-off).
+		effBleSecret := cfg.BLE.EffectiveToken(cfg.Server.Token)
+		bleCentral.SetAuthToken(effBleSecret)
+		if effBleSecret == "" {
+			slog.Warn("BLE running in OPEN mode: any device in range can exchange data; set ble.token to require authentication")
+		}
 		// Spec §3.1: inject the bleApiProvider so the long-lived listener can
 		// serve CMD_API_REQ frames for every endpoint (book chapter, folders,
 		// browse folder, book info) out of the box. The provider adapts cfg +
@@ -363,6 +363,9 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	admin.GET("/config", h.GetConfig)
 	admin.PUT("/config", h.UpdateConfig)
 	admin.POST("/scan/trigger", h.TriggerScan, middleware.RateLimit(2, 30*time.Second))
+	// Transcode path observability (spec 3.5): active sessions, cap, and the
+	// lazily-resolved encoder chain. Read-only, cheap; no rate limit needed.
+	admin.GET("/transcode/status", h.TranscodeStatus)
 
 	// System
 	sys := api.Group("/system", authMw)
