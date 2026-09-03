@@ -384,6 +384,13 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	media.GET("/thumbnail", h.MediaThumbnail)
 	media.GET("/original", h.MediaOriginal)
 	media.GET("/stream", h.MediaStream, rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
+	// HLS transcode (spec 2026-09-03-hls-transcode): playlist + segments for
+	// random-seek transcoded playback. Playlist/segment traffic is normal
+	// playback cadence (every few seconds) and must NOT carry the 5/min
+	// transcode rate limit; session creation is bounded by dedup + the
+	// transcode semaphore + the idle reaper instead.
+	media.GET("/hls/playlist", h.MediaHlsPlaylist)
+	media.GET("/hls/segment", h.MediaHlsSegment)
 	media.GET("/duration", h.MediaDuration)
 	// Batch thumbnail endpoint (grid N+1 collapse). Rate-limited because it
 	// fans out to up to 64 thumbnail generations per request.
@@ -498,7 +505,14 @@ func (s *Server) Stop() error {
 	// so Ctrl+C / tray-quit doesn't corrupt a half-written download.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return s.httpServer.Shutdown(ctx)
+	if err := s.httpServer.Shutdown(ctx); err != nil {
+		return err
+	}
+	// Kill any still-running HLS transcodes AFTER draining requests (HLS
+	// responses are static files, so draining never depends on ffmpeg);
+	// completed sessions stay on disk as cache for the next process.
+	s.Streaming.CloseHLS()
+	return nil
 }
 
 func getLocalIP() (string, error) {

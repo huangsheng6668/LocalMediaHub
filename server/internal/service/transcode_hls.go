@@ -105,6 +105,11 @@ func (s *hlsSession) SegmentPath(name string) (string, bool) {
 	return filepath.Join(s.dir, name), true
 }
 
+// PlaylistPath returns the absolute path of the session playlist.
+func (s *hlsSession) PlaylistPath() string {
+	return s.playlist
+}
+
 // GetOrCreateHlsSession returns the HLS session for the given source file,
 // starting ffmpeg on first request. modTime must come from the caller stat
 // of the already-validated path and pins the session identity.

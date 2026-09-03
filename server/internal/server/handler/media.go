@@ -136,6 +136,74 @@ func (h *Handler) MediaStream(c echo.Context) error {
 	return nil
 }
 
+// MediaHlsPlaylist starts (or joins) the HLS transcode session for the
+// given video and serves its playlist (spec 2026-09-03-hls-transcode).
+// The playlist grows until the transcode completes, so it is served
+// no-cache; players refetch it as playback progresses.
+func (h *Handler) MediaHlsPlaylist(c echo.Context) error {
+	pathStr := c.QueryParam("path")
+	if pathStr == "" {
+		return respondError(c, http.StatusBadRequest, "path required")
+	}
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
+	}
+	fi, err := os.Stat(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return respondNotFound(c, "file not found")
+		}
+		return respondInternalError(c, err)
+	}
+	sess, err := h.streaming.GetOrCreateHlsSession(resolved, fi.ModTime())
+	if err != nil {
+		return respondError(c, http.StatusServiceUnavailable, "transcode session unavailable", err)
+	}
+	c.Response().Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	return c.File(sess.PlaylistPath())
+}
+
+// MediaHlsSegment serves one strictly-validated HLS segment from the
+// session directory. The name whitelist (segNNNNN.ts) makes traversal
+// out of the session dir impossible; segments are immutable once written
+// and served with long-lived cache headers.
+func (h *Handler) MediaHlsSegment(c echo.Context) error {
+	pathStr := c.QueryParam("path")
+	name := c.QueryParam("name")
+	if pathStr == "" || name == "" {
+		return respondError(c, http.StatusBadRequest, "path and name required")
+	}
+	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions)
+	if err != nil {
+		return respondError(c, http.StatusForbidden, "access denied")
+	}
+	fi, err := os.Stat(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return respondNotFound(c, "file not found")
+		}
+		return respondInternalError(c, err)
+	}
+	// Dedup hit in the common case (the client fetched the playlist first);
+	// also refreshes lastAccess so active playback keeps the idle reaper
+	// from killing a running transcode.
+	sess, err := h.streaming.GetOrCreateHlsSession(resolved, fi.ModTime())
+	if err != nil {
+		return respondError(c, http.StatusServiceUnavailable, "transcode session unavailable", err)
+	}
+	segPath, ok := sess.SegmentPath(name)
+	if !ok {
+		return respondError(c, http.StatusBadRequest, "invalid segment name")
+	}
+	if _, err := os.Stat(segPath); err != nil {
+		return respondNotFound(c, "segment not found")
+	}
+	setMediaCacheHeaders(c)
+	return c.File(segPath)
+}
+
 func (h *Handler) MediaDuration(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
@@ -164,4 +232,3 @@ func (h *Handler) MediaDuration(c echo.Context) error {
 		"duration": duration,
 	})
 }
-

@@ -128,6 +128,13 @@ type TranscodeStatus struct {
 	Active      int                  `json:"active"`
 	MaxSessions int                  `json:"max_sessions"` // -1 = unlimited
 	Probe       transcodeProbeStatus `json:"probe"`
+	Hls         HlsStatusInfo        `json:"hls"`
+}
+
+// HlsStatusInfo reports HLS session counts (spec 2026-09-03-hls-transcode).
+type HlsStatusInfo struct {
+	Running int `json:"running"`
+	Total   int `json:"total"`
 }
 
 func (s *StreamingService) TranscodeStatus() TranscodeStatus {
@@ -135,10 +142,12 @@ func (s *StreamingService) TranscodeStatus() TranscodeStatus {
 	if s.transcodeSem != nil {
 		maxSessions = cap(s.transcodeSem)
 	}
+	running, total := s.HlsStatus()
 	return TranscodeStatus{
 		Active:      int(s.activeSessions.Load()),
 		MaxSessions: maxSessions,
 		Probe:       s.prober.status(),
+		Hls:         HlsStatusInfo{Running: running, Total: total},
 	}
 }
 
