@@ -47,6 +47,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -97,6 +98,45 @@ private fun buildStreamUrl(baseUrl: String, transcode: Boolean, startSec: Double
     return if (params.isEmpty()) clean else {
         val sep = if (clean.contains("?")) "&" else "?"
         "$clean$sep${params.joinToString("&")}"
+    }
+}
+
+/**
+ * Whether [url] points at a local file rather than a server stream. Local
+ * files have no server to transcode them, so codec errors there have no
+ * fallback path. (Extracted from the inline check in the player builder.)
+ */
+internal fun isLocalStreamUri(url: String): Boolean {
+    return url.startsWith("file://") ||
+        url.startsWith("content://") ||
+        url.startsWith("android.resource://")
+}
+
+/**
+ * Decides whether a playback error should trigger an automatic ONE-SHOT
+ * retry with server-side transcode (spec 2026-09-03-android-transcode-
+ * fallback, Phase C). Only codec-level failures qualify: the device
+ * lacking a decoder or the container being unsupported is exactly what
+ * transcoding to H.264/fMP4 fixes. Network/IO/remote errors do not —
+ * transcoding cannot help those, and retrying would just mask them.
+ *
+ * Guards: already-transcoding streams never retry (a failing transcode
+ * means the problem is not the codec); the retry happens at most once
+ * per video (loop prevention); local files never retry.
+ */
+internal fun shouldAutoFallbackToTranscode(
+    isTranscoding: Boolean,
+    alreadyAttempted: Boolean,
+    isLocalUri: Boolean,
+    errorCode: Int,
+): Boolean {
+    if (isTranscoding || alreadyAttempted || isLocalUri) return false
+    return when (errorCode) {
+        PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+        PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+        PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+        -> true
+        else -> false
     }
 }
 
@@ -165,9 +205,7 @@ fun VideoPlayerScreen(
         // 支持 http/https，遇到 file:// 会报 unsupported scheme 直接无法播放。
         // 本地 URI 改用 DefaultDataSource（原生支持 file:// / content://），
         // 远端流保持 OkHttp 工厂（Bearer token 注入 + 超时调优）。
-        val isLocalUri = streamUrl.startsWith("file://") ||
-            streamUrl.startsWith("content://") ||
-            streamUrl.startsWith("android.resource://")
+        val isLocalUri = isLocalStreamUri(streamUrl)
         val dataSourceFactory: androidx.media3.datasource.DataSource.Factory = if (isLocalUri) {
             androidx.media3.datasource.DefaultDataSource.Factory(context)
         } else {
@@ -299,6 +337,20 @@ fun VideoPlayerScreen(
         }
     }
 
+    // Whether the current stream is transcoded. Declared as an explicit
+    // MutableState (+ `by` alias for normal reads) because the
+    // Player.Listener inner class below writes it when the auto transcode
+    // fallback fires — same convention as isBufferingState above. Moved
+    // above the listener (was at the seek LaunchedEffect) so the listener
+    // can capture it.
+    val transcodeEnabledState = remember { mutableStateOf(streamUrl.contains("transcode=true")) }
+    var isTranscodingEnabled by transcodeEnabledState
+
+    // Phase C (spec 2026-09-03-android-transcode-fallback): one-shot flag,
+    // keyed on streamUrl so switching videos resets it. Explicit state for
+    // the same inner-class-write reason.
+    val autoFallbackAttemptedState = remember(streamUrl) { mutableStateOf(false) }
+
     // Auto-rotate based on video aspect ratio
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
@@ -341,6 +393,39 @@ fun VideoPlayerScreen(
                 reason: Int
             ) {
                 savedPositionMs = exoPlayer.currentPosition
+            }
+
+            // Phase C (spec 2026-09-03-android-transcode-fallback): when the
+            // device cannot decode the source (codec missing / exceeds
+            // capabilities / unsupported container), retry once with
+            // server-side transcode instead of dead-ending on a black
+            // screen. Mirrors the in-place media-swap pattern the gesture
+            // seek path uses; the URL rebuild strips any stale params, so
+            // later gesture seeks and the restart chip keep transcode=true.
+            override fun onPlayerError(error: PlaybackException) {
+                val posMs = exoPlayer.currentPosition.coerceAtLeast(0L)
+                if (!shouldAutoFallbackToTranscode(
+                        isTranscoding = transcodeEnabledState.value,
+                        alreadyAttempted = autoFallbackAttemptedState.value,
+                        isLocalUri = isLocalStreamUri(streamUrl),
+                        errorCode = error.errorCode,
+                    )
+                ) {
+                    return
+                }
+                autoFallbackAttemptedState.value = true
+                savedPositionMs = posMs
+                transcodeEnabledState.value = true
+                val fallbackUrl = buildStreamUrl(streamUrl, true, posMs / 1000.0)
+                exoPlayer.setMediaItem(MediaItem.fromUri(fallbackUrl))
+                exoPlayer.prepare()
+                exoPlayer.seekTo(0L)
+                exoPlayer.play()
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.video_fallback_transcode),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
             }
         }
         exoPlayer.addListener(listener)
@@ -407,11 +492,6 @@ fun VideoPlayerScreen(
             volumeIndicator = volumeIndicator.copy(visible = false)
         }
     }
-
-    // Whether the current stream is transcoded. Declared here (before the seek
-    // LaunchedEffect) because seek behaviour depends on it: transcoded streams
-    // need a URL rebuild with ?start=<seconds> instead of a byte-range seek.
-    var isTranscodingEnabled by remember { mutableStateOf(streamUrl.contains("transcode=true")) }
 
     // Round 22: when resuming from a non-zero position, show a temporary
     // "restart from beginning" affordance at the bottom-right for 3 seconds.

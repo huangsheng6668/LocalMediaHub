@@ -361,4 +361,6 @@
 
     <!-- ── Generic errors ──────────────────────────────────── -->
     <string name="error_unknown">未知错误</string>
+    <!-- Phase C (2026-09-03): shown when playback auto-retries with server transcode -->
+    <string name="video_fallback_transcode" translatable="false">当前设备无法直接解码该视频，已自动切换为服务器转码播放</string>
 </resources>
