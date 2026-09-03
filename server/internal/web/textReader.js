@@ -28,6 +28,19 @@ export function hotzoneRatio(clientX, rect) {
     return Math.min(1, Math.max(0, (clientX - left) / w));
 }
 
+// Pure helper: format reader header title, deduplicating when chapter title matches book title.
+export function formatHeaderTitle(chapterTitle, bookTitle) {
+    const chTitle = (chapterTitle || '').trim();
+    const bkTitle = (bookTitle || '').trim();
+    if (!chTitle || chTitle === bkTitle) {
+        return bkTitle || chTitle;
+    } else if (!bkTitle) {
+        return chTitle;
+    } else {
+        return `${chTitle} — ${bkTitle}`;
+    }
+}
+
 // Entry point invoked by router.js. Signature is FIXED: (container, path, chapterParam, paraParam).
 export async function renderTextReader(container, path, chapterParam, paraParam) {
     // Run prior cleanup FIRST so leaks from a previous render release before innerHTML wipe.
@@ -380,7 +393,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             // current idx / title / progress / scrubber / saved progress so a
             // page-turn produces the same side effects as an instant load.
             setCurrentIdx(idx);
-            els.title.textContent = `${ch.title || ''} — ${book.title || ''}`;
+            els.title.textContent = formatHeaderTitle(ch.title, book.title);
             const sec = renderBlocks(ch.blocks || blocksFromLegacyContent(ch.content), ch.title, idx);
             updateProgressUI();
             if (scrubberApi) scrubberApi.update();
@@ -482,7 +495,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             if (activeIdx !== state.currentIdx) {
                 setCurrentIdx(activeIdx);
                 const ct = (book.chapters && book.chapters[activeIdx]) ? book.chapters[activeIdx].title : '';
-                els.title.textContent = `${ct || ''} — ${book.title || ''}`;
+                els.title.textContent = formatHeaderTitle(ct, book.title);
                 saveProgress(path, { chapterIndex: activeIdx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
             }
         }
@@ -538,9 +551,11 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         const list = blocks || [];
         // 排除以标点/空白开头的段落：破折号、引号（中英文）、书名号等。
         // 否则 ::first-letter 会把引号/书名号放大，造成首字下沉错位。
+        // 同时排除元数据行（作者/书名/来源等）及短行（< 25 字符）。
         const dropCapIdx = list.findIndex(b => b && b.type === 'text' &&
-            typeof b.value === 'string' && b.value.trim().length >= 4 &&
-            !/^[—…\-\s"“”‘’《〈（(【]/.test(b.value.trim()));
+            typeof b.value === 'string' && b.value.trim().length >= 25 &&
+            !/^[—…\-\s"“”‘’《〈（(【]/.test(b.value.trim()) &&
+            !/^(作\s*者|书\s*名|来\s*源|字\s*数|简\s*介|编\s*辑|翻\s*译|出\s*版|内\s*容\s*简\s*介)[：:]/.test(b.value.trim()));
         list.forEach((block, idx) => {
             if (block && block.type === 'image') {
                 const img = document.createElement('img');
@@ -608,7 +623,15 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         setCurrentIdx(idx);
         try {
             const chapter = await getBookChapter(path, idx);
-            els.title.textContent = `${chapter.title || ''} — ${book.title || ''}`;
+            const chTitle = (chapter.title || '').trim();
+            const bkTitle = (book.title || '').trim();
+            if (!chTitle || chTitle === bkTitle) {
+                els.title.textContent = bkTitle || chTitle;
+            } else if (!bkTitle) {
+                els.title.textContent = chTitle;
+            } else {
+                els.title.textContent = `${chTitle} — ${bkTitle}`;
+            }
             const s = readerPrefs.getSettings();
             const sec = renderBlocks(chapter.blocks || blocksFromLegacyContent(chapter.content), chapter.title, idx);
             if (s.readingMode === 'scroll' && !resetScroll) {
