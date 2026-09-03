@@ -39,3 +39,26 @@ export function formatTime(seconds) {
     }
     return `${formattedMins}:${formattedSecs}`;
 }
+
+// Transcode status display helper (P4, 2026-09-03). Pure function: maps the
+// GET /api/v1/admin/transcode/status payload into display strings for the
+// dashboard 服务信息 card. null/undefined payload (request rejected) maps to
+// a degraded placeholder rather than throwing.
+const TRANSCODE_ENCODER_LABELS = {
+    h264_nvenc: 'NVIDIA NVENC 硬编',
+    h264_qsv: 'Intel QSV 硬编',
+    h264_amf: 'AMD AMF 硬编',
+    libx264: '软件编码 (libx264)',
+};
+
+export function formatTranscodeStatus(payload) {
+    if (!payload) return { encoder: '状态不可用', sessions: '—' };
+    const auto = (payload.probe && payload.probe.auto) || '';
+    const encoder = !auto
+        ? '未探测（首次转码时自动探测）'
+        : (TRANSCODE_ENCODER_LABELS[auto] || auto);
+    const active = typeof payload.active === 'number' ? payload.active : 0;
+    const max = typeof payload.max_sessions === 'number' ? payload.max_sessions : -1;
+    const sessions = max < 0 ? `${active} / 不限` : `${active} / ${max}`;
+    return { encoder, sessions };
+}

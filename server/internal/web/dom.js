@@ -39,6 +39,9 @@ export const elements = {
     infoIp: document.getElementById('info-ip'),
     infoHost: document.getElementById('info-host'),
     infoScanRoots: document.getElementById('info-scan-roots'),
+    // P4 (2026-09-03): transcode status rows in the 服务信息 dashboard card.
+    infoTranscodeEncoder: document.getElementById('info-transcode-encoder'),
+    infoTranscodeSessions: document.getElementById('info-transcode-sessions'),
 
     // Browser
     browserBreadcrumbs: document.getElementById('browser-breadcrumbs'),

@@ -3,7 +3,7 @@
 import { state } from './state.js';
 import { apiRequest, escapeHtml } from './api.js';
 import { elements } from './dom.js';
-import { formatSize, encodeRoutePath } from './utils.js';
+import { formatSize, encodeRoutePath, formatTranscodeStatus } from './utils.js';
 import { openVideoPlayer } from './videoPlayer.js';
 import { renderSection as renderBookshelfSection } from './bookshelf.js';
 
@@ -29,11 +29,14 @@ export async function renderDashboard() {
     // 1. Fetch totals + recent videos in parallel. Previously these were
     // awaited serially, so first paint waited ~4 RTTs; Promise.allSettled
     // collapses them into one round-trip batch with per-request fallbacks.
-    const [textsRes, videosRes, imagesRes, recentRes] = await Promise.allSettled([
+    const [textsRes, videosRes, imagesRes, recentRes, transcodeRes] = await Promise.allSettled([
         apiRequest(`${state.apiBase}/api/v1/texts?page=1&page_size=1`),
         apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=1`),
         apiRequest(`${state.apiBase}/api/v1/images?page=1&page_size=1`),
         apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=3`),
+        // P4 (2026-09-03): transcode path observability (encoder chain +
+        // session cap). Bearer injection + 401 handling ride apiRequest.
+        apiRequest(`${state.apiBase}/api/v1/admin/transcode/status`),
     ]);
 
     if (textsRes.status === 'rejected') console.error('Fetch text count error:', textsRes.reason);
@@ -44,6 +47,13 @@ export async function renderDashboard() {
     elements.statTexts.textContent = textsRes.status === 'fulfilled' ? (textsRes.value.total || 0) : 0;
     elements.statVideos.textContent = videosRes.status === 'fulfilled' ? (videosRes.value.total || 0) : 0;
     elements.statImages.textContent = imagesRes.status === 'fulfilled' ? (imagesRes.value.total || 0) : 0;
+
+    // textContent only — no innerHTML, CSP/XSS-safe by construction.
+    if (elements.infoTranscodeEncoder && elements.infoTranscodeSessions) {
+        const t = formatTranscodeStatus(transcodeRes.status === 'fulfilled' ? transcodeRes.value : null);
+        elements.infoTranscodeEncoder.textContent = t.encoder;
+        elements.infoTranscodeSessions.textContent = t.sessions;
+    }
 
     if (recentRes.status === 'fulfilled') {
         const items = recentRes.value.items || [];
