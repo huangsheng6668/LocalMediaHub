@@ -71,34 +71,25 @@ import com.juziss.localmediahub.ui.component.DoubleTapSeekRippleOverlay
 import com.juziss.localmediahub.ui.component.VolumeBrightnessPillHud
 
 /**
- * Builds a stream URL for the given base, transcode flag and start position.
+ * Builds a stream URL for the given base and transcode flag.
  *
- * For transcoded streams the server cannot satisfy byte-range seeks, so seeking
- * is done at the time level via `?start=<seconds>` (ffmpeg input seek). In
- * direct (copy) mode the server uses http.ServeContent which handles Range
- * natively, so no `start` param is added — ExoPlayer seeks via Range requests.
+ * HLS era (spec 2026-09-03-hls-transcode): transcoded playback targets the
+ * server's segmented HLS playlist — ExoPlayer's native HLS support gives
+ * random seeking for free, so there is no start param anymore; position
+ * restore and seeking both go through plain seekTo. Direct (copy) mode is
+ * unchanged: http.ServeContent handles Range natively.
  *
- * Any existing transcode/start query params on [baseUrl] are stripped first so
- * re-seeking doesn't accumulate duplicate params.
+ * Any stale transcode/start query params on [baseUrl] are stripped first;
+ * the /stream path suffix is then swapped for /hls/playlist.
  */
-private fun buildStreamUrl(baseUrl: String, transcode: Boolean, startSec: Double): String {
-    // Strip any previously applied transcode/start params to get the clean base.
+internal fun buildStreamUrl(baseUrl: String, transcode: Boolean): String {
     var clean = baseUrl
         .replace(Regex("[?&]transcode=true"), "")
         .replace(Regex("[?&]start=[^&]*"), "")
-    // Fix up "?&" or trailing "?" left after stripping.
     clean = clean.replace("?&", "?").removeSuffix("?").removeSuffix("&")
 
-    val params = mutableListOf<String>()
-    if (transcode) params.add("transcode=true")
-    // Only add start for transcoded streams, and only when actually seeking
-    // past the beginning (start=0 is ffmpeg's default anyway).
-    if (transcode && startSec > 0) params.add("start=%.3f".format(startSec))
-
-    return if (params.isEmpty()) clean else {
-        val sep = if (clean.contains("?")) "&" else "?"
-        "$clean$sep${params.joinToString("&")}"
-    }
+    if (!transcode) return clean
+    return clean.replace(Regex("/stream(\\?|$)"), "/hls/playlist$1")
 }
 
 /**
@@ -216,13 +207,11 @@ fun VideoPlayerScreen(
         val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context)
             .setDataSourceFactory(dataSourceFactory)
 
-        // Round 20: For transcoded streams, seekTo doesn't work because the
-        // server can't Range-slice a transcode. Instead, rebuild the URL with
-        // a `start` param so ffmpeg begins transcoding from savedPositionMs.
-        // For direct streams, seekTo before prepare is the correct sync path.
-        val isTranscoding = streamUrl.contains("transcode=true")
-        val finalUrl = if (isTranscoding && savedPositionMs > 0L) {
-            buildStreamUrl(streamUrl, true, savedPositionMs / 1000.0)
+        // HLS era: a transcode=true URL is normalized to the HLS playlist
+        // form; both direct and HLS streams restore position via plain
+        // seekTo below (HLS supports random access natively).
+        val finalUrl = if (streamUrl.contains("transcode=true")) {
+            buildStreamUrl(streamUrl, true)
         } else {
             streamUrl
         }
@@ -234,9 +223,10 @@ fun VideoPlayerScreen(
                 setSeekParameters(androidx.media3.exoplayer.SeekParameters.DEFAULT)
                 val mediaItem = MediaItem.fromUri(finalUrl)
                 setMediaItem(mediaItem)
-                // Round 20: sync seek before prepare (only for non-transcoded).
-                // Transcoded streams are seeked via URL `start` param above.
-                if (!isTranscoding && savedPositionMs > 0L) {
+                // Sync seek before prepare — valid for direct streams AND
+                // HLS playlists (ExoPlayer clamps to the seekable range
+                // once the manifest loads).
+                if (savedPositionMs > 0L) {
                     seekTo(savedPositionMs)
                 }
                 // Hand off audio focus to ExoPlayer so playback pauses other
@@ -416,10 +406,12 @@ fun VideoPlayerScreen(
                 autoFallbackAttemptedState.value = true
                 savedPositionMs = posMs
                 transcodeEnabledState.value = true
-                val fallbackUrl = buildStreamUrl(streamUrl, true, posMs / 1000.0)
+                // HLS playlist URL (native random seeking) — resume right
+                // at the failure position.
+                val fallbackUrl = buildStreamUrl(streamUrl, true)
                 exoPlayer.setMediaItem(MediaItem.fromUri(fallbackUrl))
                 exoPlayer.prepare()
-                exoPlayer.seekTo(0L)
+                exoPlayer.seekTo(posMs)
                 exoPlayer.play()
                 android.widget.Toast.makeText(
                     context,
@@ -515,19 +507,9 @@ fun VideoPlayerScreen(
             val basePos = seekState.basePositionMs
             val maxPos = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
             val newPos = (basePos + seekState.offsetMs).coerceIn(0L, maxPos)
-            if (isTranscodingEnabled) {
-                // Transcoded streams are generated on the fly and cannot be
-                // byte-seeked. Rebuild the URL with ?start=<seconds> so the
-                // server re-opens the transcode at the requested position
-                // (ffmpeg input seek), then resume playback from there.
-                val newUrl = buildStreamUrl(streamUrl, isTranscodingEnabled, newPos / 1000.0)
-                exoPlayer.setMediaItem(MediaItem.fromUri(newUrl))
-                exoPlayer.prepare()
-                exoPlayer.seekTo(0L)
-                exoPlayer.play()
-            } else {
-                exoPlayer.seekTo(newPos)
-            }
+            // HLS era: both direct and transcoded (HLS) streams seek
+            // natively — the URL-rebuild workaround is gone.
+            exoPlayer.seekTo(newPos)
             seekState = SeekState()
         }
     }
@@ -696,17 +678,7 @@ fun VideoPlayerScreen(
                         .padding(end = 16.dp, bottom = 24.dp)
                         .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
                         .clickable {
-                            if (isTranscodingEnabled) {
-                                // Transcoded streams can't byte-seek; rebuild URL
-                                // without the ?start= param and re-prepare.
-                                val restartedUrl = buildStreamUrl(streamUrl, true, 0.0)
-                                exoPlayer.setMediaItem(MediaItem.fromUri(restartedUrl))
-                                exoPlayer.prepare()
-                                exoPlayer.seekTo(0L)
-                                exoPlayer.play()
-                            } else {
-                                exoPlayer.seekTo(0L)
-                            }
+                            exoPlayer.seekTo(0L)
                             savedPositionMs = 0L
                             showRestartChip = false
                         }
