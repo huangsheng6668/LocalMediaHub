@@ -78,7 +78,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **测试**：`node --test`（用 `.test.mjs` 扩展名 + jsdom，详见 [测试与验证](#测试与验证)）
 - **Token 集成**：`api.js` 的 `apiRequest()` 自动注入 Bearer header + 401 事件 → `app.js` 弹 token modal；sessionStorage 持久化
 - **CSP 兼容**：无 inline `<script>`、无 inline `style="..."` 属性（已全量迁移为 CSS 类，`style-src 'self'` 不含 `'unsafe-inline'`；动态样式走 CSSOM 属性赋值）
-- **无构建步骤**，跟随 server 静态服务
+- **无构建步骤**，跟随 server 静态服务；**vendor 第三方库**：`vendor/hls.min.js`（hls.js 1.5.20 + `.sha256` 校验，embed 于 `web.go`，spec 2026-09-03-hls-transcode-b2）——转码播放走 HLS（`hlsCompat.js` 三级策略：hls.js → 原生 → 旧 fMP4 管道兜底），`videoPlayer.js` 的 URL-rebuild seek 已删除
 
 ### Rust 原生解码
 
