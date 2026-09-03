@@ -10,6 +10,7 @@ import { loadRoots, browsePath, setupBrowserListeners } from './browserView.js';
 import { renderBookmarks } from './bookmarksView.js';
 import { AUTH_REQUIRED_EVENT } from './api.js';
 import * as readerPrefs from './readerPrefs.js';
+import { initScrollNav } from './scrollNav.js';
 
 // Auth modal — module-scoped so it persists across show/hide.
 let lastFailedUrl = null;
@@ -105,7 +106,8 @@ function setupEventListeners() {
     // Settings module listeners (Scan Trigger + Save Settings)
     setupSettingsListeners(elements);
 
-
+    // Quick scroll navigation FAB (Top & Bottom)
+    initScrollNav();
 
     // Browser-view module listeners (search, grid clicks, breadcrumbs, thumbnail fallback)
     setupBrowserListeners(elements);
