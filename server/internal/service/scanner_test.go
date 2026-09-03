@@ -17,13 +17,13 @@ import (
 
 func TestScanner(t *testing.T) {
 	tempDir := t.TempDir()
-	
+
 	// Create subdirs and media files
 	err := os.MkdirAll(filepath.Join(tempDir, "FolderA"), 0755)
 	assert.NoError(t, err)
 	err = os.MkdirAll(filepath.Join(tempDir, "FolderB"), 0755)
 	assert.NoError(t, err)
-	
+
 	err = os.WriteFile(filepath.Join(tempDir, "FolderA", "video1.mp4"), []byte("dummy"), 0644)
 	assert.NoError(t, err)
 	err = os.WriteFile(filepath.Join(tempDir, "FolderA", "image1.jpg"), []byte("dummy"), 0644)
@@ -32,25 +32,25 @@ func TestScanner(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.WriteFile(filepath.Join(tempDir, "video2.mkv"), []byte("dummy"), 0644)
 	assert.NoError(t, err)
-	
+
 	scanner := NewScanner([]string{".mp4", ".mkv"}, []string{".jpg", ".png"}, nil)
 	assert.NotNil(t, scanner)
-	
+
 	// Check configured extensions
 	assert.True(t, scanner.VideoExts()[".mp4"])
 	assert.True(t, scanner.VideoExts()[".mkv"])
 	assert.False(t, scanner.VideoExts()[".avi"])
 	assert.True(t, scanner.ImageExts()[".jpg"])
 	assert.False(t, scanner.ImageExts()[".txt"])
-	
+
 	// Scan
 	ctx := context.Background()
 	files, err := scanner.Scan(ctx, []string{tempDir})
 	assert.NoError(t, err)
-	
+
 	// Expecting 3 media files (video1.mp4, image1.jpg, video2.mkv). document.txt is ignored.
 	assert.Len(t, files, 3)
-	
+
 	var mp4Count, jpgCount, mkvCount int
 	for _, f := range files {
 		switch f.Extension {
@@ -68,12 +68,12 @@ func TestScanner(t *testing.T) {
 	assert.Equal(t, 1, mp4Count)
 	assert.Equal(t, 1, jpgCount)
 	assert.Equal(t, 1, mkvCount)
-	
+
 	// Test caching
 	cachedFiles, err := scanner.GetCached(ctx, []string{tempDir})
 	assert.NoError(t, err)
 	assert.Len(t, cachedFiles, 3)
-	
+
 	// Test TriggerScan and callback
 	callbackCalled := make(chan bool, 1)
 	scanner.OnScanComplete = func(completeFiles []models.MediaFile) {
@@ -81,23 +81,23 @@ func TestScanner(t *testing.T) {
 		callbackCalled <- true
 	}
 	scanner.TriggerScan([]string{tempDir})
-	
+
 	select {
 	case <-callbackCalled:
 		// Success
 	case <-time.After(2 * time.Second):
 		t.Fatal("Scan complete callback was not triggered in time")
 	}
-	
+
 	// Test cancellation
 	cancelCtx, cancelFunc := context.WithCancel(context.Background())
 	cancelFunc() // Cancel immediately
-	
+
 	_, err = scanner.Scan(cancelCtx, []string{tempDir})
 	// Should return context.Canceled error
 	assert.Error(t, err)
 	assert.Equal(t, context.Canceled, err)
-	
+
 	// Test shutdown
 	scanner.Shutdown()
 }
@@ -737,3 +737,107 @@ func TestScannerContextCancelExitsQuickly(t *testing.T) {
 	t.Logf("Scan with cancelled ctx returned in %v", elapsed)
 }
 
+// --- Scan snapshot persistence (spec 2026-09-03-scan-snapshot-persistence) ---
+
+func TestScannerWritesSnapshotAfterScan(t *testing.T) {
+	tmp := t.TempDir()
+	media := filepath.Join(tmp, "media")
+	require.NoError(t, os.MkdirAll(media, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(media, "a.mp4"), []byte("x"), 0o644))
+	snapPath := filepath.Join(tmp, "state", "scan_snapshot.json")
+
+	sc := NewScannerWithSnapshot([]string{".mp4"}, nil, nil, snapPath)
+	_, err := sc.Scan(context.Background(), []string{media})
+	require.NoError(t, err)
+
+	snap, ok, err := loadScanSnapshot(snapPath, buildScanIdentity([]string{media}, []string{".mp4"}, nil, nil))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Len(t, snap.Files, 1)
+	assert.Equal(t, filepath.Join(media, "a.mp4"), snap.Files[0].Path)
+	assert.NotZero(t, snap.SavedAt)
+}
+
+func TestScannerHydrateServesWithoutWalk(t *testing.T) {
+	tmp := t.TempDir()
+	media := filepath.Join(tmp, "media")
+	require.NoError(t, os.MkdirAll(media, 0o755))
+	mediaFile := filepath.Join(media, "a.mp4")
+	require.NoError(t, os.WriteFile(mediaFile, []byte("x"), 0o644))
+	snapPath := filepath.Join(tmp, "state", "scan_snapshot.json")
+
+	sc := NewScannerWithSnapshot([]string{".mp4"}, nil, nil, snapPath)
+	_, err := sc.Scan(context.Background(), []string{media})
+	require.NoError(t, err)
+	sc.Shutdown()
+
+	// Delete the source tree entirely: any WalkDir-based path would see zero
+	// files, so a non-empty result can only come from the hydrated snapshot.
+	require.NoError(t, os.RemoveAll(media))
+
+	sc2 := NewScannerWithSnapshot([]string{".mp4"}, nil, nil, snapPath)
+	defer sc2.Shutdown()
+	require.NoError(t, sc2.StartWatching([]string{media}))
+	files, err := sc2.GetCached(context.Background(), []string{media})
+	require.NoError(t, err)
+	assert.Len(t, files, 1)
+	assert.Equal(t, mediaFile, files[0].Path)
+
+	// Per-type and per-dir structures must be hydrated too.
+	byType, err := sc2.GetCachedByType(context.Background(), []string{media}, "video")
+	require.NoError(t, err)
+	assert.Len(t, byType, 1)
+	byDir, err := sc2.GetCachedByDir(context.Background(), []string{media}, media)
+	require.NoError(t, err)
+	assert.Len(t, byDir, 1)
+}
+
+func TestScannerHydrateIdentityMismatchFallsBackCold(t *testing.T) {
+	tmp := t.TempDir()
+	rootA := filepath.Join(tmp, "a")
+	rootB := filepath.Join(tmp, "b")
+	require.NoError(t, os.MkdirAll(rootA, 0o755))
+	require.NoError(t, os.MkdirAll(rootB, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(rootA, "a.mp4"), []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(rootB, "b.mp4"), []byte("x"), 0o644))
+	snapPath := filepath.Join(tmp, "state", "scan_snapshot.json")
+
+	sc := NewScannerWithSnapshot([]string{".mp4"}, nil, nil, snapPath)
+	_, err := sc.Scan(context.Background(), []string{rootA})
+	require.NoError(t, err)
+	sc.Shutdown()
+
+	// Different roots: snapshot identity must NOT hydrate; the first request
+	// falls back to a real (synchronous) walk of rootB.
+	sc2 := NewScannerWithSnapshot([]string{".mp4"}, nil, nil, snapPath)
+	defer sc2.Shutdown()
+	require.NoError(t, sc2.StartWatching([]string{rootB}))
+	files, err := sc2.GetCached(context.Background(), []string{rootB})
+	require.NoError(t, err)
+	assert.Len(t, files, 1)
+	assert.Equal(t, filepath.Join(rootB, "b.mp4"), files[0].Path)
+}
+
+func TestScannerSnapshotWriteThrottle(t *testing.T) {
+	tmp := t.TempDir()
+	media := filepath.Join(tmp, "media")
+	require.NoError(t, os.MkdirAll(media, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(media, "a.mp4"), []byte("x"), 0o644))
+	snapPath := filepath.Join(tmp, "state", "scan_snapshot.json")
+
+	sc := NewScannerWithSnapshot([]string{".mp4"}, nil, nil, snapPath)
+	_, err := sc.Scan(context.Background(), []string{media})
+	require.NoError(t, err)
+
+	// Second file appears; the immediate rescan refreshes the in-memory cache
+	// but the snapshot write is throttled (well under the 30s min interval).
+	require.NoError(t, os.WriteFile(filepath.Join(media, "b.mp4"), []byte("x"), 0o644))
+	files, err := sc.Scan(context.Background(), []string{media})
+	require.NoError(t, err)
+	assert.Len(t, files, 2)
+
+	snap, ok, err := loadScanSnapshot(snapPath, buildScanIdentity([]string{media}, []string{".mp4"}, nil, nil))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Len(t, snap.Files, 1, "throttled snapshot must still hold the first scan result")
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,6 +62,16 @@ type Scanner struct {
 	// the fsnotify watcher, so runtime adds (new directories created during a
 	// scan) respect maxWatchedDirs too. Guarded by mu.
 	watchedCount int
+
+	// snapshotPath enables scan-result persistence (spec
+	// 2026-09-03-scan-snapshot-persistence). Empty = disabled (tests).
+	// Scan writes the result here (throttled); StartWatching hydrates the
+	// cache from it so the first request after a restart walks nothing.
+	snapshotPath string
+	// lastSnapWrite throttles snapshot rewrites (guarded by mu): media copies
+	// trigger fsnotify-debounced rescans every ~2s, and unthrottled writes
+	// would pound the disk with full-snapshot rewrites.
+	lastSnapWrite time.Time
 }
 
 // maxWatchedDirs caps the number of fsnotify directory watches. See the
@@ -68,6 +79,18 @@ type Scanner struct {
 const maxWatchedDirs = 4096
 
 func NewScanner(videoExts, imageExts, textExts []string) *Scanner {
+	return newScanner(videoExts, imageExts, textExts, "")
+}
+
+// NewScannerWithSnapshot is the production constructor: scan results are
+// persisted to snapshotPath after each successful Scan and hydrated back at
+// StartWatching (spec 2026-09-03-scan-snapshot-persistence). An empty path
+// disables persistence (identical to NewScanner).
+func NewScannerWithSnapshot(videoExts, imageExts, textExts []string, snapshotPath string) *Scanner {
+	return newScanner(videoExts, imageExts, textExts, snapshotPath)
+}
+
+func newScanner(videoExts, imageExts, textExts []string, snapshotPath string) *Scanner {
 	vExts := make(map[string]bool)
 	for _, e := range videoExts {
 		vExts[strings.ToLower(e)] = true
@@ -82,15 +105,16 @@ func NewScanner(videoExts, imageExts, textExts []string) *Scanner {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Scanner{
-		cache:       make(map[string][]models.MediaFile),
-		cacheTTL:    5 * time.Minute,
-		videoExts:   vExts,
-		imageExts:   iExts,
-		textExts:    tExts,
-		bgCtx:       ctx,
-		bgCancel:    cancel,
-		cacheDirs:   nil,
-		cacheDirMap: nil,
+		cache:        make(map[string][]models.MediaFile),
+		cacheTTL:     5 * time.Minute,
+		videoExts:    vExts,
+		imageExts:    iExts,
+		textExts:     tExts,
+		bgCtx:        ctx,
+		bgCancel:     cancel,
+		cacheDirs:    nil,
+		cacheDirMap:  nil,
+		snapshotPath: snapshotPath,
 	}
 }
 
@@ -353,6 +377,10 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	callback := s.OnScanComplete
 	s.mu.Unlock()
 
+	// Persist the scan result so the next process start hydrates instantly
+	// (spec 3.2). Throttled — see maybeWriteSnapshot.
+	s.maybeWriteSnapshot(roots, allFiles, cacheDirMap)
+
 	if callback != nil {
 		// Text files (books) have no thumbnails; filter them out of the
 		// thumbnail-generation callback so the thumbnailer doesn't try to
@@ -604,6 +632,116 @@ func (s *Scanner) InvalidateCache() {
 	s.mu.Unlock()
 }
 
+// snapshotWriteMinInterval throttles snapshot rewrites. fsnotify debounce can
+// trigger rescans every ~2s while media files are being copied; a full
+// snapshot rewrite per rescan would translate into continuous multi-MB disk
+// writes. Changes within the skipped window are picked up by the next
+// unthrottled scan.
+const snapshotWriteMinInterval = 30 * time.Second
+
+// maybeWriteSnapshot persists the scan result after a successful Scan.
+// Write failures only WARN — persistence must never fail a scan. The
+// throttle timestamp is set before the write so a failing write does not
+// retry every 2s during copy storms either.
+func (s *Scanner) maybeWriteSnapshot(roots []string, allFiles []models.MediaFile, cacheDirMap map[string]time.Time) {
+	if s.snapshotPath == "" {
+		return
+	}
+	s.mu.Lock()
+	if time.Since(s.lastSnapWrite) < snapshotWriteMinInterval {
+		s.mu.Unlock()
+		return
+	}
+	s.lastSnapWrite = time.Now()
+	s.mu.Unlock()
+
+	dirs := make(map[string]time.Time, len(cacheDirMap))
+	for d, mtime := range cacheDirMap {
+		dirs[d] = mtime
+	}
+	snap := &scanSnapshotFile{
+		Version:   scanSnapshotVersion,
+		Roots:     roots,
+		VideoExts: sortedExts(s.videoExts),
+		ImageExts: sortedExts(s.imageExts),
+		TextExts:  sortedExts(s.textExts),
+		SavedAt:   time.Now(),
+		Files:     allFiles,
+		Dirs:      dirs,
+	}
+	if err := saveScanSnapshot(s.snapshotPath, snap); err != nil {
+		slog.Warn("scan snapshot write failed", "path", s.snapshotPath, "error", err)
+	} else {
+		slog.Info("scan snapshot saved", "path", s.snapshotPath, "files", len(allFiles))
+	}
+}
+
+func sortedExts(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for e := range m {
+		out = append(out, e)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// hydrateFromSnapshotLocked rebuilds every in-memory cache structure from a
+// persisted snapshot. Caller must hold s.mu (StartWatching locks via defer).
+// cacheTime is set to SavedAt — a fresh snapshot needs no rescan at all, a
+// stale one is served immediately and the first request triggers the
+// existing stale-while-revalidate background refresh. OnScanComplete is
+// intentionally NOT fired: thumbnail disk cache persists across restarts,
+// and the stale path fires the callback naturally once a rescan runs.
+func (s *Scanner) hydrateFromSnapshotLocked(roots []string) {
+	if s.snapshotPath == "" {
+		return
+	}
+	identity := buildScanIdentity(roots, sortedExts(s.videoExts), sortedExts(s.imageExts), sortedExts(s.textExts))
+	snap, ok, err := loadScanSnapshot(s.snapshotPath, identity)
+	if err != nil {
+		slog.Warn("scan snapshot unreadable, falling back to full scan", "path", s.snapshotPath, "error", err)
+		return
+	}
+	if !ok {
+		slog.Info("scan snapshot not usable (absent or identity mismatch), starting cold", "path", s.snapshotPath)
+		return
+	}
+
+	videoFiles := make([]models.MediaFile, 0)
+	imageFiles := make([]models.MediaFile, 0)
+	textFiles := make([]models.MediaFile, 0)
+	byDir := make(map[string][]models.MediaFile)
+	for _, f := range snap.Files {
+		switch f.MediaType {
+		case "video":
+			videoFiles = append(videoFiles, f)
+		case "image":
+			imageFiles = append(imageFiles, f)
+		case "text":
+			textFiles = append(textFiles, f)
+		}
+		dir := filepath.Clean(filepath.Dir(f.Path))
+		byDir[dir] = append(byDir[dir], f)
+	}
+	cacheDirs := make([]string, 0, len(snap.Dirs))
+	cacheDirMap := make(map[string]time.Time, len(snap.Dirs))
+	for d, mtime := range snap.Dirs {
+		cacheDirs = append(cacheDirs, d)
+		cacheDirMap[d] = mtime
+	}
+	sort.Strings(cacheDirs)
+
+	s.cache["all"] = snap.Files
+	s.cache["video"] = videoFiles
+	s.cache["image"] = imageFiles
+	s.cache["text"] = textFiles
+	s.cacheDirs = cacheDirs
+	s.cacheDirMap = cacheDirMap
+	s.cacheByDir = byDir
+	s.cacheTime = snap.SavedAt
+	slog.Info("scan cache hydrated from snapshot", "files", len(snap.Files), "dirs", len(cacheDirs), "savedAt", snap.SavedAt.Format(time.RFC3339))
+}
+
 // findOwnerRoot 返回 path 所属的 watch root；找不到时返回第一个 root（降级）。
 // 路径分隔符由 filepath.Clean 统一处理。
 // 用途：watchEvents 根据 event.Name 找到所属 root，做 per-root 独立防抖。
@@ -659,6 +797,11 @@ func (s *Scanner) StartWatching(roots []string) error {
 	}
 	// Caller already holds s.mu (deferred unlock above) — assign directly.
 	s.watchedCount = watched
+
+	// Hydrate the in-memory cache from the persisted snapshot (spec 3.3).
+	// Runs after the watcher is live so post-hydrate file changes are seen.
+	// The caller still holds s.mu (deferred unlock) — use the Locked variant.
+	s.hydrateFromSnapshotLocked(roots)
 
 	// Start listening to events
 	go s.watchEvents()
