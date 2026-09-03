@@ -74,7 +74,7 @@
 
 .crumb::after {
     content: "›";
-    margin-left: 8px;
+    margin: 0 8px;
     color: var(--text-muted);
 }
 
@@ -219,9 +219,15 @@
     font-size: 13px;
     font-weight: 500;
     color: var(--text-primary);
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.4;
+    height: 2.8em;
+    word-break: break-all;
 }
 
 .card-meta {
