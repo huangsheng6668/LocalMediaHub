@@ -110,7 +110,16 @@
     .video-volume-bar {
         width: 40px;
     }
+    .scroll-fab-group {
+        right: 16px;
+        bottom: 16px;
+    }
+    body[data-active-tab="read"] .scroll-fab-group {
+        right: 16px;
+        bottom: 64px;
+    }
 }
+
 
 /* from style.css L1909-1984 (Round 16 C3 full-screen modal on phone) */
 /* ─── Round 16 C3: Full-screen modal on phone ─── */

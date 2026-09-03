@@ -890,3 +890,17 @@ dialog#reader-settings-dialog::backdrop {
 
 /* from style.css L2985 (CSP-safe reader-settings row modifier) */
 .reader-settings__row--mb8 { margin-bottom: 8px; }
+
+/* Scroll FAB adjustments for Reader mode */
+body[data-active-tab="read"] .scroll-fab-group {
+    bottom: 72px;
+    right: 24px;
+}
+
+/* Hide FAB in immersive reader mode */
+body[data-reader-immersive="on"] .scroll-fab-group {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
