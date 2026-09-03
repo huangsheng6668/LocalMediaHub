@@ -1,7 +1,7 @@
 // Settings feature module: extracted from app.js (loadConfig / renderSettings + 2 button listeners).
 import { state } from './state.js';
 import { showToast } from './toast.js';
-import { apiRequest } from './api.js';
+import { apiRequest, escapeHtml } from './api.js';
 import { elements } from './dom.js';
 
 import * as readerPrefs from './readerPrefs.js';
@@ -22,7 +22,13 @@ export async function loadConfig() {
         state.enableDelete = !!(data.system && data.system.enable_delete);
         state.thumbMax = (data.thumbnail && data.thumbnail.max_size) || 300;
 
-        elements.infoScanRoots.textContent = getFolderPaths().join(', ') || '全盘自动检测';
+        const paths = getFolderPaths();
+        if (paths.length > 0) {
+            // XSS-SAFE: paths escaped via escapeHtml()
+            elements.infoScanRoots.innerHTML = `<div class="path-chip-group">${paths.map(p => `<span class="path-chip" title="${escapeHtml(p)}">${escapeHtml(p)}</span>`).join('')}</div>`;
+        } else {
+            elements.infoScanRoots.textContent = '全盘自动检测';
+        }
     } catch (e) {
         console.error('loadConfig error:', e);
         showToast('无法从后端获取系统配置: ' + e.message, 'error');
