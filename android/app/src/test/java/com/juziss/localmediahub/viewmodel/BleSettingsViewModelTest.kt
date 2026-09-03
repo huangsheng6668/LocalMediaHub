@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
@@ -435,7 +436,7 @@ class BleSettingsViewModelTest {
             // Phase 9: these fixtures only exercise the connection-state
             // coordination path (markConnected/markDisconnected); the BLE
             // data path is never driven, so the token is left empty.
-            authTokenProvider = { "" },
+            bleKeyProvider = { "" },
         )
         // Drive the controller into ADVERTISING so markConnected/markDisconnected
         // actually flip connectionState (the state machine no-ops in DISABLED).
@@ -451,6 +452,7 @@ class BleSettingsViewModelTest {
             override val serverUrl: Flow<String> = serverUrlFlow
             override val bleEnabled: Flow<Boolean> = bleEnabledFlow
             override val lastConnectedBleAddress: Flow<String?> = lastConnectedBleAddressFlow
+            override val bleToken: Flow<String> = flowOf("")
             override suspend fun saveLastConnectedBleAddress(address: String) {
                 lastConnectedBleAddressFlow.value = address
             }

@@ -1,4 +1,4 @@
-//go:build windows && bluetooth
+//go:build windows
 
 package ble
 
@@ -11,10 +11,11 @@ func TestBuildRestartChildCommand_SetsEnvAndArgs(t *testing.T) {
 	// Fake os.Args via the helper's signature.
 	args := []string{"LocalMediaHub.exe", "--headless"}
 	ts := time.Now().Unix()
-	cmd := buildRestartChildCommand("/path/to/exe", args, ts)
+	exe := `C:\lmh\LocalMediaHub.exe`
+	cmd := buildRestartChildCommand(exe, args, ts)
 
-	if cmd.Path != "/path/to/exe" {
-		t.Fatalf("cmd.Path=%s want /path/to/exe", cmd.Path)
+	if cmd.Path != exe {
+		t.Fatalf("cmd.Path=%s want %s", cmd.Path, exe)
 	}
 	if len(cmd.Args) != len(args) {
 		t.Fatalf("cmd.Args len=%d want %d (%v)", len(cmd.Args), len(args), cmd.Args)

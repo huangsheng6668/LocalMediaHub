@@ -46,14 +46,20 @@ object BleModule {
             mgr?.adapter?.isEnabled == true
         }
         // Phase 9 (Task 9): cache the latest decrypted auth token for the
-        // controller's synchronous authTokenProvider (DataStore is async-only;
-        // the handshake needs the token the instant a challenge arrives). The
-        // cache starts EMPTY — fail closed: no token observed yet means the
+        // controller's synchronous bleKeyProvider (DataStore is async-only;
+        // the handshake needs the key the instant a challenge arrives). Both
+        // caches start EMPTY — fail closed: no key observed yet means the
         // BLE handshake is refused rather than run with a wrong/empty key —
-        // and updates on every token save/clear emission.
+        // and update on every save/clear emission. The effective key is
+        // resolveBleKey(bleToken, authToken): dedicated ble.token first,
+        // server token fallback (mirror of server BLEConfig.EffectiveToken).
         val latestAuthToken = kotlinx.coroutines.flow.MutableStateFlow("")
+        val latestBleToken = kotlinx.coroutines.flow.MutableStateFlow("")
         appScope.launch {
             store.authToken.collect { latestAuthToken.value = it }
+        }
+        appScope.launch {
+            store.bleToken.collect { latestBleToken.value = it }
         }
         val controller = BleController(
             peripheralManager = peripheralManager,
@@ -61,7 +67,7 @@ object BleModule {
             bleEnabledFlow = store.bleEnabled,
             bleHardwareAvailable = hardwareAvailable,
             saveBleEnabled = { enabled -> store.saveBleEnabled(enabled) },
-            authTokenProvider = { latestAuthToken.value },
+            bleKeyProvider = { BleController.resolveBleKey(latestBleToken.value, latestAuthToken.value) },
         )
         // Drive the controller from the persisted setting. Each emission
         // re-evaluates whether BLE should be advertising/disabled. Without

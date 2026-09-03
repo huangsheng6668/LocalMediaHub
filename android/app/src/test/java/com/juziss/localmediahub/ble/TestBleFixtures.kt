@@ -44,7 +44,7 @@ object TestBleFixtures {
             saveBleEnabled = {},
             // Phase 9: disabled controller never authenticates — empty token
             // keeps the (unused) auth path fail-closed in these fixtures.
-            authTokenProvider = { "" },
+            bleKeyProvider = { "" },
         )
         controller.evaluateAvailability(enabled = false)
         return controller

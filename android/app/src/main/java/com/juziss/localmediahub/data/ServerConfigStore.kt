@@ -32,6 +32,7 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
         private val KEY_SERVER_PORT = stringPreferencesKey("server_port")
         private val KEY_KNOWN_SERVERS = stringPreferencesKey("known_servers")
         private val KEY_AUTH_TOKEN = stringPreferencesKey("auth_token")
+        private val KEY_BLE_TOKEN = stringPreferencesKey("ble_token")
         private val KEY_APP_THEME = stringPreferencesKey("app_theme")
         private val KEY_BLE_ENABLED = booleanPreferencesKey("ble_enabled")
         private val KEY_LAST_CONNECTED_BLE_ADDRESS = stringPreferencesKey("last_connected_ble_address")
@@ -59,6 +60,20 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
             // Stored encrypted since the Keystore hardening. Legacy plaintext
             // values fail GCM decoding and are returned verbatim, so existing
             // installs keep working and upgrade on the next save.
+            TokenCrypto.decrypt(raw) ?: raw
+        }
+    }
+
+    /**
+     * Dedicated BLE handshake key（对应 server 的 ble.token）。空 = 未配置，
+     * 握手密钥回退到 authToken（与 server 侧 EffectiveToken 规则对称）。
+     * 加密存储路径与 authToken 相同。open 以便测试 fake 覆盖。
+     */
+    open val bleToken: Flow<String> = context.dataStore.data.map { prefs ->
+        val raw = prefs[KEY_BLE_TOKEN] ?: ""
+        if (raw.isEmpty()) {
+            ""
+        } else {
             TokenCrypto.decrypt(raw) ?: raw
         }
     }
@@ -124,6 +139,13 @@ open class ServerConfigStore @Inject constructor(@ApplicationContext private val
             // Encrypt at rest via an AndroidKeyStore AES-GCM key. Falls back
             // to plaintext only when the platform Keystore is unusable.
             prefs[KEY_AUTH_TOKEN] = if (token.isEmpty()) "" else (TokenCrypto.encrypt(token) ?: token)
+        }
+    }
+
+    suspend fun saveBleToken(token: String) {
+        context.dataStore.edit { prefs ->
+            // 加密路径与 authToken 一致；空串表示清除（回退到 authToken）
+            prefs[KEY_BLE_TOKEN] = if (token.isEmpty()) "" else (TokenCrypto.encrypt(token) ?: token)
         }
     }
 

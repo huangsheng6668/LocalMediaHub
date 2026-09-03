@@ -440,3 +440,38 @@ func TestPublicExposesTextExtensions(t *testing.T) {
 		t.Fatalf("expected 2 text extensions in public, got %d (%v)", len(pub.Scan.TextExtensions), pub.Scan.TextExtensions)
 	}
 }
+
+func TestBLEEffectiveToken(t *testing.T) {
+	cases := []struct{ ble, server, want string }{
+		{"", "", ""},   // 无任何密钥 → BLE 通道禁用
+		{"", "srv", "srv"}, // 回退：既有 token 模式行为不变
+		{"bt", "srv", "bt"}, // ble.token 优先
+		{"bt", "", "bt"}, // 开放 LAN 模式 + 专属 BLE 密钥
+	}
+	for _, c := range cases {
+		if got := (BLEConfig{Token: c.ble}).EffectiveToken(c.server); got != c.want {
+			t.Errorf("EffectiveToken(ble=%q, server=%q) = %q, want %q", c.ble, c.server, got, c.want)
+		}
+	}
+}
+
+func TestLoadParsesBLESection(t *testing.T) {
+	cfg, err := LoadFromBytes([]byte("server:\n  token: \"\"\nble:\n  token: abc123\n"))
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	if cfg.BLE.Token != "abc123" {
+		t.Fatalf("cfg.BLE.Token = %q, want %q", cfg.BLE.Token, "abc123")
+	}
+	if got := cfg.BLE.EffectiveToken(cfg.Server.Token); got != "abc123" {
+		t.Fatalf("EffectiveToken = %q, want abc123", got)
+	}
+	// 公共面不得暴露 BLE 密钥（与 Server.Token 同 posture）
+	pubBytes, err := json.Marshal(cfg.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(pubBytes), "abc123") {
+		t.Fatalf("ConfigPublic leaked BLE token: %s", pubBytes)
+	}
+}

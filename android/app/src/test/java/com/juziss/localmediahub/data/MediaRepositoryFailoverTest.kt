@@ -281,7 +281,7 @@ class MediaRepositoryFailoverTest {
             saveBleEnabled = {},
             // Phase 9: the token shared with the fake Central — the BLE data
             // channel now refuses to open without a completed handshake.
-            authTokenProvider = { "sekrit" },
+            bleKeyProvider = { "sekrit" },
         )
         controller.evaluateAvailability(enabled = true)
         if (state.value == BleConnState.CONNECTED) {

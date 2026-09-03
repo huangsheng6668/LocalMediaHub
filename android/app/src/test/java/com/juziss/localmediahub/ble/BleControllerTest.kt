@@ -84,7 +84,7 @@ class BleControllerTest {
         bleEnabledFlow = MutableStateFlow(true),
         bleHardwareAvailable = { true },
         saveBleEnabled = {},
-        authTokenProvider = { token },
+        bleKeyProvider = { token },
     )
 
     /**
@@ -259,7 +259,8 @@ class BleControllerTest {
      * Empty-token path (brief Step 4): without a configured authToken the
      * controller refuses to enter the auth flow — no response is sent at
      * all — and the channel drops to DISCONNECTED with an operator-readable
-     * reason (open-auth mode has no BLE data channel).
+     * reason (a challenge with no local key configured is a key mismatch —
+     * fail closed; open mode is entered on peer-connect instead).
      */
     @Test
     fun emptyTokenRefusesHandshake_sendsNothingAndDropsToDisconnected() {
@@ -896,5 +897,155 @@ class BleControllerTest {
 
         assertFalse("markDisconnected must still reset the auth state", controller.authenticated)
         assertEquals(BleConnState.ADVERTISING, controller.connectionState.value)
+    }
+
+    // ------------------------------------------------------------------
+    // Open mode (2026-08-30): blank effective key = unauthenticated v1
+    // data phase, mirroring Go Central's len(authKey) == 0.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun openMode_blankKey_entersDataPhaseOnPeerConnect() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr, token = "")
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+
+        mgr.simulatePeerConnected()
+
+        assertTrue("blank key must open the data phase (open mode)", controller.openMode)
+        assertFalse(controller.authenticated)
+        assertEquals(BleConnState.CONNECTED, controller.connectionState.value)
+    }
+
+    @Test
+    fun peerConnect_withKeyConfigured_doesNotEnterOpenMode() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr) // token defaults to "sekrit"
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+
+        mgr.simulatePeerConnected()
+
+        assertFalse("a configured key must keep the Phase 9 handshake path", controller.openMode)
+    }
+
+    @Test
+    fun openMode_echoRoundTrip_usesV1Frames() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr, token = "")
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        mgr.simulatePeerConnected()
+
+        mgr.simulateWrite(BleProtocol.encodeFrame(byteArrayOf(0x7E)))
+
+        assertEquals("open-mode echo must notify exactly one v1 frame", 1, mgr.notified.size)
+        assertEquals(
+            "open-mode frames are v1, never v2",
+            0x01,
+            mgr.notified[0][0].toInt(),
+        )
+        val echoed = BleProtocol.decodeFrame(mgr.notified[0])
+        assertNotNull(echoed)
+        assertEquals(0x7E.toByte(), echoed!!.payload[0])
+    }
+
+    @Test
+    fun openMode_jsonChunk_reachesReassemblyEngine() = runTest {
+        val mgr = FakePeripheralManager()
+        val fallback = BleTransportFallback()
+        val controller = newController(mgr, token = "", fallback = fallback)
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        mgr.simulatePeerConnected()
+
+        val json = "{\"k\":1}".toByteArray(Charsets.UTF_8)
+        val chunkPayload = BleProtocol.encodeJsonChunkPayload(
+            totalChunks = 1, chunkIndex = 0, totalBytes = json.size, chunk = json,
+        )
+        val result = fallback.fetchJson(
+            endpoint = BleProtocol.ENDPOINT_BOOK_CHAPTER,
+            path = "/book.txt",
+            index = 0,
+        ) {
+            controller.onCommandWrite(BleProtocol.encodeFrame(chunkPayload))
+        }
+        assertEquals("{\"k\":1}", result)
+        assertTrue(controller.openMode)
+    }
+
+    @Test
+    fun openMode_authCommand_isFatalWithActionableMessage() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr, token = "")
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        mgr.simulatePeerConnected()
+
+        mgr.simulateWrite(
+            BleProtocol.encodeFrame(
+                BleProtocol.encodeAuthChallengePayload(
+                    BleProtocol.AUTH_DIR_C2P, byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8),
+                ),
+            ),
+        )
+
+        assertEquals("no frame may be sent on a key mismatch", 0, mgr.notified.size)
+        assertFalse(controller.openMode)
+        assertEquals(BleConnState.DISCONNECTED, controller.connectionState.value)
+        assertNotNull(controller.authErrorText)
+        assertTrue(
+            "error must tell the user to fill in the BLE key: ${controller.authErrorText}",
+            controller.authErrorText!!.contains("BLE key"),
+        )
+    }
+
+    @Test
+    fun openMode_requestApi_sendsV1CmdApiReq() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr, token = "")
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        mgr.simulatePeerConnected()
+
+        val ok = controller.requestApi(BleProtocol.ENDPOINT_BOOK_CHAPTER, "/book.txt", 0)
+
+        assertTrue("open mode must allow requestApi", ok)
+        assertEquals(1, mgr.notified.size)
+        val frame = BleProtocol.decodeFrame(mgr.notified[0])
+        assertNotNull(frame)
+        assertEquals(BleProtocol.CMD_API_REQ, frame!!.payload[0])
+    }
+
+    @Test
+    fun preAuthDataCommand_withKeySet_fatalMentionsServerOpenMode() {
+        val mgr = FakePeripheralManager()
+        val controller = newController(mgr) // token set, NO handshake
+        controller.evaluateAvailability(enabled = true)
+        controller.markConnected()
+        mgr.simulatePeerConnected()
+
+        mgr.simulateWrite(BleProtocol.encodeFrame(byteArrayOf(0x7E)))
+
+        assertFalse(controller.authenticated)
+        assertEquals(BleConnState.DISCONNECTED, controller.connectionState.value)
+        assertNotNull(controller.authErrorText)
+        assertTrue(
+            "error must hint the server may be in open mode: ${controller.authErrorText}",
+            controller.authErrorText!!.contains("open mode"),
+        )
+    }
+
+    /**
+     * BLE 密钥解析优先级：专用 bleToken 优先，authToken 回退。
+     * 与 server BLEConfig.EffectiveToken 对称（spec 2026-08-29 route 2）。
+     */
+    @Test
+    fun resolveBleKeyPrefersDedicatedBleToken() {
+        assertEquals("bt", BleController.resolveBleKey("bt", "at"))
+        assertEquals("at", BleController.resolveBleKey("", "at"))
+        assertEquals("at", BleController.resolveBleKey("  ", "at")) // blank 视为未配置
+        assertEquals("", BleController.resolveBleKey("", ""))
     }
 }

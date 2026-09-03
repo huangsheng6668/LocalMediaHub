@@ -5,7 +5,7 @@ import "strings"
 // UUID matching for BLE device selection (Task 11 / H-1d).
 //
 // This file deliberately carries NO build tag: the matcher is a pure string
-// function shared by both builds (default stub build and -tags bluetooth), so
+// function shared by every platform build, so
 // the exact-match security contract is defined — and unit tested
 // (uuid_match_test.go) — exactly once.
 

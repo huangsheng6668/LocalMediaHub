@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -185,6 +186,9 @@ func decodeTxt(raw []byte) (string, string) {
 		}
 	}
 	decoded = strings.ReplaceAll(decoded, "\r\n", "\n")
+	if strings.Contains(decoded, "&#") {
+		decoded = html.UnescapeString(decoded)
+	}
 	return decoded, charset
 }
 

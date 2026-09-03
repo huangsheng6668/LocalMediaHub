@@ -82,8 +82,8 @@ android {
         applicationId = "com.juziss.localmediahub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -349,6 +349,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
+
+    // EmojiCompat with bundled font (offline emoji support across all Android versions & fonts)
+    implementation("androidx.emoji2:emoji2-bundled:1.4.0")
 
     // Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))

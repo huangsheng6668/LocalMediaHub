@@ -1,5 +1,3 @@
-//go:build bluetooth
-
 package ble
 
 import (
@@ -19,10 +17,10 @@ type recordingRecorder struct {
 
 func (r *recordingRecorder) RecordConnect(ok bool) { r.records = append(r.records, ok) }
 
-// TestNewCentralScannerDoesNotPanic lives in the build-tag-agnostic
-// central_test.go and runs in BOTH builds (stub path here, real tinygo path
-// under -tags bluetooth). It is intentionally NOT duplicated in this file;
-// central_adapter_test.go is the bluetooth-tagged companion that exercises
+// TestNewCentralScannerDoesNotPanic lives in central_test.go and runs against
+// the real tinygo path (adapter.Enable fails gracefully on hosts without a
+// usable radio). It is intentionally NOT duplicated in this file;
+// central_adapter_test.go is the adapter companion that exercises
 // the recorder seam only.
 
 // TestConnectLocked_RecordsOutcomeOnRecorder verifies that connectLocked

@@ -163,18 +163,26 @@ class ConnectionViewModel @Inject constructor(
     }
 
     /**
-     * Zero-touch pairing helper: fetches the bearer token via
-     * POST /api/v1/pair when the stored token is empty and the server opted
-     * into `server.lan_pairing`. Silent by design — a null result (pairing
-     * disabled / unreachable) simply leaves manual token entry as-is.
+     * Zero-touch pairing helper: fetches the token material via
+     * POST /api/v1/pair when nothing is stored yet and the server opted
+     * into `server.lan_pairing`. Saves the HTTP bearer token AND the
+     * dedicated BLE key (ble_token) when the response carries them.
+     * Silent by design — a null result (pairing disabled / unreachable)
+     * simply leaves manual token entry as-is.
      */
     private suspend fun tryPairIfTokenless() {
         try {
-            val stored = serverConfigStore.authToken.firstOrNull()
-            if (stored.isNullOrBlank()) {
+            val storedToken = serverConfigStore.authToken.firstOrNull()
+            val storedBleToken = serverConfigStore.bleToken.firstOrNull()
+            if (storedToken.isNullOrBlank() && storedBleToken.isNullOrBlank()) {
                 val granted = repository.tryLanPairing() ?: return
-                serverConfigStore.saveAuthToken(granted)
-                serverConfig.setToken(granted)
+                granted.token?.takeIf { it.isNotBlank() }?.let {
+                    serverConfigStore.saveAuthToken(it)
+                    serverConfig.setToken(it)
+                }
+                granted.bleToken?.takeIf { it.isNotBlank() }?.let {
+                    serverConfigStore.saveBleToken(it)
+                }
             }
         } catch (_: Exception) {
         }

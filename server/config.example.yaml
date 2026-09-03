@@ -4,14 +4,24 @@ server:
   # Bearer token：留空 = 开放模式（同网段任何人可访问全部 API，仅删除接口受限）。
   # 强烈建议家用共享 Wi-Fi 下设置长随机串，例如：
   #   python -c "import secrets; print(secrets.token_urlsafe(32))"
-  # 注意：token 为空时 BLE 通道不可用（Phase 9 起握手需要 token 派生密钥）。
+  # token 为空且 ble.token 也为空时 BLE 走开放模式（2026-08-30）：跳过握手、
+  # v1 无认证帧，半径内任何设备可交换数据，启动时打 WARN；想启用 BLE 认证
+  # 请配置下方 ble.token。
   token: ""
 
   # 零接触配对（默认关闭）：开启后局域网内任何设备可经 POST /api/v1/pair
-  # 免认证获取一次 token，App 在局域网内即可全自动完成 HTTP 认证与 BLE
-  # 握手的密钥配置，无需手动抄 token。这是有意向局域网开放 token 的便利
-  # 开关——仅在首次配对期间打开，手机连上后请改回 false。
+  # 免认证获取一次 token（含 ble.token，如已配置），App 在局域网内即可全自动
+  # 完成 HTTP 认证与 BLE 握手的密钥配置，无需手动抄 token。这是有意向局域网
+  # 开放 token 的便利开关——仅在首次配对期间打开，手机连上后请改回 false。
   lan_pairing: false
+
+ble:
+  # Dedicated BLE handshake key. Empty = OPEN mode (2026-08-30): the BLE
+  # channel runs without a handshake on unauthenticated v1 frames — anyone
+  # in range can exchange data. Set a key to require HMAC authentication.
+  # Fallback when empty but server.token is set: server.token.
+  token: ""
+
 
 scan:
   # Media roots. If empty AND system.allowed_roots is empty AND auto_detect_roots

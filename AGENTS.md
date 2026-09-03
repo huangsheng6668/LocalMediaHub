@@ -27,7 +27,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `security_headers.go` — CSP / XFO / nosniff / Referrer-Policy（**必须在 CORS 之前挂载**）
   - `ratelimit.go` — per-route rate limit（挂在 scan trigger + delete）+ **LRU 容量上限**（默认 4096，防伪造 `X-Forwarded-For` 内存膨胀；确定性淘汰：expired-first → oldest lastSeen → insertion seq）
   - `private_net.go` — 私网/loopback 限制（pprof 用）
-- **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）/ `server/internal/ble/`（**实验性** BLE GATT 控制通道，**server=Central**：`protocol.go` 帧 codec + `central.go`（Scan/Connect/Send 状态机）+ `central_adapter.go`（`bluetooth` build tag）/ `central_adapter_stub.go`（默认构建 fallback）。`/api/v1/ble/scan|connect|send` HTTP handler 在 `internal/server/handler/ble.go`（复用 Bearer Token；GATT 数据链路 Phase 9 起为 v2 帧认证，密钥从 token 派生）。非致命启动，BLE 不可用 server 继续 Wi-Fi/HTTP。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)）
+- **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）/ `server/internal/ble/`（**实验性** BLE GATT 控制通道，**server=Central**：`protocol.go` 帧 codec + `central.go`（Scan/Connect/Send 状态机）+ `central_adapter.go`（tinygo bluetooth 栈适配，**默认编入单一 server 构建**，运行时无蓝牙适配器则非致命降级）+ `ble_health.go`（BleHealthMonitor 连续 Connect 失败卡死检测）与 `restart_windows.go`（`LMH_BLE_RESTART_TS` 冷却自重启清 WinRT 残留 GATT 状态，接线在 `internal/server/ble_autorestart_windows.go`）。`/api/v1/ble/scan|connect|send` HTTP handler 在 `internal/server/handler/ble.go`（`/api/v1/ble/*` 鉴权跟随路由组：有 `server.token` 走 Bearer，开放模式透传；GATT 数据链路 Phase 9 起为 v2 帧认证，密钥源 `ble.token` 优先、`server.token` 回退，**两者皆空 = 开放模式**——跳过握手、v1 无认证帧（2026-08-30），见 [安全约定](#安全约定触碰前必读)）。非致命启动，BLE 不可用 server 继续 Wi-Fi/HTTP。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)）
 - **配置**：`server/config.yaml`（运行时）/ `server/config.example.yaml`（模板）
 
 ### Android (Kotlin / Compose)
@@ -51,7 +51,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `RecentActivityStore.kt`（最近活动 + 浏览状态 + 播放进度）
   - `FavoritesStore.kt`（DataStore 收藏）
   - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护）
-  - `ServerConfigStore.kt`（含 `authToken`）
+  - `ServerConfigStore.kt`（含 `authToken` / `bleToken`，均加密存储；`bleToken` 对应 server 的 `ble.token`，为空回退 `authToken`）
   - `RoutePath.kt`（浏览路径与系统/库模式标记）
 - **Network**（`network/`）：Retrofit 接口 + OkHttp + `AuthInterceptor`（注入 Bearer Token）
 - **BLE**（`ble/`，**实验性**，默认关闭，**Android=Peripheral**）：`BleProtocol`（与 server 对称的帧 codec）/ `BleConnectionStateMachine`（纯逻辑状态机，含 ADVERTISING）/ `BleController`（@Singleton 门控，开关+硬件可用性→状态机；`markConnected`/`markDisconnected` 由 HTTP 协调结果驱动）/ `BlePeripheralManager` 接口 + `AndroidBlePeripheralManager`（`BluetoothGattServer` + advertiser，Command Write + State Notify + CCCD）/ `BleToggleRule`。`data/BleApi.kt` 通过 Wi-Fi/HTTP 调 server 的 `/api/v1/ble/*` 协调连接。设置入口在 `ConnectionScreen`（开关 + 扫描列表 + 选设备连接 + 发送测试 + echo），状态经 `BleSettingsViewModel`。角色反转原因：Windows winrt Peripheral 不稳，PC 当 Central。蓝牙不可用时完全退回 Wi-Fi/HTTP（零退化）。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)
@@ -63,7 +63,8 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 
 服务端内置 SPA，浏览器访问 server 地址（如 `http://localhost:8000`）即可。
 
-- **公共层**：`server/internal/web/` 下 `app.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js`
+- **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js`
+- **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09 现代中性风重设计（spec `docs/superpowers/specs/2026-09-02-web-ui-redesign-design.md`）：7 套 `[data-theme]` chrome 主题（与阅读区主题独立分离），emoji 图标全部替换为内联 SVG
 - **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
 - **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行）+ 子模块
   - `bus.js`（事件总线 on/emit/off/EVT，零依赖）
@@ -204,9 +205,13 @@ node --test
 
 - 媒体读端点（folders / videos / images / texts / search）挂 Bearer auth；空 token 开放模式透传
 
-### BLE 帧认证（Phase 9）
+### BLE 帧认证（Phase 9 + 2026-08-29 专属密钥）
 
-- `server/internal/ble/protocol.go` v2 帧（seq+HMAC）与双 nonce 握手，密钥从 token 派生，两端对称（`BleProtocol.kt`）
+- `server/internal/ble/protocol.go` v2 帧（seq+HMAC）与双 nonce 握手，两端对称（`BleProtocol.kt`）
+- **密钥源**：有效 BLE 密钥 = `ble.token`（优先）→ `server.token`（回退）；server 端 `config.BLEConfig.EffectiveToken`，Android 端 `BleController.resolveBleKey`，**两端规则必须对称**。两者皆空 → **开放模式**（2026-08-30）：跳过双 nonce 握手，数据帧走 v1 无认证（无 seq 防重放）；BLE 半径内任何设备可交换数据，与开放 HTTP 姿态一致，启动时打 WARN；配 `ble.token` 即恢复 v2 HMAC 认证
+- 开放 LAN 模式（`server.token` 空）+ `ble.token` 非空 = HTTP 开放 + BLE 认证并存；`server.token` 与 `ble.token` 同时设置时 HTTP 与 BLE 各用独立密钥（Android 需单独填 BLE 密钥）
+- Android 端 BLE 密钥存 `ServerConfigStore.bleToken`（加密），UI 入口在 BLE 设置卡（`BleChannelSection.BleKeyCard`）；`lan_pairing` 配对响应会携带 `ble_token` 自动配置
+- spec：`docs/superpowers/specs/2026-08-29-ble-dedicated-token-design.md`
 
 ### Books 图片签名 token（Round 32 S2）
 

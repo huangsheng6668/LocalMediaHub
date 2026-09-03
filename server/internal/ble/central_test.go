@@ -252,14 +252,12 @@ func TestCentralScanTimeout(t *testing.T) {
 
 // TestNewCentralScannerDoesNotPanic asserts the central construction contract
 // that server.New depends on: NewCentralScanner must NEVER panic when the
-// Bluetooth adapter is missing, disabled, or built without the bluetooth tag.
-// Instead it returns (nil, err) and callers continue without BLE. This file
-// has no build tag, so the test runs in BOTH builds: under the default build
-// it exercises the stub path (central_adapter_stub.go), and under -tags
-// bluetooth it exercises the real tinygo path (central_adapter.go) which calls
-// adapter.Enable() — on any host without a usable radio Enable fails and
-// returns (nil, err) rather than faulting. A recover guard double-checks the
-// no-panic invariant even if a future regression raises a native fault.
+// Bluetooth adapter is missing, disabled, or permission-denied.
+// Instead it returns (nil, err) and callers continue without BLE. It exercises
+// the real tinygo path (central_adapter.go) which calls adapter.Enable() — on
+// any host without a usable radio Enable fails and returns (nil, err) rather
+// than faulting. A recover guard double-checks the no-panic invariant even if
+// a future regression raises a native fault.
 func TestNewCentralScannerDoesNotPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -471,17 +469,20 @@ func (p *blePeerFake) recordedWrites() [][]byte {
 	return out
 }
 
-// TestCentralConnectRequiresAuthKey verifies the central-side half of the
-// open-auth-mode gate: with an empty server token the auth key stays nil and
-// Connect must refuse before the link can carry any data.
-func TestCentralConnectRequiresAuthKey(t *testing.T) {
-	peer := newBlePeerFake(centralTestToken)
-	c := NewCentral(peer) // no SetAuthToken -> nil authKey
-	if err := c.Connect(context.Background(), "AA:BB"); err != ErrNoAuthKey {
-		t.Fatalf("expected ErrNoAuthKey, got %v", err)
+// TestCentralConnectOpenModeSkipsHandshake verifies the central-side half of
+// the 2026-08-30 open mode: with no key configured Connect opens the data
+// phase immediately — no handshake frames ever hit the wire.
+func TestCentralConnectOpenModeSkipsHandshake(t *testing.T) {
+	peer := newBlePeerFake(centralTestToken) // peer COULD authenticate, but open mode never asks
+	c := NewCentral(peer)                    // no SetAuthToken -> nil authKey -> open mode
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect error: %v", err)
 	}
-	if c.State() != "disconnected" {
-		t.Fatalf("state=%q want disconnected", c.State())
+	if c.State() != "connected" {
+		t.Fatalf("state=%q want connected", c.State())
+	}
+	if writes := peer.recordedWrites(); len(writes) != 0 {
+		t.Fatalf("open mode must not write handshake frames, got %d writes", len(writes))
 	}
 }
 
@@ -682,17 +683,20 @@ func TestCentralV1FrameAfterAuthRejected(t *testing.T) {
 	<-listenerDone
 }
 
-// TestCentralListenerPreAuthApiReqDropsLink (M-3b): before authentication the
-// listener only tolerates the two AUTH commands — a bare v1 CMD_API_REQ is a
-// protocol violation and must drop the link (fail closed), with no dispatch.
+// TestCentralListenerPreAuthApiReqDropsLink (M-3b): with a key configured but
+// the handshake not yet performed, the listener only tolerates the two AUTH
+// commands — a bare v1 CMD_API_REQ is a protocol violation and must drop the
+// link (fail closed), with no dispatch. (Open mode — no key — dispatches
+// instead; that path is covered by the TestCentralOpenMode* tests.)
 func TestCentralListenerPreAuthApiReqDropsLink(t *testing.T) {
 	peer := newBlePeerFake(centralTestToken)
 	peer.doneCh = make(chan struct{})
 	peer.unblockCh = make(chan struct{})
 	c := NewCentral(peer)
+	c.SetAuthToken(centralTestToken)
 	c.SetApiProvider(&jsonBlockProvider{body: []byte(`hi`)})
-	// NOTE: deliberately NOT authenticated — the listener's pre-auth policy
-	// gate is under test, so no Connect() is performed.
+	// NOTE: key configured but deliberately NOT authenticated — the listener's
+	// pre-auth policy gate is under test, so no Connect() is performed.
 
 	req, encErr := EncodeApiReqPayload(EndpointBookChapter, "/books/a.txt", 0)
 	if encErr != nil {
@@ -758,5 +762,155 @@ func TestCentralHandshakeTimeoutDisconnects(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("handshake must respect its deadline, took %s", elapsed)
+	}
+}
+
+// TestCentralOpenModeAuthCommandDropsLink: an AUTH challenge/response in
+// open mode means a confused peer (a keyed server/phone paired with a
+// keyless one) — fail closed, drop the link.
+func TestCentralOpenModeAuthCommandDropsLink(t *testing.T) {
+	peer := newBlePeerFake("")
+	c := NewCentral(peer)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	c.handleNotifyFrame(context.Background(), EncodeFrame(
+		EncodeAuthChallengePayload(AuthDirCentralToPeripheral, make([]byte, 8))))
+	if c.State() != "disconnected" {
+		t.Fatalf("state=%q want disconnected", c.State())
+	}
+	if !peer.wasDisconnected() {
+		t.Fatal("expected scanner Disconnect after AUTH command in open mode")
+	}
+}
+
+// TestCentralOpenModeEchoRoutedToChannel: a v1 data frame that is not an
+// API request is an echo reply for a waiting Send — routed to echoCh
+// without touching the link state.
+func TestCentralOpenModeEchoRoutedToChannel(t *testing.T) {
+	peer := newBlePeerFake("")
+	c := NewCentral(peer)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	c.handleNotifyFrame(context.Background(), EncodeFrame([]byte{0x7E}))
+	select {
+	case got := <-c.echoCh:
+		if len(got) != 1 || got[0] != 0x7E {
+			t.Fatalf("echo=%v want [0x7E]", got)
+		}
+	default:
+		t.Fatal("open-mode echo frame was not routed to echoCh")
+	}
+	if c.State() != "connected" {
+		t.Fatalf("an echo frame must not drop the link, state=%q", c.State())
+	}
+}
+
+// TestCentralOpenModeSendEchoRoundTrip: in open mode Send writes ONE plain
+// v1 frame and the listener-routed v1 echo comes back via echoCh.
+func TestCentralOpenModeSendEchoRoundTrip(t *testing.T) {
+	peer := newBlePeerFake("")
+	c := NewCentral(peer)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	type result struct {
+		payload []byte
+		err     error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		p, err := c.Send(context.Background(), []byte("ping"))
+		resCh <- result{payload: p, err: err}
+	}()
+
+	// Wait for the outbound write, then feed the peer's echo back through
+	// the listener path (open mode routes non-API v1 payloads to echoCh).
+	deadline := time.Now().Add(2 * time.Second)
+	for len(peer.recordedWrites()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	writes := peer.recordedWrites()
+	if len(writes) != 1 {
+		t.Fatalf("open-mode Send must write exactly one frame, got %d", len(writes))
+	}
+	if writes[0][0] != FrameVersion {
+		t.Fatalf("open-mode Send must write v1, got version %#x", writes[0][0])
+	}
+	frame, derr := DecodeFrame(writes[0])
+	if derr != nil {
+		t.Fatalf("DecodeFrame: %v", derr)
+	}
+	c.handleNotifyFrame(context.Background(), EncodeFrame(frame.Payload))
+
+	select {
+	case r := <-resCh:
+		if r.err != nil {
+			t.Fatalf("Send: %v", r.err)
+		}
+		if string(r.payload) != "ping" {
+			t.Fatalf("echo=%q want ping", r.payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("echo not delivered to Send")
+	}
+}
+
+// TestCentralOpenModeUndecodableFrameDroppedSilently: garbage on the wire
+// in open mode is dropped (Warn log) — parity with the pre-auth policy;
+// the link stays up.
+func TestCentralOpenModeUndecodableFrameDroppedSilently(t *testing.T) {
+	peer := newBlePeerFake("")
+	c := NewCentral(peer)
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	c.handleNotifyFrame(context.Background(), []byte{0x09, 0xFF, 0xFF}) // bad version
+	if c.State() != "connected" {
+		t.Fatalf("undecodable frame must not drop the link, state=%q", c.State())
+	}
+}
+
+// TestCentralOpenModeServeApiRequestChunksAsV1: open-mode API responses
+// stream as plain v1 CMD_JSON_CHUNK frames (never v2), mirroring the
+// authenticated transfer test.
+func TestCentralOpenModeServeApiRequestChunksAsV1(t *testing.T) {
+	peer := newBlePeerFake("")
+	c := NewCentral(peer)
+	body := make([]byte, 2048)
+	for i := range body {
+		body[i] = 'x'
+	}
+	c.SetApiProvider(&jsonBlockProvider{body: body})
+	if err := c.Connect(context.Background(), "AA:BB"); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	req, encErr := EncodeApiReqPayload(EndpointBookChapter, "/books/novel.txt", 0)
+	if encErr != nil {
+		t.Fatalf("EncodeApiReqPayload: %v", encErr)
+	}
+	written, err := c.ServeApiRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ServeApiRequest: %v", err)
+	}
+	if written < 2 {
+		t.Fatalf("expected multiple chunks, got %d", written)
+	}
+	writes := peer.recordedWrites()
+	if len(writes) != written {
+		t.Fatalf("written=%d but peer recorded %d frames", written, len(writes))
+	}
+	for i, raw := range writes {
+		if raw[0] != FrameVersion {
+			t.Fatalf("frame %d must be v1 in open mode, version %#x", i, raw[0])
+		}
+		frame, derr := DecodeFrame(raw)
+		if derr != nil {
+			t.Fatalf("frame %d DecodeFrame: %v", i, derr)
+		}
+		if len(frame.Payload) == 0 || CmdID(frame.Payload[0]) != CmdJsonChunk {
+			t.Fatalf("frame %d is not CMD_JSON_CHUNK", i)
+		}
 	}
 }

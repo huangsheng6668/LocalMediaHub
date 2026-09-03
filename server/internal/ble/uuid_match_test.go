@@ -14,8 +14,8 @@ import (
 // any nearby device whose UUID merely shared the "fa6a3001" prefix — or a
 // spoofed short UUID — was fed to the Android auto-connect flow. All of those
 // loose forms must be rejected now. This file has no build tag: the matcher
-// lives in uuid_match.go (tag-independent) so BOTH builds (stub and
-// -tags bluetooth) share and test the same logic.
+// lives in uuid_match.go (tag-independent) so every platform build
+// shares and tests the same logic.
 //
 // NOTE (brief reconciliation): the brief's example used the upper-cased EXACT
 // UUID ("FA6A3001-...-123456789ABC") as a must-NOT-match input, but its

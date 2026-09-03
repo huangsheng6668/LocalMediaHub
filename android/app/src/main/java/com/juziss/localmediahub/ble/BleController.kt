@@ -27,16 +27,22 @@ import javax.inject.Singleton
  * Phase 9 (Task 9, H-1b) authentication policy — the receive mirror of the Go
  * Central's `handleNotifyFrame` (`server/internal/ble/central.go`):
  *
+ *  - OPEN MODE (2026-08-30, blank effective key at GATT connect): no
+ *    handshake — every frame is v1. CMD_JSON_CHUNK routes to
+ *    [bleTransportFallback], other data commands echo back as v1, and the
+ *    two AUTH commands are fatal (keyed server vs keyless client — fail
+ *    closed with an actionable message). Outbound [requestApi]/echo are v1.
  *  - PRE-AUTH ([authenticated] == false): only v1 frames carrying
  *    CMD_AUTH_CHALLENGE / CMD_AUTH_RESPONSE are admissible.
  *      - A C2P challenge is answered with (1) a v1 response whose MAC proves
  *        possession of the shared key (`HMAC-SHA256(key, nonce||dir)[:16]`)
  *        and (2) our own P2C challenge with a fresh 8-byte nonce; the PC's
  *        response must verify against that nonce before the data phase opens.
- *      - An empty configured token refuses the handshake entirely (open-auth
- *        mode has no BLE data channel — the derived key would be publicly
- *        computable): nothing is sent, state drops to DISCONNECTED with an
- *        operator-readable [authErrorText].
+ *      - An empty configured token refuses the handshake entirely (a
+ *        challenge with no local key is a key mismatch — fail closed; the
+ *        normal blank-key path is OPEN mode, set on peer-connect): nothing
+ *        is sent, state drops to DISCONNECTED with an operator-readable
+ *        [authErrorText].
  *      - Any OTHER command pre-auth is a fatal protocol violation; an
  *        undecodable frame is silently dropped (Go listener parity).
  *  - POST-AUTH: every inbound frame must decode as an authenticated v2 frame
@@ -70,10 +76,12 @@ import javax.inject.Singleton
  * @param bleHardwareAvailable returns true only if the device has a powered,
  *   authorized Bluetooth adapter.
  * @param saveBleEnabled persists the toggle (DataStore in production).
- * @param authTokenProvider synchronous read of the CURRENT server Bearer
- *   token (decrypted). Drives [BleProtocol.deriveBleAuthKey] per handshake;
- *   an empty token refuses the auth flow (see above). The DI module backs
- *   this with a cached latest emission of `ServerConfigStore.authToken`.
+ * @param bleKeyProvider synchronous read of the CURRENT effective BLE key:
+ *   dedicated `bleToken` first, `authToken` fallback (see [resolveBleKey] —
+ *   mirror of server BLEConfig.EffectiveToken). Drives
+ *   [BleProtocol.deriveBleAuthKey] per handshake; an empty key refuses the
+ *   auth flow (see above). The DI module backs this with cached latest
+ *   emissions of `ServerConfigStore.bleToken` + `authToken`.
  */
 @Singleton
 class BleController @Inject constructor(
@@ -82,7 +90,7 @@ class BleController @Inject constructor(
     @Suppress("unused") private val bleEnabledFlow: Flow<Boolean>,
     private val bleHardwareAvailable: () -> Boolean,
     private val saveBleEnabled: suspend (Boolean) -> Unit,
-    private val authTokenProvider: () -> String,
+    private val bleKeyProvider: () -> String,
 ) {
     private val machine = BleConnectionStateMachine()
     val connectionState: StateFlow<BleConnState> = machine.state
@@ -94,6 +102,17 @@ class BleController @Inject constructor(
      */
     @Volatile
     var authenticated: Boolean = false
+        private set
+
+    /**
+     * 2026-08-30 open mode: true while the current connection runs without
+     * a key (blank effective key at GATT peer-connect) — data phase opens
+     * immediately, all frames are v1. Mirrors Go Central's
+     * `len(authKey) == 0`. @Volatile for lock-free observation; every
+     * mutation happens under [authLock].
+     */
+    @Volatile
+    var openMode: Boolean = false
         private set
 
     /**
@@ -161,7 +180,15 @@ class BleController @Inject constructor(
         // STATE_CONNECTED the peer's challenge has not arrived yet, so the
         // reset here is ordering-correct by construction.
         peripheralManager.setOnPeerConnected {
-            synchronized(authLock) { resetAuthLocked() }
+            synchronized(authLock) {
+                resetAuthLocked()
+                // 2026-08-30 open mode: a blank effective key opens the
+                // data phase immediately — no handshake, v1 frames. With a
+                // key configured the Phase 9 handshake drives entry instead.
+                if (bleKeyProvider().isBlank()) {
+                    openMode = true
+                }
+            }
         }
         // Link dropped (peer went away / cancelConnection after fatal):
         // auth state must not survive into the next link.
@@ -229,10 +256,10 @@ class BleController @Inject constructor(
      */
     fun onCommandWrite(rawFrame: ByteArray) {
         synchronized(authLock) {
-            if (authenticated) {
-                handleAuthedWriteLocked(rawFrame)
-            } else {
-                handlePreAuthWriteLocked(rawFrame)
+            when {
+                authenticated -> handleAuthedWriteLocked(rawFrame)
+                openMode -> handleOpenWriteLocked(rawFrame)
+                else -> handlePreAuthWriteLocked(rawFrame)
             }
         }
     }
@@ -249,8 +276,30 @@ class BleController @Inject constructor(
             BleProtocol.CMD_AUTH_CHALLENGE -> handleChallengeLocked(payload)
             BleProtocol.CMD_AUTH_RESPONSE -> handleCentralResponseLocked(payload)
             else -> fatalLocked(
-                "BLE protocol violation: data command 0x%02x before authentication".format(payload[0]),
+                "BLE protocol violation: data command 0x%02x before authentication (server in BLE open mode? clear the Android BLE key)".format(payload[0]),
             )
+        }
+    }
+
+    /**
+     * OPEN-mode policy (blank local key, 2026-08-30): every frame is v1.
+     * CMD_JSON_CHUNK routes to the reassembly engine (the raw frame IS the
+     * v1 encoding the engine expects — no re-wrap needed), other data
+     * commands echo back as v1, and the two AUTH commands mean the SERVER
+     * is configured with a key while this client has none — fatal with an
+     * actionable message.
+     */
+    private fun handleOpenWriteLocked(rawFrame: ByteArray) {
+        val frame = BleProtocol.decodeFrame(rawFrame) ?: return
+        val payload = frame.payload
+        if (payload.isEmpty()) return
+        when (payload[0]) {
+            BleProtocol.CMD_JSON_CHUNK ->
+                bleTransportFallback.onFrameReceived(rawFrame)
+            BleProtocol.CMD_AUTH_CHALLENGE,
+            BleProtocol.CMD_AUTH_RESPONSE,
+            -> fatalLocked("BLE auth refused: server requires a BLE key — fill it in (server ble.token)")
+            else -> notifyV1FrameLocked(payload) // echo path (connectivity loop)
         }
     }
 
@@ -262,9 +311,9 @@ class BleController @Inject constructor(
      * correctly ([handleCentralResponseLocked]).
      */
     private fun handleChallengeLocked(payload: ByteArray) {
-        val token = authTokenProvider()
+        val token = bleKeyProvider()
         if (token.isEmpty()) {
-            fatalLocked("BLE auth refused: no access token configured (open-auth mode has no BLE data channel)")
+            fatalLocked("BLE auth refused: no BLE key configured on this device")
             return
         }
         val key = BleProtocol.deriveBleAuthKey(token)
@@ -281,7 +330,7 @@ class BleController @Inject constructor(
 
         // (1) Prove ourselves: v1 response echoing nonce1 + MAC(nonce1||dir).
         val mac = BleProtocol.authResponseMac(key, nonce, dir)
-        if (!notifyHandshakeFrameLocked(BleProtocol.encodeAuthResponsePayload(nonce, mac))) {
+        if (!notifyV1FrameLocked(BleProtocol.encodeAuthResponsePayload(nonce, mac))) {
             fatalLocked("BLE handshake failed: response notify failed (no CCCD subscriber)")
             return
         }
@@ -293,7 +342,7 @@ class BleController @Inject constructor(
         // "no outstanding challenge".
         val ownNonce = ByteArray(8).also(secureRandom::nextBytes)
         pendingOwnNonce = ownNonce
-        if (!notifyHandshakeFrameLocked(
+        if (!notifyV1FrameLocked(
                 BleProtocol.encodeAuthChallengePayload(BleProtocol.AUTH_DIR_P2C, ownNonce),
             )
         ) {
@@ -328,9 +377,9 @@ class BleController @Inject constructor(
             fatalLocked("BLE handshake failed: auth response nonce mismatch")
             return
         }
-        val token = authTokenProvider()
+        val token = bleKeyProvider()
         if (token.isEmpty()) {
-            fatalLocked("BLE auth refused: no access token configured (open-auth mode has no BLE data channel)")
+            fatalLocked("BLE auth refused: no BLE key configured on this device")
             return
         }
         val key = BleProtocol.deriveBleAuthKey(token)
@@ -352,7 +401,7 @@ class BleController @Inject constructor(
 
     /** POST-AUTH policy: v2-only, strictly increasing seq, fatal on violation. */
     private fun handleAuthedWriteLocked(rawFrame: ByteArray) {
-        val token = authTokenProvider()
+        val token = bleKeyProvider()
         if (token.isEmpty()) {
             // Token vanished mid-session: the shared key can no longer be
             // established symmetrically — fail closed.
@@ -394,14 +443,15 @@ class BleController @Inject constructor(
     // ------------------------------------------------------------------
 
     /**
-     * Sends one handshake payload as a v1 frame with a short bounded retry
-     * against the CCCD-race window (Go implementer note (a)): the PC writes
-     * its challenge back-to-back with subscribing to our State
-     * characteristic, so the very first notify can fail while the
-     * subscription is not yet visible. The PC side carries a 5s handshake
-     * timeout as the outer backstop; our retry budget is far below that.
+     * Sends one payload as a v1 frame with a short bounded retry against
+     * the CCCD-race window (Go implementer note (a)): used by the Phase 9
+     * handshake and by open-mode data echoes. The PC writes its challenge
+     * back-to-back with subscribing to our State characteristic, so the
+     * very first notify can fail while the subscription is not yet visible.
+     * The PC side carries a 5s handshake timeout as the outer backstop;
+     * our retry budget is far below that.
      */
-    private fun notifyHandshakeFrameLocked(payload: ByteArray): Boolean {
+    private fun notifyV1FrameLocked(payload: ByteArray): Boolean {
         val frame = BleProtocol.encodeFrame(payload)
         var attempt = 0
         while (true) {
@@ -426,7 +476,7 @@ class BleController @Inject constructor(
      * its seq, leaving a gap — harmless for a strict-increase receiver.
      */
     private fun notifyAuthedFrameLocked(payload: ByteArray): Boolean {
-        val token = authTokenProvider()
+        val token = bleKeyProvider()
         if (token.isEmpty()) return false
         val key = BleProtocol.deriveBleAuthKey(token)
         val seq = nextTxSeq++
@@ -439,8 +489,9 @@ class BleController @Inject constructor(
      * sequence of CMD_JSON_CHUNK frames that [BleTransportFallback] reassembles.
      *
      * Phase 9: data-phase operation — refused (false) until the mutual
-     * handshake completes; afterwards the request rides a v2 authed frame
-     * (Go `ErrNotAuthenticated` symmetry).
+     * handshake completes OR the connection is in open mode (blank key,
+     * v1 frames — 2026-08-30); afterwards the request rides a v2 authed
+     * frame (Go `ErrNotAuthenticated` symmetry).
      *
      * Returns true when a GATT subscriber was actually notified; false when
      * unauthenticated, there is no subscriber, or [path] exceeds the 255-byte
@@ -482,8 +533,12 @@ class BleController @Inject constructor(
         payload[p++] = ((index2 shr 8) and 0xFF).toByte()
         payload[p++] = (index2 and 0xFF).toByte()
         synchronized(authLock) {
-            if (!authenticated) return false
-            return notifyAuthedFrameLocked(payload)
+            if (!authenticated && !openMode) return false
+            return if (openMode) {
+                notifyV1FrameLocked(payload)
+            } else {
+                notifyAuthedFrameLocked(payload)
+            }
         }
     }
 
@@ -515,19 +570,28 @@ class BleController @Inject constructor(
     /** Clears handshake + per-connection seq state. authLock held. */
     private fun resetAuthLocked() {
         authenticated = false
+        openMode = false
         pendingOwnNonce = null
         nextTxSeq = 0uL
         maxRxSeq = 0uL
         haveRxSeq = false
     }
 
-    private companion object {
+    companion object {
         /**
          * CCCD-race retry budget for handshake notifies (Go note (a)):
          * 5 attempts × 25 ms ≈ 100 ms total — enough to bridge the
          * subscribe-vs-write window, far below the PC's 5 s handshake timeout.
          */
-        const val NOTIFY_RETRY_ATTEMPTS = 5
-        const val NOTIFY_RETRY_DELAY_MS = 25L
+        private const val NOTIFY_RETRY_ATTEMPTS = 5
+        private const val NOTIFY_RETRY_DELAY_MS = 25L
+
+        /**
+         * BLE 握手密钥解析：专用 bleToken 优先，authToken 回退。
+         * 与 server 侧 BLEConfig.EffectiveToken 保持对称——两端规则不一致
+         * 会导致握手密钥不匹配（fail closed）。
+         */
+        fun resolveBleKey(bleToken: String, authToken: String): String =
+            if (bleToken.isNotBlank()) bleToken else authToken
     }
 }

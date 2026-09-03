@@ -180,7 +180,8 @@ func DecodeFrame(data []byte) (Frame, error) {
 // "lmh-ble-v1:" domain-separation prefix keeps this hash distinct from any
 // other use of the token. MUST NOT be called with an empty token — a key
 // derived from "" would be publicly computable (the prefix is a constant);
-// the Central stores a nil key for an empty token and refuses the data phase.
+// the Central stores a nil key for an empty token and runs the data phase
+// open (unauthenticated v1 frames, 2026-08-30).
 func DeriveBleAuthKey(token string) []byte {
 	h := sha256.Sum256([]byte("lmh-ble-v1:" + token))
 	return h[:]

@@ -85,6 +85,20 @@ class BleSettingsViewModel @Inject constructor(
     val lastConnectedMac: StateFlow<String?> = store.lastConnectedBleAddress
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    /**
+     * 专用 BLE 握手密钥（对应 server 的 ble.token）。空 = 未配置，握手密钥
+     * 回退到 authToken（解析规则在 BleController.resolveBleKey，两端对称）。
+     */
+    val bleToken: StateFlow<String> = store.bleToken
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    /** 保存/清除专用 BLE 密钥。保存后需重新握手才生效。 */
+    fun saveBleToken(token: String) {
+        viewModelScope.launch {
+            store.saveBleToken(token.trim())
+        }
+    }
+
     // --- Task 9: scan / connect / send echo state ---------------------------
 
     private val _devices = MutableStateFlow<List<BleDevice>>(emptyList())

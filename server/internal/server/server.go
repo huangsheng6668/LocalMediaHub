@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"strings"
@@ -40,9 +41,9 @@ type Server struct {
 	bleListenerCtx    context.Context
 	bleListenerCancel context.CancelFunc
 	// bleScanner is the concrete Central-role scanner built in New (nil when
-	// BLE is unavailable or the build lacks the bluetooth tag). It is consumed
-	// internally by the build-tag-guarded wireBleAutoRestart method
-	// (windows && bluetooth), which injects a ConnectRecorder (BleHealthMonitor)
+	// BLE is unavailable, e.g. no Bluetooth radio on the host). It is consumed
+	// internally by the platform-guarded wireBleAutoRestart method (windows),
+	// which injects a ConnectRecorder (BleHealthMonitor)
 	// for stuck-detection auto-restart. The recorder is wired inside New AFTER
 	// this field is set, because the BleHealthMonitor needs *Server for the
 	// restarter, so it can only be built once the Server is constructible.
@@ -124,24 +125,28 @@ func New(cfg *config.Config) (*Server, error) {
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, bookService, bookSigner)
 
 	// BLE GATT wiring Task 4: construct the BLE Central non-fatally. If no
-	// Bluetooth adapter is present OR the build was compiled without the
-	// "bluetooth" tag, NewCentralScanner returns (nil, err) and we leave
-	// h.BLECentral as a true nil interface so the /api/v1/ble/* handlers'
+	// Bluetooth adapter is present, NewCentralScanner returns (nil, err) and we
+	// leave h.BLECentral as a true nil interface so the /api/v1/ble/* handlers'
 	// `== nil` checks route to the "ble unavailable" responses (zero-regression).
 	// CRITICAL (Gotcha 1): assign h.BLECentral ONLY when bleCentral is non-nil.
 	// Assigning a nil *ble.Central would create a non-nil interface wrapping a
 	// nil pointer, which would defeat the handlers' nil check.
-	bleScanner, bleErr := ble.NewCentralScanner()
-	if bleErr != nil {
-		fmt.Printf("BLE Central disabled; /api/v1/ble/* will report unavailable: %v\n", bleErr)
-	} else {
-		s.bleScanner = bleScanner
-		bleCentral := ble.NewCentral(bleScanner)
-		// Phase 9 (H-1a): derive the BLE auth key from the server token. The
-		// Central refuses the data phase with a nil key (open-auth mode), and
-		// the /api/v1/ble/scan|connect handlers already 400 on an empty token
-		// — this wiring is what makes an authenticated handshake possible.
-		bleCentral.SetAuthToken(cfg.Server.Token)
+		bleScanner, bleErr := ble.NewCentralScanner()
+		if bleErr != nil {
+			fmt.Printf("BLE Central disabled; /api/v1/ble/* will report unavailable: %v\n", bleErr)
+		} else {
+			s.bleScanner = bleScanner
+			bleCentral := ble.NewCentral(bleScanner)
+			// Phase 9 (H-1a) + 2026-08-30 open mode: derive the BLE auth key
+			// from the effective BLE secret — ble.token first, server.token
+			// fallback. Both empty = OPEN mode: no handshake, data frames
+			// ride unauthenticated v1 (mirrors the open-LAN HTTP posture;
+			// the WARN below states the accepted trade-off).
+			effBleSecret := cfg.BLE.EffectiveToken(cfg.Server.Token)
+			bleCentral.SetAuthToken(effBleSecret)
+			if effBleSecret == "" {
+				slog.Warn("BLE running in OPEN mode: any device in range can exchange data; set ble.token to require authentication")
+			}
 		// Spec §3.1: inject the bleApiProvider so the long-lived listener can
 		// serve CMD_API_REQ frames for every endpoint (book chapter, folders,
 		// browse folder, book info) out of the box. The provider adapts cfg +
@@ -180,7 +185,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// BLE stuck-detection auto-restart (spec §3): parse LMH_BLE_RESTART_TS for
 	// cooldown, build the self-restarter + health monitor, and inject the
 	// monitor as the BLE scanner's ConnectRecorder. No-op when BLE is
-	// unavailable or the build is not windows && bluetooth (stub method).
+	// unavailable or on non-Windows builds (stub method).
 	// Done at the end of New so the restarter's *Server ref is fully
 	// constructed; both the headless and GUI entry points inherit it for free.
 	s.wireBleAutoRestart()

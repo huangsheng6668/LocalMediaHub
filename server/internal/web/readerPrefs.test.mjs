@@ -40,3 +40,18 @@ test('THEME_LABELS is frozen and aligned with THEME_PRESETS', () => {
         assert.ok(v.length > 0);
     }
 });
+
+test('FONT_FAMILIES all include cross-platform emoji font fallback', () => {
+    assert.ok(readerPrefs.EMOJI_FONT_FALLBACK, 'EMOJI_FONT_FALLBACK must be exported');
+    assert.ok(readerPrefs.EMOJI_FONT_FALLBACK.includes('Segoe UI Emoji'));
+    assert.ok(readerPrefs.EMOJI_FONT_FALLBACK.includes('Apple Color Emoji'));
+    assert.ok(readerPrefs.EMOJI_FONT_FALLBACK.includes('Noto Color Emoji'));
+
+    for (const [name, stack] of Object.entries(readerPrefs.FONT_FAMILIES)) {
+        assert.ok(typeof stack === 'string', `${name} font family stack must be string`);
+        assert.ok(stack.includes('Segoe UI Emoji'), `${name} must include Segoe UI Emoji`);
+        assert.ok(stack.includes('Apple Color Emoji'), `${name} must include Apple Color Emoji`);
+        assert.ok(stack.includes('Noto Color Emoji'), `${name} must include Noto Color Emoji`);
+    }
+});
+

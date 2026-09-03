@@ -157,6 +157,8 @@
 | 7 | APK 签名 fail-fast + `allowBackup=false` | `docs/superpowers/specs/2026-07-10-security-phase7-apk-signing-design.md` | 完成 |
 | 8 | 杂项 P2（rate limit / blocked roots / ffmpeg kill on disconnect / sanitize path errors） | `docs/superpowers/specs/2026-07-11-security-phase8-misc-p2-design.md` | 完成 |
 | 9 | 三端审计修复（媒体端点 auth / BodyLimit / 认证失败限速 / 缩略图缓存上限 / BLE HMAC 认证与 GATT 加固 / 杂项 P4） | `docs/superpowers/specs/2026-08-17-security-phase9-tri-end-audit-design.md` | 完成 |
+| — | BLE 专属密钥 `ble.token`（开放 LAN 模式与 BLE 并存；密钥源 `ble.token` → `server.token`，两端对称） | `docs/superpowers/specs/2026-08-29-ble-dedicated-token-design.md` | 完成 |
+| — | BLE 开放模式（无密钥 = v1 无认证开放，配 `ble.token` 恢复 v2 HMAC） | `docs/superpowers/specs/2026-08-30-ble-open-mode-design.md` | 完成 |
 
 ### 路径校验三件套（`server/internal/service/path.go`）
 

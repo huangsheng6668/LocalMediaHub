@@ -19,6 +19,7 @@ type Config struct {
 	Thumbnail ThumbnailConfig `yaml:"thumbnail" json:"thumbnail"`
 	System    SystemConfig    `yaml:"system,omitempty" json:"system,omitempty"`
 	Debug     DebugConfig     `yaml:"debug,omitempty" json:"debug,omitempty"`
+	BLE       BLEConfig       `yaml:"ble,omitempty" json:"ble,omitempty"`
 }
 
 // DebugConfig holds optional debug-only features. All fields default to off and
@@ -40,6 +41,26 @@ type ServerConfig struct {
 	// deliberately exposes the token to the LAN; intended for trusted home
 	// networks during initial pairing, to be switched off afterwards.
 	LanPairing bool `yaml:"lan_pairing" json:"lan_pairing"`
+}
+
+// BLEConfig holds the optional dedicated BLE handshake key. When Token is
+// empty the BLE channel falls back to ServerConfig.Token (pre-existing
+// behavior); when that is also empty the BLE channel runs OPEN (2026-08-30:
+// no handshake, unauthenticated v1 frames; set a token to require the
+// authenticated GATT channel). Secret: never
+// projected into ConfigPublic.
+type BLEConfig struct {
+	Token string `yaml:"token,omitempty" json:"token,omitempty"`
+}
+
+// EffectiveToken resolves the BLE handshake key source: ble.token first,
+// server.token as fallback. Both ends (server Central + Android
+// BleProtocol) must apply the same precedence or the handshake mismatches.
+func (b BLEConfig) EffectiveToken(serverToken string) string {
+	if b.Token != "" {
+		return b.Token
+	}
+	return serverToken
 }
 
 type ScanConfig struct {

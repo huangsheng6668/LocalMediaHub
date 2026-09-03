@@ -2,6 +2,8 @@ package com.juziss.localmediahub
 
 import android.app.Application
 import android.content.Context
+import androidx.emoji2.bundled.BundledEmojiCompatConfig
+import androidx.emoji2.text.EmojiCompat
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.decode.BitmapFactoryDecoder
@@ -77,6 +79,7 @@ class LocalMediaHubApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        initEmojiCompat()
         // Startup cleanup: delete Coil diskCache entries unmodified for >30 days.
         // applicationScope is bound to Application; Dispatchers.IO ensures no main-thread block.
         applicationScope.launch {
@@ -86,6 +89,22 @@ class LocalMediaHubApplication : Application(), SingletonImageLoader.Factory {
             )
         }
         registerWifiTransportMonitor()
+    }
+
+    /**
+     * Initialize EmojiCompat with bundled font (offline support).
+     * setReplaceAll(true) ensures all modern emojis are rendered consistently using the bundled
+     * color emoji font across all Android versions, devices without GMS, and all reader font families
+     * (System, Serif, Kaiti, Monospace).
+     */
+    private fun initEmojiCompat() {
+        try {
+            val emojiConfig = BundledEmojiCompatConfig(this)
+                .setReplaceAll(true)
+            EmojiCompat.init(emojiConfig)
+        } catch (e: Exception) {
+            android.util.Log.w("LocalMediaHubApp", "Failed to initialize EmojiCompat", e)
+        }
     }
 
     /**

@@ -19,6 +19,7 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 │  - mDNS 发现        │                         │  - NSD 自动发现       │
 │  - 系统托盘         │                         │  - 画中画 (PiP)       │
 │  - Bearer Token     │                         │  - 离线下载          │
+│  - BLE Central(实验)│  BLE GATT 控制通道(实验) │  - BLE Peripheral    │
 └─────────────────────┘                         └──────────────────────┘
 ```
 
@@ -30,7 +31,7 @@ GitHub: [huangsheng6668/LocalMediaHub](https://github.com/huangsheng6668/LocalMe
 
 ### 2. 小说阅读器（txt / epub）
 
-服务端章节解析（bookparser：LRU 文本缓存 + 字节/字符偏移映射，大文件章加载 ~200ms→<5ms；支持卷层级与非标准章节标题）与 epub 图片内联（签名 URL，绑定 clientIP）。Web 端阅读器已模块化为 bus 解耦架构（textReader + toc/bookmarks/progress/autoscroll/reader-settings 子模块）。7 套主题（AUTO + 日间 × 3 + 夜间 × 3），嵌入 LXGW WenKai + Noto Serif SC 字体。V2 设置：字号 / 行距 / 段距 / 首行缩进 / 字体族 / 文本最大宽度（最高 1400px/1400dp）。支持分章模式与全文滚动模式、全屏沉浸模式（隐藏系统栏/顶底栏，Esc 或后退手势优先退出沉浸）、实时百分比阅读进度与细进度条（分章内进度 % + 全书进度 %）、分章模式左右区域点击翻页、自动滚动、书签、章节列表（高亮当前章节）、首字下沉、淡入过渡。
+服务端章节解析（bookparser：LRU 文本缓存 + 字节/字符偏移映射，大文件章加载 ~200ms→<5ms；支持卷层级与非标准章节标题）与 epub 图片内联（签名 URL，绑定 clientIP）。Web 端阅读器已模块化为 bus 解耦架构（textReader + toc/bookmarks/progress/autoscroll/reader-settings 子模块）。7 套预设主题（日间 × 2 / 护眼纸质 × 3 / 夜间 × 2）另加 AUTO 跟随系统与 CUSTOM 自定义底色，嵌入 LXGW WenKai + Noto Serif SC 字体。V2 设置：字号 / 行距 / 段距 / 首行缩进 / 字体族 / 文本最大宽度（最高 1400px/1400dp）。支持分章模式与全文滚动模式、全屏沉浸模式（隐藏系统栏/顶底栏，Esc 或后退手势优先退出沉浸）、实时百分比阅读进度与细进度条（分章内进度 % + 全书进度 %）、分章模式左右区域点击翻页、自动滚动、书签、章节列表（高亮当前章节）、首字下沉、淡入过渡。
 
 ### 3. 续播与上下文恢复
 
@@ -46,13 +47,21 @@ WorkManager 前台服务执行下载，常驻通知栏显示进度；支持单�
 
 ### 6. 安全加固
 
-Bearer Token 认证（admin / system / media / books 路由组强制，SHA256 + constant-time 比较）；**books 图片签名 URL**（HMAC 绑定 clientIP + path + manifestID，替代明文 bearer token 入 URL/log）；access log `?token=` redact；**rate limit LRU + 容量上限**（防伪造 `X-Forwarded-For` 内存膨胀）；安全响应头（CSP / X-Frame-Options / nosniff / Referrer-Policy）；**`/debug/pprof` 默认关闭**（需显式 flag/config 开启）；Release APK 签名 fail-fast 守卫；libffmpeg SHA256 preBuild 校验；路径遍历防护（ValidatePath + ValidateSystemMediaAccess + ValidateAccessibleMediaPath）；**Web SPA XSS lint**（`tools/xsscheck` 扫描所有 DOM 写入 sink，缺 `// XSS-SAFE:` 注释即失败）。
+Bearer Token 认证（admin / system / media / books 路由组强制，SHA256 + constant-time 比较）；**books 图片签名 URL**（HMAC 绑定 clientIP + path + manifestID，替代明文 bearer token 入 URL/log）；access log `?token=` redact；**rate limit LRU + 容量上限**（防伪造 `X-Forwarded-For` 内存膨胀）；安全响应头（CSP / X-Frame-Options / nosniff / Referrer-Policy）；**`/debug/pprof` 默认关闭**（需显式 flag/config 开启）；Release APK 签名 fail-fast 守卫；libffmpeg SHA256 preBuild 校验；路径遍历防护（ValidatePath + ValidateSystemMediaAccess + ValidateAccessibleMediaPath）；**Web SPA XSS lint**（`tools/xsscheck` 扫描所有 DOM 写入 sink，缺 `// XSS-SAFE:` 注释即失败）；**BLE 帧认证**（v2 帧 seq+HMAC + 双 nonce 握手，专属密钥 `ble.token` 优先、`server.token` 回退，两者皆空 = 开放模式并打 WARN）。
+
+### 7. Web 管理界面
+
+浏览器直接访问 server 地址（如 `http://localhost:8000`）即是完整管理端：仪表盘（统计卡片 + 最近媒体缩略图）、文件浏览器、书架（封面卡片 + 阅读进度元数据）、书签、设置、视频播放器、图片灯箱与文本阅读器。2026-09 完成现代中性风重设计——7 套 `[data-theme]` 界面主题（与阅读区主题独立分离）、emoji 图标全部替换为内联 SVG、单文件 `style.css` 拆分为分层 `css/` 模块。零构建步骤（原生 ES module，CSP 兼容），Token 经 sessionStorage 持久化，401 自动弹输入框。
+
+### 8. BLE 控制通道（实验）
+
+并行低延迟控制通道（连接协调本身走 Wi-Fi/HTTP，不是离线兜底）：**server=Central**（tinygo bluetooth 栈，默认编入单一 server 构建，无蓝牙适配器则非致命降级），**Android=Peripheral**（`BluetoothGattServer`，Command Write + State Notify）。Android 通过 `/api/v1/ble/scan|connect|send` HTTP 接口协调连接，控制信令与数据帧走 GATT（`CMD_API_REQ` 可承载章节 / 目录等 API 响应）。默认关闭（Android 连接页 BLE 设置卡开启），蓝牙不可用完全退回 Wi-Fi/HTTP，零退化。
 
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
-| Server | Go 1.25+ / Echo v4 / modernc.org/sqlite (pure-Go) / fsnotify / getlantern/systray / hashicorp/mdns |
+| Server | Go 1.25+ / Echo v4 / modernc.org/sqlite (pure-Go) / fsnotify / getlantern/systray / hashicorp/mdns / tinygo.org/x/bluetooth（BLE Central） |
 | Android | Kotlin / Jetpack Compose / Media3 (ExoPlayer + MediaSession) / Coil 3 / WorkManager / Hilt |
 | Web 管理界面 | 模块化 JS SPA（无构建步骤，CSP 兼容） |
 | 原生解码 | Rust 2021 + cargo-ndk → arm64-v8a（pure-Rust crates）+ 预编译 libffmpeg.so |
@@ -85,6 +94,11 @@ server:
   host: "0.0.0.0"
   port: 8000
   token: "<可选：开启 Bearer Token 后填入>"
+  # lan_pairing: true   # 零接触配对（临时开启）：App 在局域网内免认证自动获取
+  #                     # token（含 ble.token），配对完成后改回 false
+
+ble:
+  token: ""   # BLE 专属握手密钥：留空回退 server.token；两者皆空 = BLE 开放模式
 
 scan:
   video_extensions: [.mp4, .mkv, .avi, .mov]
@@ -116,6 +130,7 @@ APK 输出位置：`android/app/build/outputs/apk/`
 
 - **自动**：App 优先尝试上次成功连接的服务端，失败后通过 NSD 自动发现局域网内的 Server（需同一 WiFi + `CHANGE_WIFI_MULTICAST_STATE` 权限）。
 - **手动**：在 App 中输入 PC 的局域网 IP（如 `192.168.1.100:8000`）。
+- **零接触配对**：服务端临时开启 `server.lan_pairing: true` 后，App 在局域网内免认证 `POST /api/v1/pair` 即可自动获取 token（含 BLE 密钥），无需手动抄写；配对完成后应改回 `false`。
 
 如服务端配置了 `token`，Android 与 Web 都会弹输入框。
 

@@ -1,4 +1,4 @@
-//go:build windows && bluetooth
+//go:build windows
 
 package server
 

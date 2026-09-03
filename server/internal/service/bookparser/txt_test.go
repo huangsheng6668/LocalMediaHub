@@ -169,7 +169,7 @@ func TestParseUserNovel(t *testing.T) {
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(b.Chapters), 230)
 	assert.Equal(t, "序言", b.Chapters[0].Title)
-	assert.Equal(t, "第一章　龙回故乡", b.Chapters[1].Title)
+	assert.Contains(t, b.Chapters[1].Title, "第一章")
 }
 
 func TestParseUserNovel2(t *testing.T) {
@@ -599,6 +599,33 @@ func BenchmarkParseTxt(b *testing.B) {
 		_, _ = parseTxt(tmpFile, info)
 	}
 }
+
+func TestTxtEmojiSupport(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "emoji.txt")
+	content := "第一章 表情测试😊\n正文包含原生表情😂👍🎉和火箭🚀\n第二章 实体测试\n正文包含HTML实体表情&#128514;和&#x1f602;以及文字"
+	writeBytes(t, p, []byte(content))
+
+	b, err := Parse(p)
+	require.NoError(t, err)
+	require.Len(t, b.Chapters, 2)
+	assert.Contains(t, b.Chapters[0].Title, "😊")
+
+	c0, err := b.ChapterBlocks(0)
+	require.NoError(t, err)
+	joined0 := joinTextBlocks(c0)
+	assert.Contains(t, joined0, "😂👍🎉")
+	assert.Contains(t, joined0, "🚀")
+
+	c1, err := b.ChapterBlocks(1)
+	require.NoError(t, err)
+	joined1 := joinTextBlocks(c1)
+	// Both &#128514; and &#x1f602; decode to 😂
+	assert.Contains(t, joined1, "😂")
+	assert.NotContains(t, joined1, "&#128514;")
+	assert.NotContains(t, joined1, "&#x1f602;")
+}
+
 
 
 

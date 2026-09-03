@@ -1,9 +1,8 @@
-//go:build bluetooth
-
-// This file is compiled only with the "bluetooth" build tag, pulling in the
-// real tinygo.org/x/bluetooth stack. Default builds (no tag) use
-// central_adapter_stub.go instead, so the server compiles without a Bluetooth
-// stack and treats BLE absence as non-fatal (zero-regression).
+// Real BLE Central adapter built on tinygo.org/x/bluetooth (vendored fork at
+// third_party/bluetooth). This is compiled into the standard server build —
+// there is no separate BLE build variant. Adapter absence at runtime is
+// non-fatal: if the radio is missing or Enable fails, NewCentralScanner
+// returns (nil, err) and the server continues over Wi-Fi/HTTP (zero-regression).
 
 package ble
 
@@ -29,7 +28,7 @@ type tinyGoCentralScanner struct {
 
 	// recorder observes each Connect round's outcome (ok/fail) so the server
 	// can inject a *BleHealthMonitor that triggers a self-restart after
-	// ConnectFailThreshold consecutive failures (windows && bluetooth build).
+	// ConnectFailThreshold consecutive failures (windows build).
 	// nil = observe nothing. Set once via SetConnectRecorder and only read
 	// inside connectLocked (which runs under opMu), so no extra
 	// synchronization is required.

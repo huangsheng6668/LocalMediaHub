@@ -46,7 +46,7 @@ func (f *fakeCentral) State() string {
 
 // newBLEHandler builds a Handler around the given BLE backend with a tokened
 // config, mirroring production (handler.New always carries a cfg). Tests for
-// the open-auth gate use newBLEOpenAuthHandler instead.
+// the open-token posture (both tokens empty) use newBLEOpenAuthHandler instead.
 func newBLEHandler(central BLECentralBackend) *Handler {
 	cfg := &config.Config{}
 	cfg.Server.Token = "unit-test-token"
@@ -54,7 +54,7 @@ func newBLEHandler(central BLECentralBackend) *Handler {
 }
 
 // newBLEOpenAuthHandler builds a Handler whose config has NO server.token —
-// the open-auth mode the BLE handlers must refuse (Phase 9 / H-1a).
+// open-auth mode: the BLE endpoints serve like every other route (2026-08-30).
 func newBLEOpenAuthHandler(central BLECentralBackend) *Handler {
 	return &Handler{cfg: &config.Config{}, BLECentral: central}
 }
@@ -98,43 +98,81 @@ func TestScanBLEUnavailableReturnsEmpty(t *testing.T) {
 	}
 }
 
-// TestScanBLEOpenAuthModeRejected verifies the Phase 9 (H-1a) handler gate:
-// with no server.token the scan request is refused with HTTP 400 and a
-// message explaining BLE is unavailable in open-auth mode.
-func TestScanBLEOpenAuthModeRejected(t *testing.T) {
+// TestScanBLEOpenModeAllowed: with both tokens empty the scan endpoint is
+// open like every other route (2026-08-30 spec) — devices come back, no 400.
+func TestScanBLEOpenModeAllowed(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/ble/scan", nil)
-	c := e.NewContext(req, httptest.NewRecorder())
-	h := newBLEOpenAuthHandler(&fakeCentral{})
-	err := h.ScanBLE(c)
-	if err == nil {
-		t.Fatal("expected 400 for scan in open-auth mode")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	h := newBLEOpenAuthHandler(&fakeCentral{scanDevices: []ble.Device{{ID: "AA:BB", Name: "Pixel", RSSI: -45}}})
+	if err := h.ScanBLE(c); err != nil {
+		t.Fatalf("ScanBLE error: %v", err)
 	}
-	he, ok := err.(*echo.HTTPError)
-	if !ok || he.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %v", err)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200", rec.Code)
 	}
-	if msg, _ := he.Message.(string); msg == "" || !strings.Contains(msg, "open-auth") {
-		t.Fatalf("message must explain open-auth BLE unavailability, got %q", msg)
+	var resp struct {
+		Devices []ble.Device `json:"devices"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("bad json: %v", err)
+	}
+	if len(resp.Devices) != 1 || resp.Devices[0].ID != "AA:BB" {
+		t.Fatalf("got %+v", resp.Devices)
 	}
 }
 
-// TestConnectBLEOpenAuthModeRejected verifies the connect half of the same
-// gate: no token -> HTTP 400, never a GATT connection attempt.
-func TestConnectBLEOpenAuthModeRejected(t *testing.T) {
+// TestConnectBLEOpenModeAllowed: the connect half of the same posture —
+// no key configured, still a normal connect attempt (the Central itself
+// runs open mode per Task 1).
+func TestConnectBLEOpenModeAllowed(t *testing.T) {
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ble/connect", strings.NewReader(`{"id":"AA:BB"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	c := e.NewContext(req, httptest.NewRecorder())
-	fc := &fakeCentral{}
-	h := newBLEOpenAuthHandler(fc)
-	err := h.ConnectBLE(c)
-	if err == nil {
-		t.Fatal("expected 400 for connect in open-auth mode")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	h := newBLEOpenAuthHandler(&fakeCentral{})
+	if err := h.ConnectBLE(c); err != nil {
+		t.Fatalf("ConnectBLE error: %v", err)
 	}
-	he, ok := err.(*echo.HTTPError)
-	if !ok || he.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %v", err)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200", rec.Code)
+	}
+	var resp struct {
+		Connected bool `json:"connected"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("bad json: %v", err)
+	}
+	if !resp.Connected {
+		t.Fatalf("expected connected=true, body=%s", rec.Body.String())
+	}
+}
+
+// TestScanBLEDedicatedTokenAllowed: ble.token alone (open-auth HTTP) must
+// unlock the BLE channel — the route-2 combination.
+func TestScanBLEDedicatedTokenAllowed(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ble/scan", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	cfg := &config.Config{}
+	cfg.BLE.Token = "dedicated-ble-key"
+	h := &Handler{cfg: cfg, BLECentral: &fakeCentral{
+		scanDevices: []ble.Device{{ID: "AA:BB", Name: "Pixel", RSSI: -45}},
+	}}
+	if err := h.ScanBLE(c); err != nil {
+		t.Fatalf("ScanBLE error: %v", err)
+	}
+	var resp struct {
+		Devices []ble.Device `json:"devices"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("bad json: %v", err)
+	}
+	if len(resp.Devices) != 1 {
+		t.Fatalf("expected scan to run with dedicated ble.token, got %+v", resp.Devices)
 	}
 }
 

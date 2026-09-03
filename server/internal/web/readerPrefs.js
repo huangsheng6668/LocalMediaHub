@@ -12,13 +12,16 @@ const BOOKMARKS_PREFIX = 'book_bookmarks:';
 const V1_FONT_SIZE = { SMALL: 14, MEDIUM: 16, LARGE: 18, XLARGE: 20 };
 const V1_LINE_HEIGHT = { COMPACT: 1.4, STANDARD: 1.8, LOOSE: 2.2 };
 
+// 跨平台彩色 Emoji 字体回退栈，保证 Windows / macOS / iOS / Android / Linux 下均能正常展示彩色表情
+export const EMOJI_FONT_FALLBACK = '"Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"';
+
 // 字体选项与 CSS font-family 映射；serif/kaiti 的实际字体文件由 Phase 3 引入
 export const FONT_FAMILIES = {
-    SYSTEM: '-apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif',
-    SERIF: '"Noto Serif SC", "Songti SC", "SimSun", serif',
-    KAITI: '"LXGW WenKai", "Kaiti SC", "STKaiti", cursive',
-    HEITI: '"Heiti SC", "Microsoft YaHei", "PingFang SC", sans-serif',
-    MONO: '"Cascadia Mono", Consolas, "Courier New", monospace',
+    SYSTEM: `-apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif, ${EMOJI_FONT_FALLBACK}`,
+    SERIF: `"Noto Serif SC", "Songti SC", "SimSun", serif, ${EMOJI_FONT_FALLBACK}`,
+    KAITI: `"LXGW WenKai", "Kaiti SC", "STKaiti", cursive, ${EMOJI_FONT_FALLBACK}`,
+    HEITI: `"Heiti SC", "Microsoft YaHei", "PingFang SC", sans-serif, ${EMOJI_FONT_FALLBACK}`,
+    MONO: `"Cascadia Mono", Consolas, "Courier New", monospace, ${EMOJI_FONT_FALLBACK}`,
 };
 
 // 内容宽度滑块范围（px）。Android 在屏幕 dp 上有等价 clamp。

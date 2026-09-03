@@ -446,19 +446,45 @@ class MediaRepository @Inject constructor(
     // ── LAN pairing (zero-touch setup) ────────────────────────
 
     /**
-     * Zero-touch pairing: while the server runs with `server.lan_pairing:
-     * true`, an unauthenticated POST /api/v1/pair returns the bearer token
-     * once, letting the app auto-configure HTTP auth AND the BLE handshake
-     * key without hand-copying the token. Returns the granted token, or null
-     * when pairing is disabled / unreachable / open-auth mode. Never throws.
+     * Zero-touch pairing grant from POST /api/v1/pair:
+     *  - [token]: the HTTP bearer token (present only when server.token is set)
+     *  - [bleToken]: the DEDICATED BLE handshake key (present only when the
+     *    server configured ble.token; the server.token fallback needs no
+     *    separate distribution and is omitted)
      */
-    suspend fun tryLanPairing(): String? = withContext(Dispatchers.IO) {
+    data class LanPairGrant(val token: String?, val bleToken: String?) {
+        companion object {
+            private val gson = Gson()
+
+            /** Parses the pairing body; null on unparseable/empty responses. */
+            fun parse(body: String): LanPairGrant? = try {
+                @Suppress("UNCHECKED_CAST")
+                val map = gson.fromJson(body, Map::class.java) as? Map<String, Any>
+                    ?: return null
+                LanPairGrant(
+                    token = map["token"] as? String,
+                    bleToken = map["ble_token"] as? String,
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    /**
+     * Zero-touch pairing: while the server runs with `server.lan_pairing:
+     * true`, an unauthenticated POST /api/v1/pair returns the token material
+     * once, letting the app auto-configure HTTP auth AND the BLE handshake
+     * key without hand-copying secrets. Returns the grant, or null when
+     * pairing is disabled / unreachable / nothing to distribute. Never throws.
+     */
+    suspend fun tryLanPairing(): LanPairGrant? = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder().url("$baseUrl/api/v1/pair").post("".toRequestBody(null)).build()
             http.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val body = resp.body?.string() ?: return@withContext null
-                gson.fromJson(body, Map::class.java)?.get("token") as? String
+                LanPairGrant.parse(body)
             }
         } catch (e: Exception) {
             null

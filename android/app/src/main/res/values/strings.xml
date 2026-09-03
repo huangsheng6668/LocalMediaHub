@@ -329,6 +329,11 @@
     <string name="ble_connect_btn">一键建立 BLE 控制通道</string>
     <string name="ble_send_test">发送测试 (Ping / Pong)</string>
     <string name="ble_echo_fmt">收到回声：%1$s</string>
+    <string name="ble_key_title">BLE 密钥（可选）</string>
+    <string name="ble_key_desc">服务器开放模式（未设 token）时使用 BLE 需填入服务器的 ble.token；留空则使用高级选项中的访问令牌。修改后需重新建立通道。</string>
+    <string name="ble_key_placeholder">ble.token（留空使用访问令牌）</string>
+    <string name="ble_key_save">保存密钥</string>
+    <string name="ble_key_saved">已保存，重新建立通道后生效</string>
 
     <!-- ── BLE settings ViewModel messages ─────────────────── -->
     <string name="ble_err_no_advertising">未发现当前手机的 BLE 广播（请在本 App 连接设置中打开「BLE 控制通道」开关并保持 App 运行；同时确保手机系统蓝牙已开启且距离电脑较近）</string>

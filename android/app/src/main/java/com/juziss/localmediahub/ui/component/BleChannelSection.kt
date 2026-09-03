@@ -27,6 +27,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,11 +35,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.ble.BleConnState
@@ -147,6 +153,13 @@ fun BleChannelSection(
     // has opted in to the experimental BLE channel; the inner buttons
     // are further gated on the live connection state.
     if (bleEnabled) {
+        // 专用 BLE 密钥（server ble.token）。开放 LAN 模式下使用 BLE 时必填；
+        // 留空回退到高级选项中的访问令牌（解析在 BleController.resolveBleKey）。
+        val storedBleToken by viewModel.bleToken.collectAsState()
+        BleKeyCard(
+            storedBleToken = storedBleToken,
+            onSave = { viewModel.saveBleToken(it) },
+        )
         BleDeviceScanCard(
             devices = bleDevices,
             scanning = bleScanning,
@@ -243,6 +256,100 @@ internal fun BleExperimentalToggleCard(
                 enabled = canToggle,
                 onCheckedChange = onCheckedChange,
             )
+        }
+    }
+}
+
+/**
+ * 专用 BLE 密钥编辑卡：默认折叠，展开后提供密码式输入 + 显式保存按钮
+ * （显式保存避免隐式写入 DataStore）。空值 = 清除，握手密钥回退到
+ * 访问令牌（authToken）。
+ */
+@Composable
+internal fun BleKeyCard(
+    storedBleToken: String,
+    onSave: (String) -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    // null = 尚未编辑：输入框跟随已存储值；一旦编辑即跟随用户输入
+    var keyInput by rememberSaveable { mutableStateOf<String?>(null) }
+    var showSavedHint by rememberSaveable { mutableStateOf(false) }
+    val effectiveInput = keyInput ?: storedBleToken
+
+    ElevatedCard(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.border(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+            shape = RoundedCornerShape(16.dp)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = stringResource(R.string.ble_key_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            if (expanded) {
+                Text(
+                    text = stringResource(R.string.ble_key_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = effectiveInput,
+                    onValueChange = {
+                        keyInput = it
+                        showSavedHint = false
+                    },
+                    placeholder = { Text(stringResource(R.string.ble_key_placeholder)) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (showSavedHint) {
+                        Text(
+                            text = stringResource(R.string.ble_key_saved),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(modifier = Modifier.size(8.dp))
+                    }
+                    Button(
+                        onClick = {
+                            onSave(effectiveInput)
+                            keyInput = null
+                            showSavedHint = true
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(stringResource(R.string.ble_key_save))
+                    }
+                }
+            }
         }
     }
 }

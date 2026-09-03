@@ -1,4 +1,4 @@
-//go:build windows && bluetooth
+//go:build windows
 
 package ble
 
@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -40,6 +41,13 @@ type stopper interface {
 // exec.Cmd that re-launches this server with the same args plus the
 // LMH_BLE_RESTART_TS env. Pure helper — testable without exec/exit.
 func buildRestartChildCommand(exePath string, args []string, ts int64) *exec.Cmd {
+	// 进入 exec 前净化自身可执行文件路径（CWE-78 边界）：os.Executable 的
+	// 输出收敛为规范的绝对路径，异常形态直接拒绝重启。
+	if exePath == "" || !filepath.IsAbs(exePath) {
+		exePath = ""
+	} else {
+		exePath = filepath.Clean(exePath)
+	}
 	cmd := exec.Command(exePath, args[1:]...)
 	// Inherit current environment, then set/override the restart timestamp so
 	// the child knows it was spawned by a BLE-triggered restart.
