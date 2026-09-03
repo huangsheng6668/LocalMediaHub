@@ -19,13 +19,20 @@
 }
 
 .settings-static {
-    background-color: rgba(0, 0, 0, 0.2);
+    background-color: var(--surface-hover);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    padding: 10px 12px;
-    font-family: monospace;
+    padding: 8px 12px;
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.settings-card textarea {
+    min-height: 120px;
+    font-family: var(--font-mono, monospace);
     font-size: 13px;
-    color: var(--accent-text);
+    line-height: 1.5;
 }
 
 /* from style.css L2970-2974 (CSP-safe settings-global-theme-grid) */
