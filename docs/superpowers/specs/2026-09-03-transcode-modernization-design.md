@@ -64,7 +64,7 @@
 
 ### 3.3 会话并发上限（streaming.go + server 接线）
 
-- `StreamingService` 增加 `transcodeSem chan struct{}`，容量 = `transcode.max_sessions`（默认 3；`0` = 不限制，保留逃生门）。
+- `StreamingService` 增加 `transcodeSem chan struct{}`，容量 = `transcode.max_sessions`（默认 3；**`-1` = 不限制**，保留逃生门。YAML int 无法区分缺省 0 与显式 0，故以负值作不限流哨兵，`0`/缺省在 config 层归一为默认值——实施期锁定的修正）。
 - `cmd.Start()` 前获取，`cmd.Wait()` 后 defer 释放；**排队获取尊重 `r.Context()`**——排队期间客户端断开则不再 spawn ffmpeg。
 - 不引入 429：静默排队（LAN 家庭并发场景几乎不触顶；避免两端客户端新增错误处理分支）。
 - 该上限即转码路径的 CPU DoS 兜底，与缩略图的 512MB 磁盘上限、既有 rate limit 互补。
@@ -75,7 +75,7 @@
 transcode:
   # 顺序即优先级；libx264 始终最终兜底，无需列出。非法名 WARN + 忽略。
   encoder_preference: [h264_nvenc, h264_qsv, h264_amf]
-  max_sessions: 3        # 同时转码会话上限；0 = 不限制
+  max_sessions: 3        # 同时转码会话上限；-1 = 不限制（0/缺省 = 默认 3）
 ```
 
 - 新增 `TranscodeConfig` struct 挂 `Config`；section 缺省 = 上述默认。两个字段均无敏感信息，照常投影进 `ConfigPublic`。
