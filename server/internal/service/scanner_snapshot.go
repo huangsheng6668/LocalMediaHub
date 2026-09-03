@@ -22,6 +22,10 @@ import (
 // readers cannot honor; loaders reject unknown versions.
 const scanSnapshotVersion = 1
 
+// DefaultScanSnapshotPath is where server.New wires the scanner snapshot
+// (same .data dir as the tags SQLite DB; relative to the server CWD).
+const DefaultScanSnapshotPath = ".data/scan_snapshot.json"
+
 // scanSnapshotFile is the persisted scan result. Files is the "all" cache
 // list (already sorted by Path inside Scan); Dirs is cacheDirMap verbatim
 // (directory mtimes cannot be derived from Files).

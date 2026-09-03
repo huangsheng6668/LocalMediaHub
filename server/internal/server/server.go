@@ -67,7 +67,10 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to get local IP: %w", err)
 	}
 
-	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
+	// P1 cold-start fix (spec 2026-09-03-scan-snapshot-persistence): scan
+	// results persist to .data/scan_snapshot.json and hydrate back at boot,
+	// so the first browse after a restart walks nothing.
+	scanner := service.NewScannerWithSnapshot(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions, service.DefaultScanSnapshotPath)
 	if err := scanner.StartWatching(cfg.Scan.Roots); err != nil {
 		fmt.Printf("Warning: failed to start filesystem watcher: %v\n", err)
 	}
