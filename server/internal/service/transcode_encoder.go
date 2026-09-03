@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -210,6 +211,61 @@ func (p *encoderProber) status() transcodeProbeStatus {
 		Usable:     sortedKeys(p.usable),
 		Preference: append([]string(nil), p.preference...),
 	}
+}
+
+// resolveVCodecParam maps the client vcodec query value to a resolved
+// encoder per the frozen wire contract (spec 3.2):
+//
+//	copy              → stream copy (no re-encode)
+//	"" / "auto"       → the probe-resolved auto encoder
+//	allowlisted name  → that encoder IF it passed probing, else auto (WARN)
+//	anything else     → silently auto (matches the pre-modernization posture
+//	                    of treating unknown values as the software default)
+//
+// The client value is ONLY ever a lookup key against knownEncoderArgs —
+// raw values never reach argv (CWE-78).
+func resolveVCodecParam(param string, usable func(string) bool, auto resolvedEncoder) resolvedEncoder {
+	switch {
+	case param == copyEncoderName:
+		return resolvedEncoder{Name: copyEncoderName}
+	case param == "" || param == "auto":
+		return auto
+	default:
+		if _, ok := knownEncoderArgs[param]; ok {
+			if param == fallbackEncoderName || usable(param) {
+				return resolvedEncoder{Name: param}
+			}
+			slog.Warn("transcode: requested encoder not usable on this host, falling back to auto", "requested", param, "auto", auto.Name)
+		}
+		// Unknown values (including injection attempts) fall back to auto.
+		return auto
+	}
+}
+
+// buildTranscodeArgs assembles the ffmpeg argv. Pure function: every
+// dynamic value is either a validated float, or a file path that already
+// passed sanitizeMediaArg; encoder names arrive only via the allowlist.
+// The libx264 branch produces byte-identical args to the pre-modernization
+// inline construction (zero regression surface for the fallback path).
+func buildTranscodeArgs(srcPath string, startSec float64, enc resolvedEncoder) []string {
+	args := make([]string, 0, 24)
+	if startSec != 0 {
+		args = append(args, "-ss", strconv.FormatFloat(startSec, 'f', 3, 64))
+	}
+	args = append(args, "-i", srcPath)
+	if enc.Name == copyEncoderName {
+		args = append(args, "-vcodec", copyEncoderName)
+	} else {
+		args = append(args, "-vcodec", enc.Name)
+		args = append(args, knownEncoderArgs[enc.Name]...)
+	}
+	args = append(args,
+		"-acodec", "aac",
+		"-f", "mp4",
+		"-movflags", "frag_keyframe+empty_moov",
+		"pipe:1",
+	)
+	return args
 }
 
 // sortedKeys returns map keys in deterministic order for logs / status.

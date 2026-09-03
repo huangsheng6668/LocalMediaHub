@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // largeStreamBuffer is the read/write buffer size for direct (non-transcoded)
@@ -58,12 +60,16 @@ func (b *BufferedReadSeeker) Seek(offset int64, whence int) (int64, error) {
 
 type StreamingService struct {
 	ffmpegPath string
+	// prober resolves the transcode video encoder (two-level hardware probe,
+	// libx264 fallback). Holds an empty chain until the config-driven wiring
+	// replaces it, so resolve() → libx264 directly without forking ffmpeg.
+	prober *encoderProber
 }
 
 func NewStreamingService(ffmpegPath string) *StreamingService {
 	// 自定义 ffmpeg 目录前插 PATH：exec 调用点统一使用字面量二进制名
 	activateToolDir(ffmpegPath)
-	return &StreamingService{ffmpegPath: ffmpegPath}
+	return &StreamingService{ffmpegPath: ffmpegPath, prober: newEncoderProber(nil)}
 }
 
 // contentTypeFromExt returns a MIME type based on file extension.
@@ -162,25 +168,14 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("Accept-Ranges", "none")
 
-	args := []string{}
-	if startSec != 0 {
-		args = append(args, "-ss", strconv.FormatFloat(startSec, 'f', 3, 64))
-	}
-	args = append(args, "-i", filePath)
+	// Frozen wire contract (spec 3.2): the client vcodec value is an
+	// allowlist lookup key only — never interpolated into argv.
+	enc := resolveVCodecParam(r.URL.Query().Get("vcodec"), s.prober.isUsable, s.prober.resolve())
+	args := buildTranscodeArgs(filePath, startSec, enc)
 
-	vcodec := r.URL.Query().Get("vcodec")
-	if vcodec == "copy" {
-		args = append(args, "-vcodec", "copy")
-	} else {
-		args = append(args, "-vcodec", "libx264", "-preset", "ultrafast")
-	}
-
-	args = append(args,
-		"-acodec", "aac",
-		"-f", "mp4",
-		"-movflags", "frag_keyframe+empty_moov",
-		"pipe:1",
-	)
+	slog.Info("transcode session started", "encoder", enc.Name, "file", filepath.Base(filePath), "startSec", startSec)
+	started := time.Now()
+	var written int64
 
 	// Phase 8 T5-02: bind ffmpeg lifetime to the client's request context.
 	// When the client disconnects (or the server shuts down), r.Context()
@@ -228,9 +223,11 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 	for {
 		n, readErr := bufReader.Read(buf)
 		if n > 0 {
+			written += int64(n)
 			if _, wErr := w.Write(buf[:n]); wErr != nil {
 				killCmd()
 				_ = cmd.Wait()
+				slog.Info("transcode session ended", "encoder", enc.Name, "bytes", written, "elapsed", time.Since(started).Round(time.Millisecond).String(), "reason", "client disconnect")
 				return nil
 			}
 			if flusher != nil {
@@ -243,10 +240,17 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 	}
 
 	waitErr := cmd.Wait()
+	elapsed := time.Since(started).Round(time.Millisecond).String()
 	if r.Context().Err() != nil {
+		slog.Info("transcode session ended", "encoder", enc.Name, "bytes", written, "elapsed", elapsed, "reason", "client disconnect")
 		return nil
 	}
-	return waitErr
+	if waitErr != nil {
+		slog.Warn("transcode session failed", "encoder", enc.Name, "bytes", written, "elapsed", elapsed, "error", waitErr)
+		return waitErr
+	}
+	slog.Info("transcode session ended", "encoder", enc.Name, "bytes", written, "elapsed", elapsed, "reason", "eof")
+	return nil
 }
 
 func (s *StreamingService) GetVideoDuration(filePath string) (float64, error) {

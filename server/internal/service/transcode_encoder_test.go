@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"os/exec"
+	"reflect"
 	"testing"
 )
 
@@ -107,6 +108,79 @@ func TestEncoderProberStatusBeforeAndAfterResolve(t *testing.T) {
 	st = p.status()
 	if st.Auto != "h264_nvenc" || len(st.Usable) != 1 || st.Usable[0] != "h264_nvenc" {
 		t.Fatalf("post-resolve status = %+v, want auto=h264_nvenc usable=[h264_nvenc]", st)
+	}
+}
+
+func TestResolveVCodecParam(t *testing.T) {
+	auto := resolvedEncoder{Name: "h264_qsv"}
+	usableNvencOnly := func(name string) bool { return name == "h264_nvenc" }
+	noneUsable := func(string) bool { return false }
+	cases := []struct {
+		param  string
+		usable func(string) bool
+		want   string
+	}{
+		{"copy", nil, "copy"},
+		{"", nil, "h264_qsv"},
+		{"auto", nil, "h264_qsv"},
+		{"h264_nvenc", usableNvencOnly, "h264_nvenc"}, // usable → explicit
+		{"h264_amf", usableNvencOnly, "h264_qsv"},     // not usable → auto (distinct from requested)
+		{"libx264", noneUsable, "libx264"},            // fallback always allowed, no probe needed
+		{"h264_nvenc -x", noneUsable, "h264_qsv"},     // injection attempt → auto
+		{"bogus", noneUsable, "h264_qsv"},             // unknown → auto
+	}
+	for _, tc := range cases {
+		usable := tc.usable
+		if usable == nil {
+			usable = noneUsable
+		}
+		got := resolveVCodecParam(tc.param, usable, auto)
+		if got.Name != tc.want {
+			t.Errorf("resolveVCodecParam(%q) = %q, want %q", tc.param, got.Name, tc.want)
+		}
+	}
+}
+
+func TestBuildTranscodeArgs(t *testing.T) {
+	src := `D:\media\a.mp4`
+	cases := []struct {
+		name  string
+		start float64
+		enc   resolvedEncoder
+		want  []string
+	}{
+		{
+			name:  "copy with seek",
+			start: 12.5,
+			enc:   resolvedEncoder{Name: "copy"},
+			want:  []string{"-ss", "12.500", "-i", src, "-vcodec", "copy", "-acodec", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
+		},
+		{
+			name:  "libx264 fallback byte-identical to legacy inline args",
+			start: 0,
+			enc:   resolvedEncoder{Name: "libx264"},
+			want:  []string{"-i", src, "-vcodec", "libx264", "-preset", "ultrafast", "-acodec", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
+		},
+		{
+			name:  "nvenc auto appends validated quality literals",
+			start: 0,
+			enc:   resolvedEncoder{Name: "h264_nvenc"},
+			want:  []string{"-i", src, "-vcodec", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "23", "-acodec", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
+		},
+		{
+			name:  "qsv",
+			start: 0,
+			enc:   resolvedEncoder{Name: "h264_qsv"},
+			want:  []string{"-i", src, "-vcodec", "h264_qsv", "-global_quality", "23", "-acodec", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildTranscodeArgs(src, tc.start, tc.enc)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("buildTranscodeArgs() =\n%q\nwant\n%q", got, tc.want)
+			}
+		})
 	}
 }
 
