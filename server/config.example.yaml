@@ -71,6 +71,22 @@ system:
   allowed_roots: []
     # - "D:/Media"
 
+# Transcode path (spec 2026-09-03-transcode-modernization). The hardware
+# encoder probe runs lazily on the first transcode request. An encoder is
+# used only after BOTH a static check (listed by "ffmpeg -encoders") AND a
+# runtime testsrc micro-encode succeed — listed-but-driver-broken encoders
+# are skipped with a WARN. libx264 (ultrafast) is always the final fallback
+# and never needs to be listed here.
+transcode:
+  encoder_preference:
+    - "h264_nvenc"
+    - "h264_qsv"
+    - "h264_amf"
+  # Concurrent transcode session cap (requests beyond the cap queue silently;
+  # queued requests are dropped if the client disconnects while waiting).
+  # 0 / absent = 3. -1 = unlimited.
+  max_sessions: 3
+
 # Debug features. All off by default; opt in explicitly only when needed.
 # Round 32 S3: pprof was previously registered unconditionally — now requires
 # debug.pprof=true here OR the --debug-pprof CLI flag (flag overrides config).

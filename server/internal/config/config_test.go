@@ -475,3 +475,46 @@ func TestLoadParsesBLESection(t *testing.T) {
 		t.Fatalf("ConfigPublic leaked BLE token: %s", pubBytes)
 	}
 }
+
+func TestLoadDefaultsTranscodeSection(t *testing.T) {
+	cfg, err := LoadFromBytes([]byte("server:\n  host: \"0.0.0.0\"\n  port: 8000\n"))
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	if len(cfg.Transcode.EncoderPreference) != len(DefaultEncoderPreference) {
+		t.Fatalf("expected default encoder preference %v, got %v", DefaultEncoderPreference, cfg.Transcode.EncoderPreference)
+	}
+	for i, enc := range DefaultEncoderPreference {
+		if cfg.Transcode.EncoderPreference[i] != enc {
+			t.Fatalf("encoder preference[%d] = %q, want %q", i, cfg.Transcode.EncoderPreference[i], enc)
+		}
+	}
+	if cfg.Transcode.MaxSessions != DefaultTranscodeMaxSessions {
+		t.Fatalf("MaxSessions = %d, want default %d", cfg.Transcode.MaxSessions, DefaultTranscodeMaxSessions)
+	}
+}
+
+func TestLoadTranscodeExplicitValuesPreserved(t *testing.T) {
+	cfg, err := LoadFromBytes([]byte("transcode:\n  encoder_preference: [\"h264_qsv\"]\n  max_sessions: -1\n"))
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	if len(cfg.Transcode.EncoderPreference) != 1 || cfg.Transcode.EncoderPreference[0] != "h264_qsv" {
+		t.Fatalf("expected explicit preference [h264_qsv] preserved, got %v", cfg.Transcode.EncoderPreference)
+	}
+	// -1 = unlimited sentinel; must survive normalization (only 0 defaults).
+	if cfg.Transcode.MaxSessions != -1 {
+		t.Fatalf("MaxSessions = %d, want -1 (unlimited sentinel preserved)", cfg.Transcode.MaxSessions)
+	}
+}
+
+func TestPublicProjectsTranscode(t *testing.T) {
+	cfg := &Config{Transcode: TranscodeConfig{EncoderPreference: []string{"h264_nvenc"}, MaxSessions: 2}}
+	pub := cfg.Public()
+	if len(pub.Transcode.EncoderPreference) != 1 || pub.Transcode.EncoderPreference[0] != "h264_nvenc" {
+		t.Fatalf("expected public transcode preference [h264_nvenc], got %v", pub.Transcode.EncoderPreference)
+	}
+	if pub.Transcode.MaxSessions != 2 {
+		t.Fatalf("public MaxSessions = %d, want 2", pub.Transcode.MaxSessions)
+	}
+}

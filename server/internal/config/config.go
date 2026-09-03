@@ -18,6 +18,7 @@ type Config struct {
 	Scan      ScanConfig      `yaml:"scan" json:"scan"`
 	Thumbnail ThumbnailConfig `yaml:"thumbnail" json:"thumbnail"`
 	System    SystemConfig    `yaml:"system,omitempty" json:"system,omitempty"`
+	Transcode TranscodeConfig `yaml:"transcode,omitempty" json:"transcode,omitempty"`
 	Debug     DebugConfig     `yaml:"debug,omitempty" json:"debug,omitempty"`
 	BLE       BLEConfig       `yaml:"ble,omitempty" json:"ble,omitempty"`
 }
@@ -118,6 +119,32 @@ type SystemConfig struct {
 	FFmpegPath   string   `yaml:"ffmpeg_path,omitempty" json:"ffmpeg_path,omitempty"`
 }
 
+// TranscodeConfig controls the ffmpeg transcode path (spec
+// 2026-09-03-transcode-modernization). EncoderPreference is the hardware
+// encoder probe order; libx264 is always the final fallback and never needs
+// to be listed. MaxSessions caps concurrent transcode sessions: 0 (or an
+// absent section) is normalized to DefaultTranscodeMaxSessions on load; any
+// negative value (-1) means unlimited.
+type TranscodeConfig struct {
+	EncoderPreference []string `yaml:"encoder_preference,omitempty" json:"encoder_preference,omitempty"`
+	MaxSessions       int      `yaml:"max_sessions,omitempty" json:"max_sessions,omitempty"`
+}
+
+// DefaultEncoderPreference is the hardware encoder probe order used when
+// transcode.encoder_preference is not configured. Order rationale: NVENC has
+// the widest availability on consumer desktop GPUs, QSV covers Intel iGPUs,
+// AMF covers AMD. Dev-host validation (ffmpeg 8.1.1): all three are LISTED
+// by `ffmpeg -encoders` but only nvenc passes the runtime testsrc
+// micro-encode — exactly the listed-but-driver-broken case the two-level
+// probe (service/transcode_encoder.go) exists to catch.
+var DefaultEncoderPreference = []string{"h264_nvenc", "h264_qsv", "h264_amf"}
+
+// DefaultTranscodeMaxSessions bounds concurrent ffmpeg transcodes when
+// transcode.max_sessions is absent or zero. Keeps several simultaneous
+// transcode sessions from saturating the host CPU; complementary to the
+// per-route transcode rate limits mounted in server.go.
+const DefaultTranscodeMaxSessions = 3
+
 // ConfigPublic is the redacted view of Config returned by GET/PUT /admin/config.
 // It omits only System.FFmpegPath (a local binary path). System.EnableDelete is
 // kept because the Web manager's delete buttons gate on it, and System.AllowedRoots
@@ -134,6 +161,9 @@ type ConfigPublic struct {
 	Scan      ScanConfigPublic     `json:"scan"`
 	Thumbnail ThumbnailConfig      `json:"thumbnail"`
 	System    SystemConfigPublic   `json:"system"`
+	// Transcode holds no secrets (encoder names + session cap); projected so
+	// the web settings view can show the effective transcode configuration.
+	Transcode TranscodeConfig `json:"transcode"`
 }
 
 // ServerConfigPublic mirrors only the user-facing fields of ServerConfig. The
@@ -169,6 +199,7 @@ func (c *Config) Public() ConfigPublic {
 		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions, TextExtensions: c.Scan.TextExtensions, AutoDetectRoots: c.Scan.AutoDetectRoots},
 		Thumbnail: c.Thumbnail,
 		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots, EnableDelete: c.System.EnableDelete},
+		Transcode: c.Transcode,
 	}
 }
 
@@ -222,6 +253,12 @@ func LoadFromBytes(data []byte) (*Config, error) {
 	}
 	if len(cfg.Scan.TextExtensions) == 0 {
 		cfg.Scan.TextExtensions = append([]string(nil), DefaultTextExtensions...)
+	}
+	if len(cfg.Transcode.EncoderPreference) == 0 {
+		cfg.Transcode.EncoderPreference = append([]string(nil), DefaultEncoderPreference...)
+	}
+	if cfg.Transcode.MaxSessions == 0 {
+		cfg.Transcode.MaxSessions = DefaultTranscodeMaxSessions
 	}
 	return &cfg, nil
 }
