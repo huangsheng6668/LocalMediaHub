@@ -68,7 +68,7 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 		cfg,
 		service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions),
 		nil,
-		service.NewStreamingService(""),
+		service.NewStreamingService("", nil, -1),
 		thumbnailService,
 		nil,
 		nil,

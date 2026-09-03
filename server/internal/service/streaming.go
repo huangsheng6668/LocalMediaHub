@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -61,15 +62,72 @@ func (b *BufferedReadSeeker) Seek(offset int64, whence int) (int64, error) {
 type StreamingService struct {
 	ffmpegPath string
 	// prober resolves the transcode video encoder (two-level hardware probe,
-	// libx264 fallback). Holds an empty chain until the config-driven wiring
-	// replaces it, so resolve() → libx264 directly without forking ffmpeg.
+	// libx264 fallback). Empty preference → resolve() → libx264 directly,
+	// no subprocess.
 	prober *encoderProber
+	// transcodeSem caps concurrent transcode sessions (spec 3.3); nil = no cap.
+	transcodeSem chan struct{}
+	// activeSessions counts sessions between acquire and release, exposed
+	// via TranscodeStatus for the admin endpoint.
+	activeSessions atomic.Int64
 }
 
-func NewStreamingService(ffmpegPath string) *StreamingService {
+// NewStreamingService wires the transcode path. encoderPreference comes
+// from transcode.encoder_preference (config normalizes the default chain).
+// maxSessions > 0 caps concurrent transcode sessions; anything else means
+// unlimited (config layer normalizes absent/0 to the default cap, so the
+// only way to reach unlimited here is an explicit negative value).
+func NewStreamingService(ffmpegPath string, encoderPreference []string, maxSessions int) *StreamingService {
 	// 自定义 ffmpeg 目录前插 PATH：exec 调用点统一使用字面量二进制名
 	activateToolDir(ffmpegPath)
-	return &StreamingService{ffmpegPath: ffmpegPath, prober: newEncoderProber(nil)}
+	var sem chan struct{}
+	if maxSessions > 0 {
+		sem = make(chan struct{}, maxSessions)
+	}
+	return &StreamingService{
+		ffmpegPath:   ffmpegPath,
+		prober:       newEncoderProber(encoderPreference),
+		transcodeSem: sem,
+	}
+}
+
+// acquireTranscodeSlot implements the session cap (spec 3.3). It queues
+// silently — no 429 — and abandons acquisition as soon as the client
+// disconnects, so a queued request spawns no ffmpeg at all.
+func (s *StreamingService) acquireTranscodeSlot(ctx context.Context) (release func(), acquired bool) {
+	if s.transcodeSem == nil {
+		s.activeSessions.Add(1)
+		return func() { s.activeSessions.Add(-1) }, true
+	}
+	select {
+	case s.transcodeSem <- struct{}{}:
+		s.activeSessions.Add(1)
+		return func() {
+			s.activeSessions.Add(-1)
+			<-s.transcodeSem
+		}, true
+	case <-ctx.Done():
+		return nil, false
+	}
+}
+
+// TranscodeStatus is the admin-facing snapshot of the transcode path.
+type TranscodeStatus struct {
+	Active      int                  `json:"active"`
+	MaxSessions int                  `json:"max_sessions"` // -1 = unlimited
+	Probe       transcodeProbeStatus `json:"probe"`
+}
+
+func (s *StreamingService) TranscodeStatus() TranscodeStatus {
+	maxSessions := -1
+	if s.transcodeSem != nil {
+		maxSessions = cap(s.transcodeSem)
+	}
+	return TranscodeStatus{
+		Active:      int(s.activeSessions.Load()),
+		MaxSessions: maxSessions,
+		Probe:       s.prober.status(),
+	}
 }
 
 // contentTypeFromExt returns a MIME type based on file extension.
@@ -172,6 +230,15 @@ func (s *StreamingService) serveTranscoded(w http.ResponseWriter, r *http.Reques
 	// allowlist lookup key only — never interpolated into argv.
 	enc := resolveVCodecParam(r.URL.Query().Get("vcodec"), s.prober.isUsable, s.prober.resolve())
 	args := buildTranscodeArgs(filePath, startSec, enc)
+
+	// Session cap (spec 3.3): queue silently; a queued request whose client
+	// disconnects spawns no ffmpeg at all.
+	release, acquired := s.acquireTranscodeSlot(r.Context())
+	if !acquired {
+		slog.Info("transcode session abandoned while queued", "file", filepath.Base(filePath))
+		return nil
+	}
+	defer release()
 
 	slog.Info("transcode session started", "encoder", enc.Name, "file", filepath.Base(filePath), "startSec", startSec)
 	started := time.Now()

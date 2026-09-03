@@ -75,7 +75,7 @@ func New(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tags service: %w", err)
 	}
-	streamingService := service.NewStreamingService(cfg.System.FFmpegPath)
+	streamingService := service.NewStreamingService(cfg.System.FFmpegPath, cfg.Transcode.EncoderPreference, cfg.Transcode.MaxSessions)
 	thumbnailService, err := service.NewThumbnailService(cfg.Thumbnail.CacheDir, cfg.Thumbnail.MaxSize, cfg.Thumbnail.Format, cfg.System.FFmpegPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create thumbnail service: %w", err)

@@ -21,7 +21,7 @@ func TestServeFile_DirectStreamingHeaders(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	svc := NewStreamingService("")
+	svc := NewStreamingService("", nil, -1)
 
 	t.Run("Full GET request returns 200 OK with Content-Length", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/stream", nil)
@@ -134,6 +134,55 @@ func TestServeFile_DirectStreamingHeaders(t *testing.T) {
 	})
 }
 
+func TestTranscodeSessionCap(t *testing.T) {
+	svc := NewStreamingService("", nil, 1)
+
+	release, ok := svc.acquireTranscodeSlot(context.Background())
+	if !ok {
+		t.Fatal("first acquisition must succeed")
+	}
+	if got := svc.TranscodeStatus().Active; got != 1 {
+		t.Fatalf("active sessions = %d, want 1", got)
+	}
+
+	// Second acquisition while the cap is held must abandon on ctx cancel
+	// (the queued-client-disconnect contract of spec 3.3).
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, ok := svc.acquireTranscodeSlot(ctx); ok {
+		t.Fatal("acquisition must not succeed when the cap is full and the client is gone")
+	}
+
+	release()
+	if got := svc.TranscodeStatus().Active; got != 0 {
+		t.Fatalf("active sessions after release = %d, want 0", got)
+	}
+
+	// After release the slot is available again.
+	release2, ok := svc.acquireTranscodeSlot(context.Background())
+	if !ok {
+		t.Fatal("acquisition after release must succeed")
+	}
+	release2()
+}
+
+func TestTranscodeSessionUnlimited(t *testing.T) {
+	svc := NewStreamingService("", nil, -1)
+	if got := svc.TranscodeStatus().MaxSessions; got != -1 {
+		t.Fatalf("MaxSessions = %d, want -1 (unlimited)", got)
+	}
+	for i := 0; i < 5; i++ {
+		rel, ok := svc.acquireTranscodeSlot(context.Background())
+		if !ok {
+			t.Fatalf("acquisition %d must succeed without a cap", i)
+		}
+		defer rel()
+	}
+	if got := svc.TranscodeStatus().Active; got != 5 {
+		t.Fatalf("active = %d, want 5", got)
+	}
+}
+
 // TestServeTranscodedClientDisconnect verifies that when a client disconnects
 // mid-transcode, ffmpeg is killed and serveTranscoded returns promptly
 // (within 5s). This prevents orphaned ffmpeg processes from consuming CPU
@@ -160,7 +209,7 @@ func TestServeTranscodedClientDisconnect(t *testing.T) {
 	}
 
 	// Set up streaming service with default ffmpeg path
-	svc := NewStreamingService("")
+	svc := NewStreamingService("", nil, -1)
 
 	// Create a request that will be cancelled mid-stream.
 	// ServeFile delegates to serveTranscoded when ?transcode=true.
