@@ -15,6 +15,7 @@ import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.userText
 import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.LocalBookRepository
+import com.juziss.localmediahub.data.ReadingMath
 import com.juziss.localmediahub.data.BookChapterContent
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
@@ -70,9 +71,22 @@ class TextReaderViewModel @Inject constructor(
      */
     private var lastScrollChaptersResetAtMs = 0L
 
-    private companion object {
+    companion object {
         /** How long backward-prepending stays suppressed after navigation. */
-        const val SCROLL_PRELOAD_SUPPRESS_MS = 1_500L
+        private const val SCROLL_PRELOAD_SUPPRESS_MS = 1_500L
+
+        fun pickEffectiveProgress(
+            local: BookProgress?,
+            serverLastReadAt: Long?,
+            serverChapter: Int,
+            serverPara: Int,
+            path: String,
+        ): BookProgress? {
+            if (serverLastReadAt == null || serverLastReadAt <= 0L) return local
+            val server = BookProgress(path, serverChapter, serverPara, 0, serverLastReadAt)
+            if (local == null || serverLastReadAt > local.lastReadAt) return server
+            return local
+        }
     }
     val chapterBlocks: StateFlow<List<Block>> = _chapterBlocks.asStateFlow()
 
@@ -194,6 +208,7 @@ class TextReaderViewModel @Inject constructor(
     }
 
     private suspend fun processBookLoaded(b: Book, path: String) {
+        lastPushKey = ""
         _book.value = b
         if (b.format == "unsupported") {
             _error.value = appContext.getString(R.string.reader_unsupported_format)
@@ -206,12 +221,18 @@ class TextReaderViewModel @Inject constructor(
         // 进度 key 统一为服务端规范化路径 b.path：保存点全部用 b.path，
         // 恢复查询也必须用 b.path，否则请求 path 与规范化 path 不一致时永远查不到。
         val saved = store.getBookProgress(b.path)
+        val srvState = (repo.getReadingState(b.path) as? NetworkResult.Success)?.data?.state
+        val effective = pickEffectiveProgress(
+            saved, srvState?.lastReadAt,
+            srvState?.chapterIndex ?: 0, srvState?.paraIndex ?: 0, b.path,
+        )
+        if (effective != null && effective !== saved) store.saveBookProgress(effective)
         val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
-        val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
+        val idx = effective?.chapterIndex?.coerceIn(0, lastValid) ?: 0
         // 章 0 同样可能有段级进度（新书首章读到一半）；门闩只需排除
         // "完全无段级信息的旧格式记录"（blockIndex/offset 均为 0）。
-        if (saved != null && (idx > 0 || saved.blockIndex > 0 || saved.scrollOffsetPx > 0)) {
-            _pendingResume.value = saved.copy(chapterIndex = idx)
+        if (effective != null && (idx > 0 || effective.blockIndex > 0 || effective.scrollOffsetPx > 0)) {
+            _pendingResume.value = effective.copy(chapterIndex = idx)
         }
         loadChapter(idx)
         // 若全局已启用沉浸模式，打开书即立即隐藏 chrome（Activity 据此同步隐藏系统栏）；
@@ -484,24 +505,41 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
+    private var lastPushKey = ""
+
     /**
      * Called by the UI layer (throttled via snapshotFlow + debounce) to persist
      * the within-chapter reading position: first visible block + its px offset.
      * Does NOT re-fetch chapter content — only writes progress so the next
      * session can resume mid-chapter.
      */
-    fun persistScrollProgress(chapterIndex: Int, blockIndex: Int, scrollOffsetPx: Int) {
+    fun persistScrollProgress(
+        chapterIndex: Int,
+        blockIndex: Int,
+        scrollOffsetPx: Int,
+        chapterBlockCount: Int = 0,
+        atChapterEnd: Boolean = false,
+    ) {
         val b = _book.value ?: return
         viewModelScope.launch {
+            val total = b.chapters.size.coerceAtLeast(1)
+            val percent = ReadingMath.percent(chapterIndex, blockIndex, chapterBlockCount, total)
+            val finished = ReadingMath.isFinished(chapterIndex, total, atChapterEnd)
+            val now = System.currentTimeMillis()
             store.saveBookProgress(
                 BookProgress(
                     path = b.path,
                     chapterIndex = chapterIndex,
                     blockIndex = blockIndex.coerceAtLeast(0),
                     scrollOffsetPx = scrollOffsetPx.coerceAtLeast(0),
-                    lastReadAt = System.currentTimeMillis(),
+                    lastReadAt = now,
                 )
             )
+            val key = "$chapterIndex:$blockIndex:$finished"
+            if (key != lastPushKey) {
+                lastPushKey = key
+                repo.reportReadingState(b.path, chapterIndex, blockIndex, percent, finished, now)
+            }
         }
     }
 

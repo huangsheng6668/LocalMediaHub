@@ -334,13 +334,18 @@ fun TextReaderScreen(
                     val (chIdx, blockIdx) = ReaderListLayout.scrollChapterBlock(
                         viewModel.scrollChapters.value, itemIdx,
                     )
-                    if (chIdx >= 0) viewModel.persistScrollProgress(chIdx, blockIdx, offset)
+                    if (chIdx >= 0) {
+                        val cnt = viewModel.scrollChapters.value.getOrNull(chIdx)?.blocks?.size ?: 0
+                        val atEnd = cnt > 0 && blockIdx >= cnt - 1
+                        viewModel.persistScrollProgress(chIdx, blockIdx, offset, cnt, atEnd)
+                    }
                 } else {
                     // 分章模式：item 0 = 章标题；滚到底首可见为 ❖ 时 coerce 到末段
                     val lastBlock = (blocks.size - 1).coerceAtLeast(0)
                     val blockIdx = (itemIdx - ReaderListLayout.CHAPTER_MODE_HEADER_ITEMS)
                         .coerceIn(0, lastBlock)
-                    viewModel.persistScrollProgress(idx, blockIdx, offset)
+                    val atEnd = itemIdx >= blocks.size + 1 // ❖ 末尾项可见
+                    viewModel.persistScrollProgress(idx, blockIdx, offset, blocks.size, atEnd)
                 }
             }
     }

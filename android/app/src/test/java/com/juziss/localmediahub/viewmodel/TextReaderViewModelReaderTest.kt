@@ -28,6 +28,8 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -348,5 +350,18 @@ class TextReaderViewModelReaderTest {
         val vm = createVm(mockk(relaxed = true), mockk(relaxed = true))
         vm.consumePendingResume()
         assertEquals(null, vm.pendingResume.value)
+    }
+
+    @Test
+    fun pickEffectiveProgressPrefersNewerServer() {
+        val local = BookProgress("/b", 1, 2, 0, 1000)
+        val picked = TextReaderViewModel.pickEffectiveProgress(local, 2000L, 5, 3, "/b")
+        assertEquals(5, picked!!.chapterIndex)
+        assertEquals(3, picked.blockIndex)
+        assertEquals(2000L, picked.lastReadAt)
+        // 本地更新 → 保持本地
+        assertSame(local, TextReaderViewModel.pickEffectiveProgress(local, 500L, 5, 3, "/b"))
+        // 双空
+        assertNull(TextReaderViewModel.pickEffectiveProgress(null, null, 0, 0, "/b"))
     }
 }
