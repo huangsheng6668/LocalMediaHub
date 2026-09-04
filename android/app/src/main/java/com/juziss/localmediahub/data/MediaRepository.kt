@@ -261,7 +261,8 @@ class MediaRepository @Inject constructor(
                 val builder = Request.Builder().url(url)
                 when (method) {
                     "POST" -> builder.post((jsonBody ?: "").toRequestBody(jsonMedia))
-                    "DELETE" -> builder.delete((jsonBody ?: "").toRequestBody(jsonMedia))
+                    "PUT" -> builder.put((jsonBody ?: "").toRequestBody(jsonMedia))
+                    "DELETE" -> if (jsonBody != null) builder.delete(jsonBody.toRequestBody(jsonMedia)) else builder.delete()
                 }
                 http.newCall(builder.build()).execute().use { resp ->
                     if (resp.isSuccessful) {
@@ -538,6 +539,97 @@ class MediaRepository @Inject constructor(
                 } else result as NetworkResult<String>
             }
     }
+
+    // ── Library (Reading Status & Favorites) ──────────────────
+
+    suspend fun reportReadingState(
+        path: String,
+        chapterIndex: Int,
+        paraIndex: Int,
+        percent: Double,
+        finished: Boolean,
+        lastReadAt: Long,
+    ): NetworkResult<Map<String, Any>> =
+        httpPost(
+            "$baseUrl/api/v1/library/states",
+            gson.toJson(mapOf(
+                "path" to path,
+                "chapter_index" to chapterIndex,
+                "para_index" to paraIndex,
+                "percent" to percent,
+                "finished" to finished,
+                "last_read_at" to lastReadAt,
+            )),
+            object : TypeToken<Map<String, Any>>() {}.type,
+        )
+
+    suspend fun getReadingState(path: String): NetworkResult<ReadingStateResponse> =
+        httpGet(
+            "$baseUrl/api/v1/library/states?path=${URLEncoder.encode(path, "UTF-8")}",
+            object : TypeToken<ReadingStateResponse>() {}.type,
+        )
+
+    suspend fun setReadingStatus(path: String, status: String?): NetworkResult<Map<String, String>> {
+        val body = gson.toJson(mapOf("path" to path, "status" to status))
+        return httpEmpty("$baseUrl/api/v1/library/states/status", "PUT", body)
+            .let { result ->
+                when (result) {
+                    is NetworkResult.Success -> NetworkResult.Success(mapOf("status" to "ok"))
+                    is NetworkResult.Error -> NetworkResult.Error(result.message, result.code, result.userMessageRes)
+                    is NetworkResult.Loading -> NetworkResult.Loading
+                }
+            }
+    }
+
+    suspend fun fetchDecorations(paths: List<String>): NetworkResult<DecorationsResponse> {
+        if (paths.isEmpty()) {
+            return NetworkResult.Success(DecorationsResponse())
+        }
+        val chunks = paths.chunked(500)
+        val mergedStates = mutableMapOf<String, DecorationBadge>()
+        val mergedFavorites = mutableListOf<String>()
+
+        for (chunk in chunks) {
+            val body = gson.toJson(mapOf("paths" to chunk))
+            val res = httpPost<DecorationsResponse>(
+                "$baseUrl/api/v1/library/decorations",
+                body,
+                object : TypeToken<DecorationsResponse>() {}.type,
+            )
+            when (res) {
+                is NetworkResult.Success -> {
+                    mergedStates.putAll(res.data.states)
+                    mergedFavorites.addAll(res.data.favorites)
+                }
+                is NetworkResult.Error -> return res
+                is NetworkResult.Loading -> { /* no-op */ }
+            }
+        }
+        return NetworkResult.Success(DecorationsResponse(mergedStates, mergedFavorites))
+    }
+
+    suspend fun listServerFavorites(): NetworkResult<List<ServerFavorite>> =
+        httpGet(
+            "$baseUrl/api/v1/library/favorites",
+            object : TypeToken<List<ServerFavorite>>() {}.type,
+        )
+
+    suspend fun pushServerFavorite(rec: Map<String, Any?>): NetworkResult<Map<String, String>> =
+        httpPost(
+            "$baseUrl/api/v1/library/favorites",
+            gson.toJson(rec),
+            object : TypeToken<Map<String, String>>() {}.type,
+        )
+
+    suspend fun removeServerFavorite(path: String): NetworkResult<Map<String, String>> =
+        httpEmpty("$baseUrl/api/v1/library/favorites?path=${URLEncoder.encode(path, "UTF-8")}", "DELETE")
+            .let { result ->
+                when (result) {
+                    is NetworkResult.Success -> NetworkResult.Success(mapOf("status" to "ok"))
+                    is NetworkResult.Error -> NetworkResult.Error(result.message, result.code, result.userMessageRes)
+                    is NetworkResult.Loading -> NetworkResult.Loading
+                }
+            }
 
     // ── Books (text-reader) ───────────────────────────────────
 
