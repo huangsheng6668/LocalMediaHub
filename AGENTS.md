@@ -14,6 +14,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **Service**：`server/internal/service/*.go`
   - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + per-root 防抖 + `cacheByDir` 每目录索引 + per-root 并发 `g.SetLimit` + 输出按路径排序）；快照持久化（2026-09-03）：`scanner_snapshot.go` Scan 后原子落盘 `.data/scan_snapshot.json`（30s 写节流）+ `StartWatching` 启动 hydrate（`cacheTime=SavedAt` 复用 stale-while-revalidate，roots/扩展名身份键不匹配即弃用），`NewScannerWithSnapshot` 为生产构造、`NewScanner` 保留给测试
   - `tags.go` — 标签系统（SQLite WAL + busy_timeout + `SetMaxOpenConns(max(4,NumCPU))` + 索引 + 批量 IN 查询 + JSON→SQLite 自动迁移，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）
+  - `library.go` — 阅读状态与跨媒体收藏（SQLite WAL + busy_timeout + 状态自动派生（unread/reading/finished）+ 批量 decorations 查询 + 收藏快照 8KB 上限，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）
   - `streaming.go` — 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`（修正 SeekCurrent 偏移），原生 Range）；转码路径（2026-09-03）：`transcode_encoder.go` 两级编码器探测（静态 `-encoders` + 运行时 testsrc 微编码，NVENC→QSV→AMF→libx264 兜底）+ `vcodec` allowlist 查表（客户端值永不进 argv）+ 会话并发信号量（`transcode.max_sessions`，缺省 3 / -1 不限），状态端点 `GET /api/v1/admin/transcode/status`；HLS 化（2026-09-03 Phase B）：`transcode_hls.go` 会话管理（`/api/v1/media/hls/playlist|segment`，会话键去重 + 空闲回收 + 4GiB LRU 缓存），Android 转码走 HLS 原生 seek（`VideoPlayerScreen` 的 URL-rebuild 特殊分支已删）
   - `thumbnail.go` — 缩略图（LANCZOS→Linear + MD5 缓存 + sync.Pool + hot path priority + `durations.json` ffprobe 缓存 + per-file `hotTracker`）
   - `hot_dirs.go` — per-directory 访问计数 LRU（容量 256，5min flush + Shutdown 原子落盘到 `hot_directories.json`），驱动冷启动分层预热（Tier1 hot 目录 → Tier2 根目录 → Tier3 懒生成）
@@ -39,17 +40,19 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen`（支持分章/全文滚动模式、实时百分比进度与沉浸/普通双进度条、BackHandler手势退出沉浸模式、左右触控翻页 + 右侧全书进度拖动条(松手跳章)） / `DownloadsScreen`
 - **Component**（`ui/component/`）：
   - `home/`（首页卡片：Hero / Library / ContinueWatching / RecentMedia / Favorite）
-  - `browse/`（浏览子组件：TopBar / SortMenu / SearchView / FavoritesView / DeleteConfirmDialog / QuickActionsDialog 等）
+  - `browse/`（浏览子组件：TopBar / SortMenu / SearchView / BrowseFilterChipsRow / DeleteConfirmDialog / QuickActionsDialog 等）
   - `reader/`（`ReaderSettingsSheet`（带可滚动与1400dp最大宽度） / `ReaderThemeWrapper` / `ReaderFontFamily`）
   - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `PlayerGestureHud`（音量/亮度 Pill HUD + seek ripple）/ `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`
 - **ViewModel**（`viewmodel/`）：
   - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel`
-  - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
+  - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `LibraryController`（阅读装饰与状态筛选）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
 - **Data**（`data/`）：
-  - `Models.kt`（`MediaFile` / `Folder` / `Tag` / `FavoriteMediaEntry` / `PlaybackProgressEntry` / `RecentMediaEntry` / `LastBrowseLocation`）
-  - `MediaRepository.kt`（Retrofit 包装）
+  - `Models.kt`（`MediaFile` / `Folder` / `Tag` / `FavoriteEntry` / `ReadingStatus` / `LibraryDecoration` / `ServerFavorite` / `PlaybackProgressEntry` / `RecentMediaEntry` / `LastBrowseLocation`）
+  - `MediaRepository.kt`（Retrofit 包装 + library 状态与收藏端点）
   - `RecentActivityStore.kt`（最近活动 + 浏览状态 + 播放进度）
-  - `FavoritesStore.kt`（DataStore 收藏）
+  - `FavoritesStore.kt`（DataStore 收藏，三代 Gson 兼容反序列化，支持文件与目录）
+  - `LibrarySyncManager.kt`（连线双向同步：收藏全量推拉合并 + 本地阅读进度迁移）
+  - `ReadingMath.kt`（阅读百分比与已读完判定纯函数）
   - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护）
   - `ServerConfigStore.kt`（含 `authToken` / `bleToken`，均加密存储；`bleToken` 对应 server 的 `ble.token`，为空回退 `authToken`）
   - `RoutePath.kt`（浏览路径与系统/库模式标记）
@@ -63,7 +66,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 
 服务端内置 SPA，浏览器访问 server 地址（如 `http://localhost:8000`）即可。
 
-- **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js`
+- **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js` / `library.js`（阅读状态与跨媒体收藏：筛选矩阵/徽章/DOM装饰/双向同步） / `scrollMemory.js`（双键 session 滚动记忆）
 - **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09 现代中性风重设计（spec `docs/superpowers/specs/2026-09-02-web-ui-redesign-design.md`）：7 套 `[data-theme]` chrome 主题（与阅读区主题独立分离），emoji 图标全部替换为内联 SVG
 - **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
 - **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行）+ 子模块
@@ -197,7 +200,7 @@ node --test
 
 `server/internal/server/middleware/auth.go`：
 
-- 挂载路由组：admin / system / media / books-image
+- 挂载路由组：admin / system / media / books-image / library
 - 接受 header（`Authorization: Bearer <token>`）与 query（`?token=`）双 fallback（query 仅为 `<img src>` 这种无法加 header 的场景）
 - **SHA256 + constant-time 比较**，防 timing attack 与 length leakage
 

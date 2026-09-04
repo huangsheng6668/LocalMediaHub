@@ -159,9 +159,15 @@
   - `server/internal/server/handler/library.go`（7 个 REST 端点 + 双层路径校验：文本媒体校验 / 文件目录根边界校验）
   - `server/internal/models/library_models.go`
 - Android
-  - `android/app/src/main/java/com/juziss/localmediahub/data/FavoritesStore.kt`（DataStore 持久化）
+  - `android/app/src/main/java/com/juziss/localmediahub/data/FavoritesStore.kt`（FavoriteEntry 支持文件与目录，三代 Gson 兼容反序列化）
+  - `android/app/src/main/java/com/juziss/localmediahub/data/LibrarySyncManager.kt`（连线双向同步：收藏全量推拉合并 + 本地阅读进度迁移）
+  - `android/app/src/main/java/com/juziss/localmediahub/data/ReadingMath.kt`（阅读百分比与已读完判定纯函数）
   - `android/app/src/main/java/com/juziss/localmediahub/viewmodel/TagController.kt`（Browse delegate）
+  - `android/app/src/main/java/com/juziss/localmediahub/viewmodel/LibraryController.kt`（Browse 阅读装饰与状态筛选 delegate）
+  - `android/app/src/main/java/com/juziss/localmediahub/ui/component/browse/BrowseFilterChipsRow.kt`（阅读状态筛选 Chips）
 - Web
+  - `server/internal/web/library.js`（纯函数过滤矩阵、徽章 HTML、并发拉取、DOM 就地装饰与迁移）
+  - `server/internal/web/scrollMemory.js`（双键 session 滚动位置记忆与恢复）
   - `server/internal/web/bookmarksView.js`（取代 `tagsView.js`）
 
 ### 相关 spec/plan
