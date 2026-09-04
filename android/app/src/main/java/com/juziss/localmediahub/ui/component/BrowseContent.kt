@@ -256,11 +256,15 @@ internal fun BrowseContent(
 ) {
     val folderSortOrder = state.folderSort
     val fileSortOrder = state.fileSort
-    val gridState = rememberLazyGridState()
-    val staggeredState = rememberLazyStaggeredGridState()
-    val scope = rememberCoroutineScope()
     val restorePath = state.restoreScrollTo
     val currentPath = state.currentPath
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = getScrollPosition(currentPath).coerceAtLeast(0),
+    )
+    val staggeredState = rememberLazyStaggeredGridState(
+        initialFirstVisibleItemIndex = getScrollPosition(currentPath).coerceAtLeast(0),
+    )
+    val scope = rememberCoroutineScope()
  
     // Cached per list identity: recomputing this O(n) filter on every
     // recomposition (selection toggles, BLE badge flips) was wasted work —
