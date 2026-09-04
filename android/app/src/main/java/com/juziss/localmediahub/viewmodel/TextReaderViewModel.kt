@@ -208,7 +208,9 @@ class TextReaderViewModel @Inject constructor(
         val saved = store.getBookProgress(b.path)
         val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
         val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
-        if (saved != null && idx > 0) {
+        // 章 0 同样可能有段级进度（新书首章读到一半）；门闩只需排除
+        // "完全无段级信息的旧格式记录"（blockIndex/offset 均为 0）。
+        if (saved != null && (idx > 0 || saved.blockIndex > 0 || saved.scrollOffsetPx > 0)) {
             _pendingResume.value = saved.copy(chapterIndex = idx)
         }
         loadChapter(idx)

@@ -302,6 +302,48 @@ class TextReaderViewModelReaderTest {
     }
 
     @Test
+    fun `chapter zero with paragraph progress sets pendingResume`() = runTest(dispatcher) {
+        val repo = mockk<MediaRepository>(relaxed = true)
+        val store = mockk<RecentActivityStore>(relaxed = true)
+        coEvery { repo.getBookInfo("/b.txt") } returns NetworkResult.Success(fakeBook(path = "/b.txt"))
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
+            NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
+        coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
+        coEvery { store.getBookProgress("/b.txt") } returns BookProgress(
+            path = "/b.txt", chapterIndex = 0, blockIndex = 4,
+            scrollOffsetPx = 20, lastReadAt = 1L,
+        )
+        val vm = createVm(repo, store)
+
+        vm.loadBook("/b.txt")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(0, vm.currentIndex.value)
+        assertEquals(4, vm.pendingResume.value?.blockIndex)
+    }
+
+    @Test
+    fun `chapter zero legacy record without paragraph info sets no pendingResume`() = runTest(dispatcher) {
+        val repo = mockk<MediaRepository>(relaxed = true)
+        val store = mockk<RecentActivityStore>(relaxed = true)
+        coEvery { repo.getBookInfo("/b.txt") } returns NetworkResult.Success(fakeBook(path = "/b.txt"))
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
+            NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
+        coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
+        coEvery { store.getBookProgress("/b.txt") } returns BookProgress(
+            path = "/b.txt", chapterIndex = 0, blockIndex = 0,
+            scrollOffsetPx = 0, lastReadAt = 1L,
+        )
+        val vm = createVm(repo, store)
+
+        vm.loadBook("/b.txt")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(0, vm.currentIndex.value)
+        assertEquals(null, vm.pendingResume.value)
+    }
+
+    @Test
     fun `consumePendingResume clears target`() = runTest(dispatcher) {
         val vm = createVm(mockk(relaxed = true), mockk(relaxed = true))
         vm.consumePendingResume()

@@ -621,7 +621,8 @@ fun TextReaderScreen(
             // 开书首帧改为执行 pendingResume 恢复定位（含 blockIndex=0 的章顶情形），
             // 而非无条件置顶——两个独立 effect 在同帧重启时后执行者胜出，
             // 无条件置顶会覆盖段内恢复，合并进同一 effect 从根上消除该竞争。
-            LaunchedEffect(idx, isScrollMode) {
+            // key 含 blocks.isNotEmpty()：章 0 开书时 idx 不变（0→0），需由 blocks 空→非空触发重启才能执行恢复。
+            LaunchedEffect(idx, isScrollMode, blocks.isNotEmpty()) {
                 if (!isScrollMode) {
                     val saved = viewModel.pendingResume.value
                     if (saved != null && idx == saved.chapterIndex && blocks.isNotEmpty()) {
