@@ -92,6 +92,17 @@ internal fun QuickActionsDialog(
                                 Text(stringResource(R.string.browse_action_mark_unread))
                             }
                         }
+                        TextButton(
+                            onClick = { onMarkStatus(item, null); onDismiss() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Start,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(stringResource(R.string.browse_action_clear_manual))
+                            }
+                        }
                     }
                     TextButton(
                         onClick = { onEditTags(item) },
