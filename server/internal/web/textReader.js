@@ -841,7 +841,15 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             }
             if (!target) target = els.content.querySelector(`p[data-para-index="${paraIdx}"]`);
             if (target) {
-                const targetY = Math.max(0, target.offsetTop - 16);
+                // 目标 Y 必须相对滚动容器计算：.text-reader__chapter-section 是
+                // position:relative（reader.css），p.offsetTop 只是章内偏移；
+                // 滚动模式下目标章上方有预载前章时，直接用 offsetTop 会落进
+                // 前一章的同偏移位置。rect 差值 + 当前 scrollTop 与定位无关。
+                const targetY = Math.max(0,
+                    target.getBoundingClientRect().top
+                    - els.content.getBoundingClientRect().top
+                    + els.content.scrollTop
+                    - 16);
                 els.content.scrollTop = targetY;
                 if (Math.abs(els.content.scrollTop - targetY) > 5 && attempts < maxAttempts) {
                     attempts++; setTimeout(tryScroll, 100);
