@@ -631,9 +631,15 @@ fun TextReaderScreen(
 
             // 分章模式：章节变更时自动滚动到顶部,
             // 解决翻页与切章时停在旧滚动位置的问题。
+            // 开书首次加载不置顶——位置由 pendingResume 恢复 effect 负责（含 blockIndex=0
+            // 的章顶情形）；置顶若在同帧后跑会覆盖段内恢复定位。
+            val hasShownChapter = remember { mutableStateOf(false) }
             LaunchedEffect(idx, isScrollMode) {
                 if (!isScrollMode) {
-                    listState.scrollToItem(0, 0)
+                    if (hasShownChapter.value) {
+                        listState.scrollToItem(0, 0)
+                    }
+                    hasShownChapter.value = true
                 }
             }
 
