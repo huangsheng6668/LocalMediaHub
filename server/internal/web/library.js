@@ -229,7 +229,7 @@ export function reportState(path, payload = {}) {
     const percent = payload.percent;
     const finished = payload.finished;
     const lastReadAt = payload.lastReadAt !== undefined ? payload.lastReadAt : payload.last_read_at;
-    apiRequest(`${state.apiBase}/api/v1/library/states`, {
+    return apiRequest(`${state.apiBase}/api/v1/library/states`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -241,6 +241,43 @@ export function reportState(path, payload = {}) {
             last_read_at: lastReadAt,
         }),
     }).catch(() => {}); // 静默：下次保存重试
+}
+
+export async function migrateLocalProgress() {
+    try {
+        if (typeof localStorage === 'undefined' || !localStorage) return;
+        if (localStorage.getItem('library_migrated_v1') === '1') return;
+    } catch (e) {
+        return;
+    }
+    const entries = [];
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (!key || !key.startsWith('book_progress:')) continue;
+            try {
+                const prog = JSON.parse(localStorage.getItem(key));
+                if (prog && typeof prog.lastReadAt === 'number') {
+                    entries.push({ path: key.slice('book_progress:'.length), prog });
+                }
+            } catch (e) { /* 跳过坏条目 */ }
+        }
+    } catch (e) {
+        return;
+    }
+    await runWithConcurrency(entries.map(({ path, prog }) => () => {
+        // 服务端 lastReadAt 守卫保证陈旧/重复上报 no-op；percent 无法本地重构，传 0（下次阅读会更新）
+        return reportState(path, {
+            chapterIndex: prog.chapterIndex || 0,
+            paraIndex: prog.paraIndex || 0,
+            percent: 0,
+            finished: false,
+            lastReadAt: prog.lastReadAt,
+        });
+    }), 6);
+    try {
+        localStorage.setItem('library_migrated_v1', '1');
+    } catch (e) {}
 }
 
 let currentMenuPath = null;

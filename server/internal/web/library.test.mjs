@@ -14,6 +14,7 @@ import {
     refreshDecorations,
     fetchState,
     reportState,
+    migrateLocalProgress,
     openStatusMenu,
     closeStatusMenu,
 } from './library.js';
@@ -542,3 +543,29 @@ test('renderBrowserList: handles filtering and empty state message', async () =>
         teardownJsdom();
     }
 });
+
+test('migrateLocalProgress uploads book_progress entries once', async () => {
+    setupJsdom();
+    try {
+        const posted = [];
+        global.fetch = async (url, opts) => {
+            if (String(url).includes('/api/v1/library/states') && opts && opts.method === 'POST') {
+                posted.push(JSON.parse(opts.body));
+            }
+            return { ok: true, status: 200, json: async () => ({}) };
+        };
+        localStorage.setItem('book_progress:/m/a.txt', JSON.stringify({ chapterIndex: 1, paraIndex: 2, lastReadAt: 100 }));
+        localStorage.setItem('book_progress:/m/b.txt', JSON.stringify({ chapterIndex: 3, paraIndex: 0, lastReadAt: 200 }));
+        const { migrateLocalProgress } = await import('./library.js');
+        await migrateLocalProgress();
+        assert.equal(posted.length, 2);
+        assert.equal(localStorage.getItem('library_migrated_v1'), '1');
+        posted.length = 0;
+        await migrateLocalProgress(); // 二次调用幂等
+        assert.equal(posted.length, 0);
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+

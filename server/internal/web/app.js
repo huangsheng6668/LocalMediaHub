@@ -1,6 +1,7 @@
 import { state, setAuthToken } from './state.js';
 import { handleRoute } from './router.js';
 import { loadConfig, renderSettings, setupSettingsListeners } from './settings.js';
+import { migrateLocalProgress } from './library.js';
 
 import { elements } from './dom.js';
 import { setupVideoPlayerListeners } from './videoPlayer.js';
@@ -85,6 +86,8 @@ async function initApp() {
 
     // Load config and initial data
     await loadConfig();
+
+    migrateLocalProgress(); // fire-and-forget，失败不影响启动
 
     // Parse Hash Routing on page load
     handleRoute(elements, renderDashboard, loadRoots, browsePath, renderBookmarks, renderSettings);

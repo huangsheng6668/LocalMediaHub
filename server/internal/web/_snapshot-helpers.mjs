@@ -37,6 +37,9 @@ export function setupJsdom() {
             getItem: (k) => (k in store ? store[k] : null),
             setItem: (k, v) => { store[k] = String(v); },
             removeItem: (k) => { delete store[k]; },
+            get length() { return Object.keys(store).length; },
+            key: (i) => Object.keys(store)[i] ?? null,
+            clear: () => { for (const k of Object.keys(store)) delete store[k]; },
         };
     })();
     global.sessionStorage = (() => {
@@ -45,6 +48,9 @@ export function setupJsdom() {
             getItem: (k) => (k in store ? store[k] : null),
             setItem: (k, v) => { store[k] = String(v); },
             removeItem: (k) => { delete store[k]; },
+            get length() { return Object.keys(store).length; },
+            key: (i) => Object.keys(store)[i] ?? null,
+            clear: () => { for (const k of Object.keys(store)) delete store[k]; },
         };
     })();
     return { dom, window, document: window.document };
