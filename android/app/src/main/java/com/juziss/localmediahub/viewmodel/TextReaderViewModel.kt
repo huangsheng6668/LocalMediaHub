@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 @HiltViewModel
 class TextReaderViewModel @Inject constructor(
@@ -221,23 +222,35 @@ class TextReaderViewModel @Inject constructor(
         // 进度 key 统一为服务端规范化路径 b.path：保存点全部用 b.path，
         // 恢复查询也必须用 b.path，否则请求 path 与规范化 path 不一致时永远查不到。
         val saved = store.getBookProgress(b.path)
-        val srvState = (repo.getReadingState(b.path) as? NetworkResult.Success)?.data?.state
-        val effective = pickEffectiveProgress(
-            saved, srvState?.lastReadAt,
-            srvState?.chapterIndex ?: 0, srvState?.paraIndex ?: 0, b.path,
-        )
-        if (effective != null && effective !== saved) store.saveBookProgress(effective)
         val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
-        val idx = effective?.chapterIndex?.coerceIn(0, lastValid) ?: 0
+        val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
         // 章 0 同样可能有段级进度（新书首章读到一半）；门闩只需排除
         // "完全无段级信息的旧格式记录"（blockIndex/offset 均为 0）。
-        if (effective != null && (idx > 0 || effective.blockIndex > 0 || effective.scrollOffsetPx > 0)) {
-            _pendingResume.value = effective.copy(chapterIndex = idx)
+        if (saved != null && (idx > 0 || saved.blockIndex > 0 || saved.scrollOffsetPx > 0)) {
+            _pendingResume.value = saved.copy(chapterIndex = idx)
         }
         loadChapter(idx)
         // 若全局已启用沉浸模式，打开书即立即隐藏 chrome（Activity 据此同步隐藏系统栏）；
         // 否则保持 chrome 可见。去掉旧的 1.5s 延迟，避免打开时短暂闪现顶/底栏。
         _chromeVisible.value = !_readerSettings.value.immersiveMode
+        // 服务端进度择新：并行异步校正，不阻塞开书（server 不可达时静默降级本地阅读）。
+        // 先设 pendingResume 再 loadChapter：分章模式恢复 effect 以 idx 为 key，
+        // 切章触发重启后读到的才是校正后的值。
+        viewModelScope.launch {
+            val srvState = withTimeoutOrNull(2_000) {
+                (repo.getReadingState(b.path) as? NetworkResult.Success)?.data?.state
+            } ?: return@launch
+            val effective = pickEffectiveProgress(
+                saved, srvState.lastReadAt,
+                srvState.chapterIndex, srvState.paraIndex, b.path,
+            ) ?: return@launch
+            if (effective !== saved) {
+                store.saveBookProgress(effective)
+                val correctedIdx = effective.chapterIndex.coerceIn(0, lastValid)
+                _pendingResume.value = effective.copy(chapterIndex = correctedIdx)
+                if (correctedIdx != idx) loadChapter(correctedIdx)
+            }
+        }
     }
 
     private suspend fun fetchBookChapter(

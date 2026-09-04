@@ -13,6 +13,8 @@ import com.juziss.localmediahub.data.ReaderSettings
 import com.juziss.localmediahub.data.ReaderTheme
 import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.LocalBookRepository
+import com.juziss.localmediahub.data.ReadingStateFull
+import com.juziss.localmediahub.data.ReadingStateResponse
 import com.juziss.localmediahub.network.NetworkResult
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -20,6 +22,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -28,6 +31,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -363,5 +367,61 @@ class TextReaderViewModelReaderTest {
         assertSame(local, TextReaderViewModel.pickEffectiveProgress(local, 500L, 5, 3, "/b"))
         // 双空
         assertNull(TextReaderViewModel.pickEffectiveProgress(null, null, 0, 0, "/b"))
+    }
+
+    // ---- 服务端进度择新不阻塞开书（spec：网络异常静默降级，不阻断书籍打开）----
+
+    @Test
+    fun `loadBook opens immediately while server state fetch is pending`() = runTest(dispatcher) {
+        val repo = mockk<MediaRepository>(relaxed = true)
+        val store = mockk<RecentActivityStore>(relaxed = true)
+        coEvery { repo.getBookInfo("/b.txt") } returns NetworkResult.Success(fakeBook(path = "/b.txt"))
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
+            NetworkResult.Success(BookChapterContent("C0", listOf(Block(type = "text", value = "body"))))
+        coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
+        coEvery { store.getBookProgress("/b.txt") } returns null
+        coEvery { repo.getReadingState("/b.txt") } coAnswers {
+            delay(60_000) // 服务端慢响应（虚拟时钟）：开书流程不得等待它
+            NetworkResult.Success(ReadingStateResponse(state = null))
+        }
+        val vm = createVm(repo, store)
+
+        vm.loadBook("/b.txt")
+        // 只推进 1s 虚拟时间：60s 的 states 请求仍未返回，首章内容必须已经加载
+        // （阻塞症状不在 book 置位（它先于 states await），而在 loadChapter 被串行卡住）。
+        dispatcher.scheduler.advanceTimeBy(1_000)
+        assertTrue("chapter content must load without waiting for server state", vm.chapterBlocks.value.isNotEmpty())
+
+        dispatcher.scheduler.advanceUntilIdle() // 收尾悬挂任务
+    }
+
+    @Test
+    fun `newer server state corrects resume after open without blocking`() = runTest(dispatcher) {
+        val repo = mockk<MediaRepository>(relaxed = true)
+        val store = mockk<RecentActivityStore>(relaxed = true)
+        coEvery { repo.getBookInfo("/b.txt") } returns NetworkResult.Success(fakeBook(path = "/b.txt"))
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
+            NetworkResult.Success(BookChapterContent("C1", listOf(Block(type = "text", value = "body"))))
+        coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
+        coEvery { store.getBookProgress("/b.txt") } returns BookProgress(
+            path = "/b.txt", chapterIndex = 0, blockIndex = 0,
+            scrollOffsetPx = 0, lastReadAt = 1000,
+        )
+        coEvery { repo.getReadingState("/b.txt") } returns NetworkResult.Success(
+            ReadingStateResponse(
+                state = ReadingStateFull(
+                    chapterIndex = 1, paraIndex = 2, percent = 75.0, finished = false,
+                    manualStatus = null, lastReadAt = 2000,
+                ),
+            ),
+        )
+        val vm = createVm(repo, store)
+
+        vm.loadBook("/b.txt")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, vm.pendingResume.value?.chapterIndex)
+        assertEquals(2, vm.pendingResume.value?.blockIndex)
+        coVerify { store.saveBookProgress(match { it.chapterIndex == 1 && it.blockIndex == 2 }) }
     }
 }
