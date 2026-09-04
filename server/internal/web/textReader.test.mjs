@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setupJsdom, teardownJsdom, mockBook } from './_snapshot-helpers.mjs';
+import { state } from './reader-state.js';
 
 function installEnv({ book = mockBook, chapter = null } = {}) {
     global.sessionStorage = global.sessionStorage || {
@@ -225,6 +226,122 @@ test('renderTextReader: dropcap skips metadata paragraphs and short lines (< 25 
             !paragraphs[14].classList.contains('text-reader__p--dropcap'),
             'Subsequent narrative paragraph (idx 14) should NOT have dropcap'
         );
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+// ============================================================================
+// 4. resolveResume pure helper tests
+// NOTE: textReader.js must be dynamically imported AFTER setupJsdom() — its
+// import graph (api.js -> state.js) reads localStorage at module-eval time.
+// ============================================================================
+
+test('resolveResume: explicit chapter param wins over saved progress', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        const { resolveResume } = await import('./textReader.js');
+        const r = resolveResume({
+            chapterParam: '0',
+            paraParam: null,
+            saved: { chapterIndex: 2, paraIndex: 5 },
+            chapterCount: 10,
+        });
+        assert.equal(r.startIdx, 0);
+        assert.equal(r.resumePara, null); // URL 只指定章 → 章顶，不套用存档段落
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('resolveResume: URL para param applies', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        const { resolveResume } = await import('./textReader.js');
+        const r = resolveResume({
+            chapterParam: '1',
+            paraParam: '3',
+            saved: null,
+            chapterCount: 10,
+        });
+        assert.equal(r.startIdx, 1);
+        assert.equal(r.resumePara, 3);
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('resolveResume: saved progress restores chapter and paragraph', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        const { resolveResume } = await import('./textReader.js');
+        const r = resolveResume({
+            chapterParam: null,
+            paraParam: null,
+            saved: { chapterIndex: 4, paraIndex: 7 },
+            chapterCount: 10,
+        });
+        assert.equal(r.startIdx, 4);
+        assert.equal(r.resumePara, 7);
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('resolveResume: legacy payload without paraIndex → chapter only', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        const { resolveResume } = await import('./textReader.js');
+        const r = resolveResume({
+            chapterParam: null,
+            paraParam: null,
+            saved: { chapterIndex: 4 },
+            chapterCount: 10,
+        });
+        assert.equal(r.startIdx, 4);
+        assert.equal(r.resumePara, null);
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('resolveResume: clamps out-of-range chapter', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        const { resolveResume } = await import('./textReader.js');
+        const r = resolveResume({ chapterParam: null, paraParam: null, saved: { chapterIndex: 99 }, chapterCount: 3 });
+        assert.equal(r.startIdx, 2);
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+// ============================================================================
+// 5. integration: saved progress restores chapter via render
+// ============================================================================
+
+test('renderTextReader: reopens at saved chapter when no chapter param', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        localStorage.setItem('book_progress:/test/book.txt', JSON.stringify({ chapterIndex: 2, paraIndex: 0 }));
+        const { renderTextReader } = await import('./textReader.js');
+        const container = viewContainer();
+        await renderTextReader(container, '/test/book.txt', null, null);
+        assert.equal(state.currentIdx, 2);
+        assert.ok(localStorage.getItem('book_progress:/test/book.txt').includes('"paraIndex"'));
+        container._cleanupReader?.();
     } finally {
         delete global.fetch;
         teardownJsdom();

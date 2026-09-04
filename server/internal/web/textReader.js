@@ -8,7 +8,7 @@ import { showToast } from './toast.js';
 import * as readerPrefs from './readerPrefs.js';
 import { on, EVT } from './bus.js';
 import { state, setCurrentIdx, resetState } from './reader-state.js';
-import { updateProgressUI, detectActiveChapterOnScroll } from './progress.js';
+import { updateProgressUI, detectActiveChapterOnScroll, firstVisibleParagraph } from './progress.js';
 import { renderToc } from './toc.js';
 import { renderBookmarks } from './bookmarks.js';
 import { renderAutoscroll } from './autoscroll.js';
@@ -39,6 +39,27 @@ export function formatHeaderTitle(chapterTitle, bookTitle) {
     } else {
         return `${chTitle} — ${bkTitle}`;
     }
+}
+
+// Pure helper: decide which chapter/paragraph to open at. URL params win
+// (TOC / bookmark deep links); otherwise the saved localStorage progress
+// restores chapter + first-visible paragraph. Legacy payloads without
+// paraIndex degrade to chapter-top. Exported for unit testing.
+export function resolveResume({ chapterParam, paraParam, saved, chapterCount }) {
+    const maxIdx = Math.max(0, chapterCount - 1);
+    let startIdx = 0;
+    let resumePara = null;
+    if (chapterParam !== undefined && chapterParam !== null) {
+        startIdx = clamp(parseInt(chapterParam, 10) || 0, 0, maxIdx);
+        if (paraParam !== undefined && paraParam !== null) {
+            resumePara = parseInt(paraParam, 10) || 0;
+        }
+    } else if (saved) {
+        startIdx = clamp(saved.chapterIndex || 0, 0, maxIdx);
+        const p = saved.paraIndex || 0;
+        if (p > 0) resumePara = p;
+    }
+    return { startIdx, resumePara };
 }
 
 // Entry point invoked by router.js. Signature is FIXED: (container, path, chapterParam, paraParam).
@@ -242,13 +263,10 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     state.chapterCount = (book.chapters || []).length;
     const chapterCount = state.chapterCount;
 
-    let startIdx = 0;
-    if (chapterParam !== undefined && chapterParam !== null) {
-        startIdx = clamp(parseInt(chapterParam, 10) || 0, 0, Math.max(0, chapterCount - 1));
-    } else {
-        const p = loadProgress(path);
-        if (p) startIdx = clamp(p.chapterIndex || 0, 0, Math.max(0, chapterCount - 1));
-    }
+    const savedProgress = loadProgress(path);
+    const { startIdx, resumePara } = resolveResume({
+        chapterParam, paraParam, saved: savedProgress, chapterCount,
+    });
     minLoadedIdx = startIdx;
     maxLoadedIdx = startIdx;
     setCurrentIdx(startIdx);
@@ -397,7 +415,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             const sec = renderBlocks(ch.blocks || blocksFromLegacyContent(ch.content), ch.title, idx);
             updateProgressUI();
             if (scrubberApi) scrubberApi.update();
-            saveProgress(path, { chapterIndex: idx, scrollOffset: 0, lastReadAt: Date.now() });
+            saveProgress(path, { chapterIndex: idx, paraIndex: 0, lastReadAt: Date.now() });
             return sec;
         },
         getCurrentIdx: () => state.currentIdx,
@@ -471,6 +489,50 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     // detection walks EVERY chapter section with getBoundingClientRect — doing
     // that per event is layout thrash on long books.
     let scrollRafId = null;
+    // 段级进度保存：滚动停止 800ms 后写入当前首个可见段落；关闭页面时立即 flush。
+    let progressSaveTimer = null;
+    function collectVisibleParagraphs() {
+        const containerTop = els.content.getBoundingClientRect().top;
+        const paragraphs = [];
+        els.content.querySelectorAll('.text-reader__chapter-section').forEach(sec => {
+            const chIdx = parseInt(sec.dataset.chapterIndex, 10);
+            sec.querySelectorAll('.text-reader__p').forEach(p => {
+                const r = p.getBoundingClientRect();
+                const paraIdx = parseInt(p.dataset.paraIndex, 10);
+                paragraphs.push({
+                    top: r.top,
+                    bottom: r.bottom,
+                    chapterIndex: Number.isNaN(chIdx) ? state.currentIdx : chIdx,
+                    paraIndex: Number.isNaN(paraIdx) ? 0 : paraIdx,
+                });
+            });
+        });
+        return { paragraphs, containerTop };
+    }
+    function persistVisibleProgress() {
+        const { paragraphs, containerTop } = collectVisibleParagraphs();
+        const vis = firstVisibleParagraph(paragraphs, containerTop);
+        if (vis) {
+            saveProgress(path, { chapterIndex: vis.chapterIndex, paraIndex: vis.paraIndex, lastReadAt: Date.now() });
+        }
+    }
+    function scheduleProgressSave() {
+        if (progressSaveTimer) clearTimeout(progressSaveTimer);
+        progressSaveTimer = setTimeout(() => {
+            progressSaveTimer = null;
+            persistVisibleProgress();
+        }, 800);
+    }
+    const onPageHide = () => {
+        if (progressSaveTimer) {
+            clearTimeout(progressSaveTimer);
+            progressSaveTimer = null;
+        }
+        persistVisibleProgress();
+    };
+    const onVisibilityChangeSave = () => { if (document.hidden) onPageHide(); };
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibilityChangeSave);
     function onContentScroll() {
         if (scrollRafId !== null) return;
         scrollRafId = requestAnimationFrame(() => {
@@ -496,11 +558,12 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 setCurrentIdx(activeIdx);
                 const ct = (book.chapters && book.chapters[activeIdx]) ? book.chapters[activeIdx].title : '';
                 els.title.textContent = formatHeaderTitle(ct, book.title);
-                saveProgress(path, { chapterIndex: activeIdx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
+                saveProgress(path, { chapterIndex: activeIdx, paraIndex: 0, lastReadAt: Date.now() });
             }
         }
         updateProgressUI();
         if (scrubberApi) scrubberApi.update();
+        scheduleProgressSave();
     }
     els.content.addEventListener('scroll', onContentScroll);
     const onVisibilityChange = () => { if (document.hidden) autoscrollApi.stop(); };
@@ -510,11 +573,14 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     container._cleanupReader = () => {
         if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
         if (cursorRafId !== null) cancelAnimationFrame(cursorRafId);
+        if (progressSaveTimer) clearTimeout(progressSaveTimer);
         unsubSettings(); unsubPrefs(); unsubBms();
         tocApi.dispose(); bookmarksApi.dispose(); autoscrollApi.dispose(); settingsApi.dispose();
         scrubberApi.dispose();
         pageTurnApi.dispose();
         document.removeEventListener('visibilitychange', onVisibilityChange);
+        document.removeEventListener('visibilitychange', onVisibilityChangeSave);
+        window.removeEventListener('pagehide', onPageHide);
         document.removeEventListener('keydown', onKeyDown);
         document.removeEventListener('fullscreenchange', onFullscreenChange);
         els.content.removeEventListener('scroll', onContentScroll);
@@ -527,7 +593,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
     syncBookmarkCount();
     await loadChapter(startIdx, true);
-    if (paraParam !== undefined && paraParam !== null) scrollToParagraph(parseInt(paraParam, 10), startIdx);
+    if (resumePara !== null) scrollToParagraph(resumePara, startIdx);
 
     // ===== Chapter rendering + scroll-mode buffering =====
 
@@ -649,7 +715,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             }
             updateProgressUI();
             if (scrubberApi) scrubberApi.update();
-            saveProgress(path, { chapterIndex: idx, scrollOffset: els.content.scrollTop, lastReadAt: Date.now() });
+            saveProgress(path, { chapterIndex: idx, paraIndex: 0, lastReadAt: Date.now() });
         } catch (e) {
             els.content.textContent = '加载章节失败: ' + e.message;
             showToast('加载章节失败: ' + e.message, 'error');
