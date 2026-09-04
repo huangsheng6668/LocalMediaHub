@@ -43,6 +43,42 @@ func postJSON(t *testing.T, h *Handler, method, target, body string) *httptest.R
 	return rec
 }
 
+// 目录放行是分层校验的核心设计决策（spec §4）：收藏与批量装饰端点必须接受
+// 目录路径——ValidateAccessibleMediaPath 强制 !IsDir() 会拒目录，若日后有人把
+// 校验"收紧"回去，目录收藏将静默 400。本测试锁定该行为。
+func TestDecorationsAndFavoritesAcceptDirectoryPaths(t *testing.T) {
+	h, mediaPath := newLibraryTestHandler(t)
+	dir := filepath.Dir(mediaPath)
+
+	postDecorations := func() *httptest.ResponseRecorder {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/library/decorations",
+			strings.NewReader(`{"paths":[`+strconv.Quote(dir)+`]}`))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		assert.NoError(t, h.PostDecorations(e.NewContext(req, rec)))
+		return rec
+	}
+
+	// decorations 含目录路径 → 200（而非 400）
+	rec := postDecorations()
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	// favorites POST 目录路径 → 200
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/library/favorites",
+		strings.NewReader(`{"path":`+strconv.Quote(dir)+`,"is_dir":true,"title":"novels","media_type":"folder","snapshot":{},"added_at":1000}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec2 := httptest.NewRecorder()
+	assert.NoError(t, h.AddFavorite(e.NewContext(req, rec2)))
+	assert.Equal(t, http.StatusOK, rec2.Code)
+
+	// 收藏后再查 decorations：目录以请求原始 key 形态出现在 favorites 回显中
+	rec3 := postDecorations()
+	assert.Equal(t, http.StatusOK, rec3.Code)
+	assert.Contains(t, rec3.Body.String(), strconv.Quote(dir))
+}
+
 func TestPostReadingStateRoundtrip(t *testing.T) {
 	h, mediaPath := newLibraryTestHandler(t)
 	rec := postJSON(t, h, http.MethodPost, "/api/v1/library/states",

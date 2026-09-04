@@ -117,7 +117,7 @@ status = manual_status                          // 非 NULL 时完全接管
 
 | 端点 | 请求 JSON（统一标准 snake_case） | 响应 JSON |
 |---|---|---|
-| `POST /api/v1/library/states` | `{"path": "...", "chapter_index": 0, "para_index": 0, "percent": 0.0, "finished": 0, "last_read_at": 1725400000000}` | `{"status": "reading", "updated_at": 1725400000000}`（no-op 也 200） |
+| `POST /api/v1/library/states` | `{"path": "...", "chapter_index": 0, "para_index": 0, "percent": 0.0, "finished": false, "last_read_at": 1725400000000}` | `{"status": "reading", "updated_at": 1725400000000}`（no-op 也 200） |
 | `GET /api/v1/library/states?path=` | — | `{"state": {...}}` 或 `{"state": null}` |
 | `PUT /api/v1/library/states/status` | `{"path": "...", "status": "finished"}`（status ∈ `unread` \| `reading` \| `finished` \| null） | `{"status": "finished"}` |
 | `POST /api/v1/library/decorations` | `{"paths": ["..."]}`（上限 500，超出 400） | `{"states": {"<path>": {"status": "...", "percent": 45.2, "last_read_at": 1725400000000}}, "favorites": ["<path>"]}` |
