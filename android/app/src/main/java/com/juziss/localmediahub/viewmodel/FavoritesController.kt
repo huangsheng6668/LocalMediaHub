@@ -5,6 +5,7 @@ import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.MediaRepository
+import com.juziss.localmediahub.data.buildFavoriteBody
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +55,10 @@ internal class FavoritesController(
     // owns reads/writes and re-exposes a read-only view.
     val showFavoritesOnly: StateFlow<Boolean> = sharedState.showFavoritesOnly.asStateFlow()
 
+    // pushToggleToServer 需要 fire-and-forget 作用域；由 startCollecting 传入
+    // （BrowseViewModel 传 viewModelScope），与收藏流收集共用同一生命周期。
+    private var scope: CoroutineScope? = null
+
     /**
      * Start collecting favorites flows from [favoritesStore] into local
      * StateFlows. The caller supplies the [scope] (typically the
@@ -61,6 +66,7 @@ internal class FavoritesController(
      * that scope.
      */
     fun startCollecting(scope: CoroutineScope) {
+        this.scope = scope
         scope.launch {
             favoritesStore.favorites.collect { favoritePaths ->
                 _favorites.value = favoritePaths
@@ -83,11 +89,37 @@ internal class FavoritesController(
     }
 
     suspend fun toggleFavorite(file: MediaFile, isSystemBrowse: Boolean = sharedState.isSystemBrowse.value) {
-        favoritesStore.toggleFavorite(file, isSystemBrowse)
+        val added = favoritesStore.toggleFavorite(file, isSystemBrowse)
+        pushToggleToServer(
+            added,
+            FavoriteEntry(file = file, isSystemBrowse = isSystemBrowse, addedAt = System.currentTimeMillis()),
+        )
     }
 
     suspend fun toggleFavoriteFolder(folder: Folder, isSystemBrowse: Boolean = sharedState.isSystemBrowse.value) {
-        favoritesStore.toggleFavoriteFolder(folder, isSystemBrowse)
+        val added = favoritesStore.toggleFavoriteFolder(folder, isSystemBrowse)
+        pushToggleToServer(
+            added,
+            FavoriteEntry(folder = folder, isSystemBrowse = isSystemBrowse, addedAt = System.currentTimeMillis()),
+        )
+    }
+
+    /**
+     * 收藏变更即时推送服务端：取消必须下发 DELETE——否则服务端残留行会被
+     * LibrarySyncManager 的并集拉取复活回本地，且其他端心形状态永不更新。
+     * 失败静默（下次启动全量同步兜底）。
+     */
+    private fun pushToggleToServer(added: Boolean, entry: FavoriteEntry) {
+        val scope = scope ?: return
+        scope.launch {
+            runCatching {
+                if (added) {
+                    repository.pushServerFavorite(buildFavoriteBody(entry))
+                } else {
+                    repository.removeServerFavorite(entry.path)
+                }
+            }
+        }
     }
 
     fun setShowFavoritesOnly(show: Boolean) {

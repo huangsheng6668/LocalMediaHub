@@ -67,14 +67,15 @@ class LibrarySyncManager @Inject constructor(
             favoritesStore.replaceAll(merged)
         }
     }
-
-    private fun buildFavoriteBody(entry: FavoriteEntry): Map<String, Any?> = mapOf(
-        "path" to entry.path,
-        "is_dir" to entry.isDir,
-        "is_system" to entry.isSystemBrowse,
-        "title" to (entry.file?.name ?: entry.folder?.name ?: ""),
-        "media_type" to (if (entry.isDir) "folder" else entry.file?.mediaType.orEmpty()),
-        "snapshot" to entry,
-        "added_at" to entry.addedAt,
-    )
 }
+
+/** 收藏上报表体（toggle 即时推送与启动全量同步共用；snapshot 为完整 FavoriteEntry）。 */
+internal fun buildFavoriteBody(entry: FavoriteEntry): Map<String, Any?> = mapOf(
+    "path" to entry.path,
+    "is_dir" to entry.isDir,
+    "is_system" to entry.isSystemBrowse,
+    "title" to (entry.file?.name ?: entry.folder?.name ?: ""),
+    "media_type" to (if (entry.isDir) "folder" else entry.file?.mediaType.orEmpty()),
+    "snapshot" to entry,
+    "added_at" to entry.addedAt,
+)
