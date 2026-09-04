@@ -16,6 +16,7 @@ import com.juziss.localmediahub.network.userText
 import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.LocalBookRepository
 import com.juziss.localmediahub.data.BookChapterContent
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -122,6 +123,15 @@ class TextReaderViewModel @Inject constructor(
     private val _bookmarkToast = MutableStateFlow<String?>(null)
     val bookmarkToast: StateFlow<String?> = _bookmarkToast.asStateFlow()
 
+    // 开书时的一次性恢复目标：processBookLoaded 写入，Screen 定位后 consume。
+    // 只在打开书时存在——阅读模式切换触发的 reload 不再恢复。
+    private val _pendingResume = MutableStateFlow<BookProgress?>(null)
+    val pendingResume: StateFlow<BookProgress?> = _pendingResume.asStateFlow()
+
+    fun consumePendingResume() {
+        _pendingResume.value = null
+    }
+
     init {
         // Bootstrap reader settings from DataStore so the UI starts with the
         // persisted font/line-height/theme instead of the default on every cold start.
@@ -190,9 +200,17 @@ class TextReaderViewModel @Inject constructor(
             _isLoading.value = false
             return
         }
-        val saved = store.getBookProgress(path)
+        // 等设置首次从 DataStore 加载完成，保证 Screen 依据 readingMode 分派恢复分支时
+        // 模式已定型（默认值 CHAPTER 与用户持久化的 SCROLL 之间的竞态窗口关闭）。
+        store.readerSettingsFlow.first()
+        // 进度 key 统一为服务端规范化路径 b.path：保存点全部用 b.path，
+        // 恢复查询也必须用 b.path，否则请求 path 与规范化 path 不一致时永远查不到。
+        val saved = store.getBookProgress(b.path)
         val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
         val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
+        if (saved != null && idx > 0) {
+            _pendingResume.value = saved.copy(chapterIndex = idx)
+        }
         loadChapter(idx)
         // 若全局已启用沉浸模式，打开书即立即隐藏 chrome（Activity 据此同步隐藏系统栏）；
         // 否则保持 chrome 可见。去掉旧的 1.5s 延迟，避免打开时短暂闪现顶/底栏。
@@ -295,6 +313,7 @@ class TextReaderViewModel @Inject constructor(
                     BookProgress(
                         path = b.path,
                         chapterIndex = index,
+                        blockIndex = 0,
                         scrollOffsetPx = 0,
                         lastReadAt = System.currentTimeMillis(),
                     )
@@ -435,6 +454,7 @@ class TextReaderViewModel @Inject constructor(
                     BookProgress(
                         path = b.path,
                         chapterIndex = index,
+                        blockIndex = 0,
                         scrollOffsetPx = 0,
                         lastReadAt = System.currentTimeMillis(),
                     )
@@ -464,20 +484,19 @@ class TextReaderViewModel @Inject constructor(
 
     /**
      * Called by the UI layer (throttled via snapshotFlow + debounce) to persist
-     * the within-chapter scroll position. Unlike [loadChapter], this does NOT
-     * re-fetch chapter content — it only writes the scroll offset so the next
+     * the within-chapter reading position: first visible block + its px offset.
+     * Does NOT re-fetch chapter content — only writes progress so the next
      * session can resume mid-chapter.
-     *
-     * Task 6 (text-reader C-phase).
      */
-    fun persistScrollProgress(firstVisibleItemIndex: Int, firstVisibleItemScrollOffset: Int) {
+    fun persistScrollProgress(chapterIndex: Int, blockIndex: Int, scrollOffsetPx: Int) {
         val b = _book.value ?: return
         viewModelScope.launch {
             store.saveBookProgress(
                 BookProgress(
                     path = b.path,
-                    chapterIndex = _currentIndex.value,
-                    scrollOffsetPx = firstVisibleItemScrollOffset,
+                    chapterIndex = chapterIndex,
+                    blockIndex = blockIndex.coerceAtLeast(0),
+                    scrollOffsetPx = scrollOffsetPx.coerceAtLeast(0),
                     lastReadAt = System.currentTimeMillis(),
                 )
             )

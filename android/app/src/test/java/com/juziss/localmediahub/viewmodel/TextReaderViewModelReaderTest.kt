@@ -5,6 +5,7 @@ import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Block
 import com.juziss.localmediahub.data.Book
 import com.juziss.localmediahub.data.BookChapter
+import com.juziss.localmediahub.data.BookProgress
 import com.juziss.localmediahub.data.BookChapterContent
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.RecentActivityStore
@@ -269,5 +270,41 @@ class TextReaderViewModelReaderTest {
         dispatcher.scheduler.advanceUntilIdle()
         coVerify(exactly = 1) { repo.getBookChapter("/b.txt", 0, any(), any()) }
         assertEquals("body0", vm.chapterBlocks.value.firstOrNull()?.value)
+    }
+
+    // ---- Task 3: 进度 key 统一 + pendingResume --------------------------
+
+    @Test
+    fun `loadBook restores progress keyed by book path not request path`() = runTest(dispatcher) {
+        // 服务端规范化后 Book.path 与请求 path 不同（如盘符大写）；恢复必须用 b.path 查询。
+        // repo 取 relaxed：VM 构造时即读取 repo.isBleDegraded / bleDegradedEvents
+        // 属性初始化器，strict mock 会在 createVm 阶段抛 no answer found。
+        val repo = mockk<MediaRepository>(relaxed = true)
+        val store = mockk<RecentActivityStore>(relaxed = true)
+        coEvery { repo.getBookInfo("/raw/path/book.txt") } returns
+            NetworkResult.Success(fakeBook(path = "/E:/Canonical/book.txt"))
+        coEvery { repo.getBookChapter(any(), any(), any(), any()) } returns
+            NetworkResult.Success(BookChapterContent("C1", listOf(Block(type = "text", value = "body"))))
+        coEvery { store.readerSettingsFlow } returns flowOf(ReaderSettings())
+        coEvery { store.getBookProgress("/E:/Canonical/book.txt") } returns BookProgress(
+            path = "/E:/Canonical/book.txt", chapterIndex = 1, blockIndex = 2,
+            scrollOffsetPx = 30, lastReadAt = 1L,
+        )
+        val vm = createVm(repo, store)
+
+        vm.loadBook("/raw/path/book.txt")
+        dispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals(1, vm.currentIndex.value)
+        assertEquals(2, vm.pendingResume.value?.blockIndex)
+        coVerify { store.getBookProgress("/E:/Canonical/book.txt") }
+        coVerify(exactly = 0) { store.getBookProgress("/raw/path/book.txt") }
+    }
+
+    @Test
+    fun `consumePendingResume clears target`() = runTest(dispatcher) {
+        val vm = createVm(mockk(relaxed = true), mockk(relaxed = true))
+        vm.consumePendingResume()
+        assertEquals(null, vm.pendingResume.value)
     }
 }

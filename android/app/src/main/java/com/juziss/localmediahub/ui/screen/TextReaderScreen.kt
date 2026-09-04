@@ -98,6 +98,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.juziss.localmediahub.data.Bookmark
 import com.juziss.localmediahub.data.PageTurnStyle
+import com.juziss.localmediahub.data.ReaderListLayout
 import com.juziss.localmediahub.data.ReadingMode
 import com.juziss.localmediahub.data.ScrollModeChapter
 import com.juziss.localmediahub.ui.component.reader.ReaderScrollbar
@@ -149,6 +150,7 @@ fun TextReaderScreen(
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkToast by viewModel.bookmarkToast.collectAsState()
     val chromeVisible by viewModel.chromeVisible.collectAsState()
+    val pendingResume by viewModel.pendingResume.collectAsState()
     @Suppress("unused")
     val isBleDegraded by viewModel.isBleDegraded.collectAsState()
 
@@ -321,12 +323,24 @@ fun TextReaderScreen(
         }
     }
 
-    // 节流保存阅读进度（停止滚动 1s 后写入）
+    // 节流保存阅读进度（停止滚动 1s 后写入）。把 listState 的全局 item 索引映射为
+    // (章, 章内 block)，使记录与已加载章节数解耦、跨会话可恢复。
     LaunchedEffect(listState, idx) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .debounce(1000)
             .collect { (itemIdx, offset) ->
-                viewModel.persistScrollProgress(itemIdx, offset)
+                if (isScrollMode) {
+                    val (chIdx, blockIdx) = ReaderListLayout.scrollChapterBlock(
+                        viewModel.scrollChapters.value, itemIdx,
+                    )
+                    if (chIdx >= 0) viewModel.persistScrollProgress(chIdx, blockIdx, offset)
+                } else {
+                    // 分章模式：item 0 = 章标题；滚到底首可见为 ❖ 时 coerce 到末段
+                    val lastBlock = (blocks.size - 1).coerceAtLeast(0)
+                    val blockIdx = (itemIdx - ReaderListLayout.CHAPTER_MODE_HEADER_ITEMS)
+                        .coerceIn(0, lastBlock)
+                    viewModel.persistScrollProgress(idx, blockIdx, offset)
+                }
             }
     }
 
@@ -346,6 +360,34 @@ fun TextReaderScreen(
                 scrollOffset = listState.firstVisibleItemScrollOffset,
             )
         }
+        // 开书恢复：预载完成后定位到上次阅读段落（覆盖上方的补偿滚动）。
+        // 必须读 viewModel.scrollChapters.value（StateFlow 即时值）——collectAsState
+        // 的 State 更新可能滞后于挂起函数返回，读委托属性会拿到预载前的旧列表。
+        val saved = viewModel.pendingResume.value ?: return@LaunchedEffect
+        val target = ReaderListLayout.scrollItemIndex(
+            viewModel.scrollChapters.value, saved.chapterIndex, saved.blockIndex,
+        )
+        if (target >= 0 && (saved.blockIndex > 0 || saved.scrollOffsetPx > 0)) {
+            listState.scrollToItem(target, saved.scrollOffsetPx.coerceAtLeast(0))
+        }
+        viewModel.consumePendingResume()
+    }
+
+    // 开书恢复（分章模式）：目标章内容就绪后一次性定位，随后消费。
+    // 旧格式记录（blockIndex=0 且 offset=0）等价于章顶——跳过 scrollToItem，无行为回归。
+    LaunchedEffect(pendingResume, blocks) {
+        val saved = pendingResume ?: return@LaunchedEffect
+        if (isScrollMode) return@LaunchedEffect // 滚动模式在 isScrollMode effect 内处理
+        if (blocks.isEmpty()) return@LaunchedEffect
+        val lastBlock = (blocks.size - 1).coerceAtLeast(0)
+        val blk = saved.blockIndex.coerceIn(0, lastBlock)
+        if (blk > 0 || saved.scrollOffsetPx > 0) {
+            listState.scrollToItem(
+                ReaderListLayout.CHAPTER_MODE_HEADER_ITEMS + blk,
+                saved.scrollOffsetPx.coerceAtLeast(0),
+            )
+        }
+        viewModel.consumePendingResume()
     }
 
     // ---------- 滚动模式：接近列表末尾时自动预加载下一章 ----------
