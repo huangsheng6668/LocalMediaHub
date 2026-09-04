@@ -118,6 +118,7 @@ import com.juziss.localmediahub.viewmodel.BleSettingsViewModel
 import com.juziss.localmediahub.viewmodel.TextReaderViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -150,7 +151,6 @@ fun TextReaderScreen(
     val bookmarks by viewModel.bookmarks.collectAsState()
     val bookmarkToast by viewModel.bookmarkToast.collectAsState()
     val chromeVisible by viewModel.chromeVisible.collectAsState()
-    val pendingResume by viewModel.pendingResume.collectAsState()
     @Suppress("unused")
     val isBleDegraded by viewModel.isBleDegraded.collectAsState()
 
@@ -325,7 +325,8 @@ fun TextReaderScreen(
 
     // 节流保存阅读进度（停止滚动 1s 后写入）。把 listState 的全局 item 索引映射为
     // (章, 章内 block)，使记录与已加载章节数解耦、跨会话可恢复。
-    LaunchedEffect(listState, idx) {
+    // key 含 isScrollMode：手动切模式后（idx 不变）重启以捕获新分支，防陈旧闭包写错章/段。
+    LaunchedEffect(listState, idx, isScrollMode) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .debounce(1000)
             .collect { (itemIdx, offset) ->
@@ -345,15 +346,16 @@ fun TextReaderScreen(
     }
 
     // ---------- 滚动模式：进入后同时向前和向后预加载 ----------
-    // 向后预加载 3 章，向前预加载 2 章（支持向上滚动）
     LaunchedEffect(isScrollMode) {
         if (!isScrollMode) return@LaunchedEffect
-        // 串行先加后续章
+        // 开书就绪门闩：持久化 SCROLL 模式经 DataStore 先于书籍加载到达是常态
+        // （设置读取 ~ms vs getBookInfo 网络往返）。此时 book 未加载、preload 全部
+        // no-op、pendingResume 未写——必须先等首章就绪（loadChapter 会写入
+        // _scrollChapters 单章列表），再预载与恢复；否则恢复被静默丢弃。
+        viewModel.scrollChapters.first { it.isNotEmpty() }
         viewModel.preloadScrollChapters(3)
-        // 如果当前不是第一章，串行向前加载 2 章，加载完后补偿滚动位置
         val addedItems = viewModel.preloadPreviousScrollChapters(2)
         if (addedItems > 0) {
-            // 向前插入了新 item，连同当前偏移一起向后跳以保持画面不跳动
             val current = listState.firstVisibleItemIndex
             listState.scrollToItem(
                 index = (current + addedItems).coerceAtLeast(0),
@@ -363,31 +365,16 @@ fun TextReaderScreen(
         // 开书恢复：预载完成后定位到上次阅读段落（覆盖上方的补偿滚动）。
         // 必须读 viewModel.scrollChapters.value（StateFlow 即时值）——collectAsState
         // 的 State 更新可能滞后于挂起函数返回，读委托属性会拿到预载前的旧列表。
-        val saved = viewModel.pendingResume.value ?: return@LaunchedEffect
-        val target = ReaderListLayout.scrollItemIndex(
-            viewModel.scrollChapters.value, saved.chapterIndex, saved.blockIndex,
-        )
-        if (target >= 0 && (saved.blockIndex > 0 || saved.scrollOffsetPx > 0)) {
-            listState.scrollToItem(target, saved.scrollOffsetPx.coerceAtLeast(0))
-        }
-        viewModel.consumePendingResume()
-    }
-
-    // 开书恢复（分章模式）：目标章内容就绪后一次性定位，随后消费。
-    // 旧格式记录（blockIndex=0 且 offset=0）等价于章顶——跳过 scrollToItem，无行为回归。
-    LaunchedEffect(pendingResume, blocks) {
-        val saved = pendingResume ?: return@LaunchedEffect
-        if (isScrollMode) return@LaunchedEffect // 滚动模式在 isScrollMode effect 内处理
-        if (blocks.isEmpty()) return@LaunchedEffect
-        val lastBlock = (blocks.size - 1).coerceAtLeast(0)
-        val blk = saved.blockIndex.coerceIn(0, lastBlock)
-        if (blk > 0 || saved.scrollOffsetPx > 0) {
-            listState.scrollToItem(
-                ReaderListLayout.CHAPTER_MODE_HEADER_ITEMS + blk,
-                saved.scrollOffsetPx.coerceAtLeast(0),
+        val saved = viewModel.pendingResume.value
+        if (saved != null) {
+            val target = ReaderListLayout.scrollItemIndex(
+                viewModel.scrollChapters.value, saved.chapterIndex, saved.blockIndex,
             )
+            if (target >= 0 && (saved.blockIndex > 0 || saved.scrollOffsetPx > 0)) {
+                listState.scrollToItem(target, saved.scrollOffsetPx.coerceAtLeast(0))
+            }
+            viewModel.consumePendingResume()
         }
-        viewModel.consumePendingResume()
     }
 
     // ---------- 滚动模式：接近列表末尾时自动预加载下一章 ----------
@@ -631,15 +618,26 @@ fun TextReaderScreen(
 
             // 分章模式：章节变更时自动滚动到顶部,
             // 解决翻页与切章时停在旧滚动位置的问题。
-            // 开书首次加载不置顶——位置由 pendingResume 恢复 effect 负责（含 blockIndex=0
-            // 的章顶情形）；置顶若在同帧后跑会覆盖段内恢复定位。
-            val hasShownChapter = remember { mutableStateOf(false) }
+            // 开书首帧改为执行 pendingResume 恢复定位（含 blockIndex=0 的章顶情形），
+            // 而非无条件置顶——两个独立 effect 在同帧重启时后执行者胜出，
+            // 无条件置顶会覆盖段内恢复，合并进同一 effect 从根上消除该竞争。
             LaunchedEffect(idx, isScrollMode) {
                 if (!isScrollMode) {
-                    if (hasShownChapter.value) {
+                    val saved = viewModel.pendingResume.value
+                    if (saved != null && idx == saved.chapterIndex && blocks.isNotEmpty()) {
+                        val lastBlock = (blocks.size - 1).coerceAtLeast(0)
+                        val blk = saved.blockIndex.coerceIn(0, lastBlock)
+                        if (blk > 0 || saved.scrollOffsetPx > 0) {
+                            listState.scrollToItem(
+                                ReaderListLayout.CHAPTER_MODE_HEADER_ITEMS + blk,
+                                saved.scrollOffsetPx.coerceAtLeast(0),
+                            )
+                        }
+                        viewModel.consumePendingResume()
+                    } else {
+                        if (saved != null) viewModel.consumePendingResume()
                         listState.scrollToItem(0, 0)
                     }
-                    hasShownChapter.value = true
                 }
             }
 
