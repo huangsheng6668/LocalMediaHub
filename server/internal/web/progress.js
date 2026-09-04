@@ -65,3 +65,14 @@ export function updateProgressUI() {
         els.progressBar.style.width = `${percent}%`;
     }
 }
+
+// 纯函数：给定按文档顺序排列的段落 rect 列表与阅读容器顶边，返回"首个可见段落"
+// （底部边尚未完全滚出视口的第一个段落）。用于阅读进度的段级保存：
+// - 部分露出（top < containerTop < bottom）或完整在视口内都算可见；
+// - 全部滚出（用户停在章末）返回最后一段；空列表返回 null。
+export function firstVisibleParagraph(paragraphs, containerTop) {
+    for (const p of paragraphs) {
+        if (p.bottom - containerTop > 0) return p;
+    }
+    return paragraphs.length ? paragraphs[paragraphs.length - 1] : null;
+}

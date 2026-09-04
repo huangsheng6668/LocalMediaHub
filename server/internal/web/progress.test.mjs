@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectActiveChapterOnScroll, computePercent } from './progress.js';
+import { detectActiveChapterOnScroll, computePercent, firstVisibleParagraph } from './progress.js';
 
 // mock section：模拟 getBoundingClientRect 返回的 {top, bottom}。
 function mkSec(top, bottom, idx) {
@@ -44,4 +44,40 @@ test('computePercent: clamps to [0, 100]', () => {
 
 test('computePercent: zero max returns 0', () => {
     assert.equal(computePercent(5, 0), 0);
+});
+
+// mock paragraph：模拟 getBoundingClientRect 的 {top, bottom} + 章节/段落索引。
+function mkPara(top, bottom, chapterIndex, paraIndex) {
+    return { top, bottom, chapterIndex, paraIndex };
+}
+
+test('firstVisibleParagraph: returns first paragraph whose bottom crosses container top', () => {
+    const paras = [
+        mkPara(-100, -10, 0, 0),   // 已完全滚出
+        mkPara(-10, 40, 0, 1),     // 部分可见 → 目标
+        mkPara(40, 120, 0, 2),
+    ];
+    const hit = firstVisibleParagraph(paras, 0);
+    assert.equal(hit.paraIndex, 1);
+    assert.equal(hit.chapterIndex, 0);
+});
+
+test('firstVisibleParagraph: fully-visible first paragraph wins', () => {
+    const paras = [mkPara(10, 80, 2, 3)];
+    assert.equal(firstVisibleParagraph(paras, 0).paraIndex, 3);
+});
+
+test('firstVisibleParagraph: all scrolled past → last paragraph', () => {
+    const paras = [mkPara(-200, -100, 0, 0), mkPara(-100, -20, 0, 4)];
+    assert.equal(firstVisibleParagraph(paras, 0).paraIndex, 4);
+});
+
+test('firstVisibleParagraph: empty → null', () => {
+    assert.equal(firstVisibleParagraph([], 0), null);
+});
+
+test('firstVisibleParagraph: honours nonzero container top', () => {
+    const paras = [mkPara(50, 90, 1, 0), mkPara(90, 150, 1, 1)];
+    // containerTop=100：第一段 bottom 90 < 100 已滚出，第二段部分可见
+    assert.equal(firstVisibleParagraph(paras, 100).paraIndex, 1);
 });
