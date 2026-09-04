@@ -510,6 +510,10 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         return { paragraphs, containerTop };
     }
     function persistVisibleProgress() {
+        // 活性守卫：路由切走后 view-section 为 display:none（router 不触发
+        // _cleanupReader），此时 rect 全 0，firstVisibleParagraph 会兜底到
+        // "最后一段"造成脏写（滚动模式可前跳数章）。视图不在 DOM / 不可见时跳过保存。
+        if (!els.content.isConnected || els.content.offsetParent === null) return;
         const { paragraphs, containerTop } = collectVisibleParagraphs();
         const vis = firstVisibleParagraph(paragraphs, containerTop);
         if (vis) {

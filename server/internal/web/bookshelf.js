@@ -6,7 +6,7 @@
 //                              when no progress entries exist.
 //
 // Storage keys mirror textReader.js: `book_progress:<path>` JSON, payload
-// shape { chapterIndex, scrollOffset, lastReadAt }. Sorting is lastReadAt desc
+// shape { chapterIndex, paraIndex, lastReadAt }. Sorting is lastReadAt desc
 // so the most-recently-read book shows up first.
 const PREFIX = 'book_progress:';
 
