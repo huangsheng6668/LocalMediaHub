@@ -13,13 +13,15 @@ export const state = {
     currentFiles: [], // Current browser view media files
     currentFolders: [], // Current browser view directories
     isSystemBrowse: false,
-    sortField: localStorage.getItem('lmh_browser_sort_field') || 'name', // 'name' | 'modified_time' | 'size' | 'extension'
-    sortOrder: localStorage.getItem('lmh_browser_sort_order') || 'asc',   // 'asc' | 'desc'
+    sortField: (typeof localStorage !== 'undefined' && localStorage.getItem('lmh_browser_sort_field')) || 'name', // 'name' | 'modified_time' | 'size' | 'extension'
+    sortOrder: (typeof localStorage !== 'undefined' && localStorage.getItem('lmh_browser_sort_order')) || 'asc',   // 'asc' | 'desc'
+    favoritesOnly: false,
+    statusFilter: null, // null | 'unread' | 'reading' | 'finished'
     
     // Lightbox variables
     lightboxFiles: [],
     lightboxIndex: -1,
-    lightboxStitchMode: localStorage.getItem('lightboxStitchMode') === 'true',
+    lightboxStitchMode: typeof localStorage !== 'undefined' && localStorage.getItem('lightboxStitchMode') === 'true',
 
     // Dashboard recent media (backing array for index-based click delegation)
     dashboardRecentFiles: [],
@@ -35,7 +37,7 @@ export const state = {
     apiBase: '',
 
     // Auth token for API authentication
-    authToken: sessionStorage.getItem('lmh_auth_token') || ''
+    authToken: (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('lmh_auth_token')) || ''
 };
 
 // Auth token setter with sessionStorage sync

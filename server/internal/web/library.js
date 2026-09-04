@@ -1,6 +1,10 @@
 // 阅读状态 + 收藏（library）模块：纯函数 + API + 列表装饰。
 // 注意：不得在模块求值期访问 localStorage（jsdom 测试约束）。
 
+import { apiRequest } from './api.js';
+import { state } from './state.js';
+import { showToast } from './toast.js';
+
 export function applyListFilters(folders, files, decorations, { favoritesOnly, statusFilter }) {
     const favSet = new Set(decorations ? decorations.favorites : []);
     const states = (decorations && decorations.states) || {};
@@ -81,3 +85,235 @@ export function runWithConcurrency(taskFactories, limit) {
         launch();
     });
 }
+
+let decorations = null; // { states, favorites }
+let decorationsKey = '';
+
+export function setDecorationsForTest(d) {
+    decorations = d;
+    decorationsKey = 'test';
+}
+
+export function getDecorations() {
+    return decorations;
+}
+
+function chunk(arr, n) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += n) {
+        out.push(arr.slice(i, i + n));
+    }
+    return out;
+}
+
+async function fetchDecorationsFor(paths) {
+    const states = {};
+    const favorites = [];
+    for (const part of chunk(paths, 500)) {
+        const res = await apiRequest(`${state.apiBase}/api/v1/library/decorations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paths: part }),
+        });
+        Object.assign(states, (res && res.states) || {});
+        favorites.push(...((res && res.favorites) || []));
+    }
+    return { states, favorites };
+}
+
+// browserView 渲染后调用：缓存命中同步 patch；未命中异步拉取后 patch（若期间有筛选激活则触发回调重渲染）。
+export async function refreshDecorations(onFilterableChange) {
+    const paths = [
+        ...(state.currentFolders || []).map(f => f.path),
+        ...(state.currentFiles || []).map(f => f.path),
+    ];
+    const key = (state.currentPath || '') + '|' + paths.length;
+    if (decorations && decorationsKey === key) {
+        decorateBrowserList(document.getElementById('browser-list'));
+        return;
+    }
+    try {
+        const d = await fetchDecorationsFor(paths);
+        decorations = d;
+        decorationsKey = key;
+        decorateBrowserList(document.getElementById('browser-list'));
+        if (onFilterableChange && (state.favoritesOnly || state.statusFilter != null)) {
+            onFilterableChange();
+        }
+    } catch (e) {
+        /* 服务端不可达：徽章/心形降级缺席 */
+    }
+}
+
+export function decorateBrowserList(container) {
+    if (!container || !decorations) return;
+    const favSet = new Set((decorations && decorations.favorites) || []);
+    container.querySelectorAll('.media-card[data-path]').forEach(card => {
+        const path = card.dataset.path;
+        const favBtn = card.querySelector('.fav-btn');
+        if (favBtn) {
+            favBtn.classList.toggle('active', favSet.has(path));
+        }
+        if (card.dataset.mediaType === 'text') {
+            const meta = card.querySelector('.card-meta');
+            if (!meta) return;
+            const old = meta.querySelector('.card-badge--reading, .card-badge--finished');
+            if (old) old.remove();
+            const badge = decorations.states ? decorations.states[path] : undefined;
+            const html = badgeHtmlFor(badge ? badge.status : 'unread', badge ? badge.percent : 0);
+            if (html) {
+                meta.insertAdjacentHTML('beforeend', html); // XSS-SAFE: badgeHtmlFor 输出受控常量
+            }
+        }
+    });
+}
+
+export async function toggleFavorite(path, isDir, title, mediaType) {
+    const favSet = new Set(decorations ? decorations.favorites : []);
+    const wasFav = favSet.has(path);
+    if (wasFav) favSet.delete(path); else favSet.add(path);
+    decorations = { ...(decorations || {}), states: (decorations && decorations.states) || {}, favorites: [...favSet] };
+    decorateBrowserList(document.getElementById('browser-list'));
+    try {
+        if (wasFav) {
+            await apiRequest(`${state.apiBase}/api/v1/library/favorites?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        } else {
+            await apiRequest(`${state.apiBase}/api/v1/library/favorites`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    path,
+                    is_dir: Boolean(isDir),
+                    is_system: Boolean(state.isSystemBrowse),
+                    title: title || '',
+                    media_type: mediaType || '',
+                    snapshot: { title: title || '' },
+                }),
+            });
+        }
+        showToast(wasFav ? '已取消收藏' : '已收藏', 'success');
+    } catch (e) {
+        const rollback = new Set((decorations && decorations.favorites) || []);
+        if (wasFav) rollback.add(path); else rollback.delete(path);
+        decorations = { ...(decorations || {}), states: (decorations && decorations.states) || {}, favorites: [...rollback] };
+        decorateBrowserList(document.getElementById('browser-list'));
+        showToast(`收藏操作失败: ${e.message}`, 'error');
+    }
+}
+
+export async function markStatus(path, status) {
+    try {
+        await apiRequest(`${state.apiBase}/api/v1/library/states/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path, status }),
+        });
+        decorationsKey = ''; // 强制下次 refresh 重新拉取
+        await refreshDecorations();
+    } catch (e) {
+        showToast(`标记失败: ${e.message}`, 'error');
+    }
+}
+
+export async function fetchState(path) {
+    try {
+        return await apiRequest(`${state.apiBase}/api/v1/library/states?path=${encodeURIComponent(path)}`);
+    } catch (e) {
+        return null;
+    }
+}
+
+export function reportState(path, payload = {}) {
+    const chapterIndex = payload.chapterIndex !== undefined ? payload.chapterIndex : payload.chapter_index;
+    const paraIndex = payload.paraIndex !== undefined ? payload.paraIndex : payload.para_index;
+    const percent = payload.percent;
+    const finished = payload.finished;
+    const lastReadAt = payload.lastReadAt !== undefined ? payload.lastReadAt : payload.last_read_at;
+    apiRequest(`${state.apiBase}/api/v1/library/states`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            path,
+            chapter_index: chapterIndex,
+            para_index: paraIndex,
+            percent,
+            finished,
+            last_read_at: lastReadAt,
+        }),
+    }).catch(() => {}); // 静默：下次保存重试
+}
+
+let currentMenuPath = null;
+
+function ensureStatusMenu() {
+    if (typeof document === 'undefined' || !document.body) return null;
+    let menu = document.getElementById('card-status-menu');
+    if (!menu) {
+        menu = document.createElement('div');
+        menu.id = 'card-status-menu';
+        const items = [
+            { label: '标为已读完', status: 'finished' },
+            { label: '标为读过', status: 'reading' },
+            { label: '标为未读', status: 'unread' },
+            { label: '清除手动标记', status: null },
+        ];
+        items.forEach(({ label, status }) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'status-menu__item';
+            btn.textContent = label;
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentMenuPath) {
+                    markStatus(currentMenuPath, status);
+                }
+                closeStatusMenu();
+            });
+            menu.appendChild(btn);
+        });
+        document.body.appendChild(menu);
+
+        document.addEventListener('click', (e) => {
+            const m = document.getElementById('card-status-menu');
+            if (!m || !m.classList.contains('open')) return;
+            if (!m.contains(e.target) && !e.target.closest('[data-action="status-menu"]')) {
+                closeStatusMenu();
+            }
+        }, true);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeStatusMenu();
+            }
+        });
+    }
+    return menu;
+}
+
+export function openStatusMenu(anchorEl, path) {
+    const menu = ensureStatusMenu();
+    if (!menu) return;
+    currentMenuPath = path;
+    if (anchorEl && typeof anchorEl.getBoundingClientRect === 'function') {
+        const rect = anchorEl.getBoundingClientRect();
+        const top = (rect.bottom || 0) + 4;
+        const left = rect.left || 0;
+        menu.style.top = `${top}px`;
+        menu.style.left = `${left}px`;
+    }
+    menu.classList.add('open');
+}
+
+export function closeStatusMenu() {
+    if (typeof document === 'undefined') return;
+    const menu = document.getElementById('card-status-menu');
+    if (menu) {
+        menu.classList.remove('open');
+    }
+    currentMenuPath = null;
+}
+
+export function initLibrary() {
+    ensureStatusMenu();
+}
+

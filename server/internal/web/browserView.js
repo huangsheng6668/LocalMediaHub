@@ -9,6 +9,7 @@ import { elements } from './dom.js';
 import { formatSize, encodeRoutePath, safeBtoa } from './utils.js';
 import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
+import { refreshDecorations, decorateBrowserList, toggleFavorite, markStatus, openStatusMenu } from './library.js';
 
 // ── Inline SVG icon vocabulary (mirrors index.html / Task 6 icons) ──
 // Monochrome currentColor stroke icons replace the former emoji glyphs in
@@ -24,6 +25,8 @@ const ICONS = {
     video: () => svgIcon('<rect x="2" y="5" width="14" height="14" rx="2"/><path d="m16 10 6-3v10l-6-3"/>', 32),
     image: () => svgIcon('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.35-4.35a1 1 0 0 0-1.42 0L5 21"/>', 32),
     trash: () => svgIcon('<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>', 16),
+    heart: () => svgIcon('<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>', 16),
+    dots: () => svgIcon('<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>', 16),
     // Filled play triangle (same path as the video-controls play icon).
     play: () => `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>`
 };
@@ -177,6 +180,11 @@ function onBrowserListClick(e) {
 
     if (action === 'browse') {
         browsePath(actionEl.dataset.path || '');
+    } else if (action === 'fav-toggle') {
+        toggleFavorite(actionEl.dataset.path, actionEl.dataset.isDir === '1',
+            actionEl.dataset.title || '', actionEl.dataset.mediaType || '');
+    } else if (action === 'status-menu') {
+        openStatusMenu(actionEl, actionEl.dataset.path);
     } else if (action === 'open') {
         if (state.currentFiles[idx]) openMedia(state.currentFiles[idx]);
     } else if (action === 'text-open') {
@@ -244,12 +252,13 @@ export function renderBrowserList() {
         const safePath = escapeHtml(folder.path.replace(/\\/g, '/'));
         const safeName = escapeHtml(folder.name);
         html += `
-            <div class="media-card" data-action="browse" data-path="${safePath}">
+            <div class="media-card" data-action="browse" data-path="${safePath}" data-media-type="folder">
                 <div class="card-preview">
                     <span class="card-preview-icon">${ICONS.folder()}</span>
                 </div>
                 <div class="card-actions-overlay">
                     ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" data-action="delete-folder" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                    <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${safePath}" data-is-dir="1" data-title="${safeName}" data-media-type="folder">${ICONS.heart()}</button>
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>
@@ -285,13 +294,17 @@ export function renderBrowserList() {
                 : '';
             html += `
                 <div class="media-card text-card ${isUnsupportedText ? 'text-card--unsupported' : ''}"
+                     id="file-card-${safeBtoa(file.path).replace(/=/g, '')}"
                      data-action="${isUnsupportedText ? 'text-unsupported' : 'text-open'}"
+                     data-path="${escapeHtml(file.path)}"
+                     data-media-type="text"
                      data-index="${index}">
                     <div class="card-preview">
                         <span class="card-preview-icon">${docIcon}</span>
                     </div>
                     <div class="card-actions-overlay">
-
+                        <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="text">${ICONS.heart()}</button>
+                        <button class="card-action-btn dots-btn" title="阅读状态" data-action="status-menu" data-path="${escapeHtml(file.path)}">${ICONS.dots()}</button>
                         ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">${ICONS.trash()}</button>` : ''}
                     </div>
                     <div class="card-details">
@@ -339,13 +352,13 @@ export function renderBrowserList() {
         const safeExt = escapeHtml(file.extension);
 
         html += `
-            <div class="${escapeHtml(cardClass)}" id="file-card-${safeBtoa(file.path).replace(/=/g, '')}" data-action="open" data-index="${index}">
+            <div class="${escapeHtml(cardClass)}" id="file-card-${safeBtoa(file.path).replace(/=/g, '')}" data-action="open" data-path="${escapeHtml(file.path)}" data-media-type="${isVideo ? 'video' : 'image'}" data-index="${index}">
                 <div class="card-preview" data-fallback-icon="${fallbackIcon}">
                     ${previewHtml}
                     ${playOverlay}
                 </div>
                 <div class="card-actions-overlay">
-
+                    <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="${isVideo ? 'video' : 'image'}">${ICONS.heart()}</button>
                     ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">${ICONS.trash()}</button>` : ''}
                 </div>
                 <div class="card-details">
@@ -360,6 +373,8 @@ export function renderBrowserList() {
     });
 
     elements.browserList.innerHTML = html; // XSS-SAFE: html built entirely from escapeHtml-wrapped folder/file fields above
+    decorateBrowserList(elements.browserList);
+    refreshDecorations(() => renderBrowserList());
 }
 
 // Delegated click dispatcher for breadcrumbs
