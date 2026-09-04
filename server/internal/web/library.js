@@ -152,7 +152,11 @@ export function decorateBrowserList(container) {
         const path = card.dataset.path;
         const favBtn = card.querySelector('.fav-btn');
         if (favBtn) {
-            favBtn.classList.toggle('active', favSet.has(path));
+            // 心形匹配键用按钮自身的 data-path（与服务端 decorations 回显的原始
+            // 请求形态一致）；文件夹卡片本体是斜杠形态（browse 导航历史行为），
+            // 用卡片形态匹配会让 Windows 反斜杠路径的目录心形永远点不亮。
+            const favPath = favBtn.dataset.path || path;
+            favBtn.classList.toggle('active', favSet.has(favPath));
         }
         if (card.dataset.mediaType === 'text') {
             const meta = card.querySelector('.card-meta');
@@ -168,7 +172,8 @@ export function decorateBrowserList(container) {
     });
 }
 
-export async function toggleFavorite(path, isDir, title, mediaType) {
+export async function toggleFavorite(path, isDir, title, mediaType, onFilterableChange) {
+    const shouldRerender = () => onFilterableChange && (state.favoritesOnly || state.statusFilter != null);
     const favSet = new Set(decorations ? decorations.favorites : []);
     const wasFav = favSet.has(path);
     if (wasFav) favSet.delete(path); else favSet.add(path);
@@ -192,16 +197,19 @@ export async function toggleFavorite(path, isDir, title, mediaType) {
             });
         }
         showToast(wasFav ? '已取消收藏' : '已收藏', 'success');
+        // 筛选激活时列表成员集变化（如"只看收藏"下取消收藏），就地 patch 不够，需重排。
+        if (shouldRerender()) onFilterableChange();
     } catch (e) {
         const rollback = new Set((decorations && decorations.favorites) || []);
         if (wasFav) rollback.add(path); else rollback.delete(path);
         decorations = { ...(decorations || {}), states: (decorations && decorations.states) || {}, favorites: [...rollback] };
         decorateBrowserList(document.getElementById('browser-list'));
+        if (shouldRerender()) onFilterableChange();
         showToast(`收藏操作失败: ${e.message}`, 'error');
     }
 }
 
-export async function markStatus(path, status) {
+export async function markStatus(path, status, onFilterableChange) {
     try {
         await apiRequest(`${state.apiBase}/api/v1/library/states/status`, {
             method: 'PUT',
@@ -209,7 +217,7 @@ export async function markStatus(path, status) {
             body: JSON.stringify({ path, status }),
         });
         decorationsKey = ''; // 强制下次 refresh 重新拉取
-        await refreshDecorations();
+        await refreshDecorations(onFilterableChange);
     } catch (e) {
         showToast(`标记失败: ${e.message}`, 'error');
     }
@@ -281,6 +289,7 @@ export async function migrateLocalProgress() {
 }
 
 let currentMenuPath = null;
+let currentMenuCallback = null;
 
 function ensureStatusMenu() {
     if (typeof document === 'undefined' || !document.body) return null;
@@ -302,7 +311,7 @@ function ensureStatusMenu() {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 if (currentMenuPath) {
-                    markStatus(currentMenuPath, status);
+                    markStatus(currentMenuPath, status, currentMenuCallback || undefined);
                 }
                 closeStatusMenu();
             });
@@ -327,10 +336,11 @@ function ensureStatusMenu() {
     return menu;
 }
 
-export function openStatusMenu(anchorEl, path) {
+export function openStatusMenu(anchorEl, path, onFilterableChange) {
     const menu = ensureStatusMenu();
     if (!menu) return;
     currentMenuPath = path;
+    currentMenuCallback = onFilterableChange || null;
     if (anchorEl && typeof anchorEl.getBoundingClientRect === 'function') {
         const rect = anchorEl.getBoundingClientRect();
         const top = (rect.bottom || 0) + 4;
@@ -348,6 +358,7 @@ export function closeStatusMenu() {
         menu.classList.remove('open');
     }
     currentMenuPath = null;
+    currentMenuCallback = null;
 }
 
 export function initLibrary() {

@@ -187,9 +187,10 @@ function onBrowserListClick(e) {
         browsePath(actionEl.dataset.path || '');
     } else if (action === 'fav-toggle') {
         toggleFavorite(actionEl.dataset.path, actionEl.dataset.isDir === '1',
-            actionEl.dataset.title || '', actionEl.dataset.mediaType || '');
+            actionEl.dataset.title || '', actionEl.dataset.mediaType || '',
+            () => renderBrowserList());
     } else if (action === 'status-menu') {
-        openStatusMenu(actionEl, actionEl.dataset.path);
+        openStatusMenu(actionEl, actionEl.dataset.path, () => renderBrowserList());
     } else if (action === 'open') {
         if (shownFiles[idx]) openMedia(shownFiles[idx]);
     } else if (action === 'text-open') {
@@ -271,7 +272,7 @@ export function renderBrowserList() {
                 </div>
                 <div class="card-actions-overlay">
                     ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" data-action="delete-folder" data-index="${index}">${ICONS.trash()}</button>` : ''}
-                    <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${safePath}" data-is-dir="1" data-title="${safeName}" data-media-type="folder">${ICONS.heart()}</button>
+                    <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(folder.path)}" data-is-dir="1" data-title="${safeName}" data-media-type="folder">${ICONS.heart()}</button>
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>

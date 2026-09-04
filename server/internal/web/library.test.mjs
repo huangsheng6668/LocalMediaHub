@@ -569,3 +569,111 @@ test('migrateLocalProgress uploads book_progress entries once', async () => {
     }
 });
 
+test('decorateBrowserList keys folder heart off fav-btn data-path (original path form)', () => {
+    setupJsdom();
+    try {
+        // Windows 真实形态：卡片 data-path 是斜杠形态（browse 导航历史行为），
+        // 心形按钮 data-path 是原始反斜杠形态（与服务端 decorations 回显对齐）。
+        document.body.innerHTML = `
+        <div id="browser-list">
+          <div class="media-card" data-path="E:/media/comics" data-media-type="folder">
+            <div class="card-actions-overlay">
+              <button class="card-action-btn fav-btn" data-action="fav-toggle" data-path="E:\\media\\comics"></button>
+            </div>
+          </div>
+        </div>`;
+        setDecorationsForTest({ states: {}, favorites: ['E:\\media\\comics'] });
+        decorateBrowserList(document.getElementById('browser-list'));
+        assert.ok(document.querySelector('.fav-btn.active'), 'heart lights up via button path form');
+    } finally {
+        teardownJsdom();
+    }
+});
+
+test('renderBrowserList: folder fav-btn carries original backslash path', async () => {
+    setupJsdom();
+    try {
+        document.body.innerHTML = '<div id="browser-list"></div>';
+        const { elements } = await import('./dom.js');
+        elements.browserList = document.getElementById('browser-list');
+        const { renderBrowserList } = await import('./browserView.js');
+        setDecorationsForTest({ states: {}, favorites: [] });
+        state.currentFolders = [{ path: 'E:\\media\\comics', name: 'comics' }];
+        state.currentFiles = [];
+        state.favoritesOnly = false;
+        state.statusFilter = null;
+        renderBrowserList();
+        const btn = elements.browserList.querySelector('.fav-btn');
+        assert.ok(btn, 'folder card has heart button');
+        assert.equal(btn.dataset.path, 'E:\\media\\comics');
+        // 卡片本体保持斜杠形态（browse 导航历史行为不变）
+        assert.equal(elements.browserList.querySelector('.media-card').dataset.path, 'E:/media/comics');
+        state.currentFolders = [];
+        setDecorationsForTest(null);
+    } finally {
+        teardownJsdom();
+    }
+});
+
+test('toggleFavorite re-renders via onFilterableChange when favoritesOnly is active', async () => {
+    setupJsdom();
+    global.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
+    try {
+        document.body.innerHTML = '<div id="browser-list"></div>';
+        setDecorationsForTest({ states: {}, favorites: [] });
+        state.favoritesOnly = true;
+        state.statusFilter = null;
+        let rerenders = 0;
+        await toggleFavorite('/m/a.txt', false, 'a', 'text', () => { rerenders++; });
+        assert.equal(rerenders, 1, 'list must re-render after toggle when favorites filter is active');
+        state.favoritesOnly = false;
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('toggleFavorite does not re-render when no filter is active', async () => {
+    setupJsdom();
+    global.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
+    try {
+        document.body.innerHTML = '<div id="browser-list"></div>';
+        setDecorationsForTest({ states: {}, favorites: [] });
+        state.favoritesOnly = false;
+        state.statusFilter = null;
+        let rerenders = 0;
+        await toggleFavorite('/m/a.txt', false, 'a', 'text', () => { rerenders++; });
+        assert.equal(rerenders, 0, 'no filter active: in-place patch only, no re-render');
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('markStatus forwards onFilterableChange when status filter is active', async () => {
+    setupJsdom();
+    global.fetch = async (url) => {
+        if (String(url).includes('/api/v1/library/decorations')) {
+            return { ok: true, status: 200, json: async () => ({ states: {}, favorites: [] }) };
+        }
+        return { ok: true, status: 200, json: async () => ({}) };
+    };
+    try {
+        document.body.innerHTML = '<div id="browser-list"></div>';
+        setDecorationsForTest(null);
+        state.currentPath = '/m';
+        state.currentFolders = [];
+        state.currentFiles = [];
+        state.favoritesOnly = false;
+        state.statusFilter = 'finished';
+        let rerenders = 0;
+        await markStatus('/m/a.txt', 'finished', () => { rerenders++; });
+        assert.equal(rerenders, 1, 'list must re-render after status change when status filter is active');
+        state.statusFilter = null;
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+
