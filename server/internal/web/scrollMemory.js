@@ -13,8 +13,12 @@ export function captureScrollAnchor(cards, containerTop = 0) {
     return null;
 }
 
-export function restoreScrollTop(el, container, offset = 0) {
-    return (el ? el.offsetTop : 0) - (offset || 0);
+// 目标 scrollTop = 当前滚动 + 锚点当前视口内偏移 - 捕获 offset。
+// 必须用 getBoundingClientRect 差值而非 offsetTop：浏览器列表的滚动容器链
+// （.media-card → .browser-grid → .view-section → .view-container）没有任何定位
+// 祖先，offsetParent 是 body，offsetTop 会混入容器顶以上的常量偏移（≈57px）。
+export function restoreScrollTop(elTopInContainer, containerScrollTop, offset = 0) {
+    return Math.round(elTopInContainer + (containerScrollTop || 0) - (offset || 0));
 }
 
 export function rememberScroll(dirPath, anchor) {
@@ -59,6 +63,7 @@ export function restoreScrollMemory(container, dirPath) {
     const escaped = escapeFn ? escapeFn(mem.anchorPath) : mem.anchorPath.replace(/"/g, '\\"');
     const el = container.querySelector(`.media-card[data-path="${escaped}"]`);
     if (!el) return false; // 锚点消失（排序/筛选/内容变化）→ 安全放弃
-    container.scrollTop = restoreScrollTop(el, container, mem.offset);
+    const elTopInContainer = el.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    container.scrollTop = restoreScrollTop(elTopInContainer, container.scrollTop, mem.offset);
     return true;
 }

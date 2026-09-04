@@ -30,9 +30,13 @@ test('captureScrollAnchor returns null when cards array is empty', () => {
     assert.equal(captureScrollAnchor([], 0), null);
 });
 
-test('restoreScrollTop computes target scrollTop', () => {
-    // el 距容器内容顶 800，期望视口内位于 offset=-50：scrollTop = 800 - (-50) = 850
-    assert.equal(restoreScrollTop({ offsetTop: 800 }, { scrollTop: 0 }, -50), 850);
+test('restoreScrollTop computes viewport-rect-based target independent of offsetParent', () => {
+    // elTopInContainer = el.rectTop - container.rectTop（当前锚点在视口内的偏移）；
+    // 目标 scrollTop = 当前滚动 + 视口内偏移 - 捕获 offset。
+    // 与 offsetParent/offsetTop 无关（滚动容器链无定位祖先时 offsetTop 相对 body，会偏差）。
+    assert.equal(restoreScrollTop(200, 50, -40), 290);
+    assert.equal(restoreScrollTop(100, 0, 0), 100);
+    assert.equal(restoreScrollTop(0, 300, 30), 270);
 });
 
 test('remember/recall/clear roundtrip', () => {
@@ -74,23 +78,24 @@ test('restoreScrollMemory returns false if anchor card not found in container', 
     }
 });
 
-test('restoreScrollMemory scrolls container and returns true when anchor card exists', () => {
+test('restoreScrollMemory scrolls container via rect delta and returns true when anchor card exists', () => {
     setupJsdom();
     try {
         clearScrollMemory();
         rememberScroll('/m/dir', { anchorPath: '/card-target.txt', offset: -40 });
         const container = document.createElement('div');
-        container.scrollTop = 0;
+        container.scrollTop = 50;
+        container.getBoundingClientRect = () => ({ top: 100, bottom: 700 });
         const card = document.createElement('div');
         card.className = 'media-card';
         card.setAttribute('data-path', '/card-target.txt');
-        Object.defineProperty(card, 'offsetTop', { value: 500, configurable: true });
+        card.getBoundingClientRect = () => ({ top: 300, bottom: 480 });
         container.appendChild(card);
 
         const restored = restoreScrollMemory(container, '/m/dir');
         assert.equal(restored, true);
-        // container.scrollTop = el.offsetTop - offset = 500 - (-40) = 540
-        assert.equal(container.scrollTop, 540);
+        // scrollTop = 50 + (300-100) - (-40) = 290
+        assert.equal(container.scrollTop, 290);
     } finally {
         teardownJsdom();
     }
@@ -103,15 +108,18 @@ test('restoreScrollMemory handles special characters in anchorPath', () => {
         const weirdPath = '/m/dir/special"\' [test].txt';
         rememberScroll('/m/dir', { anchorPath: weirdPath, offset: 10 });
         const container = document.createElement('div');
+        container.scrollTop = 20;
+        container.getBoundingClientRect = () => ({ top: 100, bottom: 700 });
         const card = document.createElement('div');
         card.className = 'media-card';
         card.setAttribute('data-path', weirdPath);
-        Object.defineProperty(card, 'offsetTop', { value: 300, configurable: true });
+        card.getBoundingClientRect = () => ({ top: 350, bottom: 500 });
         container.appendChild(card);
 
         const restored = restoreScrollMemory(container, '/m/dir');
         assert.equal(restored, true);
-        assert.equal(container.scrollTop, 290);
+        // scrollTop = 20 + (350-100) - 10 = 260
+        assert.equal(container.scrollTop, 260);
     } finally {
         teardownJsdom();
     }
