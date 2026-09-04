@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -72,7 +73,12 @@ func NewLibraryService(dataDir string) (*LibraryService, error) {
 }
 
 func (s *LibraryService) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
 		return nil
 	}
 	return s.db.Close()
@@ -113,9 +119,12 @@ func (s *LibraryService) UpsertProgress(u models.ProgressUpdate) (models.Reading
 	if err != nil {
 		return models.ReadingState{}, err
 	}
-	st, err := s.GetState(u.Path)
-	if err != nil || st == nil {
+	st, err := s.getStateLocked(u.Path)
+	if err != nil {
 		return models.ReadingState{}, err
+	}
+	if st == nil {
+		return models.ReadingState{}, fmt.Errorf("failed to retrieve state after upsert: %s", u.Path)
 	}
 	return *st, nil
 }
@@ -123,6 +132,10 @@ func (s *LibraryService) UpsertProgress(u models.ProgressUpdate) (models.Reading
 func (s *LibraryService) GetState(path string) (*models.ReadingState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.getStateLocked(path)
+}
+
+func (s *LibraryService) getStateLocked(path string) (*models.ReadingState, error) {
 	row := s.db.QueryRow(`SELECT path, chapter_index, para_index, percent, finished, manual_status, last_read_at, updated_at
 		FROM reading_states WHERE path = ?`, path)
 	return scanReadingState(row)

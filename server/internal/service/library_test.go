@@ -41,8 +41,11 @@ func TestUpsertProgressMerge(t *testing.T) {
 	_, err := svc.UpsertProgress(mkUpdate("/media/b.txt", 9, 5, 99.0, true, 1000))
 	assert.NoError(t, err)
 	// 更新的重读进度（lastReadAt 更新，finished=false）：finished 粘滞 + manual unread 自动清除
-	_, _ = svc.UpsertProgress(mkUpdate("/media/b.txt", 0, 0, 0, false, 2000))
-	got, _ := svc.GetState("/media/b.txt")
+	_, err = svc.UpsertProgress(mkUpdate("/media/b.txt", 0, 0, 0, false, 2000))
+	assert.NoError(t, err)
+	got, err := svc.GetState("/media/b.txt")
+	assert.NoError(t, err)
+	assert.NotNil(t, got)
 	assert.True(t, got.Finished)         // 粘滞
 	assert.Equal(t, 0, got.ChapterIndex) // 进度更新为新值
 	// 陈旧上报 no-op
@@ -53,20 +56,33 @@ func TestUpsertProgressMerge(t *testing.T) {
 
 func TestUpsertProgressAutoClearsManualUnread(t *testing.T) {
 	svc := newTestLibraryService(t)
-	_, _ = svc.UpsertProgress(mkUpdate("/media/c.txt", 1, 0, 5, false, 1000))
-	// 手动标未读（Task 2 实现 SetManualStatus；此处先直接 SQL 置位以锁定 upsert 行为）
-	_, err := svc.db.Exec(`UPDATE reading_states SET manual_status='unread' WHERE path=?`, "/media/c.txt")
+	_, err := svc.UpsertProgress(mkUpdate("/media/c.txt", 1, 0, 5, false, 1000))
 	assert.NoError(t, err)
-	_, _ = svc.UpsertProgress(mkUpdate("/media/c.txt", 2, 0, 8, false, 3000))
-	got, _ := svc.GetState("/media/c.txt")
+	// 手动标未读（Task 2 实现 SetManualStatus；此处先直接 SQL 置位以锁定 upsert 行为）
+	_, err = svc.db.Exec(`UPDATE reading_states SET manual_status='unread' WHERE path=?`, "/media/c.txt")
+	assert.NoError(t, err)
+	_, err = svc.UpsertProgress(mkUpdate("/media/c.txt", 2, 0, 8, false, 3000))
+	assert.NoError(t, err)
+	got, err := svc.GetState("/media/c.txt")
+	assert.NoError(t, err)
+	assert.NotNil(t, got)
 	assert.Nil(t, got.ManualStatus) // 自动清除
 }
 
 func TestUpsertProgressCaseInsensitivePath(t *testing.T) {
 	svc := newTestLibraryService(t)
-	_, _ = svc.UpsertProgress(mkUpdate("/Media/A.TXT", 1, 0, 5, false, 1000))
-	got, _ := svc.GetState("/media/a.txt")
+	_, err := svc.UpsertProgress(mkUpdate("/Media/A.TXT", 1, 0, 5, false, 1000))
+	assert.NoError(t, err)
+	got, err := svc.GetState("/media/a.txt")
+	assert.NoError(t, err)
 	assert.NotNil(t, got) // COLLATE NOCASE 命中同一行
+}
+
+func TestGetStateNonExistent(t *testing.T) {
+	svc := newTestLibraryService(t)
+	got, err := svc.GetState("/media/nonexistent.txt")
+	assert.NoError(t, err)
+	assert.Nil(t, got)
 }
 
 func TestDeriveStatus(t *testing.T) {
