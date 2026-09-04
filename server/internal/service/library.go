@@ -2,11 +2,13 @@ package service
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -225,3 +227,108 @@ func boolToInt(b bool) int {
 
 // nowMillis 定义为变量便于测试注入（默认 Unix 毫秒）。
 var nowMillis = func() int64 { return time.Now().UnixMilli() }
+
+func (s *LibraryService) UpsertFavorite(f models.FavoriteUpdate) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	snap := "{}"
+	if len(f.Snapshot) > 0 {
+		snap = string(f.Snapshot)
+	}
+	if len(snap) > 8192 {
+		return fmt.Errorf("snapshot too large")
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO favorites (path, is_dir, is_system, title, media_type, snapshot, added_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(path) DO UPDATE SET
+			is_dir = excluded.is_dir,
+			is_system = excluded.is_system,
+			title = excluded.title,
+			media_type = excluded.media_type,
+			snapshot = CASE
+				WHEN excluded.snapshot != favorites.snapshot AND excluded.added_at > favorites.added_at THEN excluded.snapshot
+				ELSE favorites.snapshot
+			END,
+			added_at = CASE
+				WHEN excluded.snapshot != favorites.snapshot AND excluded.added_at > favorites.added_at THEN excluded.added_at
+				ELSE favorites.added_at
+			END`,
+		f.Path, boolToInt(f.IsDir), boolToInt(f.IsSystem), f.Title, f.MediaType, snap, f.AddedAt)
+	return err
+}
+
+func (s *LibraryService) RemoveFavorite(path string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, err := s.db.Exec(`DELETE FROM favorites WHERE path = ?`, path)
+	return err
+}
+
+func (s *LibraryService) ListFavorites() ([]models.FavoriteRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rows, err := s.db.Query(`SELECT path, is_dir, is_system, title, media_type, snapshot, added_at
+		FROM favorites ORDER BY added_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]models.FavoriteRecord, 0)
+	for rows.Next() {
+		var r models.FavoriteRecord
+		var isDir, isSystem int
+		var snap string
+		if err := rows.Scan(&r.Path, &isDir, &isSystem, &r.Title, &r.MediaType, &snap, &r.AddedAt); err != nil {
+			return nil, err
+		}
+		r.IsDir, r.IsSystem = isDir == 1, isSystem == 1
+		r.Snapshot = json.RawMessage(snap)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// FavoritePaths 返回 paths（已是规范化形态）中已收藏者，保持输入顺序；批量 500 一组 IN 查询。
+func (s *LibraryService) FavoritePaths(paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return make([]string, 0), nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	found := make(map[string]bool)
+	const batchSize = 500
+	for start := 0; start < len(paths); start += batchSize {
+		end := min(start+batchSize, len(paths))
+		batch := paths[start:end]
+		placeholders := strings.Repeat("?,", len(batch)-1) + "?"
+		args := make([]interface{}, len(batch))
+		for i, p := range batch {
+			args[i] = p
+		}
+		rows, err := s.db.Query(`SELECT path FROM favorites WHERE path IN (`+placeholders+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			found[strings.ToLower(p)] = true
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]string, 0)
+	for _, p := range paths {
+		if found[strings.ToLower(p)] {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -162,3 +163,97 @@ func TestSetManualStatusReadingRetainsProgress(t *testing.T) {
 	assert.InDelta(t, 45.5, st.Percent, 1e-9)
 	assert.False(t, st.Finished)
 }
+
+func mkFav(path, title string, isDir bool, addedAt int64) models.FavoriteUpdate {
+	return models.FavoriteUpdate{
+		Path:      path,
+		Title:     title,
+		IsDir:     isDir,
+		MediaType: map[bool]string{true: "folder", false: "text"}[isDir],
+		Snapshot:  json.RawMessage(`{"file":{"name":"` + title + `"}}`),
+		AddedAt:   addedAt,
+	}
+}
+
+func TestFavoritesUpsertIdempotentAndMerge(t *testing.T) {
+	svc := newTestLibraryService(t)
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/media/novel", "novel", true, 1000)))
+	// 重复收藏：幂等保 added_at
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/media/novel", "novel", true, 9999)))
+	list, err := svc.ListFavorites()
+	assert.NoError(t, err)
+	assert.Len(t, list, 1)
+	assert.Equal(t, int64(1000), list[0].AddedAt)
+	// snapshot 随 added_at 胜者覆盖：更晚 added_at 的新 snapshot 生效
+	assert.NoError(t, svc.UpsertFavorite(models.FavoriteUpdate{
+		Path:      "/media/novel",
+		IsDir:     true,
+		MediaType: "folder",
+		Snapshot:  json.RawMessage(`{"folder":{"name":"v2"}}`),
+		AddedAt:   2000,
+	}))
+	list, _ = svc.ListFavorites()
+	assert.Equal(t, int64(2000), list[0].AddedAt)
+	assert.JSONEq(t, `{"folder":{"name":"v2"}}`, string(list[0].Snapshot))
+
+	// 更早 added_at 的新 snapshot 不覆盖
+	assert.NoError(t, svc.UpsertFavorite(models.FavoriteUpdate{
+		Path:      "/media/novel",
+		IsDir:     true,
+		MediaType: "folder",
+		Snapshot:  json.RawMessage(`{"folder":{"name":"v0"}}`),
+		AddedAt:   500,
+	}))
+	list, _ = svc.ListFavorites()
+	assert.Equal(t, int64(2000), list[0].AddedAt)
+	assert.JSONEq(t, `{"folder":{"name":"v2"}}`, string(list[0].Snapshot))
+}
+
+func TestFavoritesRemoveAndList(t *testing.T) {
+	svc := newTestLibraryService(t)
+	// 空表返回空切片（非 nil）
+	emptyList, err := svc.ListFavorites()
+	assert.NoError(t, err)
+	assert.NotNil(t, emptyList)
+	assert.Empty(t, emptyList)
+
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/a.txt", "a", false, 1)))
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/b.txt", "b", false, 2)))
+	assert.NoError(t, svc.RemoveFavorite("/a.txt"))
+	list, err := svc.ListFavorites()
+	assert.NoError(t, err)
+	assert.Len(t, list, 1)
+	assert.Equal(t, "/b.txt", list[0].Path)
+	assert.NoError(t, svc.RemoveFavorite("/missing.txt")) // 删除不存在不报错
+}
+
+func TestFavoritePaths(t *testing.T) {
+	svc := newTestLibraryService(t)
+	// 空输入
+	emptyPaths, err := svc.FavoritePaths([]string{})
+	assert.NoError(t, err)
+	assert.NotNil(t, emptyPaths)
+	assert.Empty(t, emptyPaths)
+
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/media/x.txt", "x", false, 1)))
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/media/z.txt", "z", false, 2)))
+	got, err := svc.FavoritePaths([]string{"/media/y.txt", "/media/z.txt", "/MEDIA/X.TXT"})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"/media/z.txt", "/MEDIA/X.TXT"}, got) // 输入原序 + 大小写不敏感命中
+}
+
+func TestFavoriteSnapshotTooLarge(t *testing.T) {
+	svc := newTestLibraryService(t)
+	bigSnapshot := make([]byte, 8193)
+	for i := range bigSnapshot {
+		bigSnapshot[i] = 'a'
+	}
+	err := svc.UpsertFavorite(models.FavoriteUpdate{
+		Path:     "/media/big.txt",
+		Snapshot: bigSnapshot,
+		AddedAt:  1000,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "snapshot too large")
+}
+
