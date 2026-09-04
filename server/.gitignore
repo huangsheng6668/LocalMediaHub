@@ -1,5 +1,7 @@
 # Binaries
 *.exe
+# 运行中二进制的重命名副本（Windows 下为新构建让路，重启后可删）
+*.exe.old
 *.dll
 *.so
 *.dylib
