@@ -29,6 +29,7 @@ type Server struct {
 	IP           string
 	Scanner      *service.Scanner
 	Tags         *service.TagsService
+	Library      *service.LibraryService
 	Streaming    *service.StreamingService
 	Thumbnail    *service.ThumbnailService
 	httpServer   *http.Server
@@ -78,6 +79,10 @@ func New(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tags service: %w", err)
 	}
+	libraryService, err := service.NewLibraryService(".data")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create library service: %w", err)
+	}
 	streamingService := service.NewStreamingService(cfg.System.FFmpegPath, cfg.Transcode.EncoderPreference, cfg.Transcode.MaxSessions)
 	thumbnailService, err := service.NewThumbnailService(cfg.Thumbnail.CacheDir, cfg.Thumbnail.MaxSize, cfg.Thumbnail.Format, cfg.System.FFmpegPath)
 	if err != nil {
@@ -100,6 +105,7 @@ func New(cfg *config.Config) (*Server, error) {
 		IP:        ip,
 		Scanner:   scanner,
 		Tags:      tagsService,
+		Library:   libraryService,
 		Streaming: streamingService,
 		Thumbnail: thumbnailService,
 	}
@@ -125,7 +131,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	// books: BookService wired in Task 8 — drives /api/v1/books/info|chapter.
-	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, bookService, bookSigner)
+	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, libraryService, bookService, bookSigner)
 
 	// BLE GATT wiring Task 4: construct the BLE Central non-fatally. If no
 	// Bluetooth adapter is present, NewCentralScanner returns (nil, err) and we
@@ -361,6 +367,16 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	api.GET("/tags/:tag_id/media", h.GetTaggedMedia, authMw)
 	api.GET("/tags/file-tags", h.GetFileTags, authMw)
 
+	// Library (states + favorites)
+	lib := api.Group("/library", authMw)
+	lib.POST("/states", h.PostReadingState)
+	lib.GET("/states", h.GetReadingState)
+	lib.PUT("/states/status", h.PutReadingStatus)
+	lib.POST("/decorations", h.PostDecorations)
+	lib.GET("/favorites", h.ListFavorites)
+	lib.POST("/favorites", h.AddFavorite)
+	lib.DELETE("/favorites", h.DeleteFavorite)
+
 	// Admin
 	admin := api.Group("/admin", authMw)
 	admin.GET("/config", h.GetConfig)
@@ -490,6 +506,12 @@ func (s *Server) Stop() error {
 	// Close tags database connection
 	if err := s.Tags.Close(); err != nil {
 		fmt.Printf("Warning: failed to close tags database: %v\n", err)
+	}
+	// Close library database connection
+	if s.Library != nil {
+		if err := s.Library.Close(); err != nil {
+			fmt.Printf("Warning: failed to close library database: %v\n", err)
+		}
 	}
 	// Cancel thumbnail pre-generation (preGenCancel is nil until the first scan
 	// completes — guard against nil to avoid a panic).

@@ -24,7 +24,7 @@ func newSystemBrowseHandler(t *testing.T, root string) *Handler {
 	cfg.Scan.VideoExtensions = []string{".mp4"}
 	cfg.Scan.TextExtensions = []string{".txt"}
 	cfg.System.AllowedRoots = []string{root}
-	return New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
+	return New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil, nil)
 }
 
 // TestSystemBrowseSortAndPagination covers the paged load-more contract for

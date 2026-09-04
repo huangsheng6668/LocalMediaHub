@@ -44,7 +44,7 @@ func TestUpdateConfigRejectsBlockedRoot(t *testing.T) {
 					Format:   "jpeg",
 				},
 			}
-			h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
+			h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil, nil)
 
 			e := echo.New()
 			body, _ := json.Marshal(map[string][]string{"roots": {blocked}})
@@ -73,7 +73,7 @@ func TestUpdateConfigRejectsBlockedRoot(t *testing.T) {
 // encoder chain (empty auto / usable — the endpoint must NOT force a probe).
 func TestTranscodeStatusEndpoint(t *testing.T) {
 	streaming := service.NewStreamingService("", []string{"h264_nvenc", "h264_qsv"}, 2)
-	h := New(&config.Config{}, nil, nil, streaming, nil, nil, nil)
+	h := New(&config.Config{}, nil, nil, streaming, nil, nil, nil, nil)
 
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/transcode/status", nil)
@@ -128,7 +128,7 @@ func TestUpdateConfigAcceptsValidRoot(t *testing.T) {
 			Format:   "jpeg",
 		},
 	}
-	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil)
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil, nil)
 
 	e := echo.New()
 	body, _ := json.Marshal(map[string][]string{"roots": {validRoot}})

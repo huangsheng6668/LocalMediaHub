@@ -136,11 +136,28 @@
 | GET | `/api/v1/tags/{id}/media` | 标签下媒体（分页） | 是 |
 | GET | `/api/v1/tags/file-tags` | 批量获取文件标签映射 | 是 |
 
+### API 端点（阅读状态与收藏 / library）
+
+全部阅读状态与收藏端点均挂 Bearer Token 中间件（authMw）；空 token 开放模式下中间件透传，行为不变。
+
+| 方法 | 路径 | 说明 | 需 Token |
+|---|---|---|---|
+| POST | `/api/v1/library/states` | 上报阅读进度（原子 upsert） | 是 |
+| GET | `/api/v1/library/states?path=<abs>` | 获取单本书阅读状态（未读为 null） | 是 |
+| PUT | `/api/v1/library/states/status` | 手动设置状态（unread/reading/finished 或 null） | 是 |
+| POST | `/api/v1/library/decorations` | 批量获取阅读徽章与收藏状态（Key 保真） | 是 |
+| GET | `/api/v1/library/favorites` | 收藏列表（按 added_at 倒序） | 是 |
+| POST | `/api/v1/library/favorites` | 添加/更新收藏（快照容量上限 8KB） | 是 |
+| DELETE | `/api/v1/library/favorites?path=<abs>` | 移除收藏 | 是 |
+
 ### 关键文件
 
 - Server
   - `server/internal/service/tags.go`（SQLite + RWMutex + PRAGMA + index + 批量 IN 查询 + JSON→SQLite 自动迁移）
   - `server/internal/server/handler/tags.go`
+  - `server/internal/service/library.go`（SQLite + WAL + 状态派生 + 批量 IN 查询 + 收藏快照）
+  - `server/internal/server/handler/library.go`（7 个 REST 端点 + 双层路径校验：文本媒体校验 / 文件目录根边界校验）
+  - `server/internal/models/library_models.go`
 - Android
   - `android/app/src/main/java/com/juziss/localmediahub/data/FavoritesStore.kt`（DataStore 持久化）
   - `android/app/src/main/java/com/juziss/localmediahub/viewmodel/TagController.kt`（Browse delegate）
@@ -150,6 +167,8 @@
 ### 相关 spec/plan
 
 - `docs/superpowers/specs/2026-07-10-security-audit-design.md`（SQL 注入审计）
+- `docs/superpowers/specs/2026-09-04-library-states-favorites-design.md`（跨设备共享阅读状态与跨媒体收藏设计）
+- `docs/superpowers/plans/2026-09-04-library-states-favorites.md`（对应实施 plan）
 
 ---
 

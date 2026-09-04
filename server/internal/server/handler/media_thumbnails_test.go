@@ -26,7 +26,7 @@ func newMediaThumbnailsHandler(t *testing.T, root string) *Handler {
 	cfg.Scan.Roots = []string{root}
 	thumbnail, err := service.NewThumbnailService(t.TempDir(), 64, "jpeg", "")
 	require.NoError(t, err)
-	return New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, thumbnail, nil, nil)
+	return New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, thumbnail, nil, nil, nil)
 }
 
 // writeValidPNG writes a real decodable PNG (the shared png1x1 fixture is an

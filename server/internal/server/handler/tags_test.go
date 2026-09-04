@@ -48,7 +48,7 @@ func TestGetTaggedMediaReturnsMatchingFiles(t *testing.T) {
 		t.Fatalf("failed to associate file: %v", err)
 	}
 
-	h := New(cfg, scanner, tagsService, nil, nil, nil, nil)
+	h := New(cfg, scanner, tagsService, nil, nil, nil, nil, nil)
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tags/"+tag.ID+"/media", nil)
 	rec := httptest.NewRecorder()

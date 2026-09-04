@@ -40,6 +40,7 @@ type Handler struct {
 	tags       *service.TagsService
 	streaming  *service.StreamingService
 	thumbnail  *service.ThumbnailService
+	library    *service.LibraryService
 	books      *service.BookService
 	bookSigner *service.BookSigner
 	BLECentral BLECentralBackend
@@ -47,7 +48,7 @@ type Handler struct {
 
 // New creates a Handler with all required service dependencies.
 //
-// bookSigner is the 7th and last argument; production wiring lives in
+// bookSigner is the 8th and last argument; production wiring lives in
 // server.New. Tests that don't exercise the signed-image path may pass nil.
 func New(
 	cfg *config.Config,
@@ -55,6 +56,7 @@ func New(
 	tags *service.TagsService,
 	streaming *service.StreamingService,
 	thumbnail *service.ThumbnailService,
+	library *service.LibraryService,
 	books *service.BookService,
 	bookSigner *service.BookSigner,
 ) *Handler {
@@ -64,6 +66,7 @@ func New(
 		tags:       tags,
 		streaming:  streaming,
 		thumbnail:  thumbnail,
+		library:    library,
 		books:      books,
 		bookSigner: bookSigner,
 	}

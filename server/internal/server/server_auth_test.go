@@ -121,3 +121,39 @@ func TestServerOpenModeAllowsDeletion(t *testing.T) {
 	}
 }
 
+func TestServerRejectsLibraryWithoutToken(t *testing.T) {
+	cfg := newAuthTestConfig(t, "required-token")
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	defer srv.Stop()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/library/favorites", nil)
+	rec := httptest.NewRecorder()
+	srv.Echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestServerAcceptsLibraryWithCorrectToken(t *testing.T) {
+	cfg := newAuthTestConfig(t, "required-token")
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	defer srv.Stop()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/library/favorites", nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer required-token")
+	rec := httptest.NewRecorder()
+	srv.Echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+

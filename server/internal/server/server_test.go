@@ -72,6 +72,7 @@ func TestRegisterRoutesServesThumbnailEndpoint(t *testing.T) {
 		thumbnailService,
 		nil,
 		nil,
+		nil,
 	)
 	s.registerRoutes(h)
 

@@ -28,7 +28,7 @@ func newBooksHandler(t *testing.T) (*Handler, string) {
 	cfg.Scan.Roots = []string{dir}
 	scanner := service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions)
 	books := service.NewBookService()
-	h := New(cfg, scanner, nil, nil, nil, books, nil)
+	h := New(cfg, scanner, nil, nil, nil, nil, books, nil)
 	return h, dir
 }
 
@@ -50,7 +50,7 @@ func newBooksHandlerWithSigner(t *testing.T) (*Handler, *service.BookSigner, str
 	books := service.NewBookService()
 	signer, err := service.NewBookSigner()
 	require.NoError(t, err)
-	h := New(cfg, scanner, nil, nil, nil, books, signer)
+	h := New(cfg, scanner, nil, nil, nil, nil, books, signer)
 	return h, signer, dir
 }
 
@@ -358,7 +358,7 @@ func TestGetBookImageTokenFallbackVerifiedWhenTokenConfigured(t *testing.T) {
 	books := service.NewBookService()
 	signer, err := service.NewBookSigner()
 	require.NoError(t, err)
-	h := New(cfg, scanner, nil, nil, nil, books, signer)
+	h := New(cfg, scanner, nil, nil, nil, nil, books, signer)
 
 	p := buildEpubWithImageBytes(t, dir, "cover", "Images/test.png", png1x1)
 
