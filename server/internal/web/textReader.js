@@ -265,17 +265,28 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     const chapterCount = state.chapterCount;
 
     const savedProgress = loadProgress(path);
+    // 初始章节渲染完成门闩：跨章合并导航必须等 loadChapter(startIdx) 落地后再执行，
+    // 否则与主流程的初始加载竞态（merge 的 loadChapter 被随后的 startIdx 加载覆盖）。
+    let resolveInitialLoad = () => {};
+    const initialLoadDone = new Promise((resolve) => { resolveInitialLoad = resolve; });
     // 服务端状态择新：URL 显式 chapter/para 时不参与
     if (chapterParam == null && paraParam == null) {
-        fetchState(path).then((res) => {
+        fetchState(path).then(async (res) => {
             const srv = res && res.state;
             if (!srv || !srv.last_read_at) return;
             const local = loadProgress(path);
             if (!local || srv.last_read_at > (local.lastReadAt || 0)) {
-                const merged = { chapterIndex: srv.chapter_index, paraIndex: srv.para_index, lastReadAt: srv.last_read_at };
+                const merged = {
+                    chapterIndex: srv.chapter_index,
+                    paraIndex: srv.para_index,
+                    lastReadAt: srv.last_read_at,
+                };
                 saveProgress(path, merged);
+                await initialLoadDone;
                 if (merged.paraIndex > 0 || merged.chapterIndex !== state.currentIdx) {
-                    scrollToParagraph(merged.paraIndex, merged.chapterIndex);
+                    // 跨章必须走 onNavigate（先 loadChapter 再滚动）——scrollToParagraph
+                    // 在目标章 section 不在 DOM 时会 fallback 命中当前章同号段落。
+                    await onNavigate(merged.chapterIndex, Math.max(0, merged.paraIndex));
                 }
             }
         }).catch(() => {});
@@ -635,8 +646,14 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     };
 
     syncBookmarkCount();
-    await loadChapter(startIdx, true);
-    if (resumePara !== null) scrollToParagraph(resumePara, startIdx);
+    try {
+        await loadChapter(startIdx, true);
+        if (resumePara !== null) scrollToParagraph(resumePara, startIdx);
+    } finally {
+        // 无论初始加载成败都放行门闩：跨章合并导航不应被永久挂起
+        // （加载失败时导航可能同样失败，由 onNavigate 内部容错）。
+        resolveInitialLoad();
+    }
 
     // ===== Chapter rendering + scroll-mode buffering =====
 

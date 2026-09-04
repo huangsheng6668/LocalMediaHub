@@ -480,6 +480,66 @@ test('renderTextReader merges newer server progress into local storage on open',
     }
 });
 
+test('renderTextReader merges newer server progress ACROSS chapters by loading the chapter', async () => {
+    setupJsdom();
+    try {
+        const multiParaChapter = {
+            title: '第一章 开端',
+            blocks: [
+                { type: 'text', value: '这是第一段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+                { type: 'text', value: '这是第二段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+                { type: 'text', value: '这是第三段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+            ],
+        };
+        installEnv({ chapter: multiParaChapter });
+        const origFetch = global.fetch;
+        global.fetch = async (url, opts) => {
+            const sUrl = String(url);
+            if (sUrl.includes('/api/v1/library/states')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        state: {
+                            path: '/test/book.txt',
+                            chapter_index: 2, // 跨章：本地停在第 0 章
+                            para_index: 1,
+                            last_read_at: 2000,
+                        },
+                    }),
+                };
+            }
+            return origFetch(url, opts);
+        };
+
+        localStorage.setItem('book_progress:/test/book.txt', JSON.stringify({
+            chapterIndex: 0,
+            paraIndex: 0,
+            lastReadAt: 1000,
+        }));
+
+        const { renderTextReader } = await import('./textReader.js');
+        const container = viewContainer();
+        await renderTextReader(container, '/test/book.txt', null, null);
+
+        // Wait for fetchState + gated navigation to complete
+        await new Promise((r) => setTimeout(r, 150));
+
+        const saved = JSON.parse(localStorage.getItem('book_progress:/test/book.txt') || 'null');
+        assert.ok(saved, 'saved progress exists');
+        assert.equal(saved.chapterIndex, 2, 'chapterIndex merged from server');
+        // 跨章合并必须真实切章（loadChapter），而不是 scrollToParagraph 落到
+        // 当前章同号段落（jsdom 无布局时 fallback 会命中错误段落）。
+        const sec2 = container.querySelector('.text-reader__chapter-section[data-chapter-index="2"]');
+        assert.ok(sec2, 'server chapter 2 section should be loaded into DOM');
+
+        container._cleanupReader?.();
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
 test('renderTextReader does NOT merge server progress if URL specifies chapter or para', async () => {
     setupJsdom();
     try {
