@@ -184,6 +184,14 @@
                             <span class="crumb active">根目录</span>
                         </div>
                         <div class="browser-controls">
+                            <div class="filter-chips" id="browser-filter-chips">
+                                <button class="filter-chip" id="chip-favorites" data-active="false" title="只显示当前目录中已收藏的内容">只看收藏</button>
+                                <span class="filter-chip-sep"></span>
+                                <button class="filter-chip filter-chip--status" data-status="" data-active="false">全部</button>
+                                <button class="filter-chip filter-chip--status" data-status="unread" data-active="false">未读</button>
+                                <button class="filter-chip filter-chip--status" data-status="reading" data-active="false">读过</button>
+                                <button class="filter-chip filter-chip--status" data-status="finished" data-active="false">已读完</button>
+                            </div>
                             <div class="sort-box">
                                 <span class="sort-label">排序:</span>
                                 <select id="browser-sort-select" class="sort-select" aria-label="选择排序方式">

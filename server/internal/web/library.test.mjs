@@ -395,3 +395,150 @@ test('openStatusMenu and closeStatusMenu manipulate #card-status-menu', async ()
         teardownJsdom();
     }
 });
+
+test('browser filter chips: clicking toggles state and updates active attribute', async () => {
+    setupJsdom();
+    try {
+        document.body.innerHTML = `
+            <div class="filter-chips" id="browser-filter-chips">
+                <button class="filter-chip" id="chip-favorites" data-active="false" title="只显示当前目录中已收藏的内容">只看收藏</button>
+                <span class="filter-chip-sep"></span>
+                <button class="filter-chip filter-chip--status" data-status="" data-active="false">全部</button>
+                <button class="filter-chip filter-chip--status" data-status="unread" data-active="false">未读</button>
+                <button class="filter-chip filter-chip--status" data-status="reading" data-active="false">读过</button>
+                <button class="filter-chip filter-chip--status" data-status="finished" data-active="false">已读完</button>
+            </div>
+            <div id="browser-list"></div>
+        `;
+
+        const { elements } = await import('./dom.js');
+        elements.browserList = document.getElementById('browser-list');
+        const { setupBrowserListeners } = await import('./browserView.js');
+
+        // Reset state
+        state.favoritesOnly = false;
+        state.statusFilter = null;
+        state.currentFolders = [];
+        state.currentFiles = [];
+
+        setupBrowserListeners(elements);
+
+        const chipsBox = document.getElementById('browser-filter-chips');
+        const favChip = document.getElementById('chip-favorites');
+        const allChip = chipsBox.querySelector('.filter-chip--status[data-status=""]');
+        const unreadChip = chipsBox.querySelector('.filter-chip--status[data-status="unread"]');
+        const readingChip = chipsBox.querySelector('.filter-chip--status[data-status="reading"]');
+
+        // 1. Toggle favorites
+        favChip.click();
+        assert.equal(state.favoritesOnly, true);
+        assert.equal(favChip.dataset.active, 'true');
+
+        favChip.click();
+        assert.equal(state.favoritesOnly, false);
+        assert.equal(favChip.dataset.active, 'false');
+
+        // 2. Click unread chip
+        unreadChip.click();
+        assert.equal(state.statusFilter, 'unread');
+        assert.equal(unreadChip.dataset.active, 'true');
+        assert.equal(allChip.dataset.active, 'false');
+        assert.equal(readingChip.dataset.active, 'false');
+
+        // 3. Click unread chip again to deselect -> returns to null
+        unreadChip.click();
+        assert.equal(state.statusFilter, null);
+        assert.equal(unreadChip.dataset.active, 'false');
+        assert.equal(allChip.dataset.active, 'true');
+
+        // 4. Click reading chip
+        readingChip.click();
+        assert.equal(state.statusFilter, 'reading');
+        assert.equal(readingChip.dataset.active, 'true');
+        assert.equal(allChip.dataset.active, 'false');
+
+        // 5. Click "全部" chip -> resets to null
+        allChip.click();
+        assert.equal(state.statusFilter, null);
+        assert.equal(allChip.dataset.active, 'true');
+        assert.equal(readingChip.dataset.active, 'false');
+
+        // Clean up
+        state.favoritesOnly = false;
+        state.statusFilter = null;
+    } finally {
+        teardownJsdom();
+    }
+});
+
+test('renderBrowserList: handles filtering and empty state message', async () => {
+    setupJsdom();
+    try {
+        document.body.innerHTML = `
+            <div id="browser-list"></div>
+        `;
+
+        const { elements } = await import('./dom.js');
+        elements.browserList = document.getElementById('browser-list');
+        const { renderBrowserList } = await import('./browserView.js');
+
+        // Case 1: Truly empty directory (no filters)
+        state.currentFolders = [];
+        state.currentFiles = [];
+        state.favoritesOnly = false;
+        state.statusFilter = null;
+        renderBrowserList();
+        assert.ok(elements.browserList.innerHTML.includes('当前目录为空（无媒体文件）'));
+
+        // Case 2: Empty due to favoritesOnly filter
+        state.favoritesOnly = true;
+        state.statusFilter = null;
+        renderBrowserList();
+        assert.ok(elements.browserList.innerHTML.includes('当前筛选下无匹配内容'));
+
+        // Case 3: Empty due to status filter
+        state.favoritesOnly = false;
+        state.statusFilter = 'finished';
+        renderBrowserList();
+        assert.ok(elements.browserList.innerHTML.includes('当前筛选下无匹配内容'));
+
+        // Case 4: Renders filtered items
+        setDecorationsForTest({
+            states: {
+                '/m/reading.txt': { status: 'reading', percent: 50 },
+                '/m/finished.txt': { status: 'finished', percent: 100 },
+            },
+            favorites: ['/m/reading.txt'],
+        });
+        state.currentFolders = [{ path: '/m/folder1', name: 'folder1' }];
+        state.currentFiles = [
+            { path: '/m/reading.txt', name: 'reading.txt', media_type: 'text', extension: '.txt', size: 200 },
+            { path: '/m/finished.txt', name: 'finished.txt', media_type: 'text', extension: '.txt', size: 300 },
+        ];
+
+        // Filter: favorites only
+        state.favoritesOnly = true;
+        state.statusFilter = null;
+        renderBrowserList();
+        const favCards = elements.browserList.querySelectorAll('.media-card');
+        assert.equal(favCards.length, 1);
+        assert.equal(favCards[0].dataset.path, '/m/reading.txt');
+
+        // Filter: reading status
+        state.favoritesOnly = false;
+        state.statusFilter = 'reading';
+        renderBrowserList();
+        const readingCards = elements.browserList.querySelectorAll('.media-card');
+        assert.equal(readingCards.length, 1);
+        assert.equal(readingCards[0].dataset.path, '/m/reading.txt');
+
+        // Clean up
+        state.favoritesOnly = false;
+        state.statusFilter = null;
+        state.currentFolders = [];
+        state.currentFiles = [];
+        setDecorationsForTest(null);
+    } finally {
+        teardownJsdom();
+    }
+});

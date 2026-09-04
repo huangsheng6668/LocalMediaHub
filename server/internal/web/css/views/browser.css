@@ -16,6 +16,24 @@
     flex-wrap: wrap;
 }
 
+.filter-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.filter-chip {
+    border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.3));
+    background: transparent; color: var(--text-secondary, inherit);
+    border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+    transition: all .15s ease;
+}
+.filter-chip:hover {
+    background-color: var(--surface-hover, rgba(94, 106, 210, 0.08));
+    color: var(--text-primary, inherit);
+}
+.filter-chip[data-active="true"] {
+    background-color: var(--accent-soft, rgba(59, 130, 246, 0.25));
+    border-color: var(--accent, rgba(59, 130, 246, 0.6));
+    color: var(--accent-text, #3b82f6);
+}
+.filter-chip-sep { width: 1px; height: 16px; background-color: var(--border-subtle, rgba(127, 127, 127, 0.3)); }
+
 .sort-box {
     display: flex;
     align-items: center;

@@ -9,7 +9,12 @@ import { elements } from './dom.js';
 import { formatSize, encodeRoutePath, safeBtoa } from './utils.js';
 import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
-import { refreshDecorations, decorateBrowserList, toggleFavorite, markStatus, openStatusMenu } from './library.js';
+import { refreshDecorations, decorateBrowserList, toggleFavorite, markStatus, openStatusMenu, applyListFilters, getDecorations } from './library.js';
+
+// Module-level variables for currently rendered items in browser list
+let shownFolders = [];
+let shownFiles = [];
+const clearScrollMemory = (path) => {}; // 筛选变更清滚动记忆（Task 9 接口，先置空实现）
 
 // ── Inline SVG icon vocabulary (mirrors index.html / Task 6 icons) ──
 // Monochrome currentColor stroke icons replace the former emoji glyphs in
@@ -186,12 +191,12 @@ function onBrowserListClick(e) {
     } else if (action === 'status-menu') {
         openStatusMenu(actionEl, actionEl.dataset.path);
     } else if (action === 'open') {
-        if (state.currentFiles[idx]) openMedia(state.currentFiles[idx]);
+        if (shownFiles[idx]) openMedia(shownFiles[idx]);
     } else if (action === 'text-open') {
         // Text/ebook open (Task 15): route to the reader view. Tag/delete
         // buttons inside the card have their own data-action and stop
         // propagation implicitly via .closest() returning the inner button.
-        const f = state.currentFiles[idx];
+        const f = shownFiles[idx];
         if (f) {
             window.location.hash = `#/read?path=${encodeURIComponent(f.path)}`;
         }
@@ -199,9 +204,9 @@ function onBrowserListClick(e) {
         showToast('暂不支持该格式（仅支持 .txt / .epub）', 'info');
 
     } else if (action === 'delete-folder') {
-        if (state.currentFolders[idx]) deleteFolder(state.currentFolders[idx]);
+        if (shownFolders[idx]) deleteFolder(shownFolders[idx]);
     } else if (action === 'delete-file') {
-        if (state.currentFiles[idx]) deleteMediaFile(state.currentFiles[idx]);
+        if (shownFiles[idx]) deleteMediaFile(shownFiles[idx]);
     }
 }
 
@@ -240,15 +245,23 @@ export function renderBrowserList() {
     state.currentFolders = sortMediaItems(state.currentFolders, state.sortField, state.sortOrder, true);
     state.currentFiles = sortMediaItems(state.currentFiles, state.sortField, state.sortOrder, false);
 
-    if (state.currentFolders.length === 0 && state.currentFiles.length === 0) {
-        elements.browserList.innerHTML = '<div class="browser-empty-grid">当前目录为空（无媒体文件）</div>'; // XSS-SAFE: hardcoded literal
+    const filtered = applyListFilters(state.currentFolders, state.currentFiles, getDecorations(),
+        { favoritesOnly: state.favoritesOnly, statusFilter: state.statusFilter });
+    shownFolders = filtered.folders;
+    shownFiles = filtered.files;
+
+    if (shownFolders.length === 0 && shownFiles.length === 0) {
+        const msg = (state.favoritesOnly || state.statusFilter != null)
+            ? '当前筛选下无匹配内容'
+            : '当前目录为空（无媒体文件）';
+        elements.browserList.innerHTML = `<div class="browser-empty-grid">${msg}</div>`; // XSS-SAFE: hardcoded literal
         return;
     }
 
     let html = '';
 
     // 1. Folders
-    state.currentFolders.forEach((folder, index) => {
+    shownFolders.forEach((folder, index) => {
         const safePath = escapeHtml(folder.path.replace(/\\/g, '/'));
         const safeName = escapeHtml(folder.name);
         html += `
@@ -271,7 +284,7 @@ export function renderBrowserList() {
     });
 
     // 2. Media Files
-    state.currentFiles.forEach((file, index) => {
+    shownFiles.forEach((file, index) => {
         const isVideo = file.media_type === 'video';
         const isText = file.media_type === 'text';
 
@@ -446,6 +459,25 @@ async function triggerBrowserSearch() {
 
 // Set up browser-view event listeners
 export function setupBrowserListeners(elements) {
+    const chipsBox = document.getElementById('browser-filter-chips');
+    if (chipsBox) {
+        chipsBox.addEventListener('click', (e) => {
+            const chip = e.target.closest('.filter-chip');
+            if (!chip) return;
+            if (chip.id === 'chip-favorites') {
+                state.favoritesOnly = !state.favoritesOnly;
+                chip.dataset.active = String(state.favoritesOnly);
+            } else if (chip.classList.contains('filter-chip--status')) {
+                const val = chip.dataset.status || null;
+                state.statusFilter = state.statusFilter === val ? null : val;
+                chipsBox.querySelectorAll('.filter-chip--status').forEach(c =>
+                    c.dataset.active = String(state.statusFilter === (c.dataset.status || null)));
+            }
+            clearScrollMemory(state.currentPath);
+            renderBrowserList();
+        });
+    }
+
     // Sort controls listener & initial UI sync
     if (elements.browserSortSelect) {
         elements.browserSortSelect.value = state.sortField;
@@ -469,19 +501,19 @@ export function setupBrowserListeners(elements) {
     }
 
     // Search Box Listener
-    elements.btnBrowserSearch.addEventListener('click', triggerBrowserSearch);
-    elements.browserSearchInput.addEventListener('keydown', (e) => {
+    elements?.btnBrowserSearch?.addEventListener('click', triggerBrowserSearch);
+    elements?.browserSearchInput?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') triggerBrowserSearch();
     });
 
     // Delegated click handling for browser list (folders, files, roots, drives)
-    elements.browserList.addEventListener('click', onBrowserListClick);
+    elements?.browserList?.addEventListener('click', onBrowserListClick);
 
     // Delegated click handling for breadcrumbs
-    elements.browserBreadcrumbs.addEventListener('click', onBreadcrumbsClick);
+    elements?.browserBreadcrumbs?.addEventListener('click', onBreadcrumbsClick);
 
     // Delegated thumbnail error fallback (img 'error' does not bubble -> capture phase)
-    elements.browserList.addEventListener('error', (e) => {
+    elements?.browserList?.addEventListener('error', (e) => {
         const img = e.target;
         if (img instanceof HTMLImageElement && img.classList.contains('card-thumb')) {
             const wrapper = img.closest('.card-preview');
