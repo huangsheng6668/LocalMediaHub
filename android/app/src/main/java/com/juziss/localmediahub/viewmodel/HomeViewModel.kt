@@ -2,7 +2,7 @@ package com.juziss.localmediahub.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.juziss.localmediahub.data.FavoriteMediaEntry
+import com.juziss.localmediahub.data.FavoriteEntry
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.LastBrowseLocation
 import com.juziss.localmediahub.data.MediaFile
@@ -127,9 +127,9 @@ class HomeViewModel @Inject constructor(
                     lastBrowseLocation = raw.lastBrowseLocation,
                     serverLabel = raw.serverUrl,
                 )
-                favoriteAccessModes = raw.favoriteEntries.associate {
-                    it.file.relativePath to it.isSystemBrowse
-                }
+                favoriteAccessModes = raw.favoriteEntries
+                    .mapNotNull { entry -> entry.file?.relativePath?.let { it to entry.isSystemBrowse } }
+                    .toMap()
                 if (raw.serverUrl.isBlank()) {
                     _uiState.value = _uiState.value.copy(isLoading = false)
                 }
@@ -312,7 +312,7 @@ private data class HomeRawInputs(
     val playbackProgress: List<PlaybackProgressEntry> = emptyList(),
     val lastBrowseLocation: LastBrowseLocation? = null,
     val serverUrl: String = "",
-    val favoriteEntries: List<FavoriteMediaEntry> = emptyList(),
+    val favoriteEntries: List<FavoriteEntry> = emptyList(),
 )
 
 /**

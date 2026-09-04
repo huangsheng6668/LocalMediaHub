@@ -1,6 +1,6 @@
 package com.juziss.localmediahub.viewmodel
 
-import com.juziss.localmediahub.data.FavoriteMediaEntry
+import com.juziss.localmediahub.data.FavoriteEntry
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.MediaRepository
@@ -115,6 +115,9 @@ internal class FavoritesController(
     }
 }
 
-private fun List<FavoriteMediaEntry>.associateFavoriteModes(): Map<String, Boolean> {
-    return associate { entry -> entry.file.relativePath to entry.isSystemBrowse }
+private fun List<FavoriteEntry>.associateFavoriteModes(): Map<String, Boolean> {
+    return mapNotNull { entry ->
+        val key = entry.file?.relativePath ?: entry.folder?.path ?: return@mapNotNull null
+        key to entry.isSystemBrowse
+    }.toMap()
 }

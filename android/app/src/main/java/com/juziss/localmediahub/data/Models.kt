@@ -190,7 +190,7 @@ data class ServerFavorite(
     @SerializedName("is_system") val isSystem: Boolean,
     val title: String,
     @SerializedName("media_type") val mediaType: String,
-    val snapshot: com.google.gson.JsonElement? = null,
+    val snapshot: FavoriteEntry? = null,
     @SerializedName("added_at") val addedAt: Long,
 )
 
