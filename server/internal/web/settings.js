@@ -41,7 +41,7 @@ export function renderSettings() {
     elements.settingsVideoExts.textContent = state.videoExts.join(', ') || '未配置';
     elements.settingsImageExts.textContent = state.imageExts.join(', ') || '未配置';
     elements.settingsTextExts.textContent = state.textExts.join(', ') || '未配置';
-    elements.settingsAllowedRoots.textContent = state.allowedRoots.join(', ') || '未限制/不可浏览系统';
+    elements.settingsAllowedRoots.textContent = state.allowedRoots.join(', ') || '未配置（系统浏览已关闭，媒体访问仅限媒体库共享目录）';
     if (state.enableDelete) {
         elements.settingsEnableDelete.textContent = '⚠️ 已开启 (允许从客户端删除电脑媒体文件)';
         elements.settingsEnableDelete.style.color = 'var(--error)';
