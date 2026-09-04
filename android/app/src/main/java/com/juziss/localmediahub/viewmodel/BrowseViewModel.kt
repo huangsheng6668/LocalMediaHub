@@ -13,6 +13,8 @@ import com.juziss.localmediahub.data.SystemBrowseResult
 import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.DownloadEntry
+import com.juziss.localmediahub.data.LibraryDecoration
+import com.juziss.localmediahub.data.ReadingStatus
 import com.juziss.localmediahub.network.NetworkResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -54,6 +56,7 @@ class BrowseViewModel @Inject constructor(
     private val sharedState = BrowseSharedState()
     private val navigator = BrowseNavigator(appContext, repository, recentActivityStore, sharedState)
     private val favoritesController = FavoritesController(favoritesStore, repository, sharedState)
+    private val libraryController = LibraryController(repository, sharedState)
     private val tagController = TagController(repository, sharedState)
     private val searchController = SearchController(repository, sharedState)
     private val downloadController = DownloadController(downloadManager, repository, downloadsStore, sharedState)
@@ -61,6 +64,7 @@ class BrowseViewModel @Inject constructor(
 
     init {
         favoritesController.startCollecting(viewModelScope)
+        libraryController.startCollecting(viewModelScope)
     }
 
     // ── Toast (cross-cutting, stays in ViewModel) ─────────────────
@@ -119,6 +123,14 @@ class BrowseViewModel @Inject constructor(
 
     val showFavoritesOnly: StateFlow<Boolean>
         get() = favoritesController.showFavoritesOnly
+
+    // ── Public state: Library flows ───────────────────────────────
+
+    val libraryStates: StateFlow<Map<String, LibraryDecoration>>
+        get() = sharedState.libraryStates.asStateFlow()
+
+    val statusFilter: StateFlow<ReadingStatus?>
+        get() = sharedState.statusFilter.asStateFlow()
 
     // ── Public state: Tags flows ──────────────────────────────────
 
@@ -227,6 +239,22 @@ class BrowseViewModel @Inject constructor(
 
     fun toggleFavorite(file: MediaFile, isSystemBrowse: Boolean = sharedState.isSystemBrowse.value) {
         viewModelScope.launch { favoritesController.toggleFavorite(file, isSystemBrowse) }
+    }
+
+    fun toggleFavoriteFolder(folder: Folder, isSystemBrowse: Boolean = sharedState.isSystemBrowse.value) {
+        viewModelScope.launch { favoritesController.toggleFavoriteFolder(folder, isSystemBrowse) }
+    }
+
+    fun setStatus(path: String, status: ReadingStatus?) {
+        viewModelScope.launch { libraryController.setStatus(path, status) }
+    }
+
+    fun setStatusFilter(s: ReadingStatus?) {
+        libraryController.setStatusFilter(s)
+    }
+
+    fun decorationFor(file: MediaFile): LibraryDecoration? {
+        return sharedState.libraryStates.value[file.path]
     }
 
     fun setShowFavoritesOnly(show: Boolean) {

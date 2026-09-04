@@ -17,6 +17,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
+import com.juziss.localmediahub.data.LibraryDecoration
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.ui.component.browse.BrowseContentState
 import com.juziss.localmediahub.viewmodel.SearchState
@@ -250,6 +251,8 @@ internal fun BrowseContent(
     onLoadMore: () -> Unit = {},
     hasMore: Boolean = false,
     loadingMore: Boolean = false,
+    decorationFor: (MediaFile) -> LibraryDecoration? = { null },
+    onFolderToggleFavorite: (Folder) -> Unit = {},
 ) {
     val folderSortOrder = state.folderSort
     val fileSortOrder = state.fileSort
@@ -364,6 +367,8 @@ internal fun BrowseContent(
                         folder = folder,
                         onClick = { onFolderClick(folder) },
                         onLongClick = { onFolderLongClick(folder) },
+                        isFavorite = isFavorite(folder.path),
+                        onToggleFavorite = { onFolderToggleFavorite(folder) },
                     )
                 }
                 items(files, key = { it.relativePath }, contentType = { it.mediaType }) { file ->
@@ -401,6 +406,8 @@ internal fun BrowseContent(
                             onClick = remember(file, onTextClick) { { onTextClick(file) } },
                             onLongClick = longClick,
                             isSelected = isSelected(file.relativePath),
+                            readingStatus = decorationFor(file)?.status,
+                            percent = decorationFor(file)?.percent ?: 0.0,
                         )
                     }
                 }

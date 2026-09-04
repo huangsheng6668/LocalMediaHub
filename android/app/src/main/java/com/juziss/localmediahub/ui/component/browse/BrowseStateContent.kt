@@ -12,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
+import com.juziss.localmediahub.data.LibraryDecoration
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.ui.component.BrowseContent
@@ -53,6 +54,8 @@ internal fun BrowseStateContent(
     onLoadMore: () -> Unit = {},
     hasMore: Boolean = false,
     loadingMore: Boolean = false,
+    decorationFor: (MediaFile) -> LibraryDecoration? = { null },
+    onFolderToggleFavorite: (Folder) -> Unit = {},
 ) {
     val currentPath = state.currentPath
     when (browseState) {
@@ -176,6 +179,8 @@ internal fun BrowseStateContent(
                     onLoadMore = onLoadMore,
                     hasMore = hasMore,
                     loadingMore = loadingMore,
+                    decorationFor = decorationFor,
+                    onFolderToggleFavorite = onFolderToggleFavorite,
                 )
             }
         }
@@ -236,6 +241,8 @@ internal fun BrowseStateContent(
                     onLoadMore = onLoadMore,
                     hasMore = hasMore,
                     loadingMore = loadingMore,
+                    decorationFor = decorationFor,
+                    onFolderToggleFavorite = onFolderToggleFavorite,
                 )
             }
         }
@@ -284,6 +291,8 @@ internal fun BrowseStateContent(
                         getThumbnailUrl = getThumbnailUrl,
                         videoEnabled = videoEnabled,
                         onVideoDisabledClick = onVideoDisabledClick,
+                        decorationFor = decorationFor,
+                        onFolderToggleFavorite = onFolderToggleFavorite,
                     )
                 }
             }

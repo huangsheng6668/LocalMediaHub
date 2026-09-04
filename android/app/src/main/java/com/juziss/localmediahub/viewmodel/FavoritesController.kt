@@ -2,6 +2,7 @@ package com.juziss.localmediahub.viewmodel
 
 import com.juziss.localmediahub.data.FavoriteEntry
 import com.juziss.localmediahub.data.FavoritesStore
+import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.MediaRepository
 import kotlinx.coroutines.CoroutineScope
@@ -83,6 +84,10 @@ internal class FavoritesController(
 
     suspend fun toggleFavorite(file: MediaFile, isSystemBrowse: Boolean = sharedState.isSystemBrowse.value) {
         favoritesStore.toggleFavorite(file, isSystemBrowse)
+    }
+
+    suspend fun toggleFavoriteFolder(folder: Folder, isSystemBrowse: Boolean = sharedState.isSystemBrowse.value) {
+        favoritesStore.toggleFavoriteFolder(folder, isSystemBrowse)
     }
 
     fun setShowFavoritesOnly(show: Boolean) {

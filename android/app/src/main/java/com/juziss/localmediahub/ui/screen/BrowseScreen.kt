@@ -547,6 +547,8 @@ fun BrowseScreen(
                 onLoadMore = viewModel::loadMore,
                 hasMore = hasMore,
                 loadingMore = loadingMore,
+                decorationFor = viewModel::decorationFor,
+                onFolderToggleFavorite = viewModel::toggleFavoriteFolder,
             )
         }
     }

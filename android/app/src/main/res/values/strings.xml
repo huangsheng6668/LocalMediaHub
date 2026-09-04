@@ -363,4 +363,18 @@
     <string name="error_unknown">未知错误</string>
     <!-- Phase C (2026-09-03): shown when playback auto-retries with server transcode -->
     <string name="video_fallback_transcode" translatable="false">当前设备无法直接解码该视频，已自动切换为服务器转码播放</string>
+
+    <!-- ── Library reading badges & status filtering (Task 16) ──── -->
+    <string name="reading_badge_finished">已读完</string>
+    <string name="reading_badge_reading">读到 %1$d%%</string>
+    <string name="reading_badge_reading_plain">读过</string>
+    <string name="browse_filter_status">阅读状态</string>
+    <string name="browse_status_all">全部</string>
+    <string name="browse_status_unread">未读</string>
+    <string name="browse_status_reading">读过</string>
+    <string name="browse_status_finished">已读完</string>
+    <string name="browse_action_mark_finished">标为已读完</string>
+    <string name="browse_action_mark_reading">标为读过</string>
+    <string name="browse_action_mark_unread">标为未读</string>
+    <string name="browse_action_clear_manual">清除手动标记</string>
 </resources>

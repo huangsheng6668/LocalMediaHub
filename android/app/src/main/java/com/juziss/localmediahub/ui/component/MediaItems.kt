@@ -1,4 +1,4 @@
-﻿package com.juziss.localmediahub.ui.component
+package com.juziss.localmediahub.ui.component
  
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -31,6 +31,8 @@ import coil3.compose.AsyncImage
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
+import com.juziss.localmediahub.data.ReadingStatus
+import kotlin.math.roundToInt
  
 @Composable
 internal fun FavoriteToggleIcon(
@@ -61,6 +63,8 @@ internal fun FolderCard(
     folder: Folder,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
 ) {
     ElevatedCard(
         modifier = Modifier
@@ -79,43 +83,52 @@ internal fun FolderCard(
             hoveredElevation = 4.dp
         )
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(8.dp),
+        Box {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(8.dp),
                 ) {
-                    Icon(
-                        painterResource(R.drawable.ic_folder),
-                        contentDescription = stringResource(R.string.folder),
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = stringResource(R.string.folder),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_folder),
+                            contentDescription = stringResource(R.string.folder),
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = stringResource(R.string.folder),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
+                Text(
+                    text = folder.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = stringResource(R.string.media_open_folder),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            Text(
-                text = folder.name,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = stringResource(R.string.media_open_folder),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (onToggleFavorite != null) {
+                FavoriteToggleIcon(
+                    isFavorite = isFavorite,
+                    onClick = onToggleFavorite,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+                )
+            }
         }
     }
 }
@@ -378,6 +391,8 @@ internal fun TextCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     isSelected: Boolean = false,
+    readingStatus: ReadingStatus? = null,
+    percent: Double = 0.0,
 ) {
     val containerColor = if (isUnsupported) MaterialTheme.colorScheme.surfaceVariant
         else MaterialTheme.colorScheme.surface
@@ -422,13 +437,25 @@ internal fun TextCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (readingStatus == ReadingStatus.FINISHED) {
+                    StatusBadge(
+                        text = stringResource(R.string.reading_badge_finished),
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    )
+                } else if (readingStatus == ReadingStatus.READING) {
+                    StatusBadge(
+                        text = if (percent > 0) stringResource(R.string.reading_badge_reading, percent.roundToInt())
+                               else stringResource(R.string.reading_badge_reading_plain),
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    )
+                }
                 if (isUnsupported) {
                     Surface(
                         color = MaterialTheme.colorScheme.outline,
                         shape = RoundedCornerShape(8.dp),
                     ) {
                         Text(
-                            text = "鏆備笉鏀寔",
+                            text = "暂不支持",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.surface,
@@ -467,5 +494,16 @@ internal fun TextCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun StatusBadge(text: String, containerColor: Color) {
+    Surface(color = containerColor, shape = RoundedCornerShape(999.dp)) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+        )
     }
 }

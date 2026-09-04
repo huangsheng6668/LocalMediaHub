@@ -1,7 +1,9 @@
 package com.juziss.localmediahub.viewmodel
 
 import com.juziss.localmediahub.data.Folder
+import com.juziss.localmediahub.data.LibraryDecoration
 import com.juziss.localmediahub.data.MediaFile
+import com.juziss.localmediahub.data.ReadingStatus
 import com.juziss.localmediahub.data.Tag
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -29,6 +31,9 @@ internal class BrowseSharedState {
 
     val activeTagFilter = MutableStateFlow<Tag?>(null)
     val showFavoritesOnly = MutableStateFlow(false)
+
+    val libraryStates = MutableStateFlow<Map<String, LibraryDecoration>>(emptyMap())
+    val statusFilter = MutableStateFlow<ReadingStatus?>(null)
 
     fun emitBrowseError(message: String) {
         browseState.value = BrowseState.Error(message)
