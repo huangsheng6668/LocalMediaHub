@@ -92,3 +92,73 @@ func TestDeriveStatus(t *testing.T) {
 	manual := "unread"
 	assert.Equal(t, "unread", deriveStatus(true, &manual, true)) // manual 优先
 }
+
+func TestSetManualStatus(t *testing.T) {
+	svc := newTestLibraryService(t)
+	_, _ = svc.UpsertProgress(mkUpdate("/media/d.txt", 3, 0, 30, true, 1000))
+
+	fin := "finished"
+	st, err := svc.SetManualStatus("/media/d.txt", &fin)
+	assert.NoError(t, err)
+	assert.Equal(t, "finished", deriveStatus(st.Finished, st.ManualStatus, true))
+
+	unread := "unread"
+	st, err = svc.SetManualStatus("/media/d.txt", &unread)
+	assert.NoError(t, err)
+	assert.False(t, st.Finished)             // 手动未读重置 finished
+	assert.InDelta(t, 0.0, st.Percent, 1e-9) // 且重置 percent
+	assert.Equal(t, "unread", deriveStatus(st.Finished, st.ManualStatus, true))
+
+	// 清除覆盖 → 回到自动（行仍在，percent 已被重置为 0）
+	st, err = svc.SetManualStatus("/media/d.txt", nil)
+	assert.NoError(t, err)
+	assert.Nil(t, st.ManualStatus)
+	assert.Equal(t, "reading", deriveStatus(st.Finished, st.ManualStatus, true))
+}
+
+func TestSetManualStatusInsertsRow(t *testing.T) {
+	svc := newTestLibraryService(t)
+	fin := "finished"
+	st, err := svc.SetManualStatus("/media/new.txt", &fin) // 无进度行也可手动标记
+	assert.NoError(t, err)
+	assert.True(t, st.Finished)
+	assert.InDelta(t, 100.0, st.Percent, 1e-9)
+	got, _ := svc.GetState("/media/new.txt")
+	assert.NotNil(t, got)
+}
+
+func TestSetManualStatusFinishedSetsPercent(t *testing.T) {
+	svc := newTestLibraryService(t)
+	_, _ = svc.UpsertProgress(mkUpdate("/media/e.txt", 2, 0, 20, false, 1000))
+	fin := "finished"
+	st, _ := svc.SetManualStatus("/media/e.txt", &fin)
+	assert.InDelta(t, 100.0, st.Percent, 1e-9)
+	assert.True(t, st.Finished)
+}
+
+func TestSetManualStatusNilNonExistentDoesNotInsert(t *testing.T) {
+	svc := newTestLibraryService(t)
+	st, err := svc.SetManualStatus("/media/nonexistent.txt", nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "/media/nonexistent.txt", st.Path)
+	assert.False(t, st.Finished)
+	assert.InDelta(t, 0.0, st.Percent, 1e-9)
+	assert.Nil(t, st.ManualStatus)
+	assert.Equal(t, "unread", deriveStatus(st.Finished, st.ManualStatus, false))
+
+	got, err := svc.GetState("/media/nonexistent.txt")
+	assert.NoError(t, err)
+	assert.Nil(t, got) // 确认没有插入行
+}
+
+func TestSetManualStatusReadingRetainsProgress(t *testing.T) {
+	svc := newTestLibraryService(t)
+	_, _ = svc.UpsertProgress(mkUpdate("/media/r.txt", 5, 2, 45.5, false, 1000))
+	reading := "reading"
+	st, err := svc.SetManualStatus("/media/r.txt", &reading)
+	assert.NoError(t, err)
+	assert.NotNil(t, st.ManualStatus)
+	assert.Equal(t, "reading", *st.ManualStatus)
+	assert.InDelta(t, 45.5, st.Percent, 1e-9)
+	assert.False(t, st.Finished)
+}

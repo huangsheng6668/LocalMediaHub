@@ -129,6 +129,67 @@ func (s *LibraryService) UpsertProgress(u models.ProgressUpdate) (models.Reading
 	return *st, nil
 }
 
+// SetManualStatus 手动覆盖：unread 重置 finished/percent；finished 置 finished/100；reading/nil 保持进度；status 为 nil 且行不存在时返回 zero ReadingState（不插入空行）。
+func (s *LibraryService) SetManualStatus(path string, status *string) (models.ReadingState, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if status == nil {
+		st, err := s.getStateLocked(path)
+		if err != nil {
+			return models.ReadingState{}, err
+		}
+		if st == nil {
+			return models.ReadingState{Path: path}, nil
+		}
+		now := nowMillis()
+		_, err = s.db.Exec(`UPDATE reading_states SET manual_status = NULL, updated_at = ? WHERE path = ?`, now, path)
+		if err != nil {
+			return models.ReadingState{}, err
+		}
+		refreshed, err := s.getStateLocked(path)
+		if err != nil {
+			return models.ReadingState{}, err
+		}
+		if refreshed == nil {
+			return models.ReadingState{Path: path}, nil
+		}
+		return *refreshed, nil
+	}
+
+	finInit, pctInit := 0, 0.0
+	if *status == "finished" {
+		finInit, pctInit = 1, 100.0
+	}
+	now := nowMillis()
+	_, err := s.db.Exec(`
+		INSERT INTO reading_states (path, chapter_index, para_index, percent, finished, manual_status, last_read_at, updated_at)
+		VALUES (?, 0, 0, ?, ?, ?, 0, ?)
+		ON CONFLICT(path) DO UPDATE SET
+			manual_status = excluded.manual_status,
+			finished = CASE
+				WHEN excluded.manual_status = 'unread' THEN 0
+				WHEN excluded.manual_status = 'finished' THEN 1
+				ELSE reading_states.finished END,
+			percent = CASE
+				WHEN excluded.manual_status = 'unread' THEN 0
+				WHEN excluded.manual_status = 'finished' THEN 100.0
+				ELSE reading_states.percent END,
+			updated_at = excluded.updated_at`,
+		path, pctInit, finInit, status, now)
+	if err != nil {
+		return models.ReadingState{}, err
+	}
+	st, err := s.getStateLocked(path)
+	if err != nil {
+		return models.ReadingState{}, err
+	}
+	if st == nil {
+		return models.ReadingState{}, fmt.Errorf("failed to retrieve state after setting manual status: %s", path)
+	}
+	return *st, nil
+}
+
 func (s *LibraryService) GetState(path string) (*models.ReadingState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
