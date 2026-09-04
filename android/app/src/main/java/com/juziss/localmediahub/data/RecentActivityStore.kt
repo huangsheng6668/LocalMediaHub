@@ -41,12 +41,14 @@ data class PlaybackProgressEntry(
 
 /**
  * 客户端保存的电子书阅读进度。path 为书在服务端的 relativePath;
- * chapterIndex 是当前章节索引;scrollOffsetPx 是章节内滚动像素偏移;
+ * chapterIndex 是当前章节索引;blockIndex 是章内首个可见 block 索引;
+ * scrollOffsetPx 是 blockIndex item 内的像素偏移;
  * lastReadAt 是 epoch 毫秒,用于排序书架展示。
  */
 data class BookProgress(
     val path: String,
     val chapterIndex: Int,
+    val blockIndex: Int = 0,
     val scrollOffsetPx: Int,
     val lastReadAt: Long,
 )

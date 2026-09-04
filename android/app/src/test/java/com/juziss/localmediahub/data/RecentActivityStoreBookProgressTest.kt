@@ -3,6 +3,8 @@ package com.juziss.localmediahub.data
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -75,7 +77,7 @@ class RecentActivityStoreBookProgressTest {
     @Test
     fun clearRemovesEntry() = runTest {
         withContext(Dispatchers.IO) {
-            store.saveBookProgress(BookProgress("/x/a.txt", 1, 0, 1L))
+            store.saveBookProgress(BookProgress("/x/a.txt", chapterIndex = 1, blockIndex = 0, scrollOffsetPx = 0, lastReadAt = 1L))
             store.clearBookProgress("/x/a.txt")
         }
         val got = withContext(Dispatchers.IO) {
@@ -87,8 +89,8 @@ class RecentActivityStoreBookProgressTest {
     @Test
     fun getAllReturnsSortedByLastReadAtDesc() = runTest {
         withContext(Dispatchers.IO) {
-            store.saveBookProgress(BookProgress("/x/old.txt", 0, 0, 100L))
-            store.saveBookProgress(BookProgress("/x/new.txt", 0, 0, 999L))
+            store.saveBookProgress(BookProgress("/x/old.txt", chapterIndex = 0, blockIndex = 0, scrollOffsetPx = 0, lastReadAt = 100L))
+            store.saveBookProgress(BookProgress("/x/new.txt", chapterIndex = 0, blockIndex = 0, scrollOffsetPx = 0, lastReadAt = 999L))
         }
         val all = withContext(Dispatchers.IO) {
             store.getAllBookProgress()
@@ -101,8 +103,8 @@ class RecentActivityStoreBookProgressTest {
     @Test
     fun getAllFlowEmitsSortedByLastReadAtDesc() = runTest {
         withContext(Dispatchers.IO) {
-            store.saveBookProgress(BookProgress("/x/old.txt", 0, 0, 100L))
-            store.saveBookProgress(BookProgress("/x/new.txt", 0, 0, 999L))
+            store.saveBookProgress(BookProgress("/x/old.txt", chapterIndex = 0, blockIndex = 0, scrollOffsetPx = 0, lastReadAt = 100L))
+            store.saveBookProgress(BookProgress("/x/new.txt", chapterIndex = 0, blockIndex = 0, scrollOffsetPx = 0, lastReadAt = 999L))
         }
         val all = withContext(Dispatchers.IO) {
             store.getAllBookProgressFlow().first()
@@ -122,8 +124,8 @@ class RecentActivityStoreBookProgressTest {
     @Test
     fun saveOverwritesExistingEntryForSamePath() = runTest {
         withContext(Dispatchers.IO) {
-            store.saveBookProgress(BookProgress("/x/same.txt", 1, 10, 100L))
-            store.saveBookProgress(BookProgress("/x/same.txt", 5, 200, 999L))
+            store.saveBookProgress(BookProgress("/x/same.txt", chapterIndex = 1, blockIndex = 0, scrollOffsetPx = 10, lastReadAt = 100L))
+            store.saveBookProgress(BookProgress("/x/same.txt", chapterIndex = 5, blockIndex = 0, scrollOffsetPx = 200, lastReadAt = 999L))
         }
         val got = withContext(Dispatchers.IO) {
             store.getBookProgress("/x/same.txt")
@@ -136,6 +138,34 @@ class RecentActivityStoreBookProgressTest {
             store.getAllBookProgress()
         }
         assertEquals(1, all.size)
+    }
+
+    @Test
+    fun roundTripWithBlockIndex() = runTest {
+        val p = BookProgress(
+            path = "/books/a.txt",
+            chapterIndex = 3,
+            blockIndex = 12,
+            scrollOffsetPx = 45,
+            lastReadAt = 1_700_000_000_000,
+        )
+        withContext(Dispatchers.IO) { store.saveBookProgress(p) }
+        val loaded = withContext(Dispatchers.IO) { store.getBookProgress("/books/a.txt") }
+        assertEquals(12, loaded?.blockIndex)
+        assertEquals(45, loaded?.scrollOffsetPx)
+    }
+
+    @Test
+    fun legacyJsonWithoutBlockIndexDecodesToZero() {
+        // 旧版本存储的 payload 没有 blockIndex 字段；Gson（Unsafe 分配）应给 int 缺省 0，
+        // 使旧记录退化为"章级恢复"。锁定该行为防止未来重构破坏向后兼容。
+        val legacy = """{"/books/a.txt":{"path":"/books/a.txt","chapterIndex":2,"scrollOffsetPx":7,"lastReadAt":123}}"""
+        val map = Gson().fromJson<MutableMap<String, BookProgress>>(
+            legacy,
+            object : TypeToken<MutableMap<String, BookProgress>>() {}.type,
+        )
+        assertEquals(2, map["/books/a.txt"]?.chapterIndex)
+        assertEquals(0, map["/books/a.txt"]?.blockIndex)
     }
 
     private fun deleteDatastoreFiles(context: Context) {
