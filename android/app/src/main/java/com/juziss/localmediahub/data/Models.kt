@@ -144,3 +144,53 @@ data class ScrollModeChapter(
     val title: String,
     val blocks: List<Block>,
 ) : Parcelable
+
+enum class ReadingStatus {
+    UNREAD, READING, FINISHED;
+    companion object {
+        fun fromRaw(s: String?): ReadingStatus? = when (s) {
+            "unread" -> UNREAD; "reading" -> READING; "finished" -> FINISHED; else -> null
+        }
+    }
+    fun toRaw(): String = name.lowercase()
+}
+
+data class LibraryDecoration(
+    val path: String,
+    val status: ReadingStatus,
+    val percent: Double,
+    @SerializedName("last_read_at") val lastReadAt: Long,
+)
+
+data class ReadingStateFull(
+    @SerializedName("chapter_index") val chapterIndex: Int,
+    @SerializedName("para_index") val paraIndex: Int,
+    val percent: Double,
+    val finished: Boolean,
+    @SerializedName("manual_status") val manualStatus: String?,
+    @SerializedName("last_read_at") val lastReadAt: Long,
+)
+
+data class ReadingStateResponse(val state: ReadingStateFull?)
+
+data class DecorationBadge(
+    val status: String,
+    val percent: Double,
+    @SerializedName("last_read_at") val lastReadAt: Long,
+)
+
+data class DecorationsResponse(
+    val states: Map<String, DecorationBadge> = emptyMap(),
+    val favorites: List<String> = emptyList(),
+)
+
+data class ServerFavorite(
+    val path: String,
+    @SerializedName("is_dir") val isDir: Boolean,
+    @SerializedName("is_system") val isSystem: Boolean,
+    val title: String,
+    @SerializedName("media_type") val mediaType: String,
+    val snapshot: com.google.gson.JsonElement? = null,
+    @SerializedName("added_at") val addedAt: Long,
+)
+
