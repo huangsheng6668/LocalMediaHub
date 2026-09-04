@@ -3,6 +3,7 @@ package com.juziss.localmediahub.viewmodel
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.juziss.localmediahub.data.FavoritesStore
+import com.juziss.localmediahub.data.LibrarySyncManager
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.PlaybackProgressEntry
@@ -75,16 +76,23 @@ class HomeViewModelTest {
         // shared OkHttpClient + baseUrl state. No reflection reset needed — it
         // is recreated as a fresh instance per test.
         val httpClient = OkHttpClient()
+        val favoritesStore = FavoritesStore(context, CoroutineScope(Dispatchers.Unconfined))
+        val recentActivityStore = RecentActivityStore(context)
+        val repository = MediaRepository(
+            httpClient,
+            serverConfig,
+            TestBleFixtures.disabledBleController(),
+            BleTransportFallback(),
+        )
         val viewModel = HomeViewModel(
-            favoritesStore = FavoritesStore(context, CoroutineScope(Dispatchers.Unconfined)),
-            recentActivityStore = RecentActivityStore(context),
+            favoritesStore = favoritesStore,
+            recentActivityStore = recentActivityStore,
             serverConfigStore = serverConfigStore,
             serverConfig = serverConfig,
-            repository = MediaRepository(
-                httpClient,
-                serverConfig,
-                TestBleFixtures.disabledBleController(),
-                BleTransportFallback(),
+            repository = repository,
+            librarySyncManager = LibrarySyncManager(
+                favoritesStore, recentActivityStore, repository,
+                CoroutineScope(Dispatchers.Unconfined),
             ),
         )
 

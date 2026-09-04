@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.juziss.localmediahub.data.FavoriteEntry
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.LastBrowseLocation
+import com.juziss.localmediahub.data.LibrarySyncManager
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.PlaybackProgressEntry
@@ -68,6 +69,7 @@ class HomeViewModel @Inject constructor(
     private val serverConfigStore: ServerConfigStore,
     private val serverConfig: ServerConfig,
     private val repository: MediaRepository,
+    private val librarySyncManager: LibrarySyncManager,
 ) : ViewModel() {
 
     private companion object {
@@ -148,6 +150,7 @@ class HomeViewModel @Inject constructor(
                     return@collect
                 }
                 ensureClientInitialized(url)
+                librarySyncManager.ensureStarted()
                 refresh()
             }
         }

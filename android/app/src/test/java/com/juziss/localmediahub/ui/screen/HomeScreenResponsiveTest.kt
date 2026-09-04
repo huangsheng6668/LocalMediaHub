@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaRepository
+import com.juziss.localmediahub.data.LibrarySyncManager
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.ble.BleTransportFallback
@@ -52,17 +53,21 @@ class HomeScreenResponsiveTest {
     fun home_screen_renders_in_compact_width() {
         val ctx = composeRule.activity.applicationContext
         val appScope: CoroutineScope = TestScope(SupervisorJob())
+        val favStore = FavoritesStore(ctx, appScope)
+        val actStore = RecentActivityStore(ctx)
+        val repo = MediaRepository(
+            okhttp3.OkHttpClient(),
+            ServerConfig(),
+            TestBleFixtures.disabledBleController(),
+            BleTransportFallback(),
+        )
         val viewModel = HomeViewModel(
-            favoritesStore = FavoritesStore(ctx, appScope),
-            recentActivityStore = RecentActivityStore(ctx),
+            favoritesStore = favStore,
+            recentActivityStore = actStore,
             serverConfigStore = ServerConfigStore(ctx),
             serverConfig = ServerConfig(),
-            repository = MediaRepository(
-                okhttp3.OkHttpClient(),
-                ServerConfig(),
-                TestBleFixtures.disabledBleController(),
-                BleTransportFallback(),
-            ),
+            repository = repo,
+            librarySyncManager = LibrarySyncManager(favStore, actStore, repo, appScope),
         )
 
         composeRule.setContent {
