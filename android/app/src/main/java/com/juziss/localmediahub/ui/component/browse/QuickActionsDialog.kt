@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
+import com.juziss.localmediahub.data.ReadingStatus
 
 @Composable
 internal fun QuickActionsDialog(
@@ -31,6 +32,7 @@ internal fun QuickActionsDialog(
     onDownloadFolder: (Folder) -> Unit,
     onDeleteFolder: (Folder) -> Unit,
     onDismiss: () -> Unit,
+    onMarkStatus: ((MediaFile, ReadingStatus?) -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -56,6 +58,41 @@ internal fun QuickActionsDialog(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    if (item.mediaType == "text" && onMarkStatus != null) {
+                        TextButton(
+                            onClick = { onMarkStatus(item, ReadingStatus.FINISHED); onDismiss() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Start,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(stringResource(R.string.browse_action_mark_finished))
+                            }
+                        }
+                        TextButton(
+                            onClick = { onMarkStatus(item, ReadingStatus.READING); onDismiss() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Start,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(stringResource(R.string.browse_action_mark_reading))
+                            }
+                        }
+                        TextButton(
+                            onClick = { onMarkStatus(item, ReadingStatus.UNREAD); onDismiss() },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.Start,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(stringResource(R.string.browse_action_mark_unread))
+                            }
+                        }
+                    }
                     TextButton(
                         onClick = { onEditTags(item) },
                         modifier = Modifier.fillMaxWidth(),

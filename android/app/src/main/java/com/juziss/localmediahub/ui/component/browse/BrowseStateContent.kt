@@ -14,12 +14,14 @@ import com.juziss.localmediahub.R
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.LibraryDecoration
 import com.juziss.localmediahub.data.MediaFile
+import com.juziss.localmediahub.data.ReadingStatus
 import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.ui.component.BrowseContent
 import com.juziss.localmediahub.ui.component.FolderGrid
 import com.juziss.localmediahub.ui.component.SystemDrivesContent
 import com.juziss.localmediahub.ui.component.TagFilterBar
 import com.juziss.localmediahub.viewmodel.BrowseState
+import com.juziss.localmediahub.viewmodel.applyBrowseFilters
 
 @Composable
 internal fun BrowseStateContent(
@@ -56,6 +58,10 @@ internal fun BrowseStateContent(
     loadingMore: Boolean = false,
     decorationFor: (MediaFile) -> LibraryDecoration? = { null },
     onFolderToggleFavorite: (Folder) -> Unit = {},
+    favorites: Set<String> = emptySet(),
+    showFavoritesOnly: Boolean = false,
+    statusFilter: ReadingStatus? = null,
+    libraryStates: Map<String, LibraryDecoration> = emptyMap(),
 ) {
     val currentPath = state.currentPath
     when (browseState) {
@@ -87,7 +93,9 @@ internal fun BrowseStateContent(
             )
         }
         is BrowseState.RootFolders -> {
-            val folders = browseState.folders
+            val (filteredFolders, _) = applyBrowseFilters(
+                browseState.folders, emptyList(), favorites, showFavoritesOnly, statusFilter, libraryStates
+            )
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -97,12 +105,12 @@ internal fun BrowseStateContent(
                     icon = painterResource(R.drawable.ic_storage),
                     title = stringResource(R.string.browse_lib_card_title),
                     message = stringResource(R.string.browse_lib_card_desc),
-                    meta = "共 ${folders.size} 个共享盘符",
+                    meta = "共 ${filteredFolders.size} 个共享盘符",
                     badge = null,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 )
                 FolderGrid(
-                    folders = folders,
+                    folders = filteredFolders,
                     onFolderClick = { folder ->
                         val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath
                         onBrowseFolder(path, folder.name)
@@ -137,7 +145,10 @@ internal fun BrowseStateContent(
         }
         is BrowseState.SystemBrowsed -> {
             val result = browseState.result
-            val filteredFiles = filterFilesByTag(result.files)
+            val tagFiltered = filterFilesByTag(result.files)
+            val (filteredFolders, filteredFiles) = applyBrowseFilters(
+                result.folders, tagFiltered, favorites, showFavoritesOnly, statusFilter, libraryStates
+            )
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -147,12 +158,12 @@ internal fun BrowseStateContent(
                     icon = painterResource(R.drawable.ic_storage),
                     title = stringResource(R.string.browse_path_title),
                     message = result.currentPath ?: currentPath,
-                    meta = "${result.folders.size} 文件夹 · ${filteredFiles.size} 文件",
+                    meta = "${filteredFolders.size} 文件夹 · ${filteredFiles.size} 文件",
                     badge = activeTagFilter?.name,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 )
                 BrowseContent(
-                    folders = result.folders,
+                    folders = filteredFolders,
                     files = filteredFiles,
                     onFolderClick = { folder ->
                         onBrowseSystemPath(folder.path, folder.name)
@@ -186,7 +197,10 @@ internal fun BrowseStateContent(
         }
         is BrowseState.Browsed -> {
             val result = browseState.result
-            val filteredFiles = filterFilesByTag(result.files)
+            val tagFiltered = filterFilesByTag(result.files)
+            val (filteredFolders, filteredFiles) = applyBrowseFilters(
+                result.folders, tagFiltered, favorites, showFavoritesOnly, statusFilter, libraryStates
+            )
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -196,7 +210,7 @@ internal fun BrowseStateContent(
                     icon = painterResource(R.drawable.ic_folder),
                     title = if (currentPath.isBlank()) stringResource(R.string.browse_browsed_title) else currentPath,
                     message = stringResource(R.string.browse_browsed_desc),
-                    meta = "${result.folders.size} 文件夹 · ${filteredFiles.size} 文件",
+                    meta = "${filteredFolders.size} 文件夹 · ${filteredFiles.size} 文件",
                     badge = activeTagFilter?.name,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 )
@@ -214,7 +228,7 @@ internal fun BrowseStateContent(
                     }
                 }
                 BrowseContent(
-                    folders = result.folders,
+                    folders = filteredFolders,
                     files = filteredFiles,
                     onFolderClick = { folder ->
                         val path = if (folder.relativePath.isEmpty()) folder.name else folder.relativePath

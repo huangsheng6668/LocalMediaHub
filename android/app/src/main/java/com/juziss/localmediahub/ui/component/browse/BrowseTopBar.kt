@@ -33,6 +33,7 @@ internal fun BrowseTopBar(
     title: String,
     onBack: (() -> Unit)?,
     showLibraryActions: Boolean,
+    showFavoritesAction: Boolean = showLibraryActions,
     isSystemBrowse: Boolean,
     onToggleSystemMode: () -> Unit,
     onShowFavorites: () -> Unit,
@@ -94,7 +95,7 @@ internal fun BrowseTopBar(
                         )
                     }
                 }
-                if (showLibraryActions) {
+                if (showFavoritesAction) {
                     IconButton(onClick = onShowFavorites) {
                         Icon(
                             painterResource(R.drawable.ic_favorite_border_outline),

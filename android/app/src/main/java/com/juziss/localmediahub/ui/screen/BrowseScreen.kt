@@ -11,7 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -50,7 +53,7 @@ import com.juziss.localmediahub.viewmodel.BrowseState
 import androidx.compose.ui.res.stringResource
 import com.juziss.localmediahub.R
 import com.juziss.localmediahub.viewmodel.BrowseViewModel
-import com.juziss.localmediahub.ui.component.browse.BrowseFavoritesView
+import com.juziss.localmediahub.ui.component.browse.BrowseFilterChipsRow
 import com.juziss.localmediahub.ui.component.browse.BrowseSearchView
 import com.juziss.localmediahub.ui.component.browse.BrowseContentState
 import com.juziss.localmediahub.ui.component.browse.BrowseStateContent
@@ -65,8 +68,8 @@ fun BrowseScreen(
     onVideoClick: (MediaFile) -> Unit,
     onImageClick: (MediaFile, List<MediaFile>) -> Unit,
     onTextClick: (MediaFile) -> Unit,
-    onFavoriteVideoClick: (MediaFile, Boolean) -> Unit,
-    onFavoriteImageClick: (MediaFile, List<MediaFile>, Boolean) -> Unit,
+    onFavoriteVideoClick: (MediaFile, Boolean) -> Unit = { _, _ -> },
+    onFavoriteImageClick: (MediaFile, List<MediaFile>, Boolean) -> Unit = { _, _, _ -> },
     onFavoriteTextClick: (MediaFile, Boolean) -> Unit = { file, _ -> onTextClick(file) },
     viewModel: BrowseViewModel = viewModel(),
 ) {
@@ -82,6 +85,8 @@ fun BrowseScreen(
     val favorites by viewModel.favorites.collectAsState()
     val favoriteFiles by viewModel.favoriteFiles.collectAsState()
     val showFavoritesOnly by viewModel.showFavoritesOnly.collectAsState()
+    val statusFilter by viewModel.statusFilter.collectAsState()
+    val libraryStates by viewModel.libraryStates.collectAsState()
     val tags by viewModel.tags.collectAsState()
     val activeTagFilter by viewModel.activeTagFilter.collectAsState()
     val folderSort by viewModel.folderSortOrder.collectAsState()
@@ -234,6 +239,7 @@ fun BrowseScreen(
                         else -> null
                     },
                     showLibraryActions = currentPath.isEmpty() && !showFavoritesOnly && !isCollectionView,
+                    showFavoritesAction = !showFavoritesOnly && !isCollectionView,
                     isSystemBrowse = isSystemBrowse,
                     onToggleSystemMode = {
                         if (isSystemBrowse) viewModel.loadRoots() else viewModel.loadSystemDrives()
@@ -423,6 +429,7 @@ fun BrowseScreen(
                     itemForActions = null
                 },
                 onDismiss = { itemForActions = null },
+                onMarkStatus = { file, status -> viewModel.setStatus(file.path, status) },
             )
         }
  
@@ -480,76 +487,80 @@ fun BrowseScreen(
             )
         }
  
-        when {
-            isSearchMode -> BrowseSearchView(
-                searchState = searchState,
-                searchQuery = searchQuery,
-                onClearSearch = {
-                    isSearchMode = false
-                    viewModel.clearSearch()
-                },
-                onBrowseFolder = viewModel::browseFolder,
-                onVideoClick = onVideoClick,
-                onImageClick = onImageClick,
-                onTextClick = onTextClick,
-                onToggleFavorite = onToggleFavoriteCb,
-                isFavorite = isFavoriteCb,
-                getThumbnailUrl = viewModel::getThumbnailUrl,
-                onFileLongClick = onFileLongClickCb,
-                modifier = Modifier.padding(innerPadding),
-            )
-            showFavoritesOnly -> BrowseFavoritesView(
-                favoriteFiles = favoriteFiles,
-                onVideoClick = { file ->
-                    onFavoriteVideoClick(file, viewModel.isFavoriteSystemBrowse(file))
-                },
-                onImageClick = { file, allFiles ->
-                    onFavoriteImageClick(file, allFiles.filter { it.mediaType == "image" }, viewModel.isFavoriteSystemBrowse(file))
-                },
-                onTextClick = { file ->
-                    onFavoriteTextClick(file, viewModel.isFavoriteSystemBrowse(file))
-                },
-                onToggleFavorite = onToggleFavoriteCb,
-                isFavorite = isFavoriteCb,
-                getFavoriteThumbnailUrl = viewModel::getFavoriteThumbnailUrl,
-                onFileLongClick = onFileLongClickCb,
-                modifier = Modifier.padding(innerPadding),
-            )
-            else -> BrowseStateContent(
-                browseState = browseState,
-                state = contentState,
-                isSystemBrowse = isSystemBrowse,
-                tags = tags,
-                activeTagFilter = activeTagFilter,
-                onVideoClick = handleVideoClick,
-                onImageClick = handleImageClick,
-                onTextClick = handleTextClick,
-                onToggleFavorite = onToggleFavoriteCb,
-                isFavorite = isFavoriteCb,
-                onFileLongClick = onFileLongClickCb,
-                onFolderLongClick = { folder -> itemForActions = folder },
-                onRetry = { if (isSystemBrowse) viewModel.loadSystemDrives() else viewModel.loadRoots() },
-                onBrowseFolder = viewModel::browseFolder,
-                onBrowseSystemPath = viewModel::browseSystemPath,
-                onActiveTagFilterChange = viewModel::setActiveTagFilter,
-                filterFilesByTag = viewModel::filterFilesByTag,
-                onSaveScrollPosition = viewModel::saveScrollPosition,
-                onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
-                getScrollPosition = viewModel::getScrollPosition,
-                getThumbnailUrl = viewModel::getThumbnailUrl,
-                innerPadding = innerPadding,
-                isSelected = { path -> selectedFiles.any { it.relativePath == path } },
-                // Task 5: video cards render greyed + intercept click to the
-                // Snackbar while BLE degraded mode is active.
-                videoEnabled = !isBleDegraded,
-                onVideoDisabledClick = onVideoDisabledClick,
-                // Paged folder browse: infinite scroll near the grid tail.
-                onLoadMore = viewModel::loadMore,
-                hasMore = hasMore,
-                loadingMore = loadingMore,
-                decorationFor = viewModel::decorationFor,
-                onFolderToggleFavorite = viewModel::toggleFavoriteFolder,
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = innerPadding.calculateTopPadding(), bottom = innerPadding.calculateBottomPadding()),
+        ) {
+            if (!isSearchMode && !isCollectionView) {
+                BrowseFilterChipsRow(
+                    statusFilter = statusFilter,
+                    onSelect = {
+                        viewModel.setStatusFilter(it)
+                        viewModel.saveScrollPosition(currentPath, 0)
+                    },
+                )
+            }
+            Box(modifier = Modifier.weight(1f)) {
+                when {
+                    isSearchMode -> BrowseSearchView(
+                        searchState = searchState,
+                        searchQuery = searchQuery,
+                        onClearSearch = {
+                            isSearchMode = false
+                            viewModel.clearSearch()
+                        },
+                        onBrowseFolder = viewModel::browseFolder,
+                        onVideoClick = onVideoClick,
+                        onImageClick = onImageClick,
+                        onTextClick = onTextClick,
+                        onToggleFavorite = onToggleFavoriteCb,
+                        isFavorite = isFavoriteCb,
+                        getThumbnailUrl = viewModel::getThumbnailUrl,
+                        onFileLongClick = onFileLongClickCb,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    else -> BrowseStateContent(
+                        browseState = browseState,
+                        state = contentState,
+                        isSystemBrowse = isSystemBrowse,
+                        tags = tags,
+                        activeTagFilter = activeTagFilter,
+                        onVideoClick = handleVideoClick,
+                        onImageClick = handleImageClick,
+                        onTextClick = handleTextClick,
+                        onToggleFavorite = onToggleFavoriteCb,
+                        isFavorite = isFavoriteCb,
+                        onFileLongClick = onFileLongClickCb,
+                        onFolderLongClick = { folder -> itemForActions = folder },
+                        onRetry = { if (isSystemBrowse) viewModel.loadSystemDrives() else viewModel.loadRoots() },
+                        onBrowseFolder = viewModel::browseFolder,
+                        onBrowseSystemPath = viewModel::browseSystemPath,
+                        onActiveTagFilterChange = viewModel::setActiveTagFilter,
+                        filterFilesByTag = viewModel::filterFilesByTag,
+                        onSaveScrollPosition = viewModel::saveScrollPosition,
+                        onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
+                        getScrollPosition = viewModel::getScrollPosition,
+                        getThumbnailUrl = viewModel::getThumbnailUrl,
+                        innerPadding = PaddingValues(0.dp),
+                        isSelected = { path -> selectedFiles.any { it.relativePath == path } },
+                        // Task 5: video cards render greyed + intercept click to the
+                        // Snackbar while BLE degraded mode is active.
+                        videoEnabled = !isBleDegraded,
+                        onVideoDisabledClick = onVideoDisabledClick,
+                        // Paged folder browse: infinite scroll near the grid tail.
+                        onLoadMore = viewModel::loadMore,
+                        hasMore = hasMore,
+                        loadingMore = loadingMore,
+                        decorationFor = viewModel::decorationFor,
+                        onFolderToggleFavorite = viewModel::toggleFavoriteFolder,
+                        favorites = favorites,
+                        showFavoritesOnly = showFavoritesOnly,
+                        statusFilter = statusFilter,
+                        libraryStates = libraryStates,
+                    )
+                }
+            }
         }
     }
 }
