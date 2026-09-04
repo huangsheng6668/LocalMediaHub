@@ -15,6 +15,7 @@ import { renderAutoscroll } from './autoscroll.js';
 import { renderSettings } from './reader-settings.js';
 import { renderScrubber, progressToChapterIndex } from './readerScrubber.js';
 import { renderPageTurn } from './pageTurn.js';
+import { reportState, fetchState, computeReportPayload } from './library.js';
 
 const STORAGE_PREFIX = 'book_progress:';
 
@@ -264,6 +265,21 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     const chapterCount = state.chapterCount;
 
     const savedProgress = loadProgress(path);
+    // 服务端状态择新：URL 显式 chapter/para 时不参与
+    if (chapterParam == null && paraParam == null) {
+        fetchState(path).then((res) => {
+            const srv = res && res.state;
+            if (!srv || !srv.last_read_at) return;
+            const local = loadProgress(path);
+            if (!local || srv.last_read_at > (local.lastReadAt || 0)) {
+                const merged = { chapterIndex: srv.chapter_index, paraIndex: srv.para_index, lastReadAt: srv.last_read_at };
+                saveProgress(path, merged);
+                if (merged.paraIndex > 0 || merged.chapterIndex !== state.currentIdx) {
+                    scrollToParagraph(merged.paraIndex, merged.chapterIndex);
+                }
+            }
+        }).catch(() => {});
+    }
     const { startIdx, resumePara } = resolveResume({
         chapterParam, paraParam, saved: savedProgress, chapterCount,
     });
@@ -517,7 +533,30 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         const { paragraphs, containerTop } = collectVisibleParagraphs();
         const vis = firstVisibleParagraph(paragraphs, containerTop);
         if (vis) {
-            saveProgress(path, { chapterIndex: vis.chapterIndex, paraIndex: vis.paraIndex, lastReadAt: Date.now() });
+            const prog = { chapterIndex: vis.chapterIndex, paraIndex: vis.paraIndex, lastReadAt: Date.now() };
+            saveProgress(path, prog);
+
+            const chapterParas = paragraphs.filter(p => p.chapterIndex === vis.chapterIndex);
+            const lastPara = chapterParas.length > 0
+                && chapterParas.every(p => p.bottom <= containerTop + els.content.clientHeight)
+                && vis.paraIndex === Math.max(...chapterParas.map(p => p.paraIndex));
+            const nearBottom = els.content.scrollHeight - els.content.scrollTop - els.content.clientHeight < 50;
+
+            const payload = computeReportPayload({
+                chapterIndex: vis.chapterIndex,
+                paraIndex: vis.paraIndex,
+                chapterParaCount: chapterParas.length,
+                totalChapters: state.chapterCount,
+                atChapterEnd: lastPara || nearBottom,
+            });
+
+            reportState(path, {
+                chapterIndex: vis.chapterIndex,
+                paraIndex: vis.paraIndex,
+                percent: payload.percent,
+                finished: payload.finished,
+                lastReadAt: prog.lastReadAt,
+            });
         }
     }
     function scheduleProgressSave() {
@@ -719,7 +758,9 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             }
             updateProgressUI();
             if (scrubberApi) scrubberApi.update();
-            saveProgress(path, { chapterIndex: idx, paraIndex: 0, lastReadAt: Date.now() });
+            if (!resetScroll || !savedProgress) {
+                saveProgress(path, { chapterIndex: idx, paraIndex: 0, lastReadAt: Date.now() });
+            }
         } catch (e) {
             els.content.textContent = '加载章节失败: ' + e.message;
             showToast('加载章节失败: ' + e.message, 'error');

@@ -347,3 +347,231 @@ test('renderTextReader: reopens at saved chapter when no chapter param', async (
         teardownJsdom();
     }
 });
+
+// ============================================================================
+// 6. Library progress reporting and server state merge
+// ============================================================================
+
+test('persistVisibleProgress reports percent and finished to server', async () => {
+    const { window } = setupJsdom();
+    try {
+        const posted = [];
+        const multiParaChapter = {
+            title: '第二章 发展',
+            blocks: [
+                { type: 'text', value: '这是第一段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+                { type: 'text', value: '这是第二段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+                { type: 'text', value: '这是第三段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+            ],
+        };
+        installEnv({ chapter: multiParaChapter });
+        const origFetch = global.fetch;
+        global.fetch = async (url, opts) => {
+            const sUrl = String(url);
+            if (sUrl.includes('/api/v1/library/states') && opts && opts.method === 'POST') {
+                posted.push(JSON.parse(opts.body));
+                return { ok: true, status: 200, json: async () => ({}) };
+            }
+            if (sUrl.includes('/api/v1/library/states')) {
+                return { ok: true, status: 200, json: async () => ({ state: null }) };
+            }
+            return origFetch(url, opts);
+        };
+
+        Object.defineProperty(window.HTMLElement.prototype, 'offsetParent', {
+            configurable: true,
+            get() { return this.parentNode; },
+        });
+
+        const { renderTextReader } = await import('./textReader.js');
+        const container = viewContainer();
+        await renderTextReader(container, '/test/book.txt', 1, null);
+
+        const content = container.querySelector('.text-reader__content');
+        assert.ok(content, 'content element exists');
+
+        Object.defineProperty(content, 'clientHeight', { value: 600, configurable: true });
+        Object.defineProperty(content, 'scrollHeight', { value: 2000, configurable: true });
+        Object.defineProperty(content, 'scrollTop', { value: 500, configurable: true });
+        content.getBoundingClientRect = () => ({ top: 0, bottom: 600, height: 600, width: 400, left: 0, right: 400 });
+
+        const sec = content.querySelector('.text-reader__chapter-section[data-chapter-index="1"]');
+        assert.ok(sec, 'chapter section 1 exists');
+        const paras = sec.querySelectorAll('.text-reader__p');
+        assert.equal(paras.length, 3, '3 paragraphs exist');
+
+        paras[0].getBoundingClientRect = () => ({ top: -100, bottom: -10, height: 90, width: 400, left: 0, right: 400 });
+        paras[1].getBoundingClientRect = () => ({ top: -10, bottom: 100, height: 110, width: 400, left: 0, right: 400 });
+        paras[2].getBoundingClientRect = () => ({ top: 100, bottom: 300, height: 200, width: 400, left: 0, right: 400 });
+
+        // Trigger pagehide to immediately persist visible progress
+        window.dispatchEvent(new window.Event('pagehide'));
+
+        assert.ok(posted.length > 0, 'progress should have been reported');
+        const last = posted.at(-1);
+        assert.equal(last.chapter_index, 1);
+        assert.ok(last.percent > 0 && last.percent < 100, `percent should be between 0 and 100, got ${last.percent}`);
+        assert.equal(typeof last.finished, 'boolean');
+        assert.equal(last.finished, false);
+
+        container._cleanupReader?.();
+    } finally {
+        delete window.HTMLElement.prototype.offsetParent;
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('renderTextReader merges newer server progress into local storage on open', async () => {
+    setupJsdom();
+    try {
+        const multiParaChapter = {
+            title: '第一章 开端',
+            blocks: [
+                { type: 'text', value: '这是第一段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+                { type: 'text', value: '这是第二段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+                { type: 'text', value: '这是第三段超过二十五个字符的默认正文内容，用于测试阅读器段落定位。' },
+            ],
+        };
+        installEnv({ chapter: multiParaChapter });
+        const origFetch = global.fetch;
+        global.fetch = async (url, opts) => {
+            const sUrl = String(url);
+            if (sUrl.includes('/api/v1/library/states')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        state: {
+                            path: '/test/book.txt',
+                            chapter_index: 0,
+                            para_index: 2,
+                            last_read_at: 2000,
+                        },
+                    }),
+                };
+            }
+            return origFetch(url, opts);
+        };
+
+        // Local progress has older timestamp 1000
+        localStorage.setItem('book_progress:/test/book.txt', JSON.stringify({
+            chapterIndex: 0,
+            paraIndex: 0,
+            lastReadAt: 1000,
+        }));
+
+        const { renderTextReader } = await import('./textReader.js');
+        const container = viewContainer();
+        await renderTextReader(container, '/test/book.txt', null, null);
+
+        // Wait a tick for fetchState promise to resolve and execute .then()
+        await new Promise((r) => setTimeout(r, 50));
+
+        const saved = JSON.parse(localStorage.getItem('book_progress:/test/book.txt') || 'null');
+        assert.ok(saved, 'saved progress exists in localStorage');
+        assert.equal(saved.paraIndex, 2, 'paraIndex merged from server');
+        assert.equal(saved.lastReadAt, 2000, 'lastReadAt updated from server');
+
+        container._cleanupReader?.();
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('renderTextReader does NOT merge server progress if URL specifies chapter or para', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        const origFetch = global.fetch;
+        let serverStateFetched = false;
+        global.fetch = async (url, opts) => {
+            const sUrl = String(url);
+            if (sUrl.includes('/api/v1/library/states')) {
+                serverStateFetched = true;
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        state: {
+                            path: '/test/book.txt',
+                            chapter_index: 2,
+                            para_index: 0,
+                            last_read_at: 999999,
+                        },
+                    }),
+                };
+            }
+            return origFetch(url, opts);
+        };
+
+        localStorage.setItem('book_progress:/test/book.txt', JSON.stringify({
+            chapterIndex: 0,
+            paraIndex: 0,
+            lastReadAt: 1000,
+        }));
+
+        const { renderTextReader } = await import('./textReader.js');
+        const container = viewContainer();
+        // Deep link to chapter 1
+        await renderTextReader(container, '/test/book.txt', 1, null);
+
+        await new Promise((r) => setTimeout(r, 50));
+
+        assert.equal(serverStateFetched, false, 'fetchState should not be called when chapterParam is present');
+
+        container._cleanupReader?.();
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
+test('renderTextReader does NOT merge server progress if server last_read_at <= local.lastReadAt', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        const origFetch = global.fetch;
+        global.fetch = async (url, opts) => {
+            const sUrl = String(url);
+            if (sUrl.includes('/api/v1/library/states')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        state: {
+                            path: '/test/book.txt',
+                            chapter_index: 0,
+                            para_index: 1,
+                            last_read_at: 1000, // Older than local 5000
+                        },
+                    }),
+                };
+            }
+            return origFetch(url, opts);
+        };
+
+        localStorage.setItem('book_progress:/test/book.txt', JSON.stringify({
+            chapterIndex: 0,
+            paraIndex: 2,
+            lastReadAt: 5000,
+        }));
+
+        const { renderTextReader } = await import('./textReader.js');
+        const container = viewContainer();
+        await renderTextReader(container, '/test/book.txt', null, null);
+
+        await new Promise((r) => setTimeout(r, 50));
+
+        const saved = JSON.parse(localStorage.getItem('book_progress:/test/book.txt') || 'null');
+        assert.ok(saved, 'saved progress exists');
+        assert.equal(saved.paraIndex, 2, 'local paraIndex preserved');
+        assert.equal(saved.lastReadAt, 5000, 'local lastReadAt preserved');
+
+        container._cleanupReader?.();
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
