@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -255,5 +256,70 @@ func TestFavoriteSnapshotTooLarge(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "snapshot too large")
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestBatchDecorations(t *testing.T) {
+	svc := newTestLibraryService(t)
+	_, _ = svc.UpsertProgress(mkUpdate("/m/a.txt", 5, 0, 50, false, 1000))
+	_, _ = svc.UpsertProgress(mkUpdate("/m/b.txt", 9, 9, 100, true, 1000))
+	_, _ = svc.UpsertProgress(mkUpdate("/m/c.txt", 1, 0, 5, false, 1000))
+	_, _ = svc.SetManualStatus("/m/c.txt", strPtr("unread"))
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/m/b.txt", "b", false, 1)))
+
+	res, err := svc.BatchDecorations([]string{"/m/a.txt", "/m/b.txt", "/m/c.txt", "/m/d.txt"})
+	assert.NoError(t, err)
+	assert.Len(t, res.States, 3) // d.txt 无行省略
+	assert.Equal(t, "reading", res.States["/m/a.txt"].Status)
+	assert.InDelta(t, 50.0, res.States["/m/a.txt"].Percent, 1e-9)
+	assert.Equal(t, "finished", res.States["/m/b.txt"].Status)
+	assert.Equal(t, "unread", res.States["/m/c.txt"].Status) // manual unread 显式返回
+	assert.Equal(t, []string{"/m/b.txt"}, res.Favorites)
+}
+
+func TestBatchDecorationsEmpty(t *testing.T) {
+	svc := newTestLibraryService(t)
+	res, err := svc.BatchDecorations([]string{})
+	assert.NoError(t, err)
+	assert.NotNil(t, res.States)
+	assert.Empty(t, res.States)
+	assert.NotNil(t, res.Favorites)
+	assert.Empty(t, res.Favorites)
+}
+
+func TestBatchDecorationsCaseInsensitiveAndDeduplication(t *testing.T) {
+	svc := newTestLibraryService(t)
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/media/x.txt", "x", false, 1)))
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/media/z.txt", "z", false, 2)))
+
+	res, err := svc.BatchDecorations([]string{
+		"/media/z.txt",
+		"/MEDIA/X.TXT",
+		"/media/x.txt",
+		"/MEDIA/Z.TXT",
+		"/media/other.txt",
+	})
+	assert.NoError(t, err)
+	// Deduplicated favorites preserving caller's order and casing of the first match
+	assert.Equal(t, []string{"/media/z.txt", "/MEDIA/X.TXT"}, res.Favorites)
+}
+
+func TestBatchDecorationsLargeBatch(t *testing.T) {
+	svc := newTestLibraryService(t)
+	assert.NoError(t, svc.UpsertFavorite(mkFav("/media/item-502.txt", "502", false, 1)))
+	_, err := svc.UpsertProgress(mkUpdate("/media/item-502.txt", 1, 0, 25.0, false, 1000))
+	assert.NoError(t, err)
+
+	paths := make([]string, 520)
+	for i := 0; i < 520; i++ {
+		paths[i] = fmt.Sprintf("/media/item-%d.txt", i)
+	}
+
+	res, err := svc.BatchDecorations(paths)
+	assert.NoError(t, err)
+	assert.Len(t, res.States, 1)
+	assert.Equal(t, "reading", res.States["/media/item-502.txt"].Status)
+	assert.Equal(t, []string{"/media/item-502.txt"}, res.Favorites)
 }
 

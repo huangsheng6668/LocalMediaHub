@@ -332,3 +332,90 @@ func (s *LibraryService) FavoritePaths(paths []string) ([]string, error) {
 	return out, nil
 }
 
+// BatchDecorations：批量查状态 + 收藏。States key 为 DB 中的路径；重复路径在 Favorites 中去重后按输入原序保留首个。
+func (s *LibraryService) BatchDecorations(paths []string) (models.DecorationsResult, error) {
+	if len(paths) == 0 {
+		return models.DecorationsResult{
+			States:    make(map[string]models.ReadingStateBadge),
+			Favorites: make([]string, 0),
+		}, nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	res := models.DecorationsResult{
+		States:    make(map[string]models.ReadingStateBadge),
+		Favorites: make([]string, 0),
+	}
+
+	favFound := make(map[string]bool)
+	const batchSize = 500
+
+	for start := 0; start < len(paths); start += batchSize {
+		end := min(start+batchSize, len(paths))
+		batch := paths[start:end]
+		placeholders := strings.Repeat("?,", len(batch)-1) + "?"
+		args := make([]interface{}, len(batch))
+		for i, p := range batch {
+			args[i] = p
+		}
+
+		// 1. reading_states：行存在才返回
+		rows, err := s.db.Query(`SELECT path, percent, finished, manual_status, last_read_at
+			FROM reading_states WHERE path IN (`+placeholders+`)`, args...)
+		if err != nil {
+			return res, err
+		}
+		for rows.Next() {
+			var p string
+			var pct float64
+			var finished int
+			var manual *string
+			var lastAt int64
+			if err := rows.Scan(&p, &pct, &finished, &manual, &lastAt); err != nil {
+				rows.Close()
+				return res, err
+			}
+			res.States[p] = models.ReadingStateBadge{
+				Status:     deriveStatus(finished == 1, manual, true),
+				Percent:    pct,
+				LastReadAt: lastAt,
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return res, err
+		}
+
+		// 2. favorites
+		frows, err := s.db.Query(`SELECT path FROM favorites WHERE path IN (`+placeholders+`)`, args...)
+		if err != nil {
+			return res, err
+		}
+		for frows.Next() {
+			var p string
+			if err := frows.Scan(&p); err != nil {
+				frows.Close()
+				return res, err
+			}
+			favFound[strings.ToLower(p)] = true
+		}
+		frows.Close()
+		if err := frows.Err(); err != nil {
+			return res, err
+		}
+	}
+
+	// 收藏去重且保持输入原序和首个大小写
+	seenFav := make(map[string]bool)
+	for _, p := range paths {
+		lower := strings.ToLower(p)
+		if favFound[lower] && !seenFav[lower] {
+			seenFav[lower] = true
+			res.Favorites = append(res.Favorites, p)
+		}
+	}
+
+	return res, nil
+}
+
