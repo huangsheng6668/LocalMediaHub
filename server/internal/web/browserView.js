@@ -10,11 +10,11 @@ import { formatSize, encodeRoutePath, safeBtoa } from './utils.js';
 import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 import { refreshDecorations, decorateBrowserList, toggleFavorite, markStatus, openStatusMenu, applyListFilters, getDecorations } from './library.js';
+import { initScrollMemory, restoreScrollMemory, clearScrollMemory } from './scrollMemory.js';
 
 // Module-level variables for currently rendered items in browser list
 let shownFolders = [];
 let shownFiles = [];
-const clearScrollMemory = (path) => {}; // 筛选变更清滚动记忆（Task 9 接口，先置空实现）
 
 // ── Inline SVG icon vocabulary (mirrors index.html / Task 6 icons) ──
 // Monochrome currentColor stroke icons replace the former emoji glyphs in
@@ -388,6 +388,7 @@ export function renderBrowserList() {
     elements.browserList.innerHTML = html; // XSS-SAFE: html built entirely from escapeHtml-wrapped folder/file fields above
     decorateBrowserList(elements.browserList);
     refreshDecorations(() => renderBrowserList());
+    restoreScrollMemory(document.querySelector('.view-container'), state.currentPath);
 }
 
 // Delegated click dispatcher for breadcrumbs
@@ -459,6 +460,8 @@ async function triggerBrowserSearch() {
 
 // Set up browser-view event listeners
 export function setupBrowserListeners(elements) {
+    initScrollMemory(document.querySelector('.view-container'));
+
     const chipsBox = document.getElementById('browser-filter-chips');
     if (chipsBox) {
         chipsBox.addEventListener('click', (e) => {
@@ -484,6 +487,7 @@ export function setupBrowserListeners(elements) {
         elements.browserSortSelect.addEventListener('change', (e) => {
             state.sortField = e.target.value;
             localStorage.setItem('lmh_browser_sort_field', state.sortField);
+            clearScrollMemory(state.currentPath);
             renderBrowserList();
         });
     }
@@ -496,6 +500,7 @@ export function setupBrowserListeners(elements) {
             localStorage.setItem('lmh_browser_sort_order', state.sortOrder);
             elements.sortOrderIcon.textContent = state.sortOrder === 'desc' ? '↓' : '↑';
             elements.btnBrowserSortOrder.setAttribute('title', state.sortOrder === 'desc' ? '降序' : '升序');
+            clearScrollMemory(state.currentPath);
             renderBrowserList();
         });
     }
