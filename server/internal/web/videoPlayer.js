@@ -7,7 +7,7 @@ import { formatTime, encodeRoutePath } from './utils.js';
 import { deleteMediaFile } from './delete.js';
 import { wheelToVolume } from './videoHelpers.js';
 import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoProgress.js';
-import { buildHlsPlaylistUrl, resolveHlsStrategy, needsTranscodeExt } from './hlsCompat.js';
+import { buildHlsPlaylistUrl, resolveHlsStrategy, needsTranscodeExt, needsHlsRestart } from './hlsCompat.js';
 
 // <video> tags cannot send Authorization headers, so auth-gated stream URLs
 // (/api/v1/media/stream, /api/v1/system/stream) carry the bearer token as a
@@ -162,6 +162,9 @@ export async function openVideoPlayer(file) {
         url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}`;
     }
 
+    // HLS seek anchor (spec 2026-09-06-hls-seek-restart): 0 unless resuming.
+    let hlsStartSec = 0;
+
     if (state.useTranscode && hlsStrategy !== 'none') {
         // Unified HLS endpoint: ValidateAccessibleMediaPath covers scan roots
         // AND system.allowed_roots, so both browse modes share it.
@@ -178,11 +181,18 @@ export async function openVideoPlayer(file) {
     let resumePositionMs = 0;
     if (saved && !isCompleted(saved.positionMs, saved.durationMs)) {
         resumePositionMs = saved.positionMs;
-        if (state.useTranscode && hlsStrategy === 'none') {
+        if (state.useTranscode && hlsStrategy !== 'none') {
+            // HLS resume anchors the transcode at the saved position — a
+            // post-metadata currentTime seek would clamp to the live edge
+            // of the still-growing playlist (spec 2026-09-06-hls-seek-restart).
+            hlsStartSec = Math.floor(resumePositionMs / 1000);
+            state.transcodeStartOffset = hlsStartSec;
+            url = buildHlsPlaylistUrl(state.apiBase, file.path, hlsStartSec);
+        } else if (state.useTranscode) {
             // Legacy pipe only: seek by restarting the transcode at startSec.
             const startSec = Math.floor(resumePositionMs / 1000);
             url = url.replace('start=0', 'start=' + startSec);
-            state.transcodeStartOffset = startSec * 1000;
+            state.transcodeStartOffset = startSec;
         }
         showToast(`已从 ${formatTime(resumePositionMs / 1000)} 继续`, 'info');
     } else if (saved && isCompleted(saved.positionMs, saved.durationMs)) {
@@ -197,9 +207,10 @@ export async function openVideoPlayer(file) {
     updateSpeedMenuActive(1);
 
     elements.modalVideoPlayer.classList.add('active');
-    // HLS era: direct + HLS streams both resume via a post-metadata seek
-    // (native currentTime); only the legacy pipe keeps the start= param.
-    const resumeSec = resumePositionMs > 0 && hlsStrategy !== 'none' ? resumePositionMs / 1000 : 0;
+    // Direct streams resume via a post-metadata seek (native currentTime);
+    // HLS and the legacy pipe both resume via server-side anchoring
+    // (?start=), so no element-level seek is needed for them.
+    const resumeSec = resumePositionMs > 0 && !state.useTranscode ? resumePositionMs / 1000 : 0;
     applySource(url, state.useTranscode ? hlsStrategy : 'none', resumeSec);
     elements.videoPlayer.play();
 }
@@ -251,7 +262,12 @@ export function setupVideoPlayerListeners(elements) {
                 elements.btnVideoTranscode.classList.add('active');
                 elements.btnVideoTranscode.textContent = '转码';
                 showToast('🔧 已切换至 HLS 转码流（支持任意进度拖动）', 'success');
-                applySource(buildHlsPlaylistUrl(state.apiBase, state.playingFile.path), hlsStrategy, absolutePos);
+                // Re-anchor at the current absolute position: the old
+                // session may not have transcoded this far (spec
+                // 2026-09-06-hls-seek-restart).
+                const startSec = Math.max(0, Math.floor(absolutePos));
+                applySource(buildHlsPlaylistUrl(state.apiBase, state.playingFile.path, startSec), hlsStrategy, 0);
+                state.transcodeStartOffset = startSec;
             } else {
                 elements.btnVideoTranscode.classList.remove('active');
                 elements.btnVideoTranscode.textContent = '原画';
@@ -264,8 +280,8 @@ export function setupVideoPlayerListeners(elements) {
                     url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}`;
                 }
                 applySource(url, 'none', absolutePos);
+                state.transcodeStartOffset = 0;
             }
-            state.transcodeStartOffset = 0;
             elements.videoPlayer.play();
             return;
         }
@@ -354,8 +370,25 @@ export function setupVideoPlayerListeners(elements) {
             }
             applySource(url, 'none', 0);
             elements.videoPlayer.play();
+        } else if (state.useTranscode) {
+            // HLS: inside the transcoded window seek natively (relative to
+            // the session anchor); beyond it, re-anchor the transcode at
+            // the target — hls.js would otherwise clamp to the live edge
+            // and the drag would appear to do nothing (spec
+            // 2026-09-06-hls-seek-restart).
+            const offsetSec = state.transcodeStartOffset;
+            const seekable = elements.videoPlayer.seekable;
+            const seekableEnd = seekable.length ? seekable.end(seekable.length - 1) : null;
+            if (needsHlsRestart(targetTime, offsetSec, seekableEnd)) {
+                const startSec = Math.max(0, Math.floor(targetTime));
+                state.transcodeStartOffset = startSec;
+                applySource(buildHlsPlaylistUrl(state.apiBase, state.playingFile.path, startSec), hlsStrategy, 0);
+                elements.videoPlayer.play();
+            } else {
+                elements.videoPlayer.currentTime = Math.max(0, targetTime - offsetSec);
+            }
         } else {
-            // Direct and HLS streams both seek natively.
+            // Direct streams seek natively.
             elements.videoPlayer.currentTime = targetTime;
         }
         state.isDraggingProgress = false;

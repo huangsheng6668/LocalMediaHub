@@ -13,8 +13,31 @@ export function needsTranscodeExt(fileName) {
     return NEEDS_TRANSCODE_EXTS.includes(fileName.substring(dot).toLowerCase());
 }
 
-export function buildHlsPlaylistUrl(apiBase, path) {
-    return `${apiBase}/api/v1/media/hls/playlist?path=${encodeURIComponent(path)}`;
+export function buildHlsPlaylistUrl(apiBase, path, startSec) {
+    let url = `${apiBase}/api/v1/media/hls/playlist?path=${encodeURIComponent(path)}`;
+    // Seek anchor (spec 2026-09-06-hls-seek-restart): the server re-anchors
+    // the transcode at this offset so positions not yet transcoded play
+    // immediately instead of clamping to the live edge.
+    if (Number.isFinite(startSec) && startSec > 0) {
+        url += `&start=${Math.floor(startSec)}`;
+    }
+    return url;
+}
+
+// HLS_SEEK_MARGIN: how far past the current seekable end a drag target may
+// sit and still be served by a native currentTime seek — hls.js keeps
+// appending segments, so a target just past the edge lands within a second.
+export const HLS_SEEK_MARGIN = 5;
+
+// needsHlsRestart reports whether a progress-bar drag to targetTime (on the
+// video's ABSOLUTE timeline) can be served by the current session, or needs
+// the transcode re-anchored at the target. offsetSec is the current
+// session's start anchor; seekableEnd is video.seekable's end (or null when
+// unknown — then native seek is assumed fine). Spec 2026-09-06-hls-seek-restart.
+export function needsHlsRestart(targetTime, offsetSec, seekableEnd) {
+    if (seekableEnd == null || !isFinite(seekableEnd) || seekableEnd <= 0) return false;
+    const rel = targetTime - (offsetSec || 0);
+    return rel < -0.5 || rel > seekableEnd + HLS_SEEK_MARGIN;
 }
 
 // resolveHlsStrategy picks the HLS playback route:

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { needsTranscodeExt, buildHlsPlaylistUrl, resolveHlsStrategy } from './hlsCompat.js';
+import { needsTranscodeExt, buildHlsPlaylistUrl, resolveHlsStrategy, needsHlsRestart } from './hlsCompat.js';
 
 test('needsTranscodeExt matches container-unsupported extensions case-insensitively', () => {
     assert.equal(needsTranscodeExt('Movie.mkv'), true);
@@ -15,6 +15,32 @@ test('buildHlsPlaylistUrl encodes the path', () => {
         buildHlsPlaylistUrl('http://192.168.1.2:8000', 'D:\\Media\\a b.mp4'),
         'http://192.168.1.2:8000/api/v1/media/hls/playlist?path=D%3A%5CMedia%5Ca%20b.mp4',
     );
+});
+
+test('buildHlsPlaylistUrl appends a floored start anchor when given (spec 2026-09-06)', () => {
+    assert.equal(
+        buildHlsPlaylistUrl('http://h:1', 'a.mp4', 7200.9),
+        'http://h:1/api/v1/media/hls/playlist?path=a.mp4&start=7200',
+    );
+    // Zero / negative / non-finite anchors keep the legacy URL shape.
+    assert.equal(buildHlsPlaylistUrl('http://h:1', 'a.mp4', 0).includes('start='), false);
+    assert.equal(buildHlsPlaylistUrl('http://h:1', 'a.mp4', -5).includes('start='), false);
+    assert.equal(buildHlsPlaylistUrl('http://h:1', 'a.mp4', NaN).includes('start='), false);
+});
+
+test('needsHlsRestart only fires outside the anchored seekable window', () => {
+    // Inside the window (accounting for the anchor offset): native seek.
+    assert.equal(needsHlsRestart(100, 0, 225), false);
+    assert.equal(needsHlsRestart(2300, 2160, 225), false);   // anchored session, rel=140
+    assert.equal(needsHlsRestart(2300, 2160, 229.9), false); // just inside the margin
+    assert.equal(needsHlsRestart(0, 0, 225), false);
+    // Beyond the edge or before the anchor: re-anchor needed.
+    assert.equal(needsHlsRestart(7200, 0, 225), true);
+    assert.equal(needsHlsRestart(7200, 2160, 225), true);    // rel=5040 > 230
+    assert.equal(needsHlsRestart(2000, 2160, 225), true);    // rel=-160 < -0.5
+    // Unknown seekable range: assume native seek works.
+    assert.equal(needsHlsRestart(7200, 0, null), false);
+    assert.equal(needsHlsRestart(7200, 0, Infinity), false);
 });
 
 test('resolveHlsStrategy prefers hls.js when MSE is available', () => {
