@@ -23,7 +23,6 @@ function withVideoAuthToken(url) {
 
 // Module-scoped player state (shared across the player's internal helpers).
 let controlsTimeout;
-const PLAYBACK_SPEEDS = [0.75, 1, 1.25, 1.5, 2, 3];
 let lastProgressSaveMs = 0;
 
 // HLS era (spec 2026-09-03-hls-transcode-b2): the active HLS route for the

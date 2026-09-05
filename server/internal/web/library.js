@@ -361,7 +361,3 @@ export function closeStatusMenu() {
     currentMenuCallback = null;
 }
 
-export function initLibrary() {
-    ensureStatusMenu();
-}
-
