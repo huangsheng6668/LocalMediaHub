@@ -26,7 +26,6 @@ import kotlinx.coroutines.launch
  */
 internal class DeleteController(
     private val repository: MediaRepository,
-    private val sharedState: BrowseSharedState,
 ) {
 
     // ── Delete state (private to this delegate) ─────────────────

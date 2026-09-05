@@ -7,7 +7,6 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import com.juziss.localmediahub.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -75,31 +74,6 @@ internal fun mergeFavoriteEntries(
         if (existing == null || entry.addedAt > existing.addedAt) byId[entry.identity] = entry
     }
     return byId.values.toList()
-}
-
-// ── 旧模型保留（二代兼容 + 现有测试） ─────────────────────────────────────
-
-data class FavoriteMediaEntry(
-    val file: MediaFile,
-    val isSystemBrowse: Boolean,
-)
-
-internal fun decodeFavoriteEntry(gson: Gson, json: String): FavoriteMediaEntry? {
-    return try {
-        val element = JsonParser.parseString(json)
-        val obj = element.takeIf { it.isJsonObject }?.asJsonObject
-        if (obj?.has("file") == true) {
-            gson.fromJson(json, FavoriteMediaEntry::class.java)
-        } else {
-            gson.fromJson(json, MediaFile::class.java)?.let { FavoriteMediaEntry(it, false) }
-        }
-    } catch (_: Exception) {
-        try {
-            gson.fromJson(json, MediaFile::class.java)?.let { FavoriteMediaEntry(it, false) }
-        } catch (_: Exception) {
-            null
-        }
-    }
 }
 
 // ── DataStore ──────────────────────────────────────────────────────────────

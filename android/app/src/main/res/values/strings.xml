@@ -123,7 +123,6 @@
     <string name="browse_delete_recursive">强制递归删除（如果文件夹内有其他内容，必须勾选）</string>
     <string name="browse_deleting">正在删除资源...</string>
     <string name="browse_deleting_desc">正在清理云端多媒体文件，这可能需要一点时间。</string>
-    <string name="browse_fav_card_desc">收藏的媒体将集中在此处，方便您随时快捷播放。</string>
     <string name="browse_loading_files">正在准备文件列表...</string>
     <string name="browse_loading_files_desc">正在载入媒体共享根目录、文件属性及快捷标签，请稍候。</string>
     <string name="browse_error_title">浏览目录发生错误</string>
@@ -164,7 +163,6 @@
     <!-- ── Video player ────────────────────────────────────── -->
     <string name="video_seek_min">分</string>
     <string name="video_seek_sec">秒</string>
-    <string name="media_unsupported_badge">暂不支持</string>
 
     <!-- ── Accessibility ───────────────────────────────────── -->
     <string name="a11y_selected">已选择</string>
@@ -368,7 +366,6 @@
     <string name="reading_badge_finished">已读完</string>
     <string name="reading_badge_reading">读到 %1$d%%</string>
     <string name="reading_badge_reading_plain">读过</string>
-    <string name="browse_filter_status">阅读状态</string>
     <string name="browse_status_all">全部</string>
     <string name="browse_status_unread">未读</string>
     <string name="browse_status_reading">读过</string>

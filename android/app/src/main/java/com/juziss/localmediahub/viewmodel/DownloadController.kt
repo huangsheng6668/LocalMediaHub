@@ -5,7 +5,6 @@ import com.juziss.localmediahub.data.DownloadManager
 import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.MediaFile
-import com.juziss.localmediahub.data.MediaRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -30,9 +29,7 @@ import kotlinx.coroutines.launch
  */
 internal class DownloadController(
     private val downloadManager: DownloadManager,
-    private val repository: MediaRepository,
     private val downloadsStore: DownloadsStore,
-    private val sharedState: BrowseSharedState,
 ) {
 
     val downloadedFiles: Flow<List<DownloadEntry>> = downloadsStore.downloadedFiles

@@ -59,8 +59,8 @@ class BrowseViewModel @Inject constructor(
     private val libraryController = LibraryController(repository, sharedState)
     private val tagController = TagController(repository, sharedState)
     private val searchController = SearchController(repository, sharedState)
-    private val downloadController = DownloadController(downloadManager, repository, downloadsStore, sharedState)
-    private val deleteController = DeleteController(repository, sharedState)
+    private val downloadController = DownloadController(downloadManager, downloadsStore)
+    private val deleteController = DeleteController(repository)
 
     init {
         favoritesController.startCollecting(viewModelScope)

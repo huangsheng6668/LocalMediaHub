@@ -12,7 +12,6 @@ import com.juziss.localmediahub.data.BleApi
 import com.juziss.localmediahub.data.BleDevice
 import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.network.NetworkResult
-import com.juziss.localmediahub.network.ServerConfig
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -47,7 +46,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
  *  - a mockk [BleApi] whose scan()/connect()/send() answers are scripted per
  *    test (mockk 1.13.12 mocks the concrete `@Singleton BleApi` final class
  *    via its agent — same pattern the original Task 9 tests used);
- *  - lightweight mutable-flow fakes for [ServerConfigStore] / [ServerConfig]
+ *  - lightweight mutable-flow fakes for [ServerConfigStore]
  *    so each test seeds `serverConfigured` and `bleEnabled` directly.
  *
  * `Dispatchers.setMain(StandardTestDispatcher())` puts `viewModelScope.launch`
@@ -410,14 +409,12 @@ class BleSettingsViewModelTest {
         val fakeController: BleController,
         val peripheral: FakePeripheralManager,
         val serverUrlFlow: MutableStateFlow<String>,
-        val serverConfig: ServerConfig,
     )
 
     /**
      * Builds a [BleSettingsViewModel] wired to fakes appropriate for the
      * auto-connect tests: real [BleController] (so `advertisingStarted` and
-     * `connectionState` are live), mutable-flow [ServerConfigStore] /
-     * [ServerConfig] (so tests seed [serverConfigured] / [bleEnabled]), and
+     * `connectionState` are live), mutable-flow [ServerConfigStore] (so tests seed [serverConfigured] / [bleEnabled]), and
      * either a [FakeApi] or a plain mockk [BleApi].
      */
     private fun buildVm(
@@ -442,9 +439,6 @@ class BleSettingsViewModelTest {
         // actually flip connectionState (the state machine no-ops in DISABLED).
         fakeController.evaluateAvailability(enabled = true)
 
-        val serverConfig = ServerConfig().apply {
-            if (serverConfigured) setBaseUrl("http://192.168.1.10:8000")
-        }
         val serverUrlFlow: MutableStateFlow<String> =
             MutableStateFlow(if (serverConfigured) "http://192.168.1.10:8000" else "")
         val lastConnectedBleAddressFlow: MutableStateFlow<String?> = MutableStateFlow(null)
@@ -486,10 +480,9 @@ class BleSettingsViewModelTest {
             controller = fakeController,
             api = bleApi,
             store = store,
-            serverConfig = serverConfig,
             bleEnabledFlow = bleEnabledFlow,
         )
-        lastFixtures = VmFixtures(fakeController, peripheral, serverUrlFlow, serverConfig)
+        lastFixtures = VmFixtures(fakeController, peripheral, serverUrlFlow)
         return vm
     }
 
@@ -514,6 +507,5 @@ class BleSettingsViewModelTest {
         val f = lastFixtures!!
         val url = "http://192.168.1.10:8000"
         f.serverUrlFlow.value = url
-        f.serverConfig.setBaseUrl(url)
     }
 }

@@ -12,7 +12,6 @@ import com.juziss.localmediahub.data.BleApi
 import com.juziss.localmediahub.data.BleDevice
 import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.network.NetworkResult
-import com.juziss.localmediahub.network.ServerConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -53,7 +52,6 @@ class BleSettingsViewModel @Inject constructor(
     private val controller: BleController,
     private val api: BleApi,
     val store: ServerConfigStore,
-    private val serverConfig: ServerConfig,
     @Named("bleEnabled") private val bleEnabledFlow: Flow<Boolean>,
 ) : AndroidViewModel(application) {
 
