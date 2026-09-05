@@ -3,8 +3,10 @@ package handler
 import (
 	"encoding/base64"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 
@@ -136,14 +138,36 @@ func (h *Handler) MediaStream(c echo.Context) error {
 	return nil
 }
 
+// parseHlsStartSec reads the optional ?start= seek anchor shared by the HLS
+// playlist and segment endpoints. Bounds mirror the legacy transcode pipe's
+// start parameter (0..86400, NaN/parse errors rejected); fractional values
+// floor to whole seconds — ffmpeg -ss anchors are second-granular and the
+// client-side absolute-timeline math rounds the same way.
+func parseHlsStartSec(c echo.Context) (int64, error) {
+	s := c.QueryParam("start")
+	if s == "" {
+		return 0, nil
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(f) || f < 0 || f > 86400 {
+		return 0, fmt.Errorf("invalid start parameter")
+	}
+	return int64(f), nil
+}
+
 // MediaHlsPlaylist starts (or joins) the HLS transcode session for the
 // given video and serves its playlist (spec 2026-09-03-hls-transcode).
 // The playlist grows until the transcode completes, so it is served
-// no-cache; players refetch it as playback progresses.
+// no-cache; players refetch it as playback progresses. ?start= anchors
+// the session at that seek offset (spec 2026-09-06-hls-seek-restart).
 func (h *Handler) MediaHlsPlaylist(c echo.Context) error {
 	pathStr := c.QueryParam("path")
 	if pathStr == "" {
 		return respondError(c, http.StatusBadRequest, "path required")
+	}
+	startSec, err := parseHlsStartSec(c)
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid start parameter")
 	}
 	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions)
 	if err != nil {
@@ -156,13 +180,14 @@ func (h *Handler) MediaHlsPlaylist(c echo.Context) error {
 		}
 		return respondInternalError(c, err)
 	}
-	sess, err := h.streaming.GetOrCreateHlsSession(resolved, fi.ModTime())
+	sess, err := h.streaming.GetOrCreateHlsSession(resolved, fi.ModTime(), startSec)
 	if err != nil {
 		return respondError(c, http.StatusServiceUnavailable, "transcode session unavailable", err)
 	}
 	// Serve the client-facing playlist: bare ffmpeg segment names are
-	// rewritten to absolute segment-endpoint URLs (see ClientPlaylist).
-	body, err := sess.ClientPlaylist(resolved)
+	// rewritten to absolute segment-endpoint URLs (see ClientPlaylist),
+	// carrying the session's start anchor so segment fetches dedup here.
+	body, err := sess.ClientPlaylist(resolved, startSec)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return respondNotFound(c, "playlist not found")
@@ -183,6 +208,10 @@ func (h *Handler) MediaHlsSegment(c echo.Context) error {
 	if pathStr == "" || name == "" {
 		return respondError(c, http.StatusBadRequest, "path and name required")
 	}
+	startSec, err := parseHlsStartSec(c)
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid start parameter")
+	}
 	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), h.cfg.Scan.VideoExtensions)
 	if err != nil {
 		return respondError(c, http.StatusForbidden, "access denied")
@@ -194,10 +223,11 @@ func (h *Handler) MediaHlsSegment(c echo.Context) error {
 		}
 		return respondInternalError(c, err)
 	}
-	// Dedup hit in the common case (the client fetched the playlist first);
-	// also refreshes lastAccess so active playback keeps the idle reaper
-	// from killing a running transcode.
-	sess, err := h.streaming.GetOrCreateHlsSession(resolved, fi.ModTime())
+	// Dedup hit in the common case (the client fetched the playlist first,
+	// whose rewritten segment URLs carry the same ?start= anchor); also
+	// refreshes lastAccess so active playback keeps the idle reaper from
+	// killing a running transcode.
+	sess, err := h.streaming.GetOrCreateHlsSession(resolved, fi.ModTime(), startSec)
 	if err != nil {
 		return respondError(c, http.StatusServiceUnavailable, "transcode session unavailable", err)
 	}

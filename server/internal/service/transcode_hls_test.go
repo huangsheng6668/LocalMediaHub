@@ -14,13 +14,28 @@ import (
 
 func TestHlsSessionKeyStability(t *testing.T) {
 	mt := time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC)
-	k1 := hlsSessionKey(`D:\Media\a.mp4`, mt, "h264_nvenc")
-	k2 := hlsSessionKey(`D:\Media\a.mp4`, mt, "h264_nvenc")
+	k1 := hlsSessionKey(`D:\Media\a.mp4`, mt, "h264_nvenc", 0)
+	k2 := hlsSessionKey(`D:\Media\a.mp4`, mt, "h264_nvenc", 0)
 	assert.Equal(t, k1, k2)
 	assert.Len(t, k1, 16)
-	assert.NotEqual(t, k1, hlsSessionKey(`D:\Media\a.mp4`, mt.Add(time.Second), "h264_nvenc"), "modtime change must rotate the key")
-	assert.NotEqual(t, k1, hlsSessionKey(`D:\Media\b.mp4`, mt, "h264_nvenc"))
-	assert.NotEqual(t, k1, hlsSessionKey(`D:\Media\a.mp4`, mt, "libx264"))
+	assert.NotEqual(t, k1, hlsSessionKey(`D:\Media\a.mp4`, mt.Add(time.Second), "h264_nvenc", 0), "modtime change must rotate the key")
+	assert.NotEqual(t, k1, hlsSessionKey(`D:\Media\b.mp4`, mt, "h264_nvenc", 0))
+	assert.NotEqual(t, k1, hlsSessionKey(`D:\Media\a.mp4`, mt, "libx264", 0))
+	assert.NotEqual(t, k1, hlsSessionKey(`D:\Media\a.mp4`, mt, "h264_nvenc", 3600),
+		"different seek anchor must rotate the key (spec 2026-09-06-hls-seek-restart)")
+}
+
+// TestBuildHlsArgsSeekAnchor pins the argv shape: a start anchor becomes an
+// input-side -ss BEFORE -i (fast demuxer seek), no anchor omits it entirely.
+func TestBuildHlsArgsSeekAnchor(t *testing.T) {
+	enc := resolvedEncoder{Name: "libx264"}
+	base := buildHlsArgs(`D:\m.mp4`, 0, enc, `C:\seg`, `C:\seg\index.m3u8`)
+	assert.Equal(t, "-y", base[0])
+	assert.Equal(t, "-i", base[1], "zero anchor must not insert -ss")
+
+	anchored := buildHlsArgs(`D:\m.mp4`, 3600, enc, `C:\seg`, `C:\seg\index.m3u8`)
+	assert.Equal(t, []string{"-y", "-ss", "3600", "-i", `D:\m.mp4`}, anchored[:5],
+		"-ss must precede -i for input-side seeking")
 }
 
 func TestValidHlsSegmentName(t *testing.T) {
@@ -60,7 +75,7 @@ func TestHlsClientPlaylistRewritesSegmentURIs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.m3u8"), []byte(raw), 0o644))
 
 	sess := &hlsSession{dir: dir, playlist: filepath.Join(dir, "index.m3u8")}
-	body, err := sess.ClientPlaylist(`D:\Media\My Movie (2026).mkv`)
+	body, err := sess.ClientPlaylist(`D:\Media\My Movie (2026).mkv`, 0)
 	require.NoError(t, err)
 
 	out := string(body)
@@ -69,6 +84,68 @@ func TestHlsClientPlaylistRewritesSegmentURIs(t *testing.T) {
 	assert.NotContains(t, out, "\nseg00000.ts\n", "bare segment line must not survive")
 	assert.Contains(t, out, "#EXT-X-TARGETDURATION:4")
 	assert.Contains(t, out, "#EXT-X-ENDLIST")
+
+	// Anchored sessions carry &start= so the segment endpoint dedups onto
+	// the same session (spec 2026-09-06-hls-seek-restart); zero anchors
+	// omit it to keep URLs stable with pre-spec clients.
+	anchored, err := sess.ClientPlaylist(`D:\Media\My Movie (2026).mkv`, 7200)
+	require.NoError(t, err)
+	assert.Contains(t, string(anchored), "&name=seg00000.ts&start=7200\n")
+}
+
+// TestCancelSiblingSessionsOnReanchor covers the scrub-protection contract:
+// creating a session at a new anchor kills still-running sessions for the
+// same source file, while completed cache sessions survive untouched.
+func TestCancelSiblingSessionsOnReanchor(t *testing.T) {
+	s := NewStreamingService("", nil, -1)
+	s.hlsDir = t.TempDir()
+
+	oldCtx, oldCancel := context.WithCancel(context.Background())
+	old := &hlsSession{
+		key: "old", dir: filepath.Join(s.hlsDir, "old"),
+		srcPath: `D:\Media\a.mp4`, startSec: 0,
+		lastAccess: time.Now(), running: true,
+		cancel: oldCancel, done: make(chan struct{}),
+	}
+	s.hlsSessions["old"] = old
+
+	doneCtx, doneCancel := context.WithCancel(context.Background())
+	cached := &hlsSession{
+		key: "cached", dir: filepath.Join(s.hlsDir, "cached"),
+		srcPath: `D:\Media\a.mp4`, startSec: 0,
+		lastAccess: time.Now().Add(-time.Hour), running: false, size: 4096,
+		cancel: doneCancel, done: make(chan struct{}),
+	}
+	close(cached.done)
+	s.hlsSessions["cached"] = cached
+
+	otherCtx, otherCancel := context.WithCancel(context.Background())
+	otherFile := &hlsSession{
+		key: "other", dir: filepath.Join(s.hlsDir, "other"),
+		srcPath: `D:\Media\b.mp4`, startSec: 0,
+		lastAccess: time.Now(), running: true,
+		cancel: otherCancel, done: make(chan struct{}),
+	}
+	s.hlsSessions["other"] = otherFile
+
+	fresh := &hlsSession{key: "fresh", srcPath: `D:\Media\a.mp4`, startSec: 3600, running: true}
+	s.cancelSiblingSessions(fresh)
+
+	select {
+	case <-oldCtx.Done():
+	default:
+		t.Fatal("running sibling for the same source was not cancelled")
+	}
+	select {
+	case <-doneCtx.Done():
+		t.Fatal("completed cache session must NOT be cancelled")
+	default:
+	}
+	select {
+	case <-otherCtx.Done():
+		t.Fatal("running session for a different source must NOT be cancelled")
+	default:
+	}
 }
 
 // TestHlsGetOrCreateRealFFmpeg covers the full happy path with real ffmpeg:
@@ -95,11 +172,11 @@ func TestHlsGetOrCreateRealFFmpeg(t *testing.T) {
 	s.hlsDir = filepath.Join(tmp, "hls")
 	defer s.CloseHLS()
 
-	sess1, err := s.GetOrCreateHlsSession(src, fi.ModTime())
+	sess1, err := s.GetOrCreateHlsSession(src, fi.ModTime(), 0)
 	require.NoError(t, err)
 
 	// Dedup: a second call returns the same session (no new ffmpeg).
-	sess2, err := s.GetOrCreateHlsSession(src, fi.ModTime())
+	sess2, err := s.GetOrCreateHlsSession(src, fi.ModTime(), 0)
 	require.NoError(t, err)
 	assert.Same(t, sess1, sess2)
 

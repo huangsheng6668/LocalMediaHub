@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,10 +52,10 @@ func validHlsSegmentName(name string) bool {
 }
 
 // hlsSessionKey derives the on-disk session identity: same file + same
-// modtime + same encoder reuses the session; a changed file naturally
-// rotates to a fresh key.
-func hlsSessionKey(cleanPath string, modTime time.Time, encoder string) string {
-	sum := sha256.Sum256([]byte(cleanPath + "|" + fmt.Sprintf("%d", modTime.UnixNano()) + "|" + encoder))
+// modtime + same encoder + same seek anchor reuses the session; a changed
+// file (or a different start offset) naturally rotates to a fresh key.
+func hlsSessionKey(cleanPath string, modTime time.Time, encoder string, startSec int64) string {
+	sum := sha256.Sum256([]byte(cleanPath + "|" + fmt.Sprintf("%d", modTime.UnixNano()) + "|" + encoder + "|" + strconv.FormatInt(startSec, 10)))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
@@ -66,6 +67,11 @@ type hlsSession struct {
 	playlist string
 	done     chan struct{} // closed when ffmpeg exited
 	cancel   context.CancelFunc
+
+	// srcPath/startSec pin the session identity inputs that cancelSibling
+	// sessions and playlist rewriting need beyond the key hash itself.
+	srcPath  string
+	startSec int64
 
 	mu         sync.Mutex
 	running    bool
@@ -115,8 +121,14 @@ func (s *hlsSession) PlaylistPath() string {
 // hlsSegmentEndpoint renders the client-facing URI for one segment. The path
 // and name are query params (the segment route reads both), so the URI is
 // origin-relative and stays valid no matter which URL served the playlist.
-func hlsSegmentEndpoint(sourcePath, name string) string {
-	return "/api/v1/media/hls/segment?path=" + url.QueryEscape(sourcePath) + "&name=" + url.QueryEscape(name)
+// startSec (>0) carries the session's seek anchor so the segment endpoint
+// dedups onto the same session the playlist came from.
+func hlsSegmentEndpoint(sourcePath, name string, startSec int64) string {
+	uri := "/api/v1/media/hls/segment?path=" + url.QueryEscape(sourcePath) + "&name=" + url.QueryEscape(name)
+	if startSec > 0 {
+		uri += "&start=" + strconv.FormatInt(startSec, 10)
+	}
+	return uri
 }
 
 // ClientPlaylist returns the playlist body with bare segment filenames
@@ -126,7 +138,7 @@ func hlsSegmentEndpoint(sourcePath, name string) string {
 // paths resolve against the origin for both hls.js and ExoPlayer. Only lines
 // passing the segment-name whitelist are rewritten; everything else is
 // passed through verbatim.
-func (s *hlsSession) ClientPlaylist(sourcePath string) ([]byte, error) {
+func (s *hlsSession) ClientPlaylist(sourcePath string, startSec int64) ([]byte, error) {
 	data, err := os.ReadFile(s.playlist)
 	if err != nil {
 		return nil, err
@@ -134,7 +146,7 @@ func (s *hlsSession) ClientPlaylist(sourcePath string) ([]byte, error) {
 	lines := strings.Split(string(data), "\n")
 	for i, line := range lines {
 		if name := strings.TrimSpace(line); validHlsSegmentName(name) {
-			lines[i] = hlsSegmentEndpoint(sourcePath, name)
+			lines[i] = hlsSegmentEndpoint(sourcePath, name, startSec)
 		}
 	}
 	return []byte(strings.Join(lines, "\n")), nil
@@ -142,10 +154,16 @@ func (s *hlsSession) ClientPlaylist(sourcePath string) ([]byte, error) {
 
 // GetOrCreateHlsSession returns the HLS session for the given source file,
 // starting ffmpeg on first request. modTime must come from the caller stat
-// of the already-validated path and pins the session identity.
-func (s *StreamingService) GetOrCreateHlsSession(path string, modTime time.Time) (*hlsSession, error) {
+// of the already-validated path and pins the session identity. startSec >
+// 0 anchors the transcode at that seek offset (input-side -ss) so clients
+// can jump anywhere in a not-yet-transcoded file; the playlist's media
+// timeline then runs 0..(duration-startSec) with 0 ≡ absolute startSec.
+func (s *StreamingService) GetOrCreateHlsSession(path string, modTime time.Time, startSec int64) (*hlsSession, error) {
+	if startSec < 0 {
+		startSec = 0
+	}
 	enc := s.prober.resolve()
-	key := hlsSessionKey(filepath.Clean(path), modTime, enc.Name)
+	key := hlsSessionKey(filepath.Clean(path), modTime, enc.Name, startSec)
 
 	s.hlsMu.Lock()
 	if sess, ok := s.hlsSessions[key]; ok {
@@ -160,15 +178,63 @@ func (s *StreamingService) GetOrCreateHlsSession(path string, modTime time.Time)
 		lastAccess: time.Now(),
 		done:       make(chan struct{}),
 		running:    true,
+		srcPath:    filepath.Clean(path),
+		startSec:   startSec,
 	}
 	s.hlsSessions[key] = sess
 	s.hlsMu.Unlock()
+
+	// Spec 2026-09-06-hls-seek-restart: a fresh anchor for this file
+	// supersedes any still-running older one — without this, every re-anchor
+	// would strand an ffmpeg burning a transcode slot until the idle reaper.
+	s.cancelSiblingSessions(sess)
 
 	if err := s.startHlsFFmpeg(sess, path, enc); err != nil {
 		return nil, err
 	}
 	s.startHlsReaper()
 	return sess, nil
+}
+
+// cancelSiblingSessions kills still-running sessions transcoding the same
+// source file (completed cache sessions are left alone — they still serve
+// open-from-beginning and survive under the disk cap).
+func (s *StreamingService) cancelSiblingSessions(sess *hlsSession) {
+	s.hlsMu.Lock()
+	defer s.hlsMu.Unlock()
+	for _, other := range s.hlsSessions {
+		if other == sess || !other.Running() || other.srcPath != sess.srcPath {
+			continue
+		}
+		if other.cancel != nil {
+			slog.Info("hls transcode superseded by newer seek anchor, killing", "key", other.key, "newAnchor", sess.startSec)
+			other.cancel() // waiter goroutine drops the session + dir
+		}
+	}
+}
+
+// buildHlsArgs assembles the ffmpeg argv for one HLS session. startSec > 0
+// becomes an input-side -ss (fast seek; the demuxer jumps before any decode,
+// so re-anchoring at an arbitrary position starts emitting segments within
+// ~a second instead of after minutes of catch-up transcoding).
+func buildHlsArgs(safePath string, startSec int64, enc resolvedEncoder, segDir, playlistPath string) []string {
+	args := []string{"-y"}
+	if startSec > 0 {
+		args = append(args, "-ss", strconv.FormatInt(startSec, 10))
+	}
+	args = append(args, "-i", safePath)
+	args = append(args, "-vcodec", enc.Name)
+	args = append(args, knownEncoderArgs[enc.Name]...)
+	args = append(args,
+		"-acodec", "aac",
+		"-f", "hls",
+		"-hls_time", "4",
+		"-hls_list_size", "0",
+		"-hls_flags", "independent_segments",
+		"-hls_segment_filename", filepath.Join(segDir, "seg%05d.ts"),
+		playlistPath,
+	)
+	return args
 }
 
 // startHlsFFmpeg spawns the transcode and blocks until the playlist is
@@ -185,18 +251,7 @@ func (s *StreamingService) startHlsFFmpeg(sess *hlsSession, path string, enc res
 		return err
 	}
 
-	args := []string{"-y", "-i", safePath}
-	args = append(args, "-vcodec", enc.Name)
-	args = append(args, knownEncoderArgs[enc.Name]...)
-	args = append(args,
-		"-acodec", "aac",
-		"-f", "hls",
-		"-hls_time", "4",
-		"-hls_list_size", "0",
-		"-hls_flags", "independent_segments",
-		"-hls_segment_filename", filepath.Join(sess.dir, "seg%05d.ts"),
-		sess.playlist,
-	)
+	args := buildHlsArgs(safePath, sess.startSec, enc, sess.dir, sess.playlist)
 
 	// Occupy the shared transcode slot for the lifetime of ffmpeg; queued
 	// acquisition is not used here (session creation is already deduped and
