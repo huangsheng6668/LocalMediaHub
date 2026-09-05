@@ -150,10 +150,6 @@ func (s *ThumbnailService) HasFFmpeg() bool {
 	return err == nil
 }
 
-func (s *ThumbnailService) getFFprobeCmd() string {
-	return ffprobeBin
-}
-
 // videoDuration returns the file's duration in seconds via ffprobe, or
 // (0, false) if ffprobe is unavailable or the probe fails.
 func (s *ThumbnailService) videoDuration(sourcePath string) (float64, bool) {
@@ -677,18 +673,6 @@ func (s *ThumbnailService) GenerateThumbnailBytes(sourcePath string) ([]byte, er
 // cache (keyed by sha256(path + modtime) which is unique per source file).
 func (s *ThumbnailService) GenerateSystemThumbnailBytes(sourcePath string) ([]byte, error) {
 	return s.generateBytesVia(sourcePath, s.GenerateSystemThumbnail)
-}
-
-// ffprobeSibling derives the ffprobe path from an ffmpeg path: same directory
-// and extension with the basename ffmpeg -> ffprobe. If the basename does not
-// contain "ffmpeg", it returns the bare "ffprobe" (relying on PATH lookup).
-func ffprobeSibling(ffmpegPath string) string {
-	base := strings.ToLower(filepath.Base(ffmpegPath))
-	if !strings.Contains(base, "ffmpeg") {
-		return "ffprobe"
-	}
-	ext := filepath.Ext(ffmpegPath)
-	return filepath.Join(filepath.Dir(ffmpegPath), "ffprobe"+ext)
 }
 
 // parseFFprobeDuration parses ffprobe's duration output (seconds, decimal).

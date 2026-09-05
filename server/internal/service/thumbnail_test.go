@@ -112,19 +112,6 @@ func TestMidpointSeek(t *testing.T) {
 	}
 }
 
-func TestFFprobeSibling(t *testing.T) {
-	// Use filepath.Join for both input and expected so the test is separator-agnostic.
-	if got, want := ffprobeSibling(filepath.Join("dir", "ffmpeg.exe")), filepath.Join("dir", "ffprobe.exe"); got != want {
-		t.Errorf("ffmpeg.exe -> %q, want %q", got, want)
-	}
-	if got, want := ffprobeSibling("ffmpeg"), "ffprobe"; got != want {
-		t.Errorf("bare ffmpeg -> %q, want %q", got, want)
-	}
-	if got, want := ffprobeSibling(filepath.Join("dir", "avconv.exe")), "ffprobe"; got != want {
-		t.Errorf("non-ffmpeg base -> %q, want %q", got, want)
-	}
-}
-
 // TestDurationCache_PersistRoundTrip 验证：写 durCache → Shutdown 落盘 →
 // 新建 service 读回 → 内容一致。
 func TestDurationCache_PersistRoundTrip(t *testing.T) {

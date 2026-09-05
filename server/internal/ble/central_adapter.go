@@ -449,17 +449,6 @@ func (t *tinyGoCentralScanner) WaitNotify(ctx context.Context) ([]byte, error) {
 	}
 }
 
-// mustUUID parses a UUID string at runtime; it panics on parse failure. The
-// UUIDs in this package are compile-time constants (protocol.go), so a parse
-// failure here indicates a typo in those constants and is a programmer error.
-func mustUUID(s string) bluetooth.UUID {
-	u, err := bluetooth.ParseUUID(s)
-	if err != nil {
-		panic(err)
-	}
-	return u
-}
-
 // dedup removes later duplicate scan results for the same device ID. The same
 // physical device frequently emits multiple advertisement packets during a
 // 3-second scan window; the caller (UI list) wants one row per device.

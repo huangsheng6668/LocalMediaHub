@@ -8,7 +8,7 @@ import (
 
 func TestTxtCacheSlice(t *testing.T) {
 	text := "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
-	blocks := GetChapterBlocksFromText(text, 0, len([]rune(text)))
+	blocks := GetChapterBlocksFromRunes([]rune(text), 0, len([]rune(text)))
 	if len(blocks) != 3 {
 		t.Fatalf("expected 3 blocks, got %d", len(blocks))
 	}
@@ -17,14 +17,9 @@ func TestTxtCacheSlice(t *testing.T) {
 	}
 
 	// Test empty slice fallback
-	emptyBlocks := GetChapterBlocksFromText(text, 5, 5)
+	emptyBlocks := GetChapterBlocksFromRunes([]rune(text), 5, 5)
 	if len(emptyBlocks) != 1 || emptyBlocks[0].Value != "[本章节为空]" {
 		t.Errorf("expected empty chapter fallback block, got %v", emptyBlocks)
-	}
-
-	// Test GetRuneCount
-	if count := GetRuneCount("Hello, 世界"); count != 9 {
-		t.Errorf("GetRuneCount got %d, want 9", count)
 	}
 }
 

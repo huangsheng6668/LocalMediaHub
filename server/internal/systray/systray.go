@@ -9,9 +9,8 @@ import (
 )
 
 type Tray struct {
-	srvURL  string
-	onQuit  func()
-	running bool
+	srvURL string
+	onQuit func()
 }
 
 func New(srvURL string, onQuit func()) *Tray {
@@ -51,7 +50,6 @@ func (t *Tray) onReady() {
 				clipCmd.Stdin = strings.NewReader(t.srvURL)
 				clipCmd.Start()
 			case <-mQuit.ClickedCh:
-				t.running = false
 				if t.onQuit != nil {
 					t.onQuit()
 				}
@@ -62,7 +60,3 @@ func (t *Tray) onReady() {
 }
 
 func (t *Tray) onExit() {}
-
-func (t *Tray) SetStatus(running bool) {
-	t.running = running
-}

@@ -12,11 +12,10 @@ import (
 
 type Service struct {
 	server *mdns.Server
-	quit   chan struct{}
 }
 
 func NewService() (*Service, error) {
-	return &Service{quit: make(chan struct{})}, nil
+	return &Service{}, nil
 }
 
 func (s *Service) Start(host string, port int) error {
@@ -47,17 +46,5 @@ func (s *Service) Start(host string, port int) error {
 
 	s.server = server
 	slog.Info("mDNS advertising", "service", "_localmediahub._tcp.local.", "ip", ip, "port", port)
-	return nil
-}
-
-func (s *Service) Stop() error {
-	select {
-	case <-s.quit:
-	default:
-		close(s.quit)
-	}
-	if s.server != nil {
-		return s.server.Shutdown()
-	}
 	return nil
 }

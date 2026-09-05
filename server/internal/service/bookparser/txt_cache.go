@@ -4,7 +4,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 )
 
 type txtCacheEntry struct {
@@ -90,14 +89,6 @@ func (c *txtCache) GetOrLoadRunes(path string, modTime time.Time, loadFn func() 
 	return entry.text, entry.runes, nil
 }
 
-// GetChapterBlocksFromText splits the rune range [charStart, charEnd) of text
-// into paragraph blocks. Kept as a convenience wrapper over
-// GetChapterBlocksFromRunes; callers holding a cached rune slice should use
-// the runes variant directly to avoid the per-call conversion.
-func GetChapterBlocksFromText(text string, charStart, charEnd int) []Block {
-	return GetChapterBlocksFromRunes([]rune(text), charStart, charEnd)
-}
-
 // GetChapterBlocksFromRunes splits the rune range [charStart, charEnd) into
 // paragraph blocks (blank-line separated; tabs treated as line breaks).
 func GetChapterBlocksFromRunes(runes []rune, charStart, charEnd int) []Block {
@@ -121,10 +112,6 @@ func GetChapterBlocksFromRunes(runes []rune, charStart, charEnd int) []Block {
 		return []Block{{Type: "text", Value: "[本章节为空]"}}
 	}
 	return blocks
-}
-
-func GetRuneCount(text string) int {
-	return utf8.RuneCountInString(text)
 }
 
 func clampInt(v, lo, hi int) int {

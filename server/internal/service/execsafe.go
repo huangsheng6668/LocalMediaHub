@@ -12,8 +12,7 @@ import (
 // 子进程只允许这两个白名单二进制；自定义安装位置通过 activateToolDir
 // 前插 PATH 解析，exec 调用点保持字面量程序名（CWE-78 收敛）。
 const (
-	ffmpegBin  = "ffmpeg"
-	ffprobeBin = "ffprobe"
+	ffmpegBin = "ffmpeg"
 )
 
 // activateToolDir 把配置指定且通过 sanitizeToolPath 白名单校验的 ffmpeg
