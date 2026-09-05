@@ -43,8 +43,19 @@ func SecurityHeaders() echo.MiddlewareFunc {
 					"script-src 'self'; "+
 					"style-src 'self'; "+
 					"img-src 'self' data:; "+
-					"media-src 'self'; "+
+					// blob: is required for MSE playback (hls.js): the player
+					// assigns URL.createObjectURL(MediaSource) to <video>, and
+					// 'self' does not match the blob: scheme — Chrome then
+					// rejects the source and transcoded video stays black.
+					// blob: URLs can only originate from this page's own JS,
+					// so this widens nothing an XSS couldn't already reach.
+					"media-src 'self' blob:; "+
 					"connect-src 'self'; "+
+					// worker-src blob: lets hls.js spawn its transmuxer worker
+					// from a blob URL; without it the script-src fallback
+					// forces main-thread demuxing. Workers only — <script>
+					// loading rules stay untouched.
+					"worker-src 'self' blob:; "+
 					"base-uri 'none'; "+
 					"object-src 'none'; "+
 					"form-action 'self'")

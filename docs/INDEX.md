@@ -211,7 +211,7 @@
 | `X-Frame-Options` | `DENY` | Clickjacking |
 | `X-Content-Type-Options` | `nosniff` | MIME 嗅探 |
 | `Referrer-Policy` | `no-referrer` | 外链泄漏 |
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'` | XSS 数据 exfiltration |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:` | XSS 数据 exfiltration |
 
 ### 当前已知 TODO
 

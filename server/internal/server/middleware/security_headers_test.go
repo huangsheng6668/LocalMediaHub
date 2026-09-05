@@ -11,11 +11,19 @@ import (
 func TestSecurityHeaders(t *testing.T) {
 	// Expected header values — keep in sync with security_headers.go.
 	// CSP is verbatim per Global Constraint.
+	// media-src must include blob:: hls.js (MSE) playback assigns a
+	// URL.createObjectURL(MediaSource) blob: URL to <video>, and CSP 'self'
+	// does not match the blob: scheme — without it Chrome rejects the source
+	// ("Media load rejected by URL safety check") and every transcoded
+	// (non-native-container) video plays as a black screen.
+	// worker-src must include blob:: hls.js spawns its transmuxer worker
+	// from a blob: URL; without an explicit worker-src the script-src
+	// fallback blocks it (hls.js then degrades to main-thread demuxing).
 	expectedHeaders := map[string]string{
 		"X-Frame-Options":         "DENY",
 		"X-Content-Type-Options":  "nosniff",
 		"Referrer-Policy":         "no-referrer",
-		"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'; form-action 'self'",
+		"Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; object-src 'none'; form-action 'self'",
 	}
 
 	e := echo.New()

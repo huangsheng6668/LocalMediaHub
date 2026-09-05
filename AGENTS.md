@@ -245,7 +245,8 @@ node --test
 - `X-Frame-Options: DENY`
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: no-referrer`
-- `Content-Security-Policy`: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'`
+- `Content-Security-Policy`: `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:`
+  - `media-src blob:` / `worker-src blob:` 为 hls.js（MSE 播放）所需：`<video>` 的源是 `URL.createObjectURL` 产生的 `blob:` URL，hls.js 的 transmuxer worker 同样从 `blob:` 派生，CSP `'self'` 不匹配 `blob:` scheme，缺失会导致转码播放全黑（2026-09-06 修复）
 - 中间件**必须在 CORS 之前挂载**
 - 新增 inline `style="..."` 属性会破坏 CSP（`style-src 'self'` 无 `'unsafe-inline'`）——必须放进 CSS 类；动态样式用 `el.style.prop =`（CSSOM 不受限）
 
