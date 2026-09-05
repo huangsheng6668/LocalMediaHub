@@ -38,6 +38,39 @@ func TestValidHlsSegmentName(t *testing.T) {
 	}
 }
 
+// TestHlsClientPlaylistRewritesSegmentURIs pins the on-the-wire playlist
+// contract: ffmpeg writes bare segment filenames, but the HTTP endpoint that
+// serves segments requires path+name query params — and a relative URI would
+// resolve against the playlist's own URL (/api/v1/media/hls/), 404ing every
+// segment. ClientPlaylist must rewrite whitelisted segment lines to absolute
+// endpoint paths (origin-relative, so both hls.js and ExoPlayer resolve them
+// correctly) and leave every other line untouched.
+func TestHlsClientPlaylistRewritesSegmentURIs(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "sess")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	raw := "#EXTM3U\n" +
+		"#EXT-X-VERSION:3\n" +
+		"#EXT-X-TARGETDURATION:4\n" +
+		"#EXTINF:4.000000,\n" +
+		"seg00000.ts\n" +
+		"#EXTINF:4.000000,\n" +
+		"seg00001.ts\n" +
+		"#EXT-X-ENDLIST\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.m3u8"), []byte(raw), 0o644))
+
+	sess := &hlsSession{dir: dir, playlist: filepath.Join(dir, "index.m3u8")}
+	body, err := sess.ClientPlaylist(`D:\Media\My Movie (2026).mkv`)
+	require.NoError(t, err)
+
+	out := string(body)
+	assert.Contains(t, out, "/api/v1/media/hls/segment?path=D%3A%5CMedia%5CMy+Movie+%282026%29.mkv&name=seg00000.ts\n")
+	assert.Contains(t, out, "/api/v1/media/hls/segment?path=D%3A%5CMedia%5CMy+Movie+%282026%29.mkv&name=seg00001.ts\n")
+	assert.NotContains(t, out, "\nseg00000.ts\n", "bare segment line must not survive")
+	assert.Contains(t, out, "#EXT-X-TARGETDURATION:4")
+	assert.Contains(t, out, "#EXT-X-ENDLIST")
+}
+
 // TestHlsGetOrCreateRealFFmpeg covers the full happy path with real ffmpeg:
 // session dedup, playlist + segment production, natural completion, and the
 // registry keeping the finished session as cache. Skipped when ffmpeg is

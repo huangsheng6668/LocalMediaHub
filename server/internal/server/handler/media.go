@@ -160,9 +160,17 @@ func (h *Handler) MediaHlsPlaylist(c echo.Context) error {
 	if err != nil {
 		return respondError(c, http.StatusServiceUnavailable, "transcode session unavailable", err)
 	}
-	c.Response().Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	// Serve the client-facing playlist: bare ffmpeg segment names are
+	// rewritten to absolute segment-endpoint URLs (see ClientPlaylist).
+	body, err := sess.ClientPlaylist(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return respondNotFound(c, "playlist not found")
+		}
+		return respondInternalError(c, err)
+	}
 	c.Response().Header().Set("Cache-Control", "no-cache")
-	return c.File(sess.PlaylistPath())
+	return c.Blob(http.StatusOK, "application/vnd.apple.mpegurl", body)
 }
 
 // MediaHlsSegment serves one strictly-validated HLS segment from the

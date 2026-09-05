@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -108,6 +110,34 @@ func (s *hlsSession) SegmentPath(name string) (string, bool) {
 // PlaylistPath returns the absolute path of the session playlist.
 func (s *hlsSession) PlaylistPath() string {
 	return s.playlist
+}
+
+// hlsSegmentEndpoint renders the client-facing URI for one segment. The path
+// and name are query params (the segment route reads both), so the URI is
+// origin-relative and stays valid no matter which URL served the playlist.
+func hlsSegmentEndpoint(sourcePath, name string) string {
+	return "/api/v1/media/hls/segment?path=" + url.QueryEscape(sourcePath) + "&name=" + url.QueryEscape(name)
+}
+
+// ClientPlaylist returns the playlist body with bare segment filenames
+// rewritten to absolute /api/v1/media/hls/segment URLs. ffmpeg lists segments
+// as plain names; resolved against the playlist's own URL those would drop
+// the required path/name query params and 404 on every segment. Absolute
+// paths resolve against the origin for both hls.js and ExoPlayer. Only lines
+// passing the segment-name whitelist are rewritten; everything else is
+// passed through verbatim.
+func (s *hlsSession) ClientPlaylist(sourcePath string) ([]byte, error) {
+	data, err := os.ReadFile(s.playlist)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		if name := strings.TrimSpace(line); validHlsSegmentName(name) {
+			lines[i] = hlsSegmentEndpoint(sourcePath, name)
+		}
+	}
+	return []byte(strings.Join(lines, "\n")), nil
 }
 
 // GetOrCreateHlsSession returns the HLS session for the given source file,
