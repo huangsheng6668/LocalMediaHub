@@ -68,7 +68,6 @@ export const elements = {
     modalVideoPlayer: document.getElementById('modal-video-player'),
     videoPlayer: document.getElementById('html5-video-player'),
     videoModalTitle: document.getElementById('video-modal-title'),
-    btnVideoTranscode: document.getElementById('btn-video-transcode'),
     btnVideoDelete: document.getElementById('btn-video-delete'),
     btnCloseVideoModal: document.getElementById('btn-close-video-modal'),
 

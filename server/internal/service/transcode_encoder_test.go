@@ -153,25 +153,25 @@ func TestBuildTranscodeArgs(t *testing.T) {
 			name:  "copy with seek",
 			start: 12.5,
 			enc:   resolvedEncoder{Name: "copy"},
-			want:  []string{"-ss", "12.500", "-i", src, "-vcodec", "copy", "-acodec", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
+			want:  []string{"-ss", "12.500", "-i", src, "-vcodec", "copy", "-acodec", "aac", "-sn", "-dn", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
 		},
 		{
-			name:  "libx264 fallback byte-identical to legacy inline args",
+			name:  "libx264 fallback with crf 23",
 			start: 0,
 			enc:   resolvedEncoder{Name: "libx264"},
-			want:  []string{"-i", src, "-vcodec", "libx264", "-preset", "ultrafast", "-acodec", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
+			want:  []string{"-i", src, "-vcodec", "libx264", "-preset", "ultrafast", "-crf", "23", "-acodec", "aac", "-sn", "-dn", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
 		},
 		{
 			name:  "nvenc auto appends validated quality literals",
 			start: 0,
 			enc:   resolvedEncoder{Name: "h264_nvenc"},
-			want:  []string{"-i", src, "-vcodec", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "23", "-acodec", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
+			want:  []string{"-i", src, "-vcodec", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "23", "-acodec", "aac", "-sn", "-dn", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
 		},
 		{
 			name:  "qsv",
 			start: 0,
 			enc:   resolvedEncoder{Name: "h264_qsv"},
-			want:  []string{"-i", src, "-vcodec", "h264_qsv", "-global_quality", "23", "-acodec", "aac", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
+			want:  []string{"-i", src, "-vcodec", "h264_qsv", "-global_quality", "23", "-acodec", "aac", "-sn", "-dn", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1"},
 		},
 	}
 	for _, tc := range cases {

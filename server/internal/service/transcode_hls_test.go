@@ -36,6 +36,8 @@ func TestBuildHlsArgsSeekAnchor(t *testing.T) {
 	anchored := buildHlsArgs(`D:\m.mp4`, 3600, enc, `C:\seg`, `C:\seg\index.m3u8`)
 	assert.Equal(t, []string{"-y", "-ss", "3600", "-i", `D:\m.mp4`}, anchored[:5],
 		"-ss must precede -i for input-side seeking")
+	assert.Contains(t, base, "-hls_playlist_type")
+	assert.Contains(t, anchored, "-hls_playlist_type")
 }
 
 func TestValidHlsSegmentName(t *testing.T) {
@@ -191,6 +193,7 @@ func TestHlsGetOrCreateRealFFmpeg(t *testing.T) {
 	data, err := os.ReadFile(sess1.playlist)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "#EXTM3U")
+	assert.Contains(t, string(data), "#EXT-X-PLAYLIST-TYPE:EVENT")
 	segPath, ok := sess1.SegmentPath("seg00000.ts")
 	require.True(t, ok)
 	segData, err := os.ReadFile(segPath)

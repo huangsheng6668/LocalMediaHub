@@ -39,7 +39,7 @@ var knownEncoderArgs = map[string][]string{
 	"h264_nvenc": {"-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "23"},
 	"h264_qsv":   {"-global_quality", "23"},
 	"h264_amf":   {"-quality", "balanced"},
-	"libx264":    {"-preset", "ultrafast"},
+	"libx264":    {"-preset", "ultrafast", "-crf", "23"},
 }
 
 // copyEncoderName is the pass-through pseudo-encoder ("vcodec=copy"): stream
@@ -261,6 +261,8 @@ func buildTranscodeArgs(srcPath string, startSec float64, enc resolvedEncoder) [
 	}
 	args = append(args,
 		"-acodec", "aac",
+		"-sn",  // discard subtitle streams (PGS/VobSub would fail fMP4 muxing)
+		"-dn",  // discard data streams
 		"-f", "mp4",
 		"-movflags", "frag_keyframe+empty_moov",
 		"pipe:1",

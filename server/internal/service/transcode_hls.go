@@ -227,9 +227,12 @@ func buildHlsArgs(safePath string, startSec int64, enc resolvedEncoder, segDir, 
 	args = append(args, knownEncoderArgs[enc.Name]...)
 	args = append(args,
 		"-acodec", "aac",
+		"-sn",  // discard subtitle streams (PGS/VobSub would fail HLS muxing)
+		"-dn",  // discard data streams
 		"-f", "hls",
 		"-hls_time", "4",
 		"-hls_list_size", "0",
+		"-hls_playlist_type", "event",
 		"-hls_flags", "independent_segments",
 		"-hls_segment_filename", filepath.Join(segDir, "seg%05d.ts"),
 		playlistPath,
@@ -308,6 +311,8 @@ func (s *StreamingService) startHlsFFmpeg(sess *hlsSession, path string, enc res
 	// Wait (bounded) for the first playlist + segment so the initial client
 	// request can be served synchronously.
 	deadline := time.Now().Add(hlsPlaylistWait)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 	for time.Now().Before(deadline) {
 		if hlsSessionUsable(sess.dir) {
 			return nil
@@ -320,7 +325,7 @@ func (s *StreamingService) startHlsFFmpeg(sess *hlsSession, path string, enc res
 				return nil
 			}
 			return fmt.Errorf("transcode failed: %v", sess.Err())
-		case <-time.After(200 * time.Millisecond):
+		case <-ticker.C:
 		}
 	}
 	// Still no playlist after the deadline: kill and drop. The waiter

@@ -32,15 +32,17 @@ test('needsHlsRestart only fires outside the anchored seekable window', () => {
     // Inside the window (accounting for the anchor offset): native seek.
     assert.equal(needsHlsRestart(100, 0, 225), false);
     assert.equal(needsHlsRestart(2300, 2160, 225), false);   // anchored session, rel=140
-    assert.equal(needsHlsRestart(2300, 2160, 229.9), false); // just inside the margin
+    assert.equal(needsHlsRestart(2385, 2160, 225), false);   // exactly at edge, rel=225
     assert.equal(needsHlsRestart(0, 0, 225), false);
     // Beyond the edge or before the anchor: re-anchor needed.
     assert.equal(needsHlsRestart(7200, 0, 225), true);
-    assert.equal(needsHlsRestart(7200, 2160, 225), true);    // rel=5040 > 230
+    assert.equal(needsHlsRestart(2386, 2160, 225), true);    // rel=226 > 225
+    assert.equal(needsHlsRestart(7200, 2160, 225), true);    // rel=5040 > 225
     assert.equal(needsHlsRestart(2000, 2160, 225), true);    // rel=-160 < -0.5
-    // Unknown seekable range: assume native seek works.
-    assert.equal(needsHlsRestart(7200, 0, null), false);
-    assert.equal(needsHlsRestart(7200, 0, Infinity), false);
+    // Unknown seekable range: near-anchor allows native, distant target triggers re-anchor.
+    assert.equal(needsHlsRestart(1, 0, null), false);        // rel=1 <= 2 near anchor
+    assert.equal(needsHlsRestart(7200, 0, null), true);       // rel=7200 > 2 distant target
+    assert.equal(needsHlsRestart(7200, 0, Infinity), true);
 });
 
 test('resolveHlsStrategy prefers hls.js when MSE is available', () => {

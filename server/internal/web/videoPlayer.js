@@ -3,11 +3,11 @@ import { state } from './state.js';
 import { apiRequest, getAuthToken } from './api.js';
 import { showToast } from './toast.js';
 import { elements } from './dom.js';
-import { formatTime, encodeRoutePath } from './utils.js';
+import { formatTime } from './utils.js';
 import { deleteMediaFile } from './delete.js';
 import { wheelToVolume } from './videoHelpers.js';
 import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoProgress.js';
-import { buildHlsPlaylistUrl, resolveHlsStrategy, needsTranscodeExt, needsHlsRestart } from './hlsCompat.js';
+import { buildHlsPlaylistUrl, resolveHlsStrategy, needsHlsRestart } from './hlsCompat.js';
 
 // <video> tags cannot send Authorization headers, so auth-gated stream URLs
 // (/api/v1/media/stream, /api/v1/system/stream) carry the bearer token as a
@@ -24,6 +24,8 @@ function withVideoAuthToken(url) {
 // Module-scoped player state (shared across the player's internal helpers).
 let controlsTimeout;
 let lastProgressSaveMs = 0;
+let keyboardSeekTimer = null;
+let keyboardSeekTarget = null;
 
 // HLS era (spec 2026-09-03-hls-transcode-b2): the active HLS route for the
 // current video ('hlsjs' | 'native' | 'none') and the live hls.js instance.
@@ -45,27 +47,61 @@ function destroyHls() {
 function applySource(url, strategy, seekSec) {
     const video = elements.videoPlayer;
     destroyHls();
+    const targetSeek = (seekSec && seekSec > 0) ? seekSec : 0;
+    // Always reset DOM element currentTime so previous playback position
+    // does not linger and stall the newly attached media.
+    video.currentTime = targetSeek;
+
     if (strategy === 'hlsjs') {
         const token = getAuthToken();
         hls = new window.Hls({
+            startPosition: targetSeek,
+            // LAN-optimized buffer tuning: larger forward buffer for smooth
+            // playback, back buffer for instant short-distance backward seeks
+            // (e.g. ArrowLeft -5s) without triggering a segment reload.
+            maxBufferLength: 60,       // default 30s; LAN bandwidth is ample
+            maxMaxBufferLength: 120,   // cap memory usage
+            backBufferLength: 30,      // keep 30s behind playhead for native back-seek
+            lowLatencyMode: false,     // not live streaming; avoid LL-HLS overhead
             xhrSetup: (xhr) => {
                 if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
             },
         });
         hls.loadSource(url);
         hls.attachMedia(video);
-        if (seekSec > 0) {
+
+        if (window.Hls.Events && window.Hls.Events.MANIFEST_PARSED) {
             hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-                video.currentTime = seekSec;
+                video.currentTime = targetSeek;
+                video.play().catch(() => {});
+            });
+        }
+        if (window.Hls.Events && window.Hls.Events.ERROR && window.Hls.ErrorTypes) {
+            hls.on(window.Hls.Events.ERROR, (event, data) => {
+                if (!data || !data.fatal) return;
+                switch (data.type) {
+                    case window.Hls.ErrorTypes.NETWORK_ERROR:
+                        console.warn('HLS fatal network error, recovering...', data.details);
+                        hls.startLoad();
+                        break;
+                    case window.Hls.ErrorTypes.MEDIA_ERROR:
+                        console.warn('HLS fatal media error, recovering...', data.details);
+                        hls.recoverMediaError();
+                        break;
+                    default:
+                        console.error('HLS unrecoverable error:', data);
+                        destroyHls();
+                        break;
+                }
             });
         }
         return;
     }
     video.src = withVideoAuthToken(url);
     video.load();
-    if (seekSec > 0) {
+    if (targetSeek > 0) {
         video.addEventListener('loadedmetadata', function seekOnce() {
-            video.currentTime = seekSec;
+            video.currentTime = targetSeek;
         }, { once: true });
     }
 }
@@ -97,11 +133,17 @@ function togglePlayPause() {
     }
 }
 
-// Helper for seeking via keyboard hotkeys
+// Helper for seeking via keyboard hotkeys: updates UI instantly and debounces
+// commits so rapid keypresses do not flood restarts or stall playback.
 function seekTo(targetTime) {
+    keyboardSeekTarget = targetTime;
     elements.videoProgress.value = targetTime;
     elements.videoProgress.dispatchEvent(new Event('input'));
-    elements.videoProgress.dispatchEvent(new Event('change'));
+    clearTimeout(keyboardSeekTimer);
+    keyboardSeekTimer = setTimeout(() => {
+        elements.videoProgress.dispatchEvent(new Event('change'));
+        keyboardSeekTarget = null;
+    }, 250);
 }
 
 // Auto-hide controls overlay on mouse inactivity
@@ -127,74 +169,25 @@ export async function openVideoPlayer(file) {
     elements.videoProgress.max = 100;
     elements.videoTimeDisplay.textContent = '00:00 / 加载中...';
 
-    // Auto transcode non-native containers (e.g. .ts, .mkv, .avi, .wmv, .flv).
-    // HLS era: pick the playback route once per open — hls.js / native / none
-    // (none keeps the legacy single-pipe fMP4 path, zero regression).
-    const needsTranscode = needsTranscodeExt(file.name);
-    state.useTranscode = needsTranscode;
-    state.vcodecMode = 'copy'; // legacy-path default; unused in HLS mode
-    hlsStrategy = needsTranscode ? resolveHlsStrategy(elements.videoPlayer) : 'none';
+    // Web player uses HLS streaming for universal format support and seamless seeking.
+    hlsStrategy = resolveHlsStrategy(elements.videoPlayer);
+    state.useTranscode = true;
 
     elements.videoModalTitle.textContent = file.name;
     elements.btnVideoDelete.style.display = state.enableDelete ? 'block' : 'none';
-    if (state.useTranscode) {
-        elements.btnVideoTranscode.classList.add('active');
-        elements.btnVideoTranscode.textContent = hlsStrategy === 'none' ? '快速流' : '转码';
-    } else {
-        elements.btnVideoTranscode.classList.remove('active');
-        elements.btnVideoTranscode.textContent = '原画';
-    }
 
-    // Fetch video duration
-    try {
-        const durationUrl = `${state.apiBase}/api/v1/media/duration?path=${encodeURIComponent(file.path)}`;
-        const data = await apiRequest(durationUrl);
-        state.videoDuration = data.duration;
-        elements.videoProgress.max = state.videoDuration;
-        elements.videoTimeDisplay.textContent = `00:00 / ${formatTime(state.videoDuration)}`;
-    } catch (e) {
-        console.error('Error fetching duration:', e);
-    }
-
-    // Set video src URL
-    let url = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/stream`;
-    if (state.isSystemBrowse) {
-        url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}`;
-    }
-
-    // HLS seek anchor (spec 2026-09-06-hls-seek-restart): 0 unless resuming.
-    let hlsStartSec = 0;
-
-    if (state.useTranscode && hlsStrategy !== 'none') {
-        // Unified HLS endpoint: ValidateAccessibleMediaPath covers scan roots
-        // AND system.allowed_roots, so both browse modes share it.
-        url = buildHlsPlaylistUrl(state.apiBase, file.path);
-    } else if (state.useTranscode) {
-        url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0&vcodec=${state.vcodecMode}`;
-        if (state.isSystemBrowse) {
-            url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(file.path)}&transcode=true&start=0&vcodec=${state.vcodecMode}`;
-        }
-    }
-
-    // 续播：读取上次进度，决定起点
+    // 续播：读取上次进度，决定起点（优先使用本地记录中的 duration 快速展示）
     const saved = loadProgress(file.relative_path);
-    let resumePositionMs = 0;
+    let hlsStartSec = 0;
     if (saved && !isCompleted(saved.positionMs, saved.durationMs)) {
-        resumePositionMs = saved.positionMs;
-        if (state.useTranscode && hlsStrategy !== 'none') {
-            // HLS resume anchors the transcode at the saved position — a
-            // post-metadata currentTime seek would clamp to the live edge
-            // of the still-growing playlist (spec 2026-09-06-hls-seek-restart).
-            hlsStartSec = Math.floor(resumePositionMs / 1000);
-            state.transcodeStartOffset = hlsStartSec;
-            url = buildHlsPlaylistUrl(state.apiBase, file.path, hlsStartSec);
-        } else if (state.useTranscode) {
-            // Legacy pipe only: seek by restarting the transcode at startSec.
-            const startSec = Math.floor(resumePositionMs / 1000);
-            url = url.replace('start=0', 'start=' + startSec);
-            state.transcodeStartOffset = startSec;
+        hlsStartSec = Math.floor(saved.positionMs / 1000);
+        state.transcodeStartOffset = hlsStartSec;
+        if (saved.durationMs > 0) {
+            state.videoDuration = saved.durationMs / 1000;
+            elements.videoProgress.max = state.videoDuration;
+            elements.videoTimeDisplay.textContent = `${formatTime(hlsStartSec)} / ${formatTime(state.videoDuration)}`;
         }
-        showToast(`已从 ${formatTime(resumePositionMs / 1000)} 继续`, 'info');
+        showToast(`已从 ${formatTime(hlsStartSec)} 继续`, 'info');
     } else if (saved && isCompleted(saved.positionMs, saved.durationMs)) {
         // 上次看完了：清除记录，这次从头播
         clearProgress(file.relative_path);
@@ -207,12 +200,25 @@ export async function openVideoPlayer(file) {
     updateSpeedMenuActive(1);
 
     elements.modalVideoPlayer.classList.add('active');
-    // Direct streams resume via a post-metadata seek (native currentTime);
-    // HLS and the legacy pipe both resume via server-side anchoring
-    // (?start=), so no element-level seek is needed for them.
-    const resumeSec = resumePositionMs > 0 && !state.useTranscode ? resumePositionMs / 1000 : 0;
-    applySource(url, state.useTranscode ? hlsStrategy : 'none', resumeSec);
-    elements.videoPlayer.play();
+
+    // 立即发起 HLS 流起播，不等待 duration 接口返回（提升首屏 1~2s 响应速度）
+    const url = buildHlsPlaylistUrl(state.apiBase, file.path, hlsStartSec);
+    applySource(url, hlsStrategy, 0);
+    elements.videoPlayer.play().catch(() => {});
+
+    // 并行异步获取权威时长，完成后平滑更新进度条与时间显示
+    apiRequest(`${state.apiBase}/api/v1/media/duration?path=${encodeURIComponent(file.path)}`)
+        .then(data => {
+            if (state.playingFile && state.playingFile.path === file.path && data.duration > 0) {
+                state.videoDuration = data.duration;
+                elements.videoProgress.max = state.videoDuration;
+                const cur = state.transcodeStartOffset + elements.videoPlayer.currentTime;
+                elements.videoTimeDisplay.textContent = `${formatTime(cur)} / ${formatTime(state.videoDuration)}`;
+            }
+        })
+        .catch(e => {
+            console.error('Error fetching duration:', e);
+        });
 }
 
 // All video-player-related event listener registrations (moved from setupEventListeners).
@@ -220,6 +226,9 @@ export function setupVideoPlayerListeners(elements) {
     // Close Video Modal
     elements.btnCloseVideoModal.addEventListener('click', () => {
         elements.videoPlayer.pause();
+        clearTimeout(keyboardSeekTimer);
+        keyboardSeekTimer = null;
+        keyboardSeekTarget = null;
         destroyHls();
         hlsStrategy = 'none';
         // 关闭前 flush 最终进度
@@ -244,84 +253,6 @@ export function setupVideoPlayerListeners(elements) {
         if (state.playingFile) {
             deleteMediaFile(state.playingFile);
         }
-    });
-
-    // Transcode Video toggle inside video modal.
-    // HLS era: two-state cycle (原画 <-> 转码, native random seeking via
-    // currentTime). The legacy three-state cycle (原画 -> 快速流 -> 转码中)
-    // only applies when no HLS route is available (strategy 'none').
-    elements.btnVideoTranscode.addEventListener('click', () => {
-        if (!state.playingFile) return;
-
-        const absolutePos = state.transcodeStartOffset + elements.videoPlayer.currentTime;
-
-        if (hlsStrategy !== 'none') {
-            state.useTranscode = !state.useTranscode;
-            state.vcodecMode = 'copy'; // unused in HLS mode
-            if (state.useTranscode) {
-                elements.btnVideoTranscode.classList.add('active');
-                elements.btnVideoTranscode.textContent = '转码';
-                showToast('🔧 已切换至 HLS 转码流（支持任意进度拖动）', 'success');
-                // Re-anchor at the current absolute position: the old
-                // session may not have transcoded this far (spec
-                // 2026-09-06-hls-seek-restart).
-                const startSec = Math.max(0, Math.floor(absolutePos));
-                applySource(buildHlsPlaylistUrl(state.apiBase, state.playingFile.path, startSec), hlsStrategy, 0);
-                state.transcodeStartOffset = startSec;
-            } else {
-                elements.btnVideoTranscode.classList.remove('active');
-                elements.btnVideoTranscode.textContent = '原画';
-                showToast('🚀 已切换至极速原文件直通流', 'success');
-                if (needsTranscodeExt(state.playingFile.name)) {
-                    showToast('⚠️ 当前视频容器缺乏浏览器原生支持，如画面黑屏请切回转码', 'info');
-                }
-                let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}`;
-                if (state.isSystemBrowse) {
-                    url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}`;
-                }
-                applySource(url, 'none', absolutePos);
-                state.transcodeStartOffset = 0;
-            }
-            elements.videoPlayer.play();
-            return;
-        }
-
-        // Legacy (no HLS route): original three-state cycle, seek by
-        // restarting the transcode at the absolute position.
-        if (!state.useTranscode) {
-            state.useTranscode = true;
-            state.vcodecMode = 'copy';
-            showToast('🔧 已切换至极速容器封装流（CPU占用极低）', 'success');
-        } else if (state.vcodecMode === 'copy') {
-            state.useTranscode = true;
-            state.vcodecMode = 'libx264';
-            showToast('🔧 已切换至 H.264 兼容性实时转码输出（CPU占用较高）', 'success');
-        } else {
-            state.useTranscode = false;
-            showToast('🚀 已切换至极速原文件直通流', 'success');
-            if (needsTranscodeExt(state.playingFile.name)) {
-                showToast('⚠️ 当前视频容器缺乏浏览器原生支持，如画面黑屏请切回快速流', 'info');
-            }
-        }
-
-        let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}`;
-        if (state.isSystemBrowse) {
-            url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}`;
-        }
-
-        if (state.useTranscode) {
-            state.transcodeStartOffset = Math.floor(absolutePos);
-            url += `&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
-            elements.btnVideoTranscode.classList.add('active');
-            elements.btnVideoTranscode.textContent = state.vcodecMode === 'copy' ? '快速流' : '转码中';
-        } else {
-            state.transcodeStartOffset = 0;
-            elements.btnVideoTranscode.classList.remove('active');
-            elements.btnVideoTranscode.textContent = '原画';
-        }
-
-        applySource(url, 'none', state.useTranscode ? 0 : absolutePos);
-        elements.videoPlayer.play();
     });
 
     // Custom controls: Play / Pause toggle
@@ -361,35 +292,16 @@ export function setupVideoPlayerListeners(elements) {
     // Custom controls: Progress Bar Seek Release (Perform seek on release)
     elements.videoProgress.addEventListener('change', (e) => {
         const targetTime = parseFloat(e.target.value);
-        if (state.useTranscode && hlsStrategy === 'none') {
-            // Legacy pipe: seek by restarting the transcode at the target.
-            state.transcodeStartOffset = Math.floor(targetTime);
-            let url = `${state.apiBase}/api/v1/media/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
-            if (state.isSystemBrowse) {
-                url = `${state.apiBase}/api/v1/system/stream?path=${encodeURIComponent(state.playingFile.path)}&transcode=true&start=${state.transcodeStartOffset}&vcodec=${state.vcodecMode}`;
-            }
-            applySource(url, 'none', 0);
-            elements.videoPlayer.play();
-        } else if (state.useTranscode) {
-            // HLS: inside the transcoded window seek natively (relative to
-            // the session anchor); beyond it, re-anchor the transcode at
-            // the target — hls.js would otherwise clamp to the live edge
-            // and the drag would appear to do nothing (spec
-            // 2026-09-06-hls-seek-restart).
-            const offsetSec = state.transcodeStartOffset;
-            const seekable = elements.videoPlayer.seekable;
-            const seekableEnd = seekable.length ? seekable.end(seekable.length - 1) : null;
-            if (needsHlsRestart(targetTime, offsetSec, seekableEnd)) {
-                const startSec = Math.max(0, Math.floor(targetTime));
-                state.transcodeStartOffset = startSec;
-                applySource(buildHlsPlaylistUrl(state.apiBase, state.playingFile.path, startSec), hlsStrategy, 0);
-                elements.videoPlayer.play();
-            } else {
-                elements.videoPlayer.currentTime = Math.max(0, targetTime - offsetSec);
-            }
+        const offsetSec = state.transcodeStartOffset;
+        const seekable = elements.videoPlayer.seekable;
+        const seekableEnd = seekable.length ? seekable.end(seekable.length - 1) : null;
+        if (needsHlsRestart(targetTime, offsetSec, seekableEnd)) {
+            const startSec = Math.max(0, Math.floor(targetTime));
+            state.transcodeStartOffset = startSec;
+            applySource(buildHlsPlaylistUrl(state.apiBase, state.playingFile.path, startSec), hlsStrategy, 0);
+            elements.videoPlayer.play().catch(() => {});
         } else {
-            // Direct streams seek natively.
-            elements.videoPlayer.currentTime = targetTime;
+            elements.videoPlayer.currentTime = Math.max(0, targetTime - offsetSec);
         }
         state.isDraggingProgress = false;
     });
@@ -497,15 +409,19 @@ export function setupVideoPlayerListeners(elements) {
         // ArrowLeft: Quick seek backward (5 seconds)
         else if (e.key === 'ArrowLeft') {
             e.preventDefault();
-            const currentAbsoluteTime = state.transcodeStartOffset + elements.videoPlayer.currentTime;
-            let targetTime = Math.max(0, currentAbsoluteTime - 5);
+            const baseTime = keyboardSeekTarget !== null
+                ? keyboardSeekTarget
+                : (state.transcodeStartOffset + elements.videoPlayer.currentTime);
+            const targetTime = Math.max(0, baseTime - 5);
             seekTo(targetTime);
         }
         // ArrowRight: Quick seek forward (5 seconds)
         else if (e.key === 'ArrowRight') {
             e.preventDefault();
-            const currentAbsoluteTime = state.transcodeStartOffset + elements.videoPlayer.currentTime;
-            let targetTime = Math.min(state.videoDuration, currentAbsoluteTime + 5);
+            const baseTime = keyboardSeekTarget !== null
+                ? keyboardSeekTarget
+                : (state.transcodeStartOffset + elements.videoPlayer.currentTime);
+            const targetTime = Math.min(state.videoDuration, baseTime + 5);
             seekTo(targetTime);
         }
         // ArrowUp: Volume up
