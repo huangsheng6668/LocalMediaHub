@@ -159,6 +159,19 @@ function resetControlsTimer() {
 
 // Video player setup & popup
 export async function openVideoPlayer(file) {
+    if (!file) return;
+    const rawExt = (file.extension || (file.path ? file.path.slice(file.path.lastIndexOf('.')) : '')).toLowerCase();
+    const ext = rawExt.startsWith('.') ? rawExt : (rawExt ? '.' + rawExt : '');
+    const isText = file.media_type === 'text' || ['.txt', '.epub', '.mobi', '.azw3'].includes(ext);
+    if (isText) {
+        if (['.txt', '.epub'].includes(ext)) {
+            window.location.hash = `#/read?path=${encodeURIComponent(file.path)}`;
+        } else {
+            showToast('暂不支持该格式（仅支持 .txt / .epub）', 'info');
+        }
+        return;
+    }
+
     state.playingFile = file;
     state.transcodeStartOffset = 0;
     state.videoDuration = 0;

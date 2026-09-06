@@ -63,6 +63,16 @@ test('applyListFilters: both filters intersect', () => {
     assert.equal(r.folders.length, 0);
 });
 
+test('applyListFilters: recognizes text files by extension even if media_type is misclassified', () => {
+    const mixedFiles = [
+        { path: '/m/novel.txt', name: 'novel.txt', media_type: 'video', extension: '.txt' },
+        { path: '/m/book.epub', name: 'book.epub', media_type: 'unknown' },
+        { path: '/m/movie.mp4', name: 'movie.mp4', media_type: 'video', extension: '.mp4' },
+    ];
+    const r = applyListFilters([], mixedFiles, null, { favoritesOnly: false, statusFilter: 'unread' });
+    assert.deepEqual(r.files.map(f => f.path).sort(), ['/m/book.epub', '/m/novel.txt']);
+});
+
 test('applyListFilters: empty decorations tolerated', () => {
     const r = applyListFilters(folders, files, null, { favoritesOnly: true, statusFilter: null });
     assert.equal(r.folders.length + r.files.length, 0);

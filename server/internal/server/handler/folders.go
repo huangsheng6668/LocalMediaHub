@@ -292,14 +292,34 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 // is no per-entry allocation on the hot path.
 func (h *Handler) classifyMediaType(ext string) string {
 	ext = strings.ToLower(ext)
-	if h.scanner.VideoExts()[ext] {
-		return "video"
+	if h.scanner != nil {
+		if h.scanner.VideoExts()[ext] {
+			return "video"
+		}
+		if h.scanner.ImageExts()[ext] {
+			return "image"
+		}
+		if h.scanner.TextExts()[ext] {
+			return "text"
+		}
+		return ""
 	}
-	if h.scanner.ImageExts()[ext] {
-		return "image"
-	}
-	if h.scanner.TextExts()[ext] {
-		return "text"
+	if h.cfg != nil {
+		for _, e := range h.cfg.Scan.VideoExtensions {
+			if strings.EqualFold(ext, e) {
+				return "video"
+			}
+		}
+		for _, e := range h.cfg.Scan.ImageExtensions {
+			if strings.EqualFold(ext, e) {
+				return "image"
+			}
+		}
+		for _, e := range h.cfg.Scan.TextExtensions {
+			if strings.EqualFold(ext, e) {
+				return "text"
+			}
+		}
 	}
 	return ""
 }

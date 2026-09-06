@@ -5,9 +5,21 @@ import { escapeHtml } from './api.js';
 import { elements } from './dom.js';
 import { encodeRoutePath } from './utils.js';
 import { openVideoPlayer } from './videoPlayer.js';
+import { showToast } from './toast.js';
 
-// Open Video/Image assets
+// Open Video/Image assets with defense-in-depth text interceptor
 export function openMedia(file) {
+    if (!file) return;
+    const ext = (file.extension || (file.path ? file.path.slice(file.path.lastIndexOf('.')) : '')).toLowerCase();
+    const isText = file.media_type === 'text' || ['.txt', '.epub', '.mobi', '.azw3'].includes(ext);
+    if (isText) {
+        if (['.txt', '.epub'].includes(ext) || file.media_type === 'text') {
+            window.location.hash = `#/read?path=${encodeURIComponent(file.path)}`;
+        } else {
+            showToast('暂不支持该格式（仅支持 .txt / .epub）', 'info');
+        }
+        return;
+    }
     if (file.media_type === 'video') {
         openVideoPlayer(file);
     } else if (file.media_type === 'image') {

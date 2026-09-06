@@ -56,6 +56,10 @@ export async function loadRoots() {
     state.currentPath = '';
     state.pathHistory = [];
     state.isSystemBrowse = false;
+    shownFiles = [];
+    shownFolders = [];
+    state.currentFiles = [];
+    state.currentFolders = [];
     syncBrowserHash();
 
     // Breadcrumbs
@@ -111,6 +115,10 @@ export async function loadRoots() {
 export async function loadSystemDrives() {
     state.isSystemBrowse = true;
     state.currentPath = '/system';
+    shownFiles = [];
+    shownFolders = [];
+    state.currentFiles = [];
+    state.currentFolders = [];
     syncBrowserHash();
 
     elements.browserBreadcrumbs.innerHTML = '<span class="crumb" data-action="load-roots">根目录</span><span class="crumb active">磁盘盘符</span>'; // XSS-SAFE: hardcoded literal
@@ -182,9 +190,12 @@ function onBrowserListClick(e) {
     if (!actionEl) return;
     const action = actionEl.dataset.action;
     const idx = Number(actionEl.dataset.index);
+    const clickedPath = actionEl.dataset.path || actionEl.closest('[data-path]')?.dataset.path;
+    const targetFile = (clickedPath ? shownFiles.find(item => item && item.path === clickedPath) : null) || (Number.isFinite(idx) ? shownFiles[idx] : null);
+    const targetFolder = (clickedPath ? shownFolders.find(item => item && item.path === clickedPath) : null) || (Number.isFinite(idx) ? shownFolders[idx] : null);
 
     if (action === 'browse') {
-        browsePath(actionEl.dataset.path || '');
+        browsePath(actionEl.dataset.path || (targetFolder ? targetFolder.path : ''));
     } else if (action === 'fav-toggle') {
         toggleFavorite(actionEl.dataset.path, actionEl.dataset.isDir === '1',
             actionEl.dataset.title || '', actionEl.dataset.mediaType || '',
@@ -192,22 +203,34 @@ function onBrowserListClick(e) {
     } else if (action === 'status-menu') {
         openStatusMenu(actionEl, actionEl.dataset.path, () => renderBrowserList());
     } else if (action === 'open') {
-        if (shownFiles[idx]) openMedia(shownFiles[idx]);
+        if (targetFile) {
+            const rawExt = (targetFile.extension || (targetFile.path ? targetFile.path.slice(targetFile.path.lastIndexOf('.')) : '')).toLowerCase();
+            const ext = rawExt.startsWith('.') ? rawExt : (rawExt ? '.' + rawExt : '');
+            const isText = targetFile.media_type === 'text' || ['.txt', '.epub', '.mobi', '.azw3'].includes(ext);
+            if (isText) {
+                if (['.txt', '.epub'].includes(ext)) {
+                    window.location.hash = `#/read?path=${encodeURIComponent(targetFile.path)}`;
+                } else {
+                    showToast('暂不支持该格式（仅支持 .txt / .epub）', 'info');
+                }
+                return;
+            }
+            openMedia(targetFile);
+        }
     } else if (action === 'text-open') {
         // Text/ebook open (Task 15): route to the reader view. Tag/delete
         // buttons inside the card have their own data-action and stop
         // propagation implicitly via .closest() returning the inner button.
-        const f = shownFiles[idx];
-        if (f) {
-            window.location.hash = `#/read?path=${encodeURIComponent(f.path)}`;
+        if (targetFile) {
+            window.location.hash = `#/read?path=${encodeURIComponent(targetFile.path)}`;
         }
     } else if (action === 'text-unsupported') {
         showToast('暂不支持该格式（仅支持 .txt / .epub）', 'info');
 
     } else if (action === 'delete-folder') {
-        if (shownFolders[idx]) deleteFolder(shownFolders[idx]);
+        if (targetFolder) deleteFolder(targetFolder);
     } else if (action === 'delete-file') {
-        if (shownFiles[idx]) deleteMediaFile(shownFiles[idx]);
+        if (targetFile) deleteMediaFile(targetFile);
     }
 }
 
@@ -271,7 +294,7 @@ export function renderBrowserList() {
                     <span class="card-preview-icon">${ICONS.folder()}</span>
                 </div>
                 <div class="card-actions-overlay">
-                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" data-action="delete-folder" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" data-action="delete-folder" data-path="${safePath}" data-index="${index}">${ICONS.trash()}</button>` : ''}
                     <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(folder.path)}" data-is-dir="1" data-title="${safeName}" data-media-type="folder">${ICONS.heart()}</button>
                 </div>
                 <div class="card-details">
@@ -286,8 +309,11 @@ export function renderBrowserList() {
 
     // 2. Media Files
     shownFiles.forEach((file, index) => {
-        const isVideo = file.media_type === 'video';
-        const isText = file.media_type === 'text';
+        const rawExt = (file.extension || (file.path ? file.path.slice(file.path.lastIndexOf('.')) : '')).toLowerCase();
+        const ext = rawExt.startsWith('.') ? rawExt : (rawExt ? '.' + rawExt : '');
+        const isTextExt = ['.txt', '.epub', '.mobi', '.azw3'].includes(ext);
+        const isText = file.media_type === 'text' || isTextExt;
+        const isVideo = file.media_type === 'video' && !isTextExt;
 
         // Text / ebook files (Task 15): render as a "document card" with a doc
         // icon instead of a thumbnail. .txt and .epub open the reader at
@@ -296,13 +322,12 @@ export function renderBrowserList() {
         // — show a "暂不支持" badge and a toast on click so the user knows why
         // nothing happens.
         if (isText) {
-            const ext = (file.extension || '').toLowerCase();
             const isUnsupportedText = !['.txt', '.epub'].includes(ext);
             // Both .txt and .epub use the doc icon; the extension badge
             // (TXT/EPUB) in card-meta distinguishes the two formats.
             const docIcon = ICONS.doc();
             const safeName = escapeHtml(file.name);
-            const safeExt = escapeHtml(file.extension);
+            const safeExt = escapeHtml(file.extension || ext);
             const unsupportedBadge = isUnsupportedText
                 ? '<span class="card-badge card-badge--unsupported">暂不支持</span>'
                 : '';
@@ -319,7 +344,7 @@ export function renderBrowserList() {
                     <div class="card-actions-overlay">
                         <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="text">${ICONS.heart()}</button>
                         <button class="card-action-btn dots-btn" title="阅读状态" data-action="status-menu" data-path="${escapeHtml(file.path)}">${ICONS.dots()}</button>
-                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
                     </div>
                     <div class="card-details">
                         <div class="card-title" title="${safeName}">${safeName}</div>
@@ -373,7 +398,7 @@ export function renderBrowserList() {
                 </div>
                 <div class="card-actions-overlay">
                     <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="${isVideo ? 'video' : 'image'}">${ICONS.heart()}</button>
-                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>

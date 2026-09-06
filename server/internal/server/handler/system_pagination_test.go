@@ -86,3 +86,32 @@ func TestSystemBrowseSortAndPagination(t *testing.T) {
 	require.Equal(t, "c.mp4", pageDesc.Files[0].Name)
 	require.Equal(t, "b.mp4", pageDesc.Files[1].Name)
 }
+
+func TestSystemBrowseClassifiesMediaTypes(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "novel.txt"), []byte("text"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "photo.jpg"), []byte("image"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "clip.mp4"), []byte("video"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "program.exe"), []byte("bin"), 0o644))
+
+	h := newSystemBrowseHandler(t, root)
+	e := echo.New()
+	e.GET("/api/v1/system/browse", h.SystemBrowse)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/system/browse?path="+filepath.ToSlash(root), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var result models.BrowseResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	require.Len(t, result.Files, 3) // exe ignored
+
+	fileTypes := make(map[string]string)
+	for _, f := range result.Files {
+		fileTypes[f.Name] = f.MediaType
+	}
+	require.Equal(t, "text", fileTypes["novel.txt"])
+	require.Equal(t, "image", fileTypes["photo.jpg"])
+	require.Equal(t, "video", fileTypes["clip.mp4"])
+}

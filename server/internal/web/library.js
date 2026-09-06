@@ -14,7 +14,10 @@ export function applyListFilters(folders, files, decorations, { favoritesOnly, s
         // 状态筛选：仅小说；文件夹与非文本一律隐藏
         outFolders = [];
         outFiles = outFiles.filter(f => {
-            if (f.media_type !== 'text') return false;
+            const rawExt = (f.extension || (f.path ? f.path.slice(f.path.lastIndexOf('.')) : '')).toLowerCase();
+            const ext = rawExt.startsWith('.') ? rawExt : (rawExt ? '.' + rawExt : '');
+            const isText = f.media_type === 'text' || ['.txt', '.epub', '.mobi', '.azw3'].includes(ext);
+            if (!isText) return false;
             const badge = states[f.path];
             const status = badge ? badge.status : 'unread';
             return status === statusFilter;
