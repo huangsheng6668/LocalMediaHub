@@ -34,6 +34,13 @@ export function relativeTime(ts) {
     return `${Math.floor(mo / 12)} 年前`;
 }
 
+// 阅读累计秒数 → 展示文案（spec 2026-09-08）；<60s 返回空串（不值得展示）。
+export function formatReadDuration(sec) {
+    if (!sec || sec < 60) return '';
+    if (sec < 3600) return `${Math.floor(sec / 60)} 分钟`;
+    return `${(sec / 3600).toFixed(1)} 小时`;
+}
+
 // Scan localStorage for book_progress:* entries whose path ends in .txt/.epub
 // (defensive: legacy keys or unrelated entries should be ignored), parse each
 // payload, then sort by lastReadAt descending.

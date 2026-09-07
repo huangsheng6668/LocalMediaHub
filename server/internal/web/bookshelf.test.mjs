@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { coverGradientClass, relativeTime } from './bookshelf.js';
+import { coverGradientClass, relativeTime, formatReadDuration } from './bookshelf.js';
 
 test('coverGradientClass: deterministic and in g1..g8', () => {
     const a = coverGradientClass('三体');
@@ -20,4 +20,12 @@ test('relativeTime boundaries', () => {
     assert.equal(relativeTime(now - 40 * 24 * 3600 * 1000), '1 个月前');
     assert.equal(relativeTime(now - 400 * 24 * 3600 * 1000), '1 年前');
     assert.equal(relativeTime(0), '');
+});
+
+test('formatReadDuration renders minutes below an hour, hours above', () => {
+    assert.equal(formatReadDuration(0), '');
+    assert.equal(formatReadDuration(30), '');
+    assert.equal(formatReadDuration(45 * 60), '45 分钟');
+    assert.equal(formatReadDuration(90 * 60), '1.5 小时');
+    assert.equal(formatReadDuration(3660), '1.0 小时');
 });

@@ -346,7 +346,12 @@ test('fetchState and reportState', async () => {
             percent: 60,
             finished: false,
             last_read_at: 12345,
+            read_seconds_delta: 0,
         });
+
+        reportState('/m/book.txt', { chapterIndex: 4, paraIndex: 1, percent: 60, finished: false, lastReadAt: 12346, readSecondsDelta: 30 });
+        assert.equal(calls.length, 3);
+        assert.equal(calls[2].body.read_seconds_delta, 30);
     } finally {
         delete global.fetch;
     }

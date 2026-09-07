@@ -109,7 +109,7 @@ function chunk(arr, n) {
     return out;
 }
 
-async function fetchDecorationsFor(paths) {
+export async function fetchDecorationsFor(paths) {
     const states = {};
     const favorites = [];
     for (const part of chunk(paths, 500)) {
@@ -240,6 +240,7 @@ export function reportState(path, payload = {}) {
     const percent = payload.percent;
     const finished = payload.finished;
     const lastReadAt = payload.lastReadAt !== undefined ? payload.lastReadAt : payload.last_read_at;
+    const readSecondsDelta = payload.readSecondsDelta || 0;
     return apiRequest(`${state.apiBase}/api/v1/library/states`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,6 +251,7 @@ export function reportState(path, payload = {}) {
             percent,
             finished,
             last_read_at: lastReadAt,
+            read_seconds_delta: readSecondsDelta,
         }),
     }).catch(() => {}); // 静默：下次保存重试
 }
