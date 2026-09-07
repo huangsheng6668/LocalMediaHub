@@ -14,7 +14,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **Service**：`server/internal/service/*.go`
   - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + per-root 防抖 + `cacheByDir` 每目录索引 + per-root 并发 `g.SetLimit` + 输出按路径排序）；快照持久化（2026-09-03）：`scanner_snapshot.go` Scan 后原子落盘 `.data/scan_snapshot.json`（30s 写节流）+ `StartWatching` 启动 hydrate（`cacheTime=SavedAt` 复用 stale-while-revalidate，roots/扩展名身份键不匹配即弃用），`NewScannerWithSnapshot` 为生产构造、`NewScanner` 保留给测试
   - `tags.go` — 标签系统（SQLite WAL + busy_timeout + `SetMaxOpenConns(max(4,NumCPU))` + 索引 + 批量 IN 查询 + JSON→SQLite 自动迁移，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）
-  - `library.go` — 阅读状态与跨媒体收藏（SQLite WAL + busy_timeout + 状态自动派生（unread/reading/finished）+ 批量 decorations 查询 + 收藏快照 8KB 上限，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）
+  - `library.go` — 阅读状态与跨媒体收藏（SQLite WAL + busy_timeout + 状态自动派生（unread/reading/finished）+ 批量 decorations 查询 + 收藏快照 8KB 上限，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）；阅读时长统计（2026-09-08）：`reading_states.read_seconds` 累计列 + `reading_daily` 按日聚合表 + `GET /api/v1/library/stats/summary`（今日/近7天/累计），progress upsert 携带 `read_seconds_delta`（负数忽略、>3600 clamp，累加独立于 lastReadAt 守卫）
   - `streaming.go` — 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`（修正 SeekCurrent 偏移），原生 Range）；转码路径（2026-09-03）：`transcode_encoder.go` 两级编码器探测（静态 `-encoders` + 运行时 testsrc 微编码，NVENC→QSV→AMF→libx264 兜底）+ `vcodec` allowlist 查表（客户端值永不进 argv）+ 会话并发信号量（`transcode.max_sessions`，缺省 3 / -1 不限），状态端点 `GET /api/v1/admin/transcode/status`；HLS 化（2026-09-03 Phase B）：`transcode_hls.go` 会话管理（`/api/v1/media/hls/playlist|segment`，会话键去重 + 空闲回收 + 4GiB LRU 缓存），Android 转码走 HLS 原生 seek（`VideoPlayerScreen` 的 URL-rebuild 特殊分支已删）；seek 锚定重转码（2026-09-06）：playlist/segment 接受 `?start=`，ffmpeg 输入端 `-ss` 秒起新会话 + 同源 running 会话自动取消（spec `2026-09-06-hls-seek-restart-design.md`），web 拖动到未转码区域即时重锚（`needsHlsRestart`），`transcodeStartOffset` 统一为**秒**
   - `thumbnail.go` — 缩略图（LANCZOS→Linear + MD5 缓存 + sync.Pool + hot path priority + `durations.json` ffprobe 缓存 + per-file `hotTracker`）
   - `hot_dirs.go` — per-directory 访问计数 LRU（容量 256，5min flush + Shutdown 原子落盘到 `hot_directories.json`），驱动冷启动分层预热（Tier1 hot 目录 → Tier2 根目录 → Tier3 懒生成）
@@ -37,14 +37,14 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **Activity**：
   - `MainActivity.kt`（singleTop + NavHost + 视频续播调度 `checkPlaybackProgress` / `playVideo` / `resumeRequest`；启动请求 `POST_NOTIFICATIONS`）
   - `VideoPlayerActivity.kt`（独立视频播放 Activity，承载 PiP 浮窗 + RemoteAction 广播接收；`exitingFromPip` 标志区分"关闭浮窗"vs"切后台"，关闭浮窗后 `onStop` 自动 `finish()` 释放 ExoPlayer）
-- **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen`（支持分章/全文滚动模式、实时百分比进度与沉浸/普通双进度条、BackHandler手势退出沉浸模式、左右触控翻页 + 右侧全书进度拖动条(松手跳章)） / `DownloadsScreen`
+- **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen`（支持分章/全文滚动模式、实时百分比进度与沉浸/普通双进度条、BackHandler手势退出沉浸模式、左右触控翻页 + 右侧全书进度拖动条(松手跳章)） / `DownloadsScreen` / `BookshelfScreen`（独立书架页，`bookshelf` 路由：全量最近书籍网格 + 在读/读完/收藏筛选 + 今日/本周阅读时长统计条，首页书架区"查看全部"进入）
 - **Component**（`ui/component/`）：
   - `home/`（首页卡片：Hero / Library / ContinueWatching / RecentMedia / Favorite）
   - `browse/`（浏览子组件：TopBar / SortMenu / SearchView / BrowseFilterChipsRow / DeleteConfirmDialog / QuickActionsDialog 等）
   - `reader/`（`ReaderSettingsSheet`（带可滚动与1400dp最大宽度） / `ReaderThemeWrapper` / `ReaderFontFamily`）
   - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `PlayerGestureHud`（音量/亮度 Pill HUD + seek ripple）/ `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`
 - **ViewModel**（`viewmodel/`）：
-  - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel`
+  - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel` / `BookshelfViewModel`（本地 BookProgress 全量 + decorations 合并 + `applyBookshelfFilter` 纯函数筛选）
   - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `LibraryController`（阅读装饰与状态筛选）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
 - **Data**（`data/`）：
   - `Models.kt`（`MediaFile` / `Folder` / `Tag` / `FavoriteEntry` / `ReadingStatus` / `LibraryDecoration` / `ServerFavorite` / `PlaybackProgressEntry` / `RecentMediaEntry` / `LastBrowseLocation`）
@@ -55,6 +55,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `ReadingMath.kt`（阅读百分比与已读完判定纯函数）
   - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护）
   - `ServerConfigStore.kt`（含 `authToken` / `bleToken`，均加密存储；`bleToken` 对应 server 的 `ble.token`，为空回退 `authToken`）
+  - `ReadingSessionTimer.kt`（阅读会话计时器，Activity onResume/onPause 起停表，时钟注入可测）+ `ReadingTimeStore.kt`（阅读时长 pending 缓冲，per-path Map 持久 JSON；离线累积 / 上报失败回退 / `takePendingUpto(path, 3600)` 分片补传，由 LibrarySyncManager 连线执行）
   - `RoutePath.kt`（浏览路径与系统/库模式标记）
 - **Network**（`network/`）：Retrofit 接口 + OkHttp + `AuthInterceptor`（注入 Bearer Token）
 - **BLE**（`ble/`，**实验性**，默认关闭，**Android=Peripheral**）：`BleProtocol`（与 server 对称的帧 codec）/ `BleConnectionStateMachine`（纯逻辑状态机，含 ADVERTISING）/ `BleController`（@Singleton 门控，开关+硬件可用性→状态机；`markConnected`/`markDisconnected` 由 HTTP 协调结果驱动）/ `BlePeripheralManager` 接口 + `AndroidBlePeripheralManager`（`BluetoothGattServer` + advertiser，Command Write + State Notify + CCCD）/ `BleToggleRule`。`data/BleApi.kt` 通过 Wi-Fi/HTTP 调 server 的 `/api/v1/ble/*` 协调连接。设置入口在 `ConnectionScreen`（开关 + 扫描列表 + 选设备连接 + 发送测试 + echo），状态经 `BleSettingsViewModel`。角色反转原因：Windows winrt Peripheral 不稳，PC 当 Central。蓝牙不可用时完全退回 Wi-Fi/HTTP（零退化）。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)
@@ -66,7 +67,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 
 服务端内置 SPA，浏览器访问 server 地址（如 `http://localhost:8000`）即可。
 
-- **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js` / `library.js`（阅读状态与跨媒体收藏：筛选矩阵/徽章/DOM装饰/双向同步） / `scrollMemory.js`（双键 session 滚动记忆）
+- **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js` / `library.js`（阅读状态与跨媒体收藏：筛选矩阵/徽章/DOM装饰/双向同步） / `readingTimer.js`（纯逻辑阅读计时器：textReader 活跃秒数累积，随 progress 上报 `read_seconds_delta` + 30s 心跳） / `scrollMemory.js`（双键 session 滚动记忆）
 - **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09 现代中性风重设计（spec `docs/superpowers/specs/2026-09-02-web-ui-redesign-design.md`）：7 套 `[data-theme]` chrome 主题（与阅读区主题独立分离），emoji 图标全部替换为内联 SVG
 - **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
 - **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行）+ 子模块
