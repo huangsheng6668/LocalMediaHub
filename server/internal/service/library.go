@@ -246,6 +246,26 @@ func (s *LibraryService) GetState(path string) (*models.ReadingState, error) {
 	return s.getStateLocked(path)
 }
 
+// GetStatsSummary 汇总阅读时长（spec 2026-09-08）：今日/近7天（reading_daily 按日聚合，
+// week = day >= today-6）/ 累计（reading_states.read_seconds 求和）。
+func (s *LibraryService) GetStatsSummary() (models.StatsSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out models.StatsSummary
+	today := time.Now().Format("2006-01-02")
+	weekAgo := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM reading_daily WHERE day = ?`, today).Scan(&out.TodaySeconds); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM reading_daily WHERE day >= ?`, weekAgo).Scan(&out.WeekSeconds); err != nil {
+		return out, err
+	}
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(read_seconds),0) FROM reading_states`).Scan(&out.TotalSeconds); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
 func (s *LibraryService) getStateLocked(path string) (*models.ReadingState, error) {
 	row := s.db.QueryRow(`SELECT path, chapter_index, para_index, percent, finished, manual_status, last_read_at, updated_at, read_seconds
 		FROM reading_states WHERE path = ?`, path)
@@ -409,7 +429,7 @@ func (s *LibraryService) BatchDecorations(paths []string) (models.DecorationsRes
 		}
 
 		// 1. reading_states：行存在才返回
-		rows, err := s.db.Query(`SELECT path, percent, finished, manual_status, last_read_at
+		rows, err := s.db.Query(`SELECT path, percent, finished, manual_status, last_read_at, read_seconds
 			FROM reading_states WHERE path IN (`+placeholders+`)`, args...)
 		if err != nil {
 			return res, err
@@ -420,14 +440,16 @@ func (s *LibraryService) BatchDecorations(paths []string) (models.DecorationsRes
 			var finished int
 			var manual *string
 			var lastAt int64
-			if err := rows.Scan(&p, &pct, &finished, &manual, &lastAt); err != nil {
+			var readSec int64
+			if err := rows.Scan(&p, &pct, &finished, &manual, &lastAt, &readSec); err != nil {
 				rows.Close()
 				return res, err
 			}
 			res.States[p] = models.ReadingStateBadge{
-				Status:     deriveStatus(finished == 1, manual, true),
-				Percent:    pct,
-				LastReadAt: lastAt,
+				Status:      deriveStatus(finished == 1, manual, true),
+				Percent:     pct,
+				LastReadAt:  lastAt,
+				ReadSeconds: readSec,
 			}
 		}
 		rows.Close()

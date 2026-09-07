@@ -376,6 +376,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	lib.GET("/favorites", h.ListFavorites)
 	lib.POST("/favorites", h.AddFavorite)
 	lib.DELETE("/favorites", h.DeleteFavorite)
+	lib.GET("/stats/summary", h.GetStatsSummary)
 
 	// Admin
 	admin := api.Group("/admin", authMw)

@@ -407,3 +407,29 @@ func TestMigrateAddsReadSecondsColumn(t *testing.T) {
 	assert.Equal(t, 1, cnt)
 }
 
+func TestGetStatsSummary(t *testing.T) {
+	svc := newTestLibraryService(t)
+	now := time.Now().UnixMilli()
+	_, err := svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 10, LastReadAt: now, ReadSecondsDelta: 600})
+	assert.NoError(t, err)
+	_, err = svc.UpsertProgress(models.ProgressUpdate{Path: "b.txt", Percent: 10, LastReadAt: now, ReadSecondsDelta: 60})
+	assert.NoError(t, err)
+	sum, err := svc.GetStatsSummary()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(660), sum.TodaySeconds)
+	assert.Equal(t, int64(660), sum.WeekSeconds)
+	assert.Equal(t, int64(660), sum.TotalSeconds)
+}
+
+func TestBatchDecorationsIncludesReadSeconds(t *testing.T) {
+	svc := newTestLibraryService(t)
+	now := time.Now().UnixMilli()
+	_, err := svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 10, LastReadAt: now, ReadSecondsDelta: 42})
+	assert.NoError(t, err)
+	res, err := svc.BatchDecorations([]string{"a.txt"})
+	assert.NoError(t, err)
+	badge, ok := res.States["a.txt"]
+	assert.True(t, ok)
+	assert.Equal(t, int64(42), badge.ReadSeconds)
+}
+

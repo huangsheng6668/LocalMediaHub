@@ -223,3 +223,12 @@ func (h *Handler) DeleteFavorite(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
+
+// GetStatsSummary: GET /api/v1/library/stats/summary — 今日/本周/累计阅读时长聚合。
+func (h *Handler) GetStatsSummary(c echo.Context) error {
+	sum, err := h.library.GetStatsSummary()
+	if err != nil {
+		return respondInternalError(c, err)
+	}
+	return c.JSON(http.StatusOK, sum)
+}

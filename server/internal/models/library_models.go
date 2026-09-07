@@ -41,6 +41,13 @@ type DecorationsResult struct {
 	Favorites []string                     `json:"favorites"`
 }
 
+// StatsSummary 是 GET /api/v1/library/stats/summary 的响应（阅读时长聚合）。
+type StatsSummary struct {
+	TodaySeconds int64 `json:"today_seconds"`
+	WeekSeconds  int64 `json:"week_seconds"` // 近 7 天含今日
+	TotalSeconds int64 `json:"total_seconds"`
+}
+
 // FavoriteRecord 是服务端收藏行（snapshot 为客户端 JSON，服务端不解释）。
 type FavoriteRecord struct {
 	Path      string          `json:"path"`
