@@ -57,6 +57,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
@@ -99,6 +100,7 @@ fun HomeScreen(
     onOpenRecentMedia: (RecentMediaEntry) -> Unit,
     onFavoriteClick: (MediaFile) -> Unit = {},
     onDisconnect: () -> Unit = {},
+    onOpenBookshelf: () -> Unit = {},
     downloadedEntries: List<DownloadEntry> = emptyList(),
     onOpenDownloads: () -> Unit = {},
     onDownloadClick: (DownloadEntry) -> Unit = {},
@@ -311,6 +313,11 @@ fun HomeScreen(
                     SectionHeader(
                         title = stringResource(R.string.home_section_bookshelf),
                         subtitle = stringResource(R.string.home_section_bookshelf_desc),
+                        action = {
+                            TextButton(onClick = onOpenBookshelf) {
+                                Text(stringResource(R.string.bookshelf_view_all))
+                            }
+                        },
                     )
                 }
                 item {

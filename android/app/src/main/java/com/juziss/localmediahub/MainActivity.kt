@@ -22,6 +22,7 @@ import com.juziss.localmediahub.data.shouldFocusRestart
 import com.juziss.localmediahub.ui.component.ResumePlaybackDialog
 import com.juziss.localmediahub.ui.component.ResumePlaybackRequest
 import com.juziss.localmediahub.ui.component.VideoOpenAction
+import com.juziss.localmediahub.ui.screen.BookshelfScreen
 import com.juziss.localmediahub.ui.screen.BrowseScreen
 import com.juziss.localmediahub.ui.screen.ConnectionScreen
 import com.juziss.localmediahub.ui.screen.DownloadsScreen
@@ -253,6 +254,7 @@ fun LocalMediaHubApp() {
                     }
                 },
                 downloadedEntries = downloadedEntries,
+                onOpenBookshelf = { navController.navigate("bookshelf") },
                 onOpenDownloads = { navController.navigate("downloads") },
                 onDownloadClick = { entry ->
                     when (entry.file.mediaType) {
@@ -397,6 +399,10 @@ fun LocalMediaHubApp() {
             }
         }
  
+        composable("bookshelf") {
+            BookshelfScreen(onBack = { navController.popBackStack() })
+        }
+
         composable("downloads") {
             DownloadsScreen(
                 onBack = { navController.popBackStack() },
