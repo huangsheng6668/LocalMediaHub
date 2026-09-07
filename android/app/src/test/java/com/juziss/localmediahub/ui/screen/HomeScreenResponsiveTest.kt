@@ -8,6 +8,7 @@ import com.juziss.localmediahub.data.FavoritesStore
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.LibrarySyncManager
 import com.juziss.localmediahub.data.RecentActivityStore
+import com.juziss.localmediahub.data.ReadingTimeStore
 import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.ble.BleTransportFallback
 import com.juziss.localmediahub.ble.TestBleFixtures
@@ -67,7 +68,7 @@ class HomeScreenResponsiveTest {
             serverConfigStore = ServerConfigStore(ctx),
             serverConfig = ServerConfig(),
             repository = repo,
-            librarySyncManager = LibrarySyncManager(favStore, actStore, repo, appScope),
+            librarySyncManager = LibrarySyncManager(favStore, actStore, ReadingTimeStore(ctx), repo, appScope),
         )
 
         composeRule.setContent {

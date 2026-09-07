@@ -8,6 +8,7 @@ import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.PlaybackProgressEntry
 import com.juziss.localmediahub.data.RecentActivityStore
+import com.juziss.localmediahub.data.ReadingTimeStore
 import com.juziss.localmediahub.data.ServerConfigStore
 import com.juziss.localmediahub.ble.BleTransportFallback
 import com.juziss.localmediahub.ble.TestBleFixtures
@@ -91,7 +92,9 @@ class HomeViewModelTest {
             serverConfig = serverConfig,
             repository = repository,
             librarySyncManager = LibrarySyncManager(
-                favoritesStore, recentActivityStore, repository,
+                favoritesStore, recentActivityStore,
+                ReadingTimeStore(context),
+                repository,
                 CoroutineScope(Dispatchers.Unconfined),
             ),
         )

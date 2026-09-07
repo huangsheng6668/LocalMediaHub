@@ -23,10 +23,16 @@ import javax.inject.Singleton
 class LibrarySyncManager @Inject constructor(
     private val favoritesStore: FavoritesStore,
     private val recentActivityStore: RecentActivityStore,
+    private val readingTimeStore: ReadingTimeStore,
     private val repository: MediaRepository,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
     private val started = AtomicBoolean(false)
+
+    private companion object {
+        /** 补传分片上限（与服务端 read_seconds_delta clamp 3600 对齐）。 */
+        const val MAX_SYNC_DELTA_SECONDS = 3600L
+    }
 
     /**
      * 每进程只允许触发一次同步，幂等。
@@ -65,6 +71,36 @@ class LibrarySyncManager @Inject constructor(
         if (remote is NetworkResult.Success) {
             val merged = mergeFavoriteEntries(local, remote.data)
             favoritesStore.replaceAll(merged)
+        }
+
+        // ── 3. 阅读时长 pending 补传：逐书按 ≤3600 分片，规避服务端 clamp 截断 ──
+        for (bookPath in readingTimeStore.pendingPaths()) {
+            // 防进度回退：先用服务端当前进度回传（等值 upsert no-op），仅叠加 delta；
+            // 拉不到服务端状态视为网络不可用，整段补传下轮再试（pending 未扣减）。
+            var ch = 0; var para = 0; var pct = 0.0
+            when (val remoteState = repository.getReadingState(bookPath)) {
+                is NetworkResult.Success -> remoteState.data.state?.let { st ->
+                    ch = st.chapterIndex; para = st.paraIndex; pct = st.percent
+                }
+                else -> return
+            }
+            while (true) {
+                val chunk = readingTimeStore.takePendingUpto(bookPath, MAX_SYNC_DELTA_SECONDS)
+                if (chunk <= 0) break
+                val result = repository.reportReadingState(
+                    path = bookPath,
+                    chapterIndex = ch,
+                    paraIndex = para,
+                    percent = pct,
+                    finished = false,
+                    lastReadAt = System.currentTimeMillis(),
+                    readSecondsDelta = chunk,
+                )
+                if (result !is NetworkResult.Success) {
+                    readingTimeStore.addPending(bookPath, chunk)
+                    break // 该书剩余片与后续书下轮再试
+                }
+            }
         }
     }
 }

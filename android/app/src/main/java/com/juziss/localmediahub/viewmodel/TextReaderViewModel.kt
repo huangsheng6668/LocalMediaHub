@@ -10,6 +10,8 @@ import com.juziss.localmediahub.data.BookProgress
 import com.juziss.localmediahub.data.Bookmark
 import com.juziss.localmediahub.data.MediaRepository
 import com.juziss.localmediahub.data.ReaderSettings
+import com.juziss.localmediahub.data.ReadingSessionTimer
+import com.juziss.localmediahub.data.ReadingTimeStore
 import com.juziss.localmediahub.data.RecentActivityStore
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.userText
@@ -36,6 +38,7 @@ class TextReaderViewModel @Inject constructor(
     private val store: RecentActivityStore,
     private val localBookRepo: LocalBookRepository,
     private val downloadsStore: DownloadsStore,
+    private val readingTimeStore: ReadingTimeStore,
 ) : ViewModel() {
 
     private var isLocalMode = false
@@ -520,6 +523,25 @@ class TextReaderViewModel @Inject constructor(
 
     private var lastPushKey = ""
 
+    /** 单次上报的时长 delta 上限（与服务端 clamp 3600 对齐）。 */
+    private val MAX_REPORT_DELTA_SECONDS = 3600L
+
+    // ---- 阅读时长计时（spec 2026-09-08-reading-stats-and-android-bookshelf）----
+    // Activity onResume/onPause 驱动起停表；内存值沉入 ReadingTimeStore 的
+    // pending 缓冲（离线安全），上报失败回退到缓冲，连线由 LibrarySyncManager 分片补传。
+    private val readingTimer = ReadingSessionTimer()
+
+    /** Activity onResume：开始累计活跃阅读秒数。 */
+    fun startReadingSession() { readingTimer.start() }
+
+    /** Activity onPause：停表并把累积秒数沉入 pending 缓冲（离线安全）。 */
+    fun stopReadingSession() {
+        readingTimer.stop()
+        val b = _book.value ?: return
+        val d = readingTimer.takeDelta()
+        if (d > 0) viewModelScope.launch { readingTimeStore.addPending(b.path, d) }
+    }
+
     /**
      * Called by the UI layer (throttled via snapshotFlow + debounce) to persist
      * the within-chapter reading position: first visible block + its px offset.
@@ -549,9 +571,17 @@ class TextReaderViewModel @Inject constructor(
                 )
             )
             val key = "$chapterIndex:$blockIndex:$finished"
-            if (key != lastPushKey) {
+            // 计时器内存值先沉入 pending 缓冲（离线安全），再取 ≤3600 一片随载荷上报；
+            // 上报失败回退到缓冲，下次上报或连线补传重试。delta>0 时绕过 pushKey 去重。
+            val liveDelta = readingTimer.takeDelta()
+            if (liveDelta > 0) readingTimeStore.addPending(b.path, liveDelta)
+            val delta = readingTimeStore.takePendingUpto(b.path, MAX_REPORT_DELTA_SECONDS)
+            if (key != lastPushKey || delta > 0) {
                 lastPushKey = key
-                repo.reportReadingState(b.path, chapterIndex, blockIndex, percent, finished, now)
+                val result = repo.reportReadingState(b.path, chapterIndex, blockIndex, percent, finished, now, delta)
+                if (result !is NetworkResult.Success && delta > 0) {
+                    readingTimeStore.addPending(b.path, delta)
+                }
             }
         }
     }

@@ -58,7 +58,9 @@ class LibrarySyncManagerTest {
             BleTransportFallback(),
         )
         val mgr = LibrarySyncManager(
-            favoritesStore, recentActivityStore, repo,
+            favoritesStore, recentActivityStore,
+            ReadingTimeStore(ApplicationProvider.getApplicationContext()),
+            repo,
             CoroutineScope(dispatcher),
         )
         mgr.ensureStarted()

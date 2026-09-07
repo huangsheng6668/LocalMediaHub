@@ -38,6 +38,16 @@ class TextReaderActivity : ComponentActivity() {
 
     private val viewModel: TextReaderViewModel by viewModels()
 
+    override fun onResume() {
+        super.onResume()
+        viewModel.startReadingSession()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        viewModel.stopReadingSession()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

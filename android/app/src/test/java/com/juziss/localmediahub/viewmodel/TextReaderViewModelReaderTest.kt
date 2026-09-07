@@ -44,6 +44,7 @@ class TextReaderViewModelReaderTest {
     private val dispatcher = StandardTestDispatcher()
     private val localBookRepo = LocalBookRepository()
     private val downloadsStore = mockk<DownloadsStore>(relaxed = true)
+    private val readingTimeStore = mockk<com.juziss.localmediahub.data.ReadingTimeStore>(relaxed = true)
     // The ViewModel resolves localized error/bookmark strings through a
     // Context; a mock returns the same literals the assertions expect.
     private val appContext: Context = mockk(relaxed = true) {
@@ -58,7 +59,7 @@ class TextReaderViewModelReaderTest {
     }
 
     private fun createVm(repo: MediaRepository, store: RecentActivityStore) =
-        TextReaderViewModel(appContext, repo, store, localBookRepo, downloadsStore)
+        TextReaderViewModel(appContext, repo, store, localBookRepo, downloadsStore, readingTimeStore)
 
     @After
     fun tearDown() {
