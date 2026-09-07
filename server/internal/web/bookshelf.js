@@ -8,6 +8,10 @@
 // Storage keys mirror textReader.js: `book_progress:<path>` JSON, payload
 // shape { chapterIndex, paraIndex, lastReadAt }. Sorting is lastReadAt desc
 // so the most-recently-read book shows up first.
+// Reading duration ("已读 X") is patched in asynchronously from server
+// decorations (spec 2026-09-08); offline/failure degrades to progress-only meta.
+import { fetchDecorationsFor } from './library.js';
+
 const PREFIX = 'book_progress:';
 
 // Deterministic gradient pick: same title → same cover color, always one of
@@ -72,6 +76,7 @@ function baseName(path) {
 function renderCard(entry) {
     const card = document.createElement('div');
     card.className = 'bookshelf-card';
+    card.dataset.path = entry.path;
     const title = baseName(entry.path);
     const meta = `第 ${(entry.chapterIndex || 0) + 1} 章 · ${relativeTime(entry.lastReadAt)}`;
     // XSS-SAFE: pure-literal template; user data (title/meta) is set via textContent below
@@ -91,6 +96,24 @@ function renderCard(entry) {
         location.hash = '#/read?path=' + encodeURIComponent(entry.path);
     });
     return card;
+}
+
+// Async duration patch: fills "已读 X" into rendered cards from server
+// decorations; silent no-op offline (progress-only meta stays).
+function patchDurations(grid, paths) {
+    fetchDecorationsFor(paths)
+        .then(d => {
+            grid.querySelectorAll('.bookshelf-card').forEach(card => {
+                const badge = d.states[card.dataset.path];
+                const dur = formatReadDuration(badge && badge.read_seconds);
+                if (!dur) return;
+                const el = card.querySelector('.bookshelf-card__progress');
+                if (el && !el.textContent.includes('已读')) {
+                    el.textContent = `${el.textContent} · 已读 ${dur}`;
+                }
+            });
+        })
+        .catch(() => { /* 服务端不可达：退回纯进度 meta */ });
 }
 
 // Full-page render for the #/bookshelf route. Always replaces container
@@ -116,6 +139,7 @@ export function render(container) {
     grid.className = 'bookshelf-grid';
     list.forEach(entry => grid.appendChild(renderCard(entry)));
     container.appendChild(grid);
+    patchDurations(grid, list.map(e => e.path));
 }
 
 // Dashboard embed. Renders nothing (and clears the host) when the shelf is
@@ -133,6 +157,8 @@ export function renderSection(container) {
         <div class="bookshelf-grid"></div>
     `;
     const grid = section.querySelector('.bookshelf-grid');
-    list.slice(0, 6).forEach(entry => grid.appendChild(renderCard(entry)));
+    const shown = list.slice(0, 6);
+    shown.forEach(entry => grid.appendChild(renderCard(entry)));
     container.appendChild(section);
+    patchDurations(grid, shown.map(e => e.path));
 }

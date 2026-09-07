@@ -16,6 +16,7 @@ import { renderSettings } from './reader-settings.js';
 import { renderScrubber, progressToChapterIndex } from './readerScrubber.js';
 import { renderPageTurn } from './pageTurn.js';
 import { reportState, fetchState, computeReportPayload } from './library.js';
+import { createReadingTimer } from './readingTimer.js';
 
 const STORAGE_PREFIX = 'book_progress:';
 
@@ -106,6 +107,13 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
     // Scroll-mode buffering window (orchestration-local state).
     let minLoadedIdx = 0, maxLoadedIdx = 0, isLoadingChapter = false;
+
+    // Reading-time tracking (spec 2026-09-08-reading-stats): active seconds
+    // accumulate while the reader is open AND the page is visible; deltas ride
+    // the existing progress report (plus a 30s heartbeat) via read_seconds_delta.
+    const readTimer = createReadingTimer();
+    let lastReportedProg = null;
+    let readingHeartbeatTimer = null;
 
     // ===== Immersive-mode state machine (Phase 5). Toggles chrome visibility
     // via body dataset + fullscreen API — orchestrator-only concerns. =====
@@ -561,13 +569,14 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
                 atChapterEnd: lastPara || nearBottom,
             });
 
-            reportState(path, {
+            lastReportedProg = {
                 chapterIndex: vis.chapterIndex,
                 paraIndex: vis.paraIndex,
                 percent: payload.percent,
                 finished: payload.finished,
                 lastReadAt: prog.lastReadAt,
-            });
+            };
+            reportState(path, { ...lastReportedProg, readSecondsDelta: readTimer.takeDelta() });
         }
     }
     function scheduleProgressSave() {
@@ -577,14 +586,27 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             persistVisibleProgress();
         }, 800);
     }
+    const flushReadingDelta = () => {
+        try {
+            const d = readTimer.takeDelta();
+            if (d > 0 && lastReportedProg && state.path) {
+                reportState(state.path, { ...lastReportedProg, lastReadAt: Date.now(), readSecondsDelta: d });
+            }
+        } catch (e) { /* 上报失败不打断阅读/测试：下次心跳重试 */ }
+    };
     const onPageHide = () => {
         if (progressSaveTimer) {
             clearTimeout(progressSaveTimer);
             progressSaveTimer = null;
         }
         persistVisibleProgress();
+        readTimer.stop();
+        flushReadingDelta();
     };
-    const onVisibilityChangeSave = () => { if (document.hidden) onPageHide(); };
+    const onVisibilityChangeSave = () => {
+        if (document.hidden) onPageHide();
+        else readTimer.start();
+    };
     window.addEventListener('pagehide', onPageHide);
     document.addEventListener('visibilitychange', onVisibilityChangeSave);
     function onContentScroll() {
@@ -623,11 +645,23 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     const onVisibilityChange = () => { if (document.hidden) autoscrollApi.stop(); };
     document.addEventListener('visibilitychange', onVisibilityChange);
 
+    // Reading-time session: start when the reader opens, heartbeat every 30s
+    // so long stays within one chapter still accrue (persistVisibleProgress
+    // already merges the delta on scroll/visibility exits). unref (Node-only)
+    // keeps the interval from holding the process open in node:test, where
+    // renderTextReader is invoked without the full _cleanupReader teardown.
+    readTimer.start();
+    readingHeartbeatTimer = setInterval(flushReadingDelta, 30000);
+    if (typeof readingHeartbeatTimer.unref === 'function') readingHeartbeatTimer.unref();
+
     // ===== Cleanup =====
     container._cleanupReader = () => {
         if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
         if (cursorRafId !== null) cancelAnimationFrame(cursorRafId);
         if (progressSaveTimer) clearTimeout(progressSaveTimer);
+        if (readingHeartbeatTimer) clearInterval(readingHeartbeatTimer);
+        readTimer.stop();
+        flushReadingDelta();
         unsubSettings(); unsubPrefs(); unsubBms();
         tocApi.dispose(); bookmarksApi.dispose(); autoscrollApi.dispose(); settingsApi.dispose();
         scrubberApi.dispose();
