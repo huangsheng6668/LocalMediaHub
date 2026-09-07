@@ -177,11 +177,18 @@ data class DecorationBadge(
     val status: String,
     val percent: Double,
     @SerializedName("last_read_at") val lastReadAt: Long,
+    @SerializedName("read_seconds") val readSeconds: Long = 0,
 )
 
 data class DecorationsResponse(
     val states: Map<String, DecorationBadge> = emptyMap(),
     val favorites: List<String> = emptyList(),
+)
+
+data class StatsSummaryResponse(
+    @SerializedName("today_seconds") val todaySeconds: Long,
+    @SerializedName("week_seconds") val weekSeconds: Long,
+    @SerializedName("total_seconds") val totalSeconds: Long,
 )
 
 data class ServerFavorite(

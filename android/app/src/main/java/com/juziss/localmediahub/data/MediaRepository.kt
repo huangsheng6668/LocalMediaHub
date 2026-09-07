@@ -549,6 +549,7 @@ class MediaRepository @Inject constructor(
         percent: Double,
         finished: Boolean,
         lastReadAt: Long,
+        readSecondsDelta: Long = 0,
     ): NetworkResult<Map<String, Any>> =
         httpPost(
             "$baseUrl/api/v1/library/states",
@@ -559,8 +560,15 @@ class MediaRepository @Inject constructor(
                 "percent" to percent,
                 "finished" to finished,
                 "last_read_at" to lastReadAt,
+                "read_seconds_delta" to readSecondsDelta,
             )),
             object : TypeToken<Map<String, Any>>() {}.type,
+        )
+
+    suspend fun getStatsSummary(): NetworkResult<StatsSummaryResponse> =
+        httpGet(
+            "$baseUrl/api/v1/library/stats/summary",
+            object : TypeToken<StatsSummaryResponse>() {}.type,
         )
 
     suspend fun getReadingState(path: String): NetworkResult<ReadingStateResponse> =
