@@ -53,7 +53,8 @@ func NewLibraryService(dataDir string) (*LibraryService, error) {
 			finished INTEGER NOT NULL DEFAULT 0 CHECK (finished IN (0, 1)),
 			manual_status TEXT CHECK (manual_status IS NULL OR manual_status IN ('unread', 'reading', 'finished')),
 			last_read_at INTEGER NOT NULL DEFAULT 0,
-			updated_at INTEGER NOT NULL DEFAULT 0
+			updated_at INTEGER NOT NULL DEFAULT 0,
+			read_seconds INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE TABLE IF NOT EXISTS favorites (
 			path TEXT PRIMARY KEY COLLATE NOCASE,
@@ -64,14 +65,42 @@ func NewLibraryService(dataDir string) (*LibraryService, error) {
 			snapshot TEXT NOT NULL DEFAULT '{}',
 			added_at INTEGER NOT NULL DEFAULT 0
 		);
+		CREATE TABLE IF NOT EXISTS reading_daily (
+			path TEXT NOT NULL COLLATE NOCASE,
+			day TEXT NOT NULL,
+			seconds INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (path, day)
+		);
 		CREATE INDEX IF NOT EXISTS idx_reading_states_last_read_at ON reading_states(last_read_at);
 		CREATE INDEX IF NOT EXISTS idx_favorites_added_at ON favorites(added_at);
+		CREATE INDEX IF NOT EXISTS idx_reading_daily_day ON reading_daily(day);
 	`)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
+	if err := ensureColumn(db, "reading_states", "read_seconds",
+		"ALTER TABLE reading_states ADD COLUMN read_seconds INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &LibraryService{db: db}, nil
+}
+
+// ensureColumn 幂等迁移：表缺少 column 时执行 ddl（对已有库加列，新库建表已含列则 no-op）。
+func ensureColumn(db *sql.DB, table, column, ddl string) error {
+	var cnt int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, column,
+	).Scan(&cnt); err != nil {
+		return err
+	}
+	if cnt == 0 {
+		if _, err := db.Exec(ddl); err != nil {
+			return fmt.Errorf("migrate %s.%s: %w", table, column, err)
+		}
+	}
+	return nil
 }
 
 func (s *LibraryService) Close() error {
@@ -120,6 +149,25 @@ func (s *LibraryService) UpsertProgress(u models.ProgressUpdate) (models.Reading
 		u.Path, u.ChapterIndex, u.ParaIndex, u.Percent, boolToInt(u.Finished), u.LastReadAt, now)
 	if err != nil {
 		return models.ReadingState{}, err
+	}
+	// 阅读时长 delta（spec 2026-09-08）：独立于上方 lastReadAt 守卫累加——离线补传时
+	// lastReadAt 可能陈旧（progress 被拒），但时长增量仍有效。负数忽略，>3600 clamp。
+	delta := u.ReadSecondsDelta
+	if delta < 0 {
+		delta = 0
+	}
+	if delta > 3600 {
+		delta = 3600
+	}
+	if delta > 0 {
+		if _, err = s.db.Exec(`UPDATE reading_states SET read_seconds = read_seconds + ? WHERE path = ?`, delta, u.Path); err != nil {
+			return models.ReadingState{}, err
+		}
+		if _, err = s.db.Exec(`INSERT INTO reading_daily (path, day, seconds) VALUES (?, ?, ?)
+			ON CONFLICT(path, day) DO UPDATE SET seconds = seconds + excluded.seconds`,
+			u.Path, time.Now().Format("2006-01-02"), delta); err != nil {
+			return models.ReadingState{}, err
+		}
 	}
 	st, err := s.getStateLocked(u.Path)
 	if err != nil {
@@ -199,7 +247,7 @@ func (s *LibraryService) GetState(path string) (*models.ReadingState, error) {
 }
 
 func (s *LibraryService) getStateLocked(path string) (*models.ReadingState, error) {
-	row := s.db.QueryRow(`SELECT path, chapter_index, para_index, percent, finished, manual_status, last_read_at, updated_at
+	row := s.db.QueryRow(`SELECT path, chapter_index, para_index, percent, finished, manual_status, last_read_at, updated_at, read_seconds
 		FROM reading_states WHERE path = ?`, path)
 	return scanReadingState(row)
 }
@@ -208,7 +256,7 @@ func scanReadingState(row *sql.Row) (*models.ReadingState, error) {
 	var st models.ReadingState
 	var finished int
 	if err := row.Scan(&st.Path, &st.ChapterIndex, &st.ParaIndex, &st.Percent, &finished,
-		&st.ManualStatus, &st.LastReadAt, &st.UpdatedAt); err != nil {
+		&st.ManualStatus, &st.LastReadAt, &st.UpdatedAt, &st.ReadSeconds); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

@@ -1,9 +1,12 @@
 package service
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -321,5 +324,86 @@ func TestBatchDecorationsLargeBatch(t *testing.T) {
 	assert.Len(t, res.States, 1)
 	assert.Equal(t, "reading", res.States["/media/item-502.txt"].Status)
 	assert.Equal(t, []string{"/media/item-502.txt"}, res.Favorites)
+}
+
+// ---- 阅读时长统计（spec 2026-09-08-reading-stats-and-android-bookshelf）----
+
+func TestUpsertProgressAccumulatesReadSeconds(t *testing.T) {
+	svc := newTestLibraryService(t)
+	now := time.Now().UnixMilli()
+	_, err := svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 10, LastReadAt: now, ReadSecondsDelta: 30})
+	assert.NoError(t, err)
+	_, err = svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 20, LastReadAt: now + 1000, ReadSecondsDelta: 45})
+	assert.NoError(t, err)
+	st, err := svc.GetState("a.txt")
+	assert.NoError(t, err)
+	assert.NotNil(t, st)
+	assert.Equal(t, int64(75), st.ReadSeconds)
+}
+
+func TestUpsertProgressDeltaClampAndNegative(t *testing.T) {
+	svc := newTestLibraryService(t)
+	now := time.Now().UnixMilli()
+	_, err := svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 10, LastReadAt: now, ReadSecondsDelta: 999999})
+	assert.NoError(t, err)
+	_, err = svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 20, LastReadAt: now + 1000, ReadSecondsDelta: -50})
+	assert.NoError(t, err)
+	st, err := svc.GetState("a.txt")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(3600), st.ReadSeconds) // clamp 到 3600，负数忽略
+}
+
+func TestReadingDailyAggregates(t *testing.T) {
+	svc := newTestLibraryService(t)
+	now := time.Now().UnixMilli()
+	_, err := svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 10, LastReadAt: now, ReadSecondsDelta: 60})
+	assert.NoError(t, err)
+	_, err = svc.UpsertProgress(models.ProgressUpdate{Path: "b.txt", Percent: 10, LastReadAt: now, ReadSecondsDelta: 90})
+	assert.NoError(t, err)
+	var sec int64
+	today := time.Now().Format("2006-01-02")
+	err = svc.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM reading_daily WHERE day = ?`, today).Scan(&sec)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(150), sec)
+}
+
+func TestDeltaBypassesLastReadAtGuard(t *testing.T) {
+	svc := newTestLibraryService(t)
+	now := time.Now().UnixMilli()
+	_, err := svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 50, LastReadAt: now, ReadSecondsDelta: 60})
+	assert.NoError(t, err)
+	// 陈旧上报（lastReadAt 更旧）：progress 被 WHERE 守卫拒绝，delta 仍须累加（离线补传场景）
+	_, err = svc.UpsertProgress(models.ProgressUpdate{Path: "a.txt", Percent: 10, LastReadAt: now - 5000, ReadSecondsDelta: 120})
+	assert.NoError(t, err)
+	st, err := svc.GetState("a.txt")
+	assert.NoError(t, err)
+	assert.Equal(t, int64(180), st.ReadSeconds) // delta 累加不受守卫影响
+	assert.Equal(t, 50.0, st.Percent)           // 陈旧进度被拒绝
+}
+
+func TestMigrateAddsReadSecondsColumn(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "lib.db"))
+	assert.NoError(t, err)
+	// 旧 schema：无 read_seconds 列
+	_, err = db.Exec(`CREATE TABLE reading_states (
+		path TEXT PRIMARY KEY COLLATE NOCASE,
+		chapter_index INTEGER NOT NULL DEFAULT 0,
+		para_index INTEGER NOT NULL DEFAULT 0,
+		percent REAL NOT NULL DEFAULT 0,
+		finished INTEGER NOT NULL DEFAULT 0,
+		manual_status TEXT,
+		last_read_at INTEGER NOT NULL DEFAULT 0,
+		updated_at INTEGER NOT NULL DEFAULT 0)`)
+	assert.NoError(t, err)
+	assert.NoError(t, db.Close())
+
+	svc, err := NewLibraryService(dir) // 打开旧库触发迁移
+	assert.NoError(t, err)
+	t.Cleanup(func() { _ = svc.Close() })
+	var cnt int
+	assert.NoError(t, svc.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('reading_states') WHERE name='read_seconds'`).Scan(&cnt))
+	assert.Equal(t, 1, cnt)
 }
 
