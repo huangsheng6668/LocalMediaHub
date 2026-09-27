@@ -923,7 +923,10 @@ fun TextReaderScreen(
                                 )
                             } else {
                                 // ===== 分章模式：COVER/SIMULATION/NONE 动画支持 =====
-                                Box(Modifier.fillMaxSize()) {
+                                // contentAlignment 必须显式 Center：本 Box fillMaxSize 时外层
+                                // 的居中对它失效，默认 TopStart 会把限宽内容列顶到左缘
+                                // （左侧贴边、右侧留 maxContentDp 收窄的全部余量）。
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     // 底层：当前 blocks（loadChapter 后的新章）
                                     ChapterModeContent(
                                         blocks = blocks,
@@ -948,7 +951,9 @@ fun TextReaderScreen(
                                         Box(
                                             Modifier
                                                 .fillMaxSize()
-                                                .graphicsLayer { translationX = topTx * size.width }
+                                                .graphicsLayer { translationX = topTx * size.width },
+                                            // 与底层列同策略居中，翻页动画期间旧章快照不横向跳位
+                                            contentAlignment = Alignment.Center,
                                         ) {
                                             // 顶层用静态 Column 渲染旧章（动画期间无需滚动）
                                             StaticChapterOverlay(
