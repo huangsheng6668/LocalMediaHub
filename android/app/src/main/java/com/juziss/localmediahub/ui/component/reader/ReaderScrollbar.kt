@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -20,7 +21,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
@@ -125,7 +125,7 @@ fun ReaderScrollbar(
                 .fillMaxHeight()
                 .width(4.dp)
                 .align(Alignment.Center)
-                .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f), RoundedCornerShape(2.dp))
         )
         Box(
             modifier = Modifier
@@ -133,7 +133,7 @@ fun ReaderScrollbar(
                 .padding(top = thumbOffsetDp)
                 .height(thumbHeightDp)
                 .padding(horizontal = if (isDragging) 9.dp else 11.dp)
-                .background(Color.White.copy(alpha = thumbAlpha), RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = thumbAlpha), RoundedCornerShape(3.dp))
         )
     }
 }

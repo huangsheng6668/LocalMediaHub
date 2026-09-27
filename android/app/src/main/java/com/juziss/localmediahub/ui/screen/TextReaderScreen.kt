@@ -52,7 +52,6 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -68,6 +67,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -652,6 +652,10 @@ fun TextReaderScreen(
                 topBar = {
                     AnimatedVisibility(visible = chromeVisible, enter = fadeIn(), exit = fadeOut()) {
                         TopAppBar(
+                            // Ink Editorial：幽灵 chrome —— 栏色 = 阅读底色，无阴影。
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background,
+                            ),
                             title = { Text(book?.chapters?.getOrNull(idx)?.title ?: book?.title ?: "") },
                             navigationIcon = {
                                 IconButton(onClick = onBack) {
@@ -682,9 +686,11 @@ fun TextReaderScreen(
                             LinearProgressIndicator(
                                 progress = { if (isScrollMode) overallPercent / 100f else chapterPercent / 100f },
                                 modifier = Modifier.fillMaxWidth().height(3.dp),
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.secondary,
                             )
-                            BottomAppBar {
+                            BottomAppBar(
+                                containerColor = MaterialTheme.colorScheme.background,
+                            ) {
                                 if (isScrollMode) {
                                     Text(
                                         stringResource(
@@ -707,7 +713,11 @@ fun TextReaderScreen(
                                     )
                                     Spacer(Modifier.weight(1f))
                                     TextButton(onClick = { turn(PageTurnDirection.PREV) }) { Text(stringResource(R.string.reader_prev_chapter)) }
-                                    TextButton(onClick = { turn(PageTurnDirection.NEXT) }) { Text(stringResource(R.string.reader_next_chapter)) }
+                                    // Ink Editorial：下一章 = 墨黑胶囊主操作（primary）。
+                                    Button(
+                                        onClick = { turn(PageTurnDirection.NEXT) },
+                                        shape = RoundedCornerShape(50),
+                                    ) { Text(stringResource(R.string.reader_next_chapter)) }
                                 }
                             }
                         }
@@ -815,7 +825,7 @@ fun TextReaderScreen(
                             )
                         }
                 ) {
-                    // 沉浸模式下底部微光进度条
+                    // 沉浸模式下底部微光进度条（苔绿）
                     if (!chromeVisible) {
                         LinearProgressIndicator(
                             progress = { if (isScrollMode) overallPercent / 100f else chapterPercent / 100f },
@@ -823,7 +833,7 @@ fun TextReaderScreen(
                                 .fillMaxWidth()
                                 .height(2.dp)
                                 .align(Alignment.BottomCenter),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f),
                             trackColor = Color.Transparent,
                         )
                     }
@@ -1094,7 +1104,7 @@ private fun ChapterModeContent(
             Text(
                 text = chapterTitle,
                 style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Normal,
                     fontSize = (settings.fontSizeSp + 6).sp,
                     fontFamily = FontFamily.Serif,
                     textAlign = TextAlign.Center,
@@ -1104,14 +1114,7 @@ private fun ChapterModeContent(
                     .fillMaxWidth()
                     .padding(top = 32.dp, bottom = 24.dp),
             )
-            HorizontalDivider(
-                modifier = Modifier
-                    .width(40.dp)
-                    .padding(bottom = 16.dp),
-                color = MaterialTheme.colorScheme.outline,
-            )
         }
-
         itemsIndexed(
             items = blocks,
             key = { blockIdx, _ -> "ch_${idx}_$blockIdx" },
@@ -1171,7 +1174,7 @@ private fun ScrollModeContent(
                 Text(
                     text = chapter.title,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Normal,
                         fontSize = (settings.fontSizeSp + 6).sp,
                         fontFamily = FontFamily.Serif,
                         textAlign = TextAlign.Center,
@@ -1180,12 +1183,6 @@ private fun ScrollModeContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 32.dp, bottom = 24.dp),
-                )
-                HorizontalDivider(
-                    modifier = Modifier
-                        .width(40.dp)
-                        .padding(bottom = 16.dp),
-                    color = MaterialTheme.colorScheme.outline,
                 )
             }
 
@@ -1425,7 +1422,7 @@ private fun StaticChapterOverlay(
         Text(
             text = chapterTitle,
             style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Normal,
                 fontSize = (settings.fontSizeSp + 6).sp,
                 fontFamily = FontFamily.Serif,
                 textAlign = TextAlign.Center,
@@ -1434,12 +1431,6 @@ private fun StaticChapterOverlay(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 32.dp, bottom = 24.dp),
-        )
-        HorizontalDivider(
-            modifier = Modifier
-                .width(40.dp)
-                .padding(bottom = 16.dp),
-            color = MaterialTheme.colorScheme.outline,
         )
 
         // 内容块（仅文本；图片在动画期间跳过）
