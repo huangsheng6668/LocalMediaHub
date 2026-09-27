@@ -74,3 +74,6 @@ localmediahub.keystore.unrecoverable.bak
 
 # Mimosa session state (scan hook artifacts, not source)
 .mimosa/
+
+# Superdesign temp component templates
+.superdesign/tmp/

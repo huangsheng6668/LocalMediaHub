@@ -3,6 +3,7 @@
 export const elements = {
     menuDashboard: document.getElementById('menu-dashboard'),
     menuBrowser: document.getElementById('menu-browser'),
+    menuBookshelf: document.getElementById('menu-bookshelf'),
     menuBookmarks: document.getElementById('menu-bookmarks'),
     menuSettings: document.getElementById('menu-settings'),
 

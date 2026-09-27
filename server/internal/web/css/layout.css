@@ -2,7 +2,7 @@
 /* App Layout Grid */
 .app-container {
     display: grid;
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: 220px 1fr;
     height: 100vh;
     width: 100vw;
 }
@@ -17,43 +17,28 @@
     justify-content: space-between;
 }
 
+/* Ink Editorial（spec 2026-09-27 §3.3）：品牌区 = serif 字标 + muted 副标，
+   去掉旧 monogram 徽章与版本 chip。 */
 .sidebar-brand {
     display: flex;
-    align-items: center;
-    gap: var(--space-3);
+    flex-direction: column;
+    gap: 6px;
     padding: var(--space-2) var(--space-3) var(--space-5);
-    border-bottom: 1px solid var(--border-subtle);
 }
 
-.brand-monogram {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    background: var(--accent);
-    color: var(--text-on-accent);
-    font-weight: 700;
-    font-size: 12px;
-    letter-spacing: 0.5px;
-    border-radius: var(--radius-sm);
-}
-
-.brand-name {
-    font-size: 16px;
-    font-weight: 600;
+.brand-wordmark {
+    font-family: var(--font-display);
+    font-size: 21px;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.01em;
     color: var(--text-primary);
-    letter-spacing: -0.3px;
 }
 
-.brand-version {
+.brand-subtitle {
     font-size: 11px;
-    background: var(--surface-card);
-    color: var(--text-muted);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-subtle);
     font-weight: 500;
+    color: var(--text-muted);
 }
 
 .sidebar-menu {
@@ -75,17 +60,18 @@
     font-weight: 500;
     font-size: 14px;
     border-radius: var(--radius-md);
-    transition: all .15s ease;
+    transition: color .15s ease;
 }
 
 .menu-item:hover {
     color: var(--text-primary);
-    background-color: var(--surface-hover);
 }
 
+/* Ink Editorial：活动项 = ink 文字 + 2px 墨色左条，无底色填充。 */
 .menu-item.active {
-    color: var(--accent-text);
-    background-color: var(--accent-soft);
+    color: var(--text-primary);
+    font-weight: 600;
+    background-color: transparent;
 }
 
 .menu-item.active::before {
@@ -94,9 +80,9 @@
     left: 0;
     top: 8px;
     bottom: 8px;
-    width: 3px;
-    border-radius: 0 2px 2px 0;
-    background: var(--accent);
+    width: 2px;
+    border-radius: 0 1px 1px 0;
+    background: var(--action-ink);
 }
 
 .menu-icon {
@@ -120,8 +106,8 @@
     padding: 6px 12px;
     font-size: 13px;
     color: var(--text-secondary);
-    background: var(--surface-card);
-    border: 1px solid var(--border-subtle);
+    background: transparent;
+    border: none;
     border-radius: 999px;
 }
 
@@ -132,8 +118,8 @@
 }
 
 .status-indicator.online {
-    background-color: #4F8A6B;
-    box-shadow: 0 0 0 3px rgba(79, 138, 107, 0.2);
+    background-color: var(--secondary);
+    box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* Main Content Area */
@@ -157,10 +143,11 @@
 }
 
 .main-header h1 {
-    font-size: 18px;
-    font-weight: 600;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 400;
     color: var(--text-primary);
-    letter-spacing: -0.3px;
+    letter-spacing: -0.01em;
 }
 
 .view-container {

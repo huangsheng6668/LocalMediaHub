@@ -1,105 +1,116 @@
-/* from style.css L19-207 (core design tokens + data-theme palettes) */
-/* ── Modern-neutral chrome palettes — see spec §设计语言 ── */
+/* ── Slate Ink & Paper chrome palettes — Ink Editorial redesign, spec
+   2026-09-27 §3.1 (docs/superpowers/specs/2026-09-27-ink-editorial-redesign-design.md)。
+   语义分工：--accent = 苔绿（焦点/进度/在读状态），--action-ink = 墨黑主操作
+   （主按钮/活动导航条/滑块 thumb；暗色主题反转）。 */
 :root,
 [data-theme="day"] {
     color-scheme: light;
-    --surface-app:     #FAFAFA;
+    --surface-app:     #F7F7F5;
     --surface-card:    #FFFFFF;
-    --surface-sidebar: #F4F4F5;
-    --surface-hover:   rgba(94, 106, 210, 0.08);
-    --text-primary:    #17181C;
-    --text-secondary:  #52525B;
-    --text-muted:      #8A8A93;
+    --surface-sidebar: #F1F1EE;
+    --surface-hover:   rgba(15, 23, 42, 0.06);
+    --text-primary:    #0F172A;
+    --text-secondary:  #52575E;
+    --text-muted:      #8A8F98;
     --text-on-accent:  #FFFFFF;
-    --accent:          #5E6AD2;
-    --accent-hover:    #4E59C9;
-    --accent-soft:     rgba(94, 106, 210, 0.12);
-    --accent-text:     #4348B8;
-    --border-soft:     #EDEDF0;
-    --border-subtle:   #E4E4E7;
-    --shadow-sm:       0 1px 2px rgba(23, 24, 28, 0.05);
-    --shadow-md:       0 4px 12px rgba(23, 24, 28, 0.08), 0 2px 4px rgba(23, 24, 28, 0.05);
+    --accent:          #3D6B4F;
+    --accent-hover:    #2F5640;
+    --accent-soft:     rgba(61, 107, 79, 0.10);
+    --accent-text:     #2F5640;
+    --action-ink:      #0A0A0A;
+    --action-ink-hover:#26282E;
+    --border-soft:     #EFEDE8;
+    --border-subtle:   #E5E4DF;
+    --shadow-sm:       0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md:       0 4px 12px rgba(15, 23, 42, 0.06), 0 2px 4px rgba(15, 23, 42, 0.04);
     --radius-sm: 6px;  --radius-md: 10px; --radius-lg: 14px;
     --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
     --space-5: 24px; --space-6: 32px;
-    --error: #DC2626;  --secondary: #16A34A;
+    --error: #DC2626;  --secondary: #3D6B4F;
+    --font-display: "Noto Serif SC", "Songti SC", serif;
     --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
 [data-theme="day_bright"] {
     color-scheme: light;
-    --surface-app: #FFFFFF; --surface-card: #FFFFFF; --surface-sidebar: #F8FAFC;
-    --surface-hover: rgba(37, 99, 235, 0.08);
-    --text-primary: #0F172A; --text-secondary: #475569; --text-muted: #94A3B8;
+    --surface-app: #FFFFFF; --surface-card: #FFFFFF; --surface-sidebar: #F7F7F4;
+    --surface-hover: rgba(15, 23, 42, 0.05);
+    --text-primary: #0F172A; --text-secondary: #52575E; --text-muted: #8A8F98;
     --text-on-accent: #FFFFFF;
-    --accent: #2563EB; --accent-hover: #1D4ED8;
-    --accent-soft: rgba(37, 99, 235, 0.12); --accent-text: #1E40AF;
-    --border-soft: #EDF2F7; --border-subtle: #E2E8F0;
-    --error: #DC2626; --secondary: #16A34A;
+    --accent: #3D6B4F; --accent-hover: #2F5640;
+    --accent-soft: rgba(61, 107, 79, 0.10); --accent-text: #2F5640;
+    --action-ink: #0A0A0A; --action-ink-hover: #26282E;
+    --border-soft: #F0F0EC; --border-subtle: #E7E7E2;
+    --error: #DC2626; --secondary: #3D6B4F;
 }
 
 [data-theme="eye_care"] {
     color-scheme: light;
-    --surface-app: #F7F1E3; --surface-card: #FCF8EE; --surface-sidebar: #EFE7D2;
-    --surface-hover: rgba(160, 113, 60, 0.10);
-    --text-primary: #3F3A2F; --text-secondary: #6B6353; --text-muted: #8F866F;
+    --surface-app: #F5F1E6; --surface-card: #FBF8F0; --surface-sidebar: #EFE9DA;
+    --surface-hover: rgba(74, 64, 52, 0.08);
+    --text-primary: #3B3428; --text-secondary: #5E5442; --text-muted: #8F8470;
     --text-on-accent: #FFFFFF;
-    --accent: #A0713C; --accent-hover: #8A5F30;
-    --accent-soft: rgba(160, 113, 60, 0.14); --accent-text: #7C5527;
-    --border-soft: #EAE1CD; --border-subtle: #E3D9C2;
-    --error: #C0392B; --secondary: #4F7D3A;
+    --accent: #4A6B52; --accent-hover: #3C5843;
+    --accent-soft: rgba(74, 107, 82, 0.12); --accent-text: #3C5843;
+    --action-ink: #26211A; --action-ink-hover: #3B3428;
+    --border-soft: #EAE3D2; --border-subtle: #E2D9C4;
+    --error: #C0392B; --secondary: #4A6B52;
 }
 
 [data-theme="eye_care_green"] {
     color-scheme: light;
-    --surface-app: #EAF0E6; --surface-card: #F4F8F1; --surface-sidebar: #DFE8DA;
-    --surface-hover: rgba(79, 125, 93, 0.10);
-    --text-primary: #253326; --text-secondary: #4A5B4C; --text-muted: #6E7F70;
+    --surface-app: #DDE6DA; --surface-card: #EDF2EA; --surface-sidebar: #D2DECF;
+    --surface-hover: rgba(30, 42, 32, 0.08);
+    --text-primary: #1E2A20; --text-secondary: #3E4C40; --text-muted: #66756A;
     --text-on-accent: #FFFFFF;
-    --accent: #4F7D5D; --accent-hover: #40684C;
-    --accent-soft: rgba(79, 125, 93, 0.14); --accent-text: #3A5C46;
-    --border-soft: #DAE3D6; --border-subtle: #D3DFD0;
-    --error: #C0392B; --secondary: #16A34A;
+    --accent: #33593C; --accent-hover: #2A4831;
+    --accent-soft: rgba(51, 89, 60, 0.12); --accent-text: #2A4831;
+    --action-ink: #17211A; --action-ink-hover: #242E26;
+    --border-soft: #D2DECF; --border-subtle: #C6D4C2;
+    --error: #C0392B; --secondary: #33593C;
 }
 
 [data-theme="parchment"] {
     color-scheme: light;
-    --surface-app: #F3EBD9; --surface-card: #FAF4E6; --surface-sidebar: #EBE1C8;
-    --surface-hover: rgba(156, 107, 47, 0.10);
-    --text-primary: #443C2C; --text-secondary: #6E6450; --text-muted: #948A74;
+    --surface-app: #EFE8D5; --surface-card: #F7F1E2; --surface-sidebar: #E7DEC7;
+    --surface-hover: rgba(61, 51, 39, 0.08);
+    --text-primary: #3D3327; --text-secondary: #5C5040; --text-muted: #8C7E66;
     --text-on-accent: #FFFFFF;
-    --accent: #9C6B2F; --accent-hover: #83571F;
-    --accent-soft: rgba(156, 107, 47, 0.14); --accent-text: #77531F;
-    --border-soft: #E7DCC4; --border-subtle: #E0D4B8;
-    --error: #C0392B; --secondary: #4F7D3A;
+    --accent: #4E6B44; --accent-hover: #3F5837;
+    --accent-soft: rgba(78, 107, 68, 0.12); --accent-text: #3F5837;
+    --action-ink: #241D14; --action-ink-hover: #38301F;
+    --border-soft: #E4DAC3; --border-subtle: #DCD0B5;
+    --error: #C0392B; --secondary: #4E6B44;
 }
 
 [data-theme="night"] {
     color-scheme: dark;
-    --surface-app: #141517; --surface-card: #1D1F23; --surface-sidebar: #101113;
-    --surface-hover: rgba(123, 135, 232, 0.12);
-    --text-primary: #E8E9ED; --text-secondary: #A6A8B0; --text-muted: #7C7E87;
-    --text-on-accent: #FFFFFF;
-    --accent: #7B87E8; --accent-hover: #8C97EE;
-    --accent-soft: rgba(123, 135, 232, 0.16); --accent-text: #A3ACEF;
-    --border-soft: #24262C; --border-subtle: #2A2C33;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.4);
-    --error: #F87171; --secondary: #4ADE80;
+    --surface-app: #0C0D10; --surface-card: #15161A; --surface-sidebar: #0F1013;
+    --surface-hover: rgba(143, 191, 159, 0.10);
+    --text-primary: #E7E9EE; --text-secondary: #9BA1AC; --text-muted: #74787F;
+    --text-on-accent: #0F172A;
+    --accent: #8FBF9F; --accent-hover: #A3CDAF;
+    --accent-soft: rgba(143, 191, 159, 0.14); --accent-text: #A3CDAF;
+    --action-ink: #E7E9EE; --action-ink-hover: #FFFFFF;
+    --border-soft: #1F2128; --border-subtle: #22242B;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55), 0 2px 4px rgba(0, 0, 0, 0.45);
+    --error: #F87171; --secondary: #8FBF9F;
 }
 
 [data-theme="night_black"] {
     color-scheme: dark;
     --surface-app: #000000; --surface-card: #101114; --surface-sidebar: #0A0B0D;
-    --surface-hover: rgba(123, 135, 232, 0.14);
-    --text-primary: #E8E9ED; --text-secondary: #A6A8B0; --text-muted: #7C7E87;
-    --text-on-accent: #FFFFFF;
-    --accent: #7B87E8; --accent-hover: #8C97EE;
-    --accent-soft: rgba(123, 135, 232, 0.18); --accent-text: #A3ACEF;
-    --border-soft: #22242A; --border-subtle: #26282E;
+    --surface-hover: rgba(143, 191, 159, 0.12);
+    --text-primary: #E7E9EE; --text-secondary: #9BA1AC; --text-muted: #74787F;
+    --text-on-accent: #0F172A;
+    --accent: #8FBF9F; --accent-hover: #A3CDAF;
+    --accent-soft: rgba(143, 191, 159, 0.16); --accent-text: #A3CDAF;
+    --action-ink: #E7E9EE; --action-ink-hover: #FFFFFF;
+    --border-soft: #1C1E24; --border-subtle: #202228;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.7), 0 2px 4px rgba(0, 0, 0, 0.5);
-    --error: #F87171; --secondary: #4ADE80;
+    --error: #F87171; --secondary: #8FBF9F;
 }
 
 /* from style.css L2821-2836 (body[data-reader-theme] app-variable overrides) */

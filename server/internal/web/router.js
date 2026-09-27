@@ -30,7 +30,7 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
     [elements.viewDashboard, elements.viewBrowser, elements.viewBookmarks, elements.viewSettings, elements.viewReader].forEach(v => {
         if (v) v.classList.remove('active');
     });
-    [elements.menuDashboard, elements.menuBrowser, elements.menuBookmarks, elements.menuSettings].forEach(m => {
+    [elements.menuDashboard, elements.menuBrowser, elements.menuBookshelf, elements.menuBookmarks, elements.menuSettings].forEach(m => {
         if (m) m.classList.remove('active');
     });
 
@@ -96,6 +96,7 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
         // #view-reader section that #/read uses.
         state.activeTab = 'bookshelf';
         if (elements.pageTitle) elements.pageTitle.textContent = '书架';
+        if (elements.menuBookshelf) elements.menuBookshelf.classList.add('active');
         if (elements.viewReader) {
             elements.viewReader.classList.add('active');
             renderBookshelf(elements.viewReader);

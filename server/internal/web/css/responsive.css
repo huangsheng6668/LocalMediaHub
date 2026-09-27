@@ -7,7 +7,7 @@
         display: flex;
     }
     .app-container {
-        grid-template-columns: 1fr; /* 移除 260px 固定列，全宽 */
+        grid-template-columns: 1fr; /* 移除 220px 固定列，全宽 */
     }
     .sidebar {
         position: fixed;
@@ -17,7 +17,7 @@
         transform: translateX(-100%);
         transition: transform 0.25s ease;
         z-index: 60; /* backdrop(50) < sidebar(60) < modals(100) */
-        width: 260px; /* 保持与桌面端一致的宽度 */
+        width: 220px; /* 保持与桌面端一致的宽度 */
     }
     .sidebar.open {
         transform: translateX(0);
