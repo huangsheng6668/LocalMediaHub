@@ -32,7 +32,7 @@
 **Interfaces:**
 - Produces: `--action-ink` / `--action-ink-hover` CSS 变量（后续任务全部主操作控件消费）
 
-- [ ] **Step 1: themes.css 重调 7 预设**
+- [x] **Step 1: themes.css 重调 7 预设**
 
 `themes.css` 顶部注释改为 `/* ── Slate Ink & Paper chrome palettes — spec 2026-09-27 §3.1 ── */`。整块替换内容：
 
@@ -151,7 +151,7 @@
 
 （保留文件底部 `body[data-reader-theme]` 覆盖块不动。）
 
-- [ ] **Step 2: layout.css 侧栏改版**
+- [x] **Step 2: layout.css 侧栏改版**
 
 - `.app-container` grid 列 `260px` → `220px`
 - `.sidebar-brand`：去 `border-bottom`，改 `padding: var(--space-2) var(--space-3) var(--space-5)`；内部结构对应新 markup
@@ -179,7 +179,7 @@
 - `.server-status`：`background: var(--surface-card)` → `background: transparent`；去 border（`border: none`）
 - `.main-header h1`：加 `font-family: var(--font-display); font-weight: 400; font-size: 20px;`
 
-- [ ] **Step 3: components.css 主按钮换 ink**
+- [x] **Step 3: components.css 主按钮换 ink**
 
 ```css
 .btn-primary {
@@ -193,7 +193,7 @@
 
 （`.btn` 基类 `border-radius: var(--radius-sm)` 不动，仅 primary 覆盖为胶囊。）
 
-- [ ] **Step 4: index.html sidebar markup**
+- [x] **Step 4: index.html sidebar markup**
 
 `.sidebar-brand` 内部替换为：
 
@@ -218,12 +218,12 @@
 </a>
 ```
 
-- [ ] **Step 5: router.js 激活书架菜单**
+- [x] **Step 5: router.js 激活书架菜单**
 
 - 顶部 de-activate 数组加 `elements.menuBookshelf`（需同步在 app.js 的 elements 绑定加 `menuBookshelf: document.getElementById('menu-bookshelf')`——先 grep app.js 的 elements 构造位置再插入同款行）
 - `#/bookshelf` 分支加：`if (elements.menuBookshelf) elements.menuBookshelf.classList.add('active');`
 
-- [ ] **Step 6: 测试 + xsscheck + commit**
+- [x] **Step 6: 测试 + xsscheck + commit**
 
 ```bash
 cd server/internal/web && node --test
@@ -245,7 +245,7 @@ git add -A && git commit -m "feat(web): slate-ink chrome tokens and editorial si
 - Consumes: Task 1 的 `--action-ink` 族
 - Produces: 新 reader 主题 hex（Task 4 Android 对称消费）
 
-- [ ] **Step 1: 先改测试（TDD）**
+- [x] **Step 1: 先改测试（TDD）**
 
 `textReader-theme.test.mjs` 第二个测试断言改为：
 
@@ -254,14 +254,14 @@ assert.equal(root.style.getPropertyValue('--reader-bg'), '#F6F4EE'); // DAY.bg
 assert.equal(root.style.getPropertyValue('--reader-fg'), '#26282E'); // DAY.fg
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd server/internal/web && node --test textReader-theme.test.mjs
 ```
 Expected: FAIL（DAY.bg 仍为 #FAF8F3）
 
-- [ ] **Step 3: readerPrefs.js THEME_PRESETS + 默认值**
+- [x] **Step 3: readerPrefs.js THEME_PRESETS + 默认值**
 
 ```js
 export const THEME_PRESETS = {
@@ -278,14 +278,14 @@ export const THEME_PRESETS = {
 
 `DEFAULT_SETTINGS`: `fontSize: 16` → `17`；`lineHeight: 1.8` → `1.9`。（其余字段与迁移函数不动。）
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 cd server/internal/web && node --test
 ```
 Expected: 全部 PASS
 
-- [ ] **Step 5: reader.css 幽灵 chrome 改版**
+- [x] **Step 5: reader.css 幽灵 chrome 改版**
 
 关键规则替换（保持既有选择器名，全部为值级修改）：
 
@@ -363,11 +363,11 @@ Expected: 全部 PASS
 
 （AUTO/CUSTOM 渐变 swatch 保持。reader-content 首字下沉已是 serif 不动。）
 
-- [ ] **Step 6: textReader.js skeleton 微调**
+- [x] **Step 6: textReader.js skeleton 微调**
 
 skeleton 中下一章按钮：`<button class="text-reader__next" type="button">下一章</button>` → `<button class="text-reader__next text-reader__next--primary" type="button">下一章</button>`（仅加类，逻辑零改动）。
 
-- [ ] **Step 7: 全量测试 + commit**
+- [x] **Step 7: 全量测试 + commit**
 
 ```bash
 cd server/internal/web && node --test
@@ -386,7 +386,7 @@ git add -A && git commit -m "feat(reader): ink editorial reader chrome and retun
 **Interfaces:**
 - Consumes: Task 1 tokens（--action-ink/--font-display/hairline）
 
-- [ ] **Step 1: dashboard.css**
+- [x] **Step 1: dashboard.css**
 
 - `.stats-grid`：去卡片化——`grid-template-columns: repeat(3, 1fr)` 保留，加 `border-top: 1px solid var(--border-subtle)` 顶部分隔可省；`.stat-card` 去边框/阴影/背景（`background: transparent; border: none; box-shadow: none; padding: 0`），相邻列间 `border-left: 1px solid var(--border-soft)` + 左 padding
 - `.stat-card__value`：`font-family: var(--font-display); font-size: 40px; font-weight: 400; line-height: 1;`
@@ -394,7 +394,7 @@ git add -A && git commit -m "feat(reader): ink editorial reader chrome and retun
 - `.widget-card`：`border-radius: 12px`；`h2` 不变
 - 新增继续阅读条样式（`.dashboard-bookshelf` 已有容器，补充 `.book-continue-card` 行内布局：书封块 `font-family: var(--font-display)` + 2px 苔绿进度线 + 11px muted 元信息，卡片 hairline hover ink）——若 bookshelf.js 现有 class 已固定，则按其 DOM 覆写样式（先读 bookshelf.js 渲染的 class 名再写规则，勿改 JS）
 
-- [ ] **Step 2: browser.css**
+- [x] **Step 2: browser.css**
 
 - `.filter-chip`：`border-radius: 9999px; padding: 6px 14px;`
 - `.filter-chip[data-active="true"], .filter-chip.active`（按现有选择器）：active = `background: var(--action-ink); color: var(--text-on-accent); border-color: var(--action-ink)`（替换原 accent-soft 填充）
@@ -402,13 +402,13 @@ git add -A && git commit -m "feat(reader): ink editorial reader chrome and retun
 - 文本卡书名区：加 `font-family: var(--font-display)`（对 text 卡标题 class；先读 browserView.js 实际 class）
 - 阅读状态 chip：`background: var(--accent-soft); color: var(--accent-text);`（已是 accent 语义，自动换苔绿，确认无硬编码旧 hex）
 
-- [ ] **Step 3: bookshelf.css**
+- [x] **Step 3: bookshelf.css**
 
 - 书卡：hairline 12px、hover ink；书名 `font-family: var(--font-display)`
 - 进度线：`height: 2px; background: var(--accent);`（细线）
 - 状态 chip：在读 = `var(--accent-soft)/var(--accent-text)`；已读完 = hairline；未读 = muted（按 bookshelf.js 现有 class 覆写）
 
-- [ ] **Step 4: 测试 + commit**
+- [x] **Step 4: 测试 + commit**
 
 ```bash
 cd server/internal/web && node --test
@@ -430,7 +430,7 @@ git add -A && git commit -m "feat(web): dashboard browser bookshelf ink editoria
 - Consumes: Task 2 的 reader hex（逐字对称）
 - Produces: 新 Material3 scheme（Task 5 消费）
 
-- [ ] **Step 1: 先改 ThemeColorSchemeTest 断言（TDD）**
+- [x] **Step 1: 先改 ThemeColorSchemeTest 断言（TDD）**
 
 ```kotlin
 @Test
@@ -467,14 +467,14 @@ fun eye_care_theme_keeps_own_primary_but_gets_outline_soft() {
 }
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 cd android && ./gradlew testDebugUnitTest --tests "com.juziss.localmediahub.ui.theme.ThemeColorSchemeTest"
 ```
 Expected: FAIL
 
-- [ ] **Step 3: Theme.kt 六 scheme 重调**
+- [x] **Step 3: Theme.kt 六 scheme 重调**
 
 ```kotlin
 private val DarkColorScheme = darkColorScheme(
@@ -510,7 +510,7 @@ private val LightColorScheme = lightColorScheme(
 //   onSurface #E7E9EE, onSurfaceVariant #9BA1AC, outline #202228
 ```
 
-- [ ] **Step 4: ColorTokens.kt**
+- [x] **Step 4: ColorTokens.kt**
 
 ```kotlin
 object OutlineSoft {
@@ -531,11 +531,11 @@ object PrimaryText {
 }
 ```
 
-- [ ] **Step 5: ReaderSettings.kt 对称**
+- [x] **Step 5: ReaderSettings.kt 对称**
 
 ReaderTheme 七预设 hex 逐字替换为 Task 2 THEME_PRESETS 新值（如 `DAY(bg=Color(0xFFF6F4EE), fg=Color(0xFF26282E), chromeBg=Color(0xFFEDEBE3), chromeFg=Color(0xFF3A3C44), muted=Color(0xFF83858C), border=Color(0xFFE0DDD2))`；label 不变）；`ReaderSettings` 默认 `fontSizeSp = 17`、`lineHeightMultiplier = 1.9f`。
 
-- [ ] **Step 6: 跑 Android 测试 + commit**
+- [x] **Step 6: 跑 Android 测试 + commit**
 
 ```bash
 cd android && ./gradlew testDebugUnitTest
@@ -554,24 +554,24 @@ git add -A && git commit -m "feat(android): slate-ink material schemes and reade
 **Interfaces:**
 - Consumes: Task 4 scheme（MaterialTheme.colorScheme.primary 现为 ink 系）
 
-- [ ] **Step 1: TextReaderScreen**
+- [x] **Step 1: TextReaderScreen**
 
 - TopAppBar：`colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.85f))`（幽灵近似：无 elevation）；BottomAppBar 同理 `containerColor = …background.copy(alpha = 0.9f)`
 - LinearProgressIndicator（顶/底两处）：`color = MaterialTheme.colorScheme.secondary`（苔绿）、`trackColor = Color.Transparent`
 - 章模式底栏：`上一章` 保持 TextButton（`color = MaterialTheme.colorScheme.onSurfaceVariant`）；`下一章` 改 `Button(shape = RoundedCornerShape(50))`（ink 填充，默认 colors 即 primary=ink）
 - 章节标题 `HorizontalDivider`（40dp 装饰线）：删除该 composable 调用（spec：去装饰线，留白替代）
 
-- [ ] **Step 2: ReaderScrollbar.kt**
+- [x] **Step 2: ReaderScrollbar.kt**
 
 thumb 颜色 → `MaterialTheme.colorScheme.primary`（ink）；填充段 → `secondary`（苔绿）；track → `surfaceVariant`。（先读文件确认现有 Color 引用名再替换。）
 
-- [ ] **Step 3: BookshelfScreen.kt**
+- [x] **Step 3: BookshelfScreen.kt**
 
 - 筛选 chip：选中项 `FilterChip`/现有控件颜色 → `selectedContainerColor = MaterialTheme.colorScheme.primary, labelColor = onPrimary`（ink 胶囊）；未选中 hairline（按现有实现调 colors 参数）
 - 进度条若有：`color = secondary`、高度 2dp
 - 书名 Text 加 `fontFamily = FontFamily.Serif`
 
-- [ ] **Step 4: 测试 + commit**
+- [x] **Step 4: 测试 + commit**
 
 ```bash
 cd android && ./gradlew testDebugUnitTest
@@ -586,8 +586,8 @@ git add -A && git commit -m "feat(android): reader and bookshelf ink editorial c
 - Modify: `AGENTS.md`（Web 管理界面节：设计语言措辞 modern-neutral → Slate Ink & Paper / Ink Editorial）
 - Modify: `.superdesign/design-system.md`（Part B 标注"已实施 2026-09-27"）
 
-- [ ] **Step 1: 更新 AGENTS.md 中「2026-09 现代中性风重设计」相关句子为 Ink Editorial（2026-09-27，spec 链接），并注明 reader 主题 hex 已按新 spec 重调、双端对称约定不变**
-- [ ] **Step 2: commit**
+- [x] **Step 1: 更新 AGENTS.md 中「2026-09 现代中性风重设计」相关句子为 Ink Editorial（2026-09-27，spec 链接），并注明 reader 主题 hex 已按新 spec 重调、双端对称约定不变**
+- [x] **Step 2: commit**
 
 ```bash
 git add AGENTS.md .superdesign/design-system.md docs/

@@ -42,7 +42,7 @@ Top bar: bordered 36px "←" square + "章节名 — 书名" (15px/600) + right-
 
 ---
 
-# PART B — NEW visual language (redesign target, user-approved direction)
+# PART B — NEW visual language (user-approved 2026-09-27; IMPLEMENTED 2026-09-27, commits 6e4d180..343a2b1)
 
 Seeded by the **Serene / Minimalist Editorial** style (superdesign slug `serene-find-my-dream`), adapted from a landing-page hero language into a **product UI language for a reading-first media hub**.
 

@@ -68,7 +68,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 服务端内置 SPA，浏览器访问 server 地址（如 `http://localhost:8000`）即可。
 
 - **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js` / `library.js`（阅读状态与跨媒体收藏：筛选矩阵/徽章/DOM装饰/双向同步） / `readingTimer.js`（纯逻辑阅读计时器：textReader 活跃秒数累积，随 progress 上报 `read_seconds_delta` + 30s 心跳） / `scrollMemory.js`（双键 session 滚动记忆）
-- **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09 现代中性风重设计（spec `docs/superpowers/specs/2026-09-02-web-ui-redesign-design.md`）：7 套 `[data-theme]` chrome 主题（与阅读区主题独立分离），emoji 图标全部替换为内联 SVG
+- **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09-27 Ink Editorial 重设计（Slate Ink & Paper，spec `docs/superpowers/specs/2026-09-27-ink-editorial-redesign-design.md`，前身 2026-09-02 现代中性风）：7 套 `[data-theme]` chrome 主题重调为暖灰纸面 + 墨黑主操作（`--action-ink`）+ 苔绿 accent（`--accent`），阅读器 chrome 幽灵化（半透明 + backdrop-blur），阅读主题 hex 双端对称重调；emoji 图标全部为内联 SVG
 - **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
 - **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行）+ 子模块
   - `bus.js`（事件总线 on/emit/off/EVT，零依赖）
