@@ -14,12 +14,12 @@ val LocalOutlineSoft = staticCompositionLocalOf<Color?> { null }
 
 /** Theme 入口处用此函数 Provide 各主题的 outline-soft 值。 */
 object OutlineSoft {
-    val Light: Color = Color(0xFFE2D9C6)
-    val Dark: Color = Color(0xFF332B24)
-    val EyeCare: Color = Color(0xFFD9C8B2)
-    val EyeCareGreen: Color = Color(0xFF9BB098)
-    val Parchment: Color = Color(0xFFD6CBAE)
-    val NightBlack: Color = Color(0xFF222222)
+    val Light: Color = Color(0xFFE5E4DF)
+    val Dark: Color = Color(0xFF22242B)
+    val EyeCare: Color = Color(0xFFE2D9C4)
+    val EyeCareGreen: Color = Color(0xFFC6D4C2)
+    val Parchment: Color = Color(0xFFDCD0B5)
+    val NightBlack: Color = Color(0xFF1C1E24)
 }
 
 /** 在 Theme 入口处包裹 content 以注入 outline-soft 值。 */
@@ -44,12 +44,12 @@ fun outlineSoftColor(): Color =
 val LocalPrimaryText = staticCompositionLocalOf<Color?> { null }
 
 object PrimaryText {
-    val Light: Color = Color(0xFF965410)
-    val Dark: Color = Color(0xFFF2A878)        // 与 Web --accent-text 对齐
-    val EyeCare: Color = Color(0xFF6B4A2A)      // 棕系深化，AA on #F5EBDC
-    val EyeCareGreen: Color = Color(0xFF1F3A23) // 深绿，AA on #B9C7B6
-    val Parchment: Color = Color(0xFF4A3520)    // 深棕，AA on #F4ECD8
-    val NightBlack: Color = Color(0xFFE0E0E0)   // 暗色高对比白
+    val Light: Color = Color(0xFF2F5640)      // moss 深化，AA on 暖灰纸面
+    val Dark: Color = Color(0xFFA3CDAF)        // 与 Web --accent-text 对齐
+    val EyeCare: Color = Color(0xFF3C5843)     // moss 深化，AA on #F5F1E6
+    val EyeCareGreen: Color = Color(0xFF2A4831) // 深绿，AA on #DDE6DA
+    val Parchment: Color = Color(0xFF3F5837)    // 深绿，AA on #EFE8D5
+    val NightBlack: Color = Color(0xFFE7E9EE)   // 暗色高对比白
 }
 
 /** 在 Theme 入口处包裹 content 以注入 primary-text 值。 */

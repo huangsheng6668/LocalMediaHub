@@ -28,35 +28,37 @@ class ThemeColorSchemeTest {
     }
 
     @Test
-    fun day_theme_uses_terracotta_primary() {
+    fun day_theme_uses_ink_primary_and_paper_bg() {
+        // Ink Editorial（spec 2026-09-27 §3.1）：primary = 墨黑主操作，
+        // secondary = 苔绿，背景 = 暖灰纸面。
         val s = schemeFor("DAY")
-        assertEquals(Color(0xFFB96D1D), s.primary)
-        assertEquals(Color(0xFF3E7A7E), s.secondary)
-        assertEquals(Color(0xFFF4EEE2), s.background)
-        assertEquals(Color(0xFFFBF6EC), s.surface)
-        assertEquals(Color(0xFFFBEBD8), s.primaryContainer)
-        assertEquals(Color(0xFFD6EFF0), s.secondaryContainer)
+        assertEquals(Color(0xFF26282E), s.primary)
+        assertEquals(Color(0xFF3D6B4F), s.secondary)
+        assertEquals(Color(0xFFF7F7F5), s.background)
+        assertEquals(Color(0xFFFFFFFF), s.surface)
+        assertEquals(Color(0xFFE9E9E4), s.primaryContainer)
+        assertEquals(Color(0xFFE4EDE6), s.secondaryContainer)
     }
 
     @Test
-    fun day_theme_provides_terracotta_outline_soft() {
+    fun day_theme_provides_slate_outline_soft() {
         val captured = mutableListOf<Color>()
         composeRule.setContent {
             LocalMediaHubTheme(themeKey = "DAY") { captured.add(outlineSoftColor()) }
         }
         composeRule.waitForIdle()
-        assertEquals(Color(0xFFE2D9C6), captured.single())
+        assertEquals(Color(0xFFE5E4DF), captured.single())
     }
 
     @Test
-    fun night_theme_uses_warm_amber_primary_and_warm_black_bg() {
+    fun night_theme_uses_paper_ink_primary_and_deep_slate_bg() {
         val s = schemeFor("NIGHT")
-        assertEquals(Color(0xFFE8915A), s.primary)
-        assertEquals(Color(0xFF6FB8BC), s.secondary)
-        assertEquals(Color(0xFF141210), s.background)
-        assertEquals(Color(0xFF1E1A17), s.surface)
-        assertEquals(Color(0xFF3A2516), s.primaryContainer)
-        assertEquals(Color(0xFF1A3335), s.secondaryContainer)
+        assertEquals(Color(0xFFE7E9EE), s.primary)
+        assertEquals(Color(0xFF8FBF9F), s.secondary)
+        assertEquals(Color(0xFF0C0D10), s.background)
+        assertEquals(Color(0xFF15161A), s.surface)
+        assertEquals(Color(0xFF26282C), s.primaryContainer)
+        assertEquals(Color(0xFF1C2A20), s.secondaryContainer)
     }
 
     @Test
@@ -66,7 +68,7 @@ class ThemeColorSchemeTest {
             LocalMediaHubTheme(themeKey = "NIGHT") { captured.add(outlineSoftColor()) }
         }
         composeRule.waitForIdle()
-        assertEquals(Color(0xFF332B24), captured.single())
+        assertEquals(Color(0xFF22242B), captured.single())
     }
 
     @Test
@@ -82,7 +84,7 @@ class ThemeColorSchemeTest {
             }
         }
         composeRule.waitForIdle()
-        assertEquals(Color(0xFF8C6239), schemes.single().primary) // 保留自身 primary
-        assertEquals(Color(0xFFD9C8B2), os.single())
+        assertEquals(Color(0xFF4A6B52), schemes.single().primary) // moss（保留暖纸底）
+        assertEquals(Color(0xFFE2D9C4), os.single())
     }
 }

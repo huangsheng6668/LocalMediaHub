@@ -21,12 +21,12 @@ class PrimaryTextTokenTest {
     fun primary_text_returns_provided_value() {
         val captured = mutableListOf<Color>()
         composeRule.setContent {
-            ProvidePrimaryText(Color(0xFF965410)) {
+            ProvidePrimaryText(Color(0xFF2F5640)) {
                 captured.add(primaryTextColor())
             }
         }
         composeRule.waitForIdle()
-        assertEquals(Color(0xFF965410), captured.single())
+        assertEquals(Color(0xFF2F5640), captured.single())
     }
 
     @Test
@@ -43,23 +43,23 @@ class PrimaryTextTokenTest {
     }
 
     @Test
-    fun day_theme_provides_terracotta_primary_text() {
+    fun day_theme_provides_moss_primary_text() {
         val captured = mutableListOf<Color>()
         composeRule.setContent {
             LocalMediaHubTheme(themeKey = "DAY") { captured.add(primaryTextColor()) }
         }
         composeRule.waitForIdle()
-        assertEquals(Color(0xFF965410), captured.single())
+        assertEquals(Color(0xFF2F5640), captured.single())
     }
 
     @Test
-    fun night_theme_provides_warm_amber_primary_text() {
+    fun night_theme_provides_soft_moss_primary_text() {
         val captured = mutableListOf<Color>()
         composeRule.setContent {
             LocalMediaHubTheme(themeKey = "NIGHT") { captured.add(primaryTextColor()) }
         }
         composeRule.waitForIdle()
-        // night primary (#E8915A) 已 7.8:1 合规；显式 Provide #F2A878 与 Web --accent-text 对齐。
-        assertEquals(Color(0xFFF2A878), captured.single())
+        // night 显式 Provide #A3CDAF 与 Web --accent-text 对齐（Ink Editorial）。
+        assertEquals(Color(0xFFA3CDAF), captured.single())
     }
 }

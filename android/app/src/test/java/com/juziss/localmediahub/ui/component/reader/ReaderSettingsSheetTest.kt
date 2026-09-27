@@ -38,7 +38,7 @@ import org.robolectric.RobolectricTestRunner
  * the way.
  *
  * Phase 3: discrete font/line-height chips replaced with continuous sliders
- * (verified via the "字号 16" / "行距 1.8" labels); font-family FilterChips
+ * (verified via the "字号 17" / "行距 1.9" labels); font-family FilterChips
  * added; paragraph toggles added.
  *
  * Note: the project does not have Truth on the test classpath (confirmed in
@@ -52,14 +52,14 @@ class ReaderSettingsSheetTest {
 
     /**
      * Phase 3: section titles and slider value labels render with default
-     * settings (16 / 1.8 / DAY). The discrete "小"/"紧凑" chips no longer
-     * exist — they are replaced by slider value labels "字号 16" / "行距 1.8".
+     * settings (17 / 1.9 / DAY). The discrete "小"/"紧凑" chips no longer
+     * exist — they are replaced by slider value labels "字号 17" / "行距 1.9".
      */
     @Test
     fun renders_all_sections_and_default_selections() {
         composeRule.setContent {
             ReaderSettingsSheetContent(
-                settings = ReaderSettings(),  // SYSTEM / 16 / 1.8 / DAY / speed=5
+                settings = ReaderSettings(),  // SYSTEM / 17 / 1.9 / DAY / speed=5
                 onChange = {},
             )
         }
@@ -70,9 +70,9 @@ class ReaderSettingsSheetTest {
         composeRule.onNodeWithText("字号与行距").assertExists()
         composeRule.onNodeWithText("段落").assertExists()
         composeRule.onNodeWithText("行为").assertExists()
-        // Slider value labels (default font 16, line height 1.8, width 600, speed 5)
-        composeRule.onNodeWithText("字号 16").assertExists()
-        composeRule.onNodeWithText("行距 1.8").assertExists()
+        // Slider value labels (default font 17, line height 1.9, width 600, speed 5)
+        composeRule.onNodeWithText("字号 17").assertExists()
+        composeRule.onNodeWithText("行距 1.9").assertExists()
         composeRule.onNodeWithText("宽度 600").assertExists()
         composeRule.onNodeWithText("自动滚动速度 5").assertExists()
         // Paragraph toggle labels
@@ -97,8 +97,8 @@ class ReaderSettingsSheetTest {
         assertNotNull(captured)
         assertEquals(ReaderFontFamily.SERIF, captured?.fontFamily)
         // Other settings preserved
-        assertEquals(16, captured?.fontSizeSp)
-        assertEquals(1.8f, captured?.lineHeightMultiplier ?: -1f, 0.0001f)
+        assertEquals(17, captured?.fontSizeSp)
+        assertEquals(1.9f, captured?.lineHeightMultiplier ?: -1f, 0.0001f)
         assertEquals(ReaderTheme.DAY, captured?.theme)
     }
 

@@ -73,8 +73,8 @@ class ReaderSettingsMigrationTest {
     fun v1_unknown_enum_falls_back_to_default() = runBlocking {
         injectRawSettings("""{"fontSize":"BOGUS","lineHeight":"WEIRD"}""")
         val s = store.readerSettingsFlow.first()
-        assertEquals(16, s.fontSizeSp)  // migrate 函数找不到映射时保留原字符串 -> Gson 抛异常 -> 整体默认
-        assertEquals(1.8f, s.lineHeightMultiplier, 0.0001f)
+        assertEquals(17, s.fontSizeSp)  // migrate 函数找不到映射时保留原字符串 -> Gson 抛异常 -> 整体默认
+        assertEquals(1.9f, s.lineHeightMultiplier, 0.0001f)
     }
 
     @Test

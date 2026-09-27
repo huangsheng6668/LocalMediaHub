@@ -23,8 +23,8 @@ enum class PageTurnStyle(val label: String) {
 
 data class ReaderSettings(
     val fontFamily: ReaderFontFamily = ReaderFontFamily.SYSTEM,
-    val fontSizeSp: Int = 16,
-    val lineHeightMultiplier: Float = 1.8f,
+    val fontSizeSp: Int = 17,
+    val lineHeightMultiplier: Float = 1.9f,
     val contentWidthDp: Int = 600,
     val firstLineIndent: Boolean = true,
     val paragraphSpacing: Boolean = false,
@@ -42,7 +42,8 @@ data class ReaderSettings(
 
 /**
  * 阅读区主题（含 chrome 配色字段）。AUTO 不携带颜色，由调用方解析为
- * DAY/NIGHT（亮/暗系统模式）。具体 hex 值来自 spec §1.1 表格。
+ * DAY/NIGHT（亮/暗系统模式）。hex 值 = Ink Editorial 重调（spec
+ * 2026-09-27 §3.2），与 Web readerPrefs.THEME_PRESETS 逐字对称。
  */
 enum class ReaderTheme(
     val bg: Color,
@@ -54,9 +55,9 @@ enum class ReaderTheme(
     val label: String,
 ) {
     DAY(
-        bg = Color(0xFFFAF8F3), fg = Color(0xFF2B2B2B),
-        chromeBg = Color(0xFFF2EFE7), chromeFg = Color(0xFF3D3D3D),
-        muted = Color(0xFF7A7A78), border = Color(0xFFE5E2D8),
+        bg = Color(0xFFF6F4EE), fg = Color(0xFF26282E),
+        chromeBg = Color(0xFFEDEBE3), chromeFg = Color(0xFF3A3C44),
+        muted = Color(0xFF83858C), border = Color(0xFFE0DDD2),
         label = "日间·纸白",
     ),
     DAY_BRIGHT(
@@ -66,15 +67,15 @@ enum class ReaderTheme(
         label = "日间·亮白",
     ),
     EYE_CARE(
-        bg = Color(0xFFF4ECD8), fg = Color(0xFF5B4636),
-        chromeBg = Color(0xFFEDE3CC), chromeFg = Color(0xFF6B5644),
-        muted = Color(0xFF9C8870), border = Color(0xFFD8CBAF),
+        bg = Color(0xFFF2EAD8), fg = Color(0xFF4A4034),
+        chromeBg = Color(0xFFE9DFC9), chromeFg = Color(0xFF56493A),
+        muted = Color(0xFF9A8C74), border = Color(0xFFD9CDB2),
         label = "护眼·米黄",
     ),
     EYE_CARE_GREEN(
-        bg = Color(0xFFB9C7B6), fg = Color(0xFF1F2E20),
-        chromeBg = Color(0xFFACBCAB), chromeFg = Color(0xFF1A271B),
-        muted = Color(0xFF4D5E4F), border = Color(0xFF9BB098),
+        bg = Color(0xFFC6D2C4), fg = Color(0xFF1E2A20),
+        chromeBg = Color(0xFFB9C7B6), chromeFg = Color(0xFF22301F),
+        muted = Color(0xFF48584A), border = Color(0xFFA3B39F),
         label = "护眼·豆沙绿",
     ),
     PARCHMENT(
@@ -84,15 +85,15 @@ enum class ReaderTheme(
         label = "羊皮纸",
     ),
     NIGHT(
-        bg = Color(0xFF1A1A1F), fg = Color(0xFFC9C9CE),
-        chromeBg = Color(0xFF232328), chromeFg = Color(0xFFB0B0B5),
-        muted = Color(0xFF84848A), border = Color(0xFF2D2D33),
+        bg = Color(0xFF111318), fg = Color(0xFFC6CAD2),
+        chromeBg = Color(0xFF191C22), chromeFg = Color(0xFFB4B9C4),
+        muted = Color(0xFF7E838D), border = Color(0xFF252832),
         label = "夜间·深空",
     ),
     NIGHT_BLACK(
-        bg = Color(0xFF000000), fg = Color(0xFFBFBFBF),
-        chromeBg = Color(0xFF0A0A0A), chromeFg = Color(0xFFA8A8A8),
-        muted = Color(0xFF787878), border = Color(0xFF1C1C1C),
+        bg = Color(0xFF000000), fg = Color(0xFFB9BDC6),
+        chromeBg = Color(0xFF0A0B0D), chromeFg = Color(0xFFA7ABB5),
+        muted = Color(0xFF74787F), border = Color(0xFF1B1D24),
         label = "夜间·纯黑",
     ),
     AUTO(
