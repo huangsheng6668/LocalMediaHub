@@ -17,31 +17,38 @@
 .bookshelf-card {
     background: var(--surface-card);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
+    border-radius: 12px;
     overflow: hidden; cursor: pointer;
-    transition: box-shadow .15s ease, transform .15s ease;
+    transition: border-color .15s ease, transform .15s ease;
 }
-.bookshelf-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+/* Ink Editorial：hover = hairline 转墨黑 + 轻浮起（去阴影语言）。 */
+.bookshelf-card:hover { border-color: var(--action-ink, var(--text-primary)); transform: translateY(-2px); }
 .bookshelf-card__cover {
     aspect-ratio: 3 / 4;
     display: grid; place-items: center; padding: var(--space-3);
+    /* 书脊感：右缘 inset 阴影 */
+    box-shadow: inset -4px 0 8px rgba(15, 23, 42, 0.06);
 }
 .bookshelf-card__cover-title {
-    font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.92);
-    text-align: center; word-break: break-all; line-height: 1.4;
+    font-family: var(--font-display, "Noto Serif SC", serif);
+    font-size: 15px; font-weight: 400; letter-spacing: 0.15em;
+    color: var(--text-primary);
+    text-align: center; word-break: break-all; line-height: 1.5;
 }
-.bookshelf-card__cover--g1 { background: linear-gradient(150deg, #5E6AD2, #8B5CF6); }
-.bookshelf-card__cover--g2 { background: linear-gradient(150deg, #0EA5E9, #5E6AD2); }
-.bookshelf-card__cover--g3 { background: linear-gradient(150deg, #14B8A6, #0EA5E9); }
-.bookshelf-card__cover--g4 { background: linear-gradient(150deg, #22C55E, #14B8A6); }
-.bookshelf-card__cover--g5 { background: linear-gradient(150deg, #F59E0B, #EF4444); }
-.bookshelf-card__cover--g6 { background: linear-gradient(150deg, #EC4899, #8B5CF6); }
-.bookshelf-card__cover--g7 { background: linear-gradient(150deg, #64748B, #334155); }
-.bookshelf-card__cover--g8 { background: linear-gradient(150deg, #7B87E8, #3B4A6B); }
+/* Ink Editorial：书封 = 纸色系（源自阅读主题纸面），去彩虹渐变。 */
+.bookshelf-card__cover--g1 { background: #EDEBE3; }
+.bookshelf-card__cover--g2 { background: #E4E9DC; }
+.bookshelf-card__cover--g3 { background: #DCE5DA; }
+.bookshelf-card__cover--g4 { background: #E9E3D2; }
+.bookshelf-card__cover--g5 { background: #E5DBC6; }
+.bookshelf-card__cover--g6 { background: #DFE0E3; }
+.bookshelf-card__cover--g7 { background: #E8E4DA; }
+.bookshelf-card__cover--g8 { background: #E2DFD6; }
 .bookshelf-card__meta { padding: var(--space-3) var(--space-4) var(--space-4); }
 .bookshelf-card__title {
-    font-size: 13px; font-weight: 500; color: var(--text-primary);
+    font-family: var(--font-display, "Noto Serif SC", serif);
+    font-size: 14px; font-weight: 400; color: var(--text-primary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.bookshelf-card__progress { margin-top: 2px; font-size: 12px; color: var(--text-muted); }
+.bookshelf-card__progress { margin-top: 4px; font-size: 12px; color: var(--accent-text); }
 

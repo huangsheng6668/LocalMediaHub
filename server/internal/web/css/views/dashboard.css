@@ -1,6 +1,7 @@
 /* from style.css L542-584 (dashboard statistics grid) — Task 8 redesign:
    stat cards now carry an icon chip + label/value body (.stat-card__*). */
-/* Dashboard Statistics Grid */
+/* Ink Editorial（spec 2026-09-27 §3.3）：统计区去卡片化 —— 开放构图，
+   serif 展示数字 + hairline 列分隔，图标 ghost 圆。 */
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -12,30 +13,31 @@
     display: flex;
     align-items: center;
     gap: var(--space-4);
-    background: var(--surface-card);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: var(--space-5);
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow .15s ease, transform .15s ease;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: var(--space-3) 0;
+    box-shadow: none;
 }
-.stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.stat-card + .stat-card { border-left: 1px solid var(--border-soft); padding-left: var(--space-5); }
 .stat-card__icon {
     display: grid;
     place-items: center;
     width: 44px;
     height: 44px;
-    border-radius: var(--radius-md);
-    background: var(--accent-soft);
-    color: var(--accent-text);
+    border-radius: 9999px;
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
 }
 .stat-card__label { margin: 0; font-size: 13px; color: var(--text-secondary); }
 .stat-card__value {
     margin: 2px 0 0;
-    font-size: 26px;
-    font-weight: 600;
+    font-family: var(--font-display, "Noto Serif SC", serif);
+    font-size: 40px;
+    font-weight: 400;
     color: var(--text-primary);
-    line-height: 1.1;
+    line-height: 1;
 }
 
 /* from style.css L586-591 (dashboard widgets grid) */

@@ -28,9 +28,10 @@
     color: var(--text-primary, inherit);
 }
 .filter-chip[data-active="true"] {
-    background-color: var(--accent-soft, rgba(59, 130, 246, 0.25));
-    border-color: var(--accent, rgba(59, 130, 246, 0.6));
-    color: var(--accent-text, #3b82f6);
+    /* Ink Editorial：活动筛选 = 墨黑胶囊。 */
+    background-color: var(--action-ink, #0A0A0A);
+    border-color: var(--action-ink, #0A0A0A);
+    color: var(--text-on-accent, #FFFFFF);
 }
 .filter-chip-sep { width: 1px; height: 16px; background-color: var(--border-subtle, rgba(127, 127, 127, 0.3)); }
 
@@ -69,7 +70,7 @@
 /* Geometry (height 34px / card bg / border) comes from components.css
    (.btn base + .btn-sort-order sizing); only the arrow flavor lives here. */
 .btn-sort-order {
-    color: var(--accent);
+    color: var(--text-primary);
     font-size: 14px;
     font-weight: 700;
     line-height: 1;
@@ -130,14 +131,14 @@
 .media-card {
     background-color: var(--surface-card);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
+    border-radius: 12px;
     overflow: hidden;
     cursor: pointer;
     transition: box-shadow .15s ease, transform .15s ease, border-color .15s ease;
     display: flex;
     flex-direction: column;
     position: relative;
-    box-shadow: var(--shadow-sm);
+    box-shadow: none;
     /* P2 (2026-09-03): skip layout/paint of off-screen cards. Large
        directories inject thousands of cards in one innerHTML pass and the
        browser otherwise lays out every node up front. content-visibility:
@@ -151,8 +152,8 @@
 
 .media-card:hover {
     transform: translateY(-2px);
-    border-color: var(--accent);
-    box-shadow: var(--shadow-md);
+    border-color: var(--action-ink, var(--text-primary));
+    box-shadow: var(--shadow-sm);
 }
 
 /* Card Header/Preview Area */
@@ -221,7 +222,7 @@
 
 .media-card:hover .play-button-circle {
     transform: scale(1.1);
-    background-color: var(--accent);
+    background-color: var(--action-ink, #0A0A0A);
 }
 
 /* Card Details Area */
@@ -452,8 +453,9 @@
     color: #fca5a5;
 }
 
-.card-badge--reading { background-color: rgba(59, 130, 246, 0.18); color: #93c5fd; }
-.card-badge--finished { background-color: rgba(34, 197, 94, 0.18); color: #86efac; }
+/* Ink Editorial：阅读状态徽标 —— 在读 = 苔绿软底，已读完 = 中性 hairline。 */
+.card-badge--reading { background-color: var(--accent-soft, rgba(61, 107, 79, 0.12)); color: var(--accent-text, #2F5640); }
+.card-badge--finished { background-color: transparent; color: var(--text-muted); border: 1px solid var(--border-subtle); }
 .fav-btn.active { color: #f87171; }
 .fav-btn.active svg { fill: currentColor; }
 #card-status-menu {
