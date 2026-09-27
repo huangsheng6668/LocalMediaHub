@@ -87,7 +87,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             <footer class="text-reader__footer">
                 <button class="text-reader__prev" type="button">上一章</button>
                 <span class="text-reader__progress">-</span>
-                <button class="text-reader__next" type="button">下一章</button>
+                <button class="text-reader__next text-reader__next--primary" type="button">下一章</button>
                 <button class="text-reader__toc" type="button">目录</button>
             </footer>
         </div>

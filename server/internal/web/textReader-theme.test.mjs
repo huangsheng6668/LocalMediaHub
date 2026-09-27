@@ -70,8 +70,8 @@ test('CUSTOM with missing colors falls back to DAY palette (light system)', asyn
         await renderTextReader(viewContainer(), mockBook.path, 0);
         await new Promise((r) => setTimeout(r, 50));
         const root = document.documentElement;
-        assert.equal(root.style.getPropertyValue('--reader-bg'), '#FAF8F3'); // DAY.bg
-        assert.equal(root.style.getPropertyValue('--reader-fg'), '#2B2B2B'); // DAY.fg
+        assert.equal(root.style.getPropertyValue('--reader-bg'), '#F6F4EE'); // DAY.bg
+        assert.equal(root.style.getPropertyValue('--reader-fg'), '#26282E'); // DAY.fg
     } finally {
         delete global.fetch;
         teardownJsdom();

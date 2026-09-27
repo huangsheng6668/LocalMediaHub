@@ -27,16 +27,17 @@ export const FONT_FAMILIES = {
 // 内容宽度滑块范围（px）。Android 在屏幕 dp 上有等价 clamp。
 export const CONTENT_WIDTH_RANGE = { MIN: 600, MAX: 1400, STEP: 10 };
 
-// 6 个主题预设（spec §1.1 表格逐字一致）。
-// chromeBg/chromeFg/muted 用于顶/底栏/drawer/dialog 的局部主题覆盖。
+// 6 个主题预设（Ink Editorial 重调，spec 2026-09-27 §3.2；hex 与 Android
+// ReaderTheme enum 逐字对称）。chromeBg/chromeFg/muted 用于顶/底栏/drawer/
+// dialog 的局部主题覆盖。
 export const THEME_PRESETS = {
-    DAY:            { bg: '#FAF8F3', fg: '#2B2B2B', chromeBg: '#F2EFE7', chromeFg: '#3D3D3D', muted: '#7A7A78', border: '#E5E2D8' },
+    DAY:            { bg: '#F6F4EE', fg: '#26282E', chromeBg: '#EDEBE3', chromeFg: '#3A3C44', muted: '#83858C', border: '#E0DDD2' },
     DAY_BRIGHT:     { bg: '#FFFFFF', fg: '#212121', chromeBg: '#F5F5F5', chromeFg: '#333333', muted: '#7A7A7A', border: '#E0E0E0' },
-    EYE_CARE:       { bg: '#F4ECD8', fg: '#5B4636', chromeBg: '#EDE3CC', chromeFg: '#6B5644', muted: '#9C8870', border: '#D8CBAF' },
-    EYE_CARE_GREEN: { bg: '#B9C7B6', fg: '#1F2E20', chromeBg: '#ACBCAB', chromeFg: '#1A271B', muted: '#4D5E4F', border: '#9BB098' },
+    EYE_CARE:       { bg: '#F2EAD8', fg: '#4A4034', chromeBg: '#E9DFC9', chromeFg: '#56493A', muted: '#9A8C74', border: '#D9CDB2' },
+    EYE_CARE_GREEN: { bg: '#C6D2C4', fg: '#1E2A20', chromeBg: '#B9C7B6', chromeFg: '#22301F', muted: '#48584A', border: '#A3B39F' },
     PARCHMENT:      { bg: '#EFE6D2', fg: '#3D3327', chromeBg: '#E5D9BF', chromeFg: '#4D4034', muted: '#8C7E66', border: '#D3C7AB' },
-    NIGHT:          { bg: '#1A1A1F', fg: '#C9C9CE', chromeBg: '#232328', chromeFg: '#B0B0B5', muted: '#84848A', border: '#2D2D33' },
-    NIGHT_BLACK:    { bg: '#000000', fg: '#BFBFBF', chromeBg: '#0A0A0A', chromeFg: '#A8A8A8', muted: '#787878', border: '#1C1C1C' },
+    NIGHT:          { bg: '#111318', fg: '#C6CAD2', chromeBg: '#191C22', chromeFg: '#B4B9C4', muted: '#7E838D', border: '#252832' },
+    NIGHT_BLACK:    { bg: '#000000', fg: '#B9BDC6', chromeBg: '#0A0B0D', chromeFg: '#A7ABB5', muted: '#74787F', border: '#1B1D24' },
     // AUTO 不是预设颜色，而是"跟随系统"标记。getSettings 调用方解析为 DAY/NIGHT。
     AUTO:           null,
 };
@@ -62,8 +63,8 @@ export const LINE_HEIGHT_RANGE = { MIN: 1.3, MAX: 2.5, STEP: 0.1 };
 
 export const DEFAULT_SETTINGS = {
     fontFamily: 'SYSTEM',
-    fontSize: 16,
-    lineHeight: 1.8,
+    fontSize: 17,
+    lineHeight: 1.9,
     contentWidth: 720,
     firstLineIndent: true,
     paragraphSpacing: false,

@@ -46,18 +46,21 @@ body[data-active-tab="read"] .text-reader {
     gap: 12px;
     padding: 12px max(16px, calc((100% - 800px) / 2));
     border-bottom: 1px solid var(--reader-border);
-    background-color: var(--reader-chrome-bg);
+    /* Ink Editorial：幽灵 chrome —— chromeBg 85% 半透明 + 毛玻璃，正文从栏下透出。 */
+    background-color: color-mix(in srgb, var(--reader-chrome-bg, var(--surface-card)) 85%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     color: var(--reader-chrome-fg);
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
 .text-reader__back {
     background: transparent;
-    border: 1px solid var(--reader-border, var(--border-subtle));
+    border: 1px solid transparent;
+    border-radius: 9999px;
     color: var(--reader-fg, var(--text-primary));
     width: 36px;
     height: 36px;
-    border-radius: var(--radius-md);
     cursor: pointer;
     font-size: 18px;
     line-height: 1;
@@ -67,8 +70,8 @@ body[data-active-tab="read"] .text-reader {
 
 .text-reader__back:hover {
     background-color: var(--surface-hover);
-    border-color: var(--accent);
-    color: var(--accent);
+    border-color: var(--reader-border, var(--border-subtle));
+    color: var(--reader-fg, var(--text-primary));
 }
 
 .text-reader__title {
@@ -168,24 +171,20 @@ body[data-active-tab="read"] .text-reader {
 }
 
 /* Phase 6: 章节大标题（正文顶部，独立于顶栏面包屑）。
-   固定 serif，居中，底部短装饰线 (::after)。字号随 --reader-font-size
-   浮动 +6px 与 Android 端对齐。 */
+   Ink Editorial：serif 400 居中，去装饰线，用留白制造编辑感。
+   字号随 --reader-font-size 浮动 +6px 与 Android 端对齐。 */
 .text-reader__chapter-title {
-    font-size: calc(var(--reader-font-size, 16px) + 6px);
+    font-size: calc(var(--reader-font-size, 17px) + 6px);
     font-family: "Noto Serif SC", "Songti SC", serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-    font-weight: 600;
+    font-weight: 400;
+    letter-spacing: 0.02em;
     color: var(--reader-fg);
     text-align: center;
     margin: 2em 0 1.5em;
     position: relative;
 }
 .text-reader__chapter-title::after {
-    content: "";
-    display: block;
-    width: 40px;
-    height: 1px;
-    background: var(--reader-border);
-    margin: 12px auto 0;
+    display: none;
 }
 
 /* Phase 6: 首字下沉（仅 .text-reader__p--dropcap）。覆盖默认 indent-on。 */
@@ -254,7 +253,7 @@ body[data-active-tab="read"] .text-reader {
     opacity: 1;
 }
 
-/* Header actions (Aa + play/pause) */
+/* Header actions (Aa + play/pause) — Ink Editorial ghost 圆：静止无边框，hover 现边框。 */
 .text-reader__header-actions {
     display: flex;
     gap: 8px;
@@ -265,9 +264,9 @@ body[data-active-tab="read"] .text-reader {
 .text-reader__icon-btn {
     min-width: 36px;
     height: 36px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--reader-border, var(--border-subtle));
-    background: var(--reader-bg, var(--surface-card));
+    border-radius: 9999px;
+    border: 1px solid transparent;
+    background: transparent;
     color: var(--reader-fg, var(--text-primary));
     cursor: pointer;
     transition: all .15s ease, color 0.2s ease, border-color 0.2s ease;
@@ -275,8 +274,8 @@ body[data-active-tab="read"] .text-reader {
 
 .text-reader__icon-btn:hover {
     background: var(--surface-hover);
-    border-color: var(--accent);
-    color: var(--accent);
+    border-color: var(--reader-border, var(--border-subtle));
+    color: var(--reader-fg, var(--text-primary));
 }
 
 /* TOC tabs */
@@ -337,15 +336,16 @@ body[data-active-tab="read"] .text-reader {
 }
 
 .text-reader__drawer-item--active {
-    background-color: var(--reader-selection, rgba(124, 58, 237, 0.25));
+    /* Ink Editorial：活动章 = ink 文字 + 2px 墨色左条，无底色填充。 */
+    background-color: transparent;
     color: var(--reader-fg, var(--text-primary));
     opacity: 1;
     font-weight: 600;
-    box-shadow: inset 3px 0 0 0 var(--accent);
+    box-shadow: inset 2px 0 0 0 var(--action-ink, #0A0A0A);
 }
 
 .text-reader__drawer-item--active:hover {
-    background-color: var(--reader-selection, rgba(124, 58, 237, 0.35));
+    background-color: var(--surface-hover);
     color: var(--reader-fg, var(--text-primary));
 }
 
@@ -427,25 +427,41 @@ dialog#reader-settings-dialog menu {
     gap: 8px;
     padding: 10px max(16px, calc((100% - 800px) / 2));
     border-top: 1px solid var(--reader-border);
-    background-color: var(--reader-chrome-bg);
+    /* Ink Editorial：幽灵 chrome（与 header 对称）。 */
+    background-color: color-mix(in srgb, var(--reader-chrome-bg, var(--surface-card)) 85%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     color: var(--reader-chrome-fg);
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
+/* Ink Editorial：底栏按钮 = 胶囊；下一章为主操作（ink 填充）。 */
 .text-reader__footer button {
     background: transparent;
     border: 1px solid var(--reader-border, var(--border-subtle));
     color: var(--reader-fg, var(--text-primary));
-    padding: 6px 14px;
-    border-radius: var(--radius-sm);
+    padding: 6px 16px;
+    border-radius: 9999px;
     cursor: pointer;
     font-size: 12px;
     transition: all .15s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 .text-reader__footer button:hover:not(:disabled) {
-    background-color: var(--accent);
-    border-color: var(--accent);
+    background-color: var(--action-ink);
+    border-color: var(--action-ink);
+    color: var(--text-on-accent);
+}
+
+.text-reader__next--primary {
+    background-color: var(--action-ink);
+    border-color: var(--action-ink);
+    color: var(--text-on-accent);
+}
+
+.text-reader__next--primary:hover:not(:disabled) {
+    background-color: var(--action-ink-hover);
+    border-color: var(--action-ink-hover);
     color: var(--text-on-accent);
 }
 
@@ -484,7 +500,7 @@ dialog#reader-settings-dialog menu {
     height: 14px;
     border-radius: 50%;
     transform: translate(-50%, -50%);
-    background-color: var(--accent, #6366f1);
+    background-color: var(--action-ink, #0A0A0A);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
     transition: width 0.1s ease, height 0.1s ease;
 }
@@ -768,18 +784,18 @@ body[data-reader-immersive="on"] .text-reader__content {
     border: 1px solid var(--reader-border, var(--border-subtle));
     display: inline-block;
 }
-.reader-settings__theme-swatch[data-theme="DAY"]         { background: #FAF8F3; }
+.reader-settings__theme-swatch[data-theme="DAY"]         { background: #F6F4EE; }
 .reader-settings__theme-swatch[data-theme="DAY_BRIGHT"]  { background: #FFFFFF; }
-.reader-settings__theme-swatch[data-theme="EYE_CARE"]    { background: #F4ECD8; }
-.reader-settings__theme-swatch[data-theme="EYE_CARE_GREEN"] { background: #C7EDCC; }
+.reader-settings__theme-swatch[data-theme="EYE_CARE"]    { background: #F2EAD8; }
+.reader-settings__theme-swatch[data-theme="EYE_CARE_GREEN"] { background: #C6D2C4; }
 .reader-settings__theme-swatch[data-theme="PARCHMENT"]   { background: #EFE6D2; }
-.reader-settings__theme-swatch[data-theme="NIGHT"]       { background: #1A1A1F; }
+.reader-settings__theme-swatch[data-theme="NIGHT"]       { background: #111318; }
 .reader-settings__theme-swatch[data-theme="NIGHT_BLACK"] { background: #000000; }
 .reader-settings__theme-swatch[data-theme="AUTO"] {
-    background: linear-gradient(135deg, #FAF8F3 0 50%, #1A1A1F 50% 100%);
+    background: linear-gradient(135deg, #F6F4EE 0 50%, #111318 50% 100%);
 }
 .reader-settings__theme-swatch[data-theme="CUSTOM"] {
-    background: linear-gradient(135deg, #FAF8F3 0 50%, #2B2B2B 50% 100%);
+    background: linear-gradient(135deg, #F6F4EE 0 50%, #2B2B2B 50% 100%);
 }
 .reader-settings__theme-label {
     color: var(--reader-fg, var(--text-primary));
