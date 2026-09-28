@@ -307,14 +307,14 @@
     </div>
 
     <!-- Video Player Overlay Modal -->
-    <div class="overlay-modal" id="modal-video-player">
+    <div class="overlay-modal" id="modal-video-player" role="dialog" aria-modal="true" aria-labelledby="video-modal-title">
         <div class="modal-backdrop"></div>
         <div class="modal-wrapper">
             <div class="modal-header">
                 <span class="modal-title" id="video-modal-title">视频播放器</span>
                 <div class="modal-actions">
                     <button class="btn video-delete-btn" id="btn-video-delete">删除</button>
-                    <button class="btn-close" id="btn-close-video-modal">✕</button>
+                    <button class="btn-close" id="btn-close-video-modal" aria-label="关闭">✕</button>
                 </div>
             </div>
             <div class="modal-body video-container">
@@ -356,10 +356,10 @@
     </div>
 
     <!-- Image Preview Overlay Lightbox -->
-    <div class="overlay-modal" id="modal-image-preview">
+    <div class="overlay-modal" id="modal-image-preview" role="dialog" aria-modal="true" aria-label="图片预览">
         <div class="modal-backdrop"></div>
         <div class="modal-wrapper lightbox-wrapper">
-            <button class="btn-close lightbox-close" id="btn-close-image-modal" title="关闭">✕</button>
+            <button class="btn-close lightbox-close" id="btn-close-image-modal" title="关闭" aria-label="关闭">✕</button>
             <button class="lightbox-toggle-mode" id="btn-image-mode-toggle" title="切换拼接模式">拼接模式</button>
             <button class="lightbox-nav nav-prev" id="btn-image-prev" aria-label="上一张"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
             <div class="lightbox-content">
