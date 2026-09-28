@@ -337,9 +337,15 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 
 	// Images
 	api.GET("/images", h.GetImages, authMw)
-	// Phase 9 (M-3): each miss decodes a full-size image to build the thumbnail;
-	// rate-limit to blunt filename-enumeration floods.
-	api.GET("/images/*", h.GetImageAsset, authMw, middleware.RateLimit(60, time.Minute))
+	// Phase 9 (M-3): each thumbnail miss decodes a full-size image — a CPU
+	// amplifier under filename enumeration. Scope the limit to /thumbnail
+	// only (same convention as /videos/*): originals are plain file sends,
+	// and the web lightbox stitch mode loads a whole manga (hundreds of
+	// originals per minute), which an unconditional limit turns into 429s
+	// and every <img> renders broken.
+	api.GET("/images/*", h.GetImageAsset,
+		authMw,
+		rateLimitWhen(isThumbnailRequest, middleware.RateLimit(60, time.Minute)))
 
 	// Texts
 	api.GET("/texts", h.GetTexts, authMw)

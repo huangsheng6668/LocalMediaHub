@@ -36,6 +36,70 @@ func TestRateLimitOnScanTriggerIntegration(t *testing.T) {
 	}
 }
 
+// TestImageOriginalsNotRateLimited verifies that original image assets are NOT
+// caught by the thumbnail flood-protection rate limit. The web lightbox stitch
+// mode loads every page of a manga folder at once (hundreds of /original
+// requests within a minute) and 429s there render the whole comic browser as
+// broken images. The rate limit exists to blunt thumbnail-generation floods
+// (each miss decodes a full-size image), not to cap plain file sends.
+func TestImageOriginalsNotRateLimited(t *testing.T) {
+	cfg := newAuthTestConfig(t, "img-token")
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	defer srv.Stop()
+
+	// 120 rapid requests = double the 60/min thumbnail limit. Every response
+	// must be non-429 (they will be 403: the path is outside the scan roots,
+	// but the rate limiter fires before the handler so a limited request
+	// would surface as 429 regardless).
+	for i := 0; i < 120; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/images/C%3A/nonexistent/page.jpg/original", nil)
+		req.Header.Set(echo.HeaderAuthorization, "Bearer img-token")
+		req.RemoteAddr = "192.168.1.101:1234"
+		rec := httptest.NewRecorder()
+		srv.Echo.ServeHTTP(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("request %d: /original got 429 — original assets must not be rate limited (body=%s)", i+1, rec.Body.String())
+		}
+	}
+}
+
+// TestImageThumbnailsStillRateLimited keeps the Phase 9 (M-3) protection
+// intact after scoping the limiter to thumbnails: each thumbnail miss decodes
+// a full-size image (a CPU amplifier under filename enumeration), so
+// /thumbnail requests stay capped at 60/min per client IP.
+func TestImageThumbnailsStillRateLimited(t *testing.T) {
+	cfg := newAuthTestConfig(t, "img-token")
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	defer srv.Stop()
+
+	url := "/api/v1/images/C%3A/nonexistent/page.jpg/thumbnail"
+	for i := 0; i < 60; i++ {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set(echo.HeaderAuthorization, "Bearer img-token")
+		req.RemoteAddr = "192.168.1.102:1234"
+		rec := httptest.NewRecorder()
+		srv.Echo.ServeHTTP(rec, req)
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("request %d: got 429 too early (limit should be 60/min)", i+1)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer img-token")
+	req.RemoteAddr = "192.168.1.102:1234"
+	rec := httptest.NewRecorder()
+	srv.Echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("request 61: status = %d, want 429", rec.Code)
+	}
+}
+
 // TestRateLimitOnDeleteIntegration verifies the RateLimit middleware mounted on
 // /system/delete allows the first 5 requests per minute then rejects the 6th.
 // We don't need a valid path to delete — the rate limiter fires before the
