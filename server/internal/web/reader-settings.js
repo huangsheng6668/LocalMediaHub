@@ -5,6 +5,8 @@
 //   - 写入走 readerPrefs.saveSettings（localStorage 持久化 + window storage event），
 //     随后 emit(EVT.SETTINGS_CHANGED, { settings }) 让其它模块（autoscroll/progress/主 UI）反应。
 //   - 返回 { open, dispose }：open 调 showModal；dispose 解绑 listener 并从 DOM 移除 dialog。
+//   - light dismiss：open 后挂 document capture click（rAF 延迟），遮罩/外部点击自动关闭
+//     （showModal 下点击 ::backdrop 的事件 target 即 <dialog> 自身）。
 //   - 所有 innerHTML 模板均为纯字面量 + 硬编码 enum map（FONT_FAMILIES 集合等），无用户数据插值。
 import { state } from './reader-state.js';
 import * as readerPrefs from './readerPrefs.js';
@@ -272,6 +274,42 @@ export function renderSettings(container) {
     }
     dialog.addEventListener('change', onChange);
 
+    // 外部点击关闭（light dismiss）：showModal 下点击 ::backdrop 的事件 target 是
+    // <dialog> 自身（backdrop 非独立元素），据此识别遮罩点击；无 showModal 的环境
+    // （jsdom）退化为"点击 dialog 之外任意处关闭"。capture + rAF 延迟挂载，避免打开
+    // 按钮的同一次 click 冒泡到 document 立即触发关闭（模式同 toc.js）。
+    let outsideRafId = null;
+    let outsideAttached = false;
+
+    function attachOutsideListener() {
+        if (outsideAttached) return;
+        document.addEventListener('click', onOutsideClick, true);
+        outsideAttached = true;
+    }
+
+    function detachOutsideListener() {
+        if (outsideRafId !== null) {
+            cancelAnimationFrame(outsideRafId);
+            outsideRafId = null;
+        }
+        if (outsideAttached) {
+            document.removeEventListener('click', onOutsideClick, true);
+            outsideAttached = false;
+        }
+    }
+
+    function onOutsideClick(e) {
+        if (!dialog.open) return;
+        // 面板内控件点击不关闭；target 即 <dialog>（遮罩）或位于 dialog 外（fallback）则关闭
+        if (e.target !== dialog && dialog.contains(e.target)) return;
+        if (typeof dialog.close === 'function') dialog.close();
+        else dialog.open = false;
+        detachOutsideListener();
+    }
+
+    // × 按钮与 Esc 的原生关闭路径经此解绑
+    dialog.addEventListener('close', detachOutsideListener);
+
     function open() {
         syncControlsFromSettings();
         if (typeof dialog.showModal === 'function') {
@@ -279,10 +317,16 @@ export function renderSettings(container) {
         } else {
             dialog.open = true;
         }
+        outsideRafId = requestAnimationFrame(() => {
+            outsideRafId = null;
+            attachOutsideListener();
+        });
     }
 
     function dispose() {
+        detachOutsideListener();
         dialog.removeEventListener('change', onChange);
+        dialog.removeEventListener('close', detachOutsideListener);
         if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
     }
 

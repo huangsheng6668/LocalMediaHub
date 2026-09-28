@@ -77,7 +77,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `toc.js`（目录抽屉：渲染/高亮/开关/外部点击关闭，单一 drawerEl）
   - `bookmarks.js`（书签 tab + 当前章节弱标记）
   - `autoscroll.js`（自动滚动 rAF 面板）
-  - `reader-settings.js`（阅读设置 dialog，emit `settings:changed`）
+  - `reader-settings.js`（阅读设置 dialog，emit `settings:changed`；light dismiss：document capture click + rAF 延迟挂载，遮罩/外部点击自动关闭，`×`/Esc 走原生 `close` 事件解绑）
   - **注意**：`state.js` / `settings.js` 是全局 app 模块，**勿与** `reader-state.js` / `reader-settings.js` 混淆
 - **测试**：`node --test`（用 `.test.mjs` 扩展名 + jsdom，详见 [测试与验证](#测试与验证)）
 - **Token 集成**：`api.js` 的 `apiRequest()` 自动注入 Bearer header + 401 事件 → `app.js` 弹 token modal；sessionStorage 持久化

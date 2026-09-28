@@ -96,3 +96,74 @@ test('letterSpacing slider saves float; customBg saves hex', () => {
         teardown();
     }
 });
+
+// light dismiss：rAF（测试环境 stub 为 setTimeout 0）后监听才挂上。
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test('click targeting the <dialog> itself (backdrop) closes open dialog', async () => {
+    setup();
+    try {
+        const { api, dialog } = mount({});
+        api.open();
+        assert.equal(dialog.open, true);
+        await tick();
+        // showModal 环境下点击 ::backdrop 的事件 target 即 <dialog> 自身
+        dialog.dispatchEvent(new window.Event('click', { bubbles: true }));
+        assert.equal(dialog.open, false, 'backdrop-target click should close the dialog');
+        api.dispose();
+    } finally {
+        teardown();
+    }
+});
+
+test('click on a control inside the dialog keeps it open', async () => {
+    setup();
+    try {
+        const { api, dialog } = mount({});
+        api.open();
+        await tick();
+        const radio = dialog.querySelector('input[name="fontFamily"][value="SERIF"]');
+        radio.dispatchEvent(new window.Event('click', { bubbles: true }));
+        assert.equal(dialog.open, true, 'inside click must not close the dialog');
+        api.dispose();
+    } finally {
+        teardown();
+    }
+});
+
+test('click outside the dialog closes it (non-modal fallback)', async () => {
+    setup();
+    try {
+        const { api, dialog } = mount({});
+        api.open();
+        await tick();
+        const outside = document.querySelector('#view-reader');
+        outside.dispatchEvent(new window.Event('click', { bubbles: true }));
+        assert.equal(dialog.open, false, 'outside click should close the dialog');
+        api.dispose();
+    } finally {
+        teardown();
+    }
+});
+
+test('the click that opens the dialog does not immediately re-close it', async () => {
+    setup();
+    try {
+        const { api, dialog } = mount({});
+        const btn = document.createElement('button');
+        btn.textContent = 'Aa';
+        document.body.appendChild(btn);
+        btn.addEventListener('click', () => api.open());
+        btn.dispatchEvent(new window.Event('click', { bubbles: true }));
+        assert.equal(dialog.open, true, 'dialog must survive the opening click');
+        await tick(); // 监听在打开 click 完成后才挂上
+        assert.equal(dialog.open, true, 'listener must not react to the opening click');
+        // 用非打开按钮的外部元素：点打开按钮本身在 fallback 下会先关再开（open 总是执行）
+        document.querySelector('#view-reader').dispatchEvent(new window.Event('click', { bubbles: true }));
+        assert.equal(dialog.open, false, 'a later outside click closes');
+        btn.remove();
+        api.dispose();
+    } finally {
+        teardown();
+    }
+});
