@@ -3,7 +3,7 @@
 // 解析失败（源文件格式变化）→ fail 并给出可操作信息，绝不静默 skip。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import * as readerPrefs from './readerPrefs.js';
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -151,5 +151,19 @@ test('theme labels: web THEME_LABELS / THEME_OPTIONS === android ReaderTheme.lab
     while ((o = ore.exec(optsSrc)) !== null) opts[o[1]] = o[2];
     for (const k of Object.keys(labels)) {
         assert.equal(opts[k], labels[k], `reader-settings THEME_OPTIONS.${k}: android=${labels[k]} options=${opts[k]}`);
+    }
+});
+
+test('web sources contain no inline style attributes (CSP style-src self)', () => {
+    // 分隔符归一：recursive readdir 在 win32 返回反斜杠路径，vendor/node_modules 排除必须双兼容。
+    const norm = (f) => f.replace(/\\/g, '/');
+    const skip = (f) => f.endsWith('.test.mjs') || norm(f).includes('vendor/')
+        || norm(f).includes('node_modules/') || f.includes('_snapshot-helpers');
+    const files = readdirSync(new URL('./', import.meta.url), { recursive: true, encoding: 'utf8' })
+        .filter((f) => /\.(js|html)$/.test(f) && !skip(f));
+    assert.ok(files.length > 20, `scan found suspiciously few files (${files.length}) — check directory`);
+    for (const f of files) {
+        const src = read('./' + norm(f));
+        assert.ok(!/style="/.test(src), `${f} contains inline style=" — move to a CSS class (CSP)`);
     }
 });
