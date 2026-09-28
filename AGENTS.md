@@ -42,7 +42,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `home/`（首页卡片：Hero / Library / ContinueWatching / RecentMedia / Favorite）
   - `browse/`（浏览子组件：TopBar / SortMenu / SearchView / BrowseFilterChipsRow / DeleteConfirmDialog / QuickActionsDialog 等）
   - `reader/`（`ReaderSettingsSheet`（带可滚动与1400dp最大宽度） / `ReaderThemeWrapper` / `ReaderFontFamily`）
-  - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `PlayerGestureHud`（音量/亮度 Pill HUD + seek ripple）/ `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`
+  - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `PlayerGestureHud`（音量/亮度 Pill HUD + seek ripple）/ `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`（`ui/theme/` 色值与 web themes.css 对称，由 `server/internal/web/theme-parity.test.mjs` 守护(node --test)）
 - **ViewModel**（`viewmodel/`）：
   - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel` / `BookshelfViewModel`（本地 BookProgress 全量 + decorations 合并 + `applyBookshelfFilter` 纯函数筛选）
   - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `LibraryController`（阅读装饰与状态筛选）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
@@ -68,7 +68,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 服务端内置 SPA，浏览器访问 server 地址（如 `http://localhost:8000`）即可。
 
 - **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js` / `library.js`（阅读状态与跨媒体收藏：筛选矩阵/徽章/DOM装饰/双向同步） / `readingTimer.js`（纯逻辑阅读计时器：textReader 活跃秒数累积，随 progress 上报 `read_seconds_delta` + 30s 心跳） / `scrollMemory.js`（双键 session 滚动记忆）
-- **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09-27 Ink Editorial 重设计（Slate Ink & Paper，spec `docs/superpowers/specs/2026-09-27-ink-editorial-redesign-design.md`，前身 2026-09-02 现代中性风）：7 套 `[data-theme]` chrome 主题重调为暖灰纸面 + 墨黑主操作（`--action-ink`）+ 苔绿 accent（`--accent`），阅读器 chrome 幽灵化（半透明 + backdrop-blur），阅读主题 hex 双端对称重调；emoji 图标全部为内联 SVG
+- **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09-27 Ink Editorial 重设计（Slate Ink & Paper，spec `docs/superpowers/specs/2026-09-27-ink-editorial-redesign-design.md`，前身 2026-09-02 现代中性风）：7 套 `[data-theme]` chrome 主题重调为暖灰纸面 + 墨黑主操作（`--action-ink`）+ 苔绿 accent（`--accent`），阅读器 chrome 幽灵化（半透明 + backdrop-blur），阅读主题 hex 双端对称重调；emoji 图标全部为内联 SVG；`theme-parity.test.mjs` 守护双端主题 token 对称(reader hex / chrome token / label / 无 inline style)，改色值或标签需双端同步
 - **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
 - **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行）+ 子模块
   - `bus.js`（事件总线 on/emit/off/EVT，零依赖）
