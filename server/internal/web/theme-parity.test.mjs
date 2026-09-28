@@ -124,3 +124,32 @@ test('chrome token: PrimaryText === web --accent-text', () => {
         assert.equal(pt[name], css[theme]['accent-text'], `PrimaryText.${name} != ${theme} --accent-text`);
     }
 });
+
+test('theme labels: web THEME_LABELS / THEME_OPTIONS === android ReaderTheme.label', () => {
+    const src = read(READER_SETTINGS_KT);
+    const labels = {};
+    let m;
+    const re = /^ {4}([A-Z_]+)\($([\s\S]*?)^ {4}\)[;,]$/gm;
+    while ((m = re.exec(src)) !== null) {
+        const lm = m[2].match(/label\s*=\s*"([^"]+)"/);
+        if (lm) labels[m[1]] = lm[1];
+    }
+    assert.equal(Object.keys(labels).length, 9, 'expected 9 ReaderTheme entries with labels');
+
+    // Web chrome 网格标签（settings.js）：8 个共有 key 必须与 Android 逐字一致。
+    for (const [k, v] of Object.entries(readerPrefs.THEME_LABELS)) {
+        assert.equal(labels[k], v, `THEME_LABELS.${k}: android=${labels[k]} web=${v}`);
+    }
+    assert.ok(!('CUSTOM' in readerPrefs.THEME_LABELS),
+        'chrome grid has no CUSTOM theme — keep it out of THEME_LABELS (spec §4)');
+
+    // reader-settings.js 的阅读器主题表（含 CUSTOM）：全部 9 项与 Android 一致。
+    const optsSrc = read('./reader-settings.js');
+    const opts = {};
+    let o;
+    const ore = /\['([A-Z_]+)',\s*'([^']+)'\]/g;
+    while ((o = ore.exec(optsSrc)) !== null) opts[o[1]] = o[2];
+    for (const k of Object.keys(labels)) {
+        assert.equal(opts[k], labels[k], `reader-settings THEME_OPTIONS.${k}: android=${labels[k]} options=${opts[k]}`);
+    }
+});

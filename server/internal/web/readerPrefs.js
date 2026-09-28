@@ -45,13 +45,13 @@ export const THEME_PRESETS = {
 // 主题展示名（settings 页网格）。settings.js 的 // XSS-SAFE: 豁免以"本常量已冻结
 // 且值全部为字面量"为前提 —— 勿在此对象中放入任何动态/用户数据。
 export const THEME_LABELS = Object.freeze({
-    DAY: '日间',
-    DAY_BRIGHT: '纯白',
-    EYE_CARE: '护眼米色',
-    EYE_CARE_GREEN: '护眼绿',
+    DAY: '日间·纸白',
+    DAY_BRIGHT: '日间·亮白',
+    EYE_CARE: '护眼·米黄',
+    EYE_CARE_GREEN: '护眼·豆沙绿',
     PARCHMENT: '羊皮纸',
-    NIGHT: '深灰夜间',
-    NIGHT_BLACK: '纯黑夜间',
+    NIGHT: '夜间·深空',
+    NIGHT_BLACK: '夜间·纯黑',
     AUTO: '跟随系统',
 });
 
