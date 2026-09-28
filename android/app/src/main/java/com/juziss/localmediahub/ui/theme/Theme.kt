@@ -32,10 +32,12 @@ private val DarkColorScheme = darkColorScheme(
     onSurfaceVariant = Color(0xFF9BA1AC),
     outline = Color(0xFF22242B),
     outlineVariant = Color(0xFF22242B),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF0F172A),
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF26282E),
+    primary = Color(0xFF0A0A0A),
     secondary = Color(0xFF3D6B4F),
     tertiary = Color(0xFF2F5640),
     background = Color(0xFFF7F7F5),
@@ -51,6 +53,31 @@ private val LightColorScheme = lightColorScheme(
     onSurfaceVariant = Color(0xFF52575E),
     outline = Color(0xFFE5E4DF),
     outlineVariant = Color(0xFFE5E4DF),
+    error = Color(0xFFDC2626),
+    onError = Color.White,
+)
+
+// 纯白日间（= web day_bright）：纯白表面 + 墨黑主操作 + 苔绿 accent。
+// hex 与 themes.css [data-theme="day_bright"] 逐字对称（跨端守护：theme-parity.test.mjs）。
+private val DayBrightColorScheme = lightColorScheme(
+    primary = Color(0xFF0A0A0A),
+    secondary = Color(0xFF3D6B4F),
+    tertiary = Color(0xFF2F5640),
+    background = Color(0xFFFFFFFF),
+    surface = Color(0xFFFFFFFF),
+    surfaceVariant = Color(0xFFF7F7F4),
+    primaryContainer = Color(0xFFE9E9E4),
+    secondaryContainer = Color(0xFFE4EDE6),
+    onPrimary = Color.White,
+    onSecondary = Color.White,
+    onTertiary = Color.White,
+    onBackground = Color(0xFF0F172A),
+    onSurface = Color(0xFF0F172A),
+    onSurfaceVariant = Color(0xFF52575E),
+    outline = Color(0xFFE7E7E2),
+    outlineVariant = Color(0xFFE7E7E2),
+    error = Color(0xFFDC2626),
+    onError = Color.White,
 )
 
 private val AppTypography = Typography(
@@ -105,9 +132,9 @@ private val AppTypography = Typography(
 )
 
 private val EyeCareGreenColorScheme = lightColorScheme(
-    primary = Color(0xFF33593C),
-    secondary = Color(0xFF2A4831),
-    tertiary = Color(0xFF48584A),
+    primary = Color(0xFF17211A),
+    secondary = Color(0xFF33593C),
+    tertiary = Color(0xFF2A4831),
     background = Color(0xFFDDE6DA),
     surface = Color(0xFFEDF2EA),
     surfaceVariant = Color(0xFFD2DECF),
@@ -118,12 +145,14 @@ private val EyeCareGreenColorScheme = lightColorScheme(
     onSurface = Color(0xFF1E2A20),
     onSurfaceVariant = Color(0xFF3E4C40),
     outline = Color(0xFFC6D4C2),
+    error = Color(0xFFC0392B),
+    onError = Color.White,
 )
 
 private val EyeCareColorScheme = lightColorScheme(
-    primary = Color(0xFF4A6B52),
-    secondary = Color(0xFF3C5843),
-    tertiary = Color(0xFF6B5E48),
+    primary = Color(0xFF26211A),
+    secondary = Color(0xFF4A6B52),
+    tertiary = Color(0xFF3C5843),
     background = Color(0xFFF5F1E6),
     surface = Color(0xFFFBF8F0),
     surfaceVariant = Color(0xFFEFE9DA),
@@ -134,12 +163,14 @@ private val EyeCareColorScheme = lightColorScheme(
     onSurface = Color(0xFF3B3428),
     onSurfaceVariant = Color(0xFF5E5442),
     outline = Color(0xFFE2D9C4),
+    error = Color(0xFFC0392B),
+    onError = Color.White,
 )
 
 private val ParchmentColorScheme = lightColorScheme(
-    primary = Color(0xFF4E6B44),
-    secondary = Color(0xFF3F5837),
-    tertiary = Color(0xFF75654F),
+    primary = Color(0xFF241D14),
+    secondary = Color(0xFF4E6B44),
+    tertiary = Color(0xFF3F5837),
     background = Color(0xFFEFE8D5),
     surface = Color(0xFFF7F1E2),
     surfaceVariant = Color(0xFFE7DEC7),
@@ -150,13 +181,15 @@ private val ParchmentColorScheme = lightColorScheme(
     onSurface = Color(0xFF3D3327),
     onSurfaceVariant = Color(0xFF5C5040),
     outline = Color(0xFFDCD0B5),
+    error = Color(0xFFC0392B),
+    onError = Color.White,
 )
 
 private val NightBlackColorScheme = darkColorScheme(
     primary = Color(0xFFE7E9EE),
-    secondary = Color(0xFF9BA1AC),
-    tertiary = Color(0xFF74787F),
-    background = Color.Black,
+    secondary = Color(0xFF8FBF9F),
+    tertiary = Color(0xFFA3CDAF),
+    background = Color(0xFF000000),
     surface = Color(0xFF101114),
     surfaceVariant = Color(0xFF1A1C22),
     primaryContainer = Color(0xFF22242B),
@@ -166,6 +199,8 @@ private val NightBlackColorScheme = darkColorScheme(
     onSurface = Color(0xFFE7E9EE),
     onSurfaceVariant = Color(0xFF9BA1AC),
     outline = Color(0xFF202228),
+    error = Color(0xFFF87171),
+    onError = Color(0xFF0F172A),
 )
 
 @Composable
@@ -182,7 +217,8 @@ fun LocalMediaHubTheme(
         "PARCHMENT" -> Triple(ParchmentColorScheme, OutlineSoft.Parchment, PrimaryText.Parchment)
         "NIGHT_BLACK" -> Triple(NightBlackColorScheme, OutlineSoft.NightBlack, PrimaryText.NightBlack)
         "NIGHT" -> Triple(DarkColorScheme, OutlineSoft.Dark, PrimaryText.Dark)
-        "DAY", "DAY_BRIGHT" -> Triple(LightColorScheme, OutlineSoft.Light, PrimaryText.Light)
+        "DAY" -> Triple(LightColorScheme, OutlineSoft.Light, PrimaryText.Light)
+        "DAY_BRIGHT" -> Triple(DayBrightColorScheme, OutlineSoft.DayBright, PrimaryText.DayBright)
         else -> Triple(
             if (darkTheme) DarkColorScheme else LightColorScheme,
             if (darkTheme) OutlineSoft.Dark else OutlineSoft.Light,

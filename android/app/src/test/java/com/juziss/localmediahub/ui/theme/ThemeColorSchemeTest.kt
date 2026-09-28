@@ -32,7 +32,7 @@ class ThemeColorSchemeTest {
         // Ink Editorial（spec 2026-09-27 §3.1）：primary = 墨黑主操作，
         // secondary = 苔绿，背景 = 暖灰纸面。
         val s = schemeFor("DAY")
-        assertEquals(Color(0xFF26282E), s.primary)
+        assertEquals(Color(0xFF0A0A0A), s.primary)
         assertEquals(Color(0xFF3D6B4F), s.secondary)
         assertEquals(Color(0xFFF7F7F5), s.background)
         assertEquals(Color(0xFFFFFFFF), s.surface)
@@ -72,7 +72,7 @@ class ThemeColorSchemeTest {
     }
 
     @Test
-    fun eye_care_theme_keeps_own_primary_but_gets_outline_soft() {
+    fun eye_care_theme_uses_ink_primary_and_moss_accent() {
         // Capture both scheme and outline-soft in a single setContent — calling
         // composeRule.setContent twice in one test throws IllegalStateException.
         val schemes = mutableListOf<androidx.compose.material3.ColorScheme>()
@@ -84,7 +84,39 @@ class ThemeColorSchemeTest {
             }
         }
         composeRule.waitForIdle()
-        assertEquals(Color(0xFF4A6B52), schemes.single().primary) // moss（保留暖纸底）
+        assertEquals(Color(0xFF26211A), schemes.single().primary) // 墨黑主操作 = eye_care --action-ink
+        assertEquals(Color(0xFF4A6B52), schemes.single().secondary) // moss = eye_care --accent
         assertEquals(Color(0xFFE2D9C4), os.single())
+    }
+
+    @Test
+    fun day_bright_theme_uses_white_surfaces() {
+        val s = schemeFor("DAY_BRIGHT")
+        assertEquals(Color(0xFF0A0A0A), s.primary)
+        assertEquals(Color(0xFFFFFFFF), s.background)
+        assertEquals(Color(0xFFE7E7E2), s.outline)
+    }
+
+    @Test
+    fun error_colors_follow_web_tokens() {
+        // Capture all three schemes in a single setContent — calling
+        // composeRule.setContent multiple times in one test throws IllegalStateException.
+        // Nested LocalMediaHubTheme each override MaterialTheme for its subtree.
+        val errors = mutableListOf<Color>()
+        composeRule.setContent {
+            LocalMediaHubTheme(themeKey = "DAY") {
+                errors.add(MaterialTheme.colorScheme.error)
+                LocalMediaHubTheme(themeKey = "EYE_CARE") {
+                    errors.add(MaterialTheme.colorScheme.error)
+                    LocalMediaHubTheme(themeKey = "NIGHT") {
+                        errors.add(MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        assertEquals(Color(0xFFDC2626), errors[0])
+        assertEquals(Color(0xFFC0392B), errors[1])
+        assertEquals(Color(0xFFF87171), errors[2])
     }
 }

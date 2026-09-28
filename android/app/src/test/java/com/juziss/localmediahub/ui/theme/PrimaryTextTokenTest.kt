@@ -62,4 +62,15 @@ class PrimaryTextTokenTest {
         // night 显式 Provide #A3CDAF 与 Web --accent-text 对齐（Ink Editorial）。
         assertEquals(Color(0xFFA3CDAF), captured.single())
     }
+
+    @Test
+    fun night_black_theme_provides_soft_moss_primary_text() {
+        val captured = mutableListOf<Color>()
+        composeRule.setContent {
+            LocalMediaHubTheme(themeKey = "NIGHT_BLACK") { captured.add(primaryTextColor()) }
+        }
+        composeRule.waitForIdle()
+        // night_black 显式 Provide #A3CDAF 与 Web --accent-text 对齐（Ink Editorial）。
+        assertEquals(Color(0xFFA3CDAF), captured.single())
+    }
 }
