@@ -29,6 +29,12 @@ export function renderScrubber({
 }) {
     const root = document.createElement('div');
     root.className = 'text-reader__scrubber';
+    // progressbar 语义(Task 4):min/max 静态,valuenow 由 setThumb 同步(0..100)。
+    root.setAttribute('role', 'progressbar');
+    root.setAttribute('aria-label', '阅读进度');
+    root.setAttribute('aria-valuemin', '0');
+    root.setAttribute('aria-valuemax', '100');
+    root.setAttribute('aria-valuenow', '0');
     // XSS-SAFE: 纯字面量骨架,label 文字通过 textContent 设置
     root.innerHTML = `
         <div class="text-reader__scrubber-track"></div>
@@ -51,6 +57,8 @@ export function renderScrubber({
 
     function setThumb(progress) {
         thumb.style.left = `${Math.round(progress * 100)}%`;
+        // aria-valuenow 与 thumb 同源:update() 与拖动路径共用此处计算。
+        root.setAttribute('aria-valuenow', String(Math.round(progress * 100)));
     }
 
     function setLabel(progress, dragging) {

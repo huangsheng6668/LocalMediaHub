@@ -94,9 +94,9 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         <div class="text-reader__drawer text-reader__drawer--hidden" aria-hidden="true"></div>
         <div class="text-reader__autoscroll-panel text-reader__autoscroll-panel--hidden" id="autoscroll-panel">
             <button class="autoscroll-panel-btn" id="autoscroll-panel-play" aria-label="播放/暂停" title="播放/暂停"><span data-icon="pause"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none" aria-hidden="true"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg></span><span data-icon="play" hidden><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg></span></button>
-            <button class="autoscroll-panel-btn" id="autoscroll-panel-minus" title="减速">-</button>
+            <button class="autoscroll-panel-btn" id="autoscroll-panel-minus" title="减速" aria-label="减速">-</button>
             <span class="autoscroll-panel-text">速度: <span id="autoscroll-val-speed">5</span></span>
-            <button class="autoscroll-panel-btn" id="autoscroll-panel-plus" title="加速">+</button>
+            <button class="autoscroll-panel-btn" id="autoscroll-panel-plus" title="加速" aria-label="加速">+</button>
         </div>
     `;
 

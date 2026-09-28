@@ -63,6 +63,20 @@ test('CUSTOM theme reveals color section; switching away hides it', () => {
     }
 });
 
+// Task 4: dialog 可访问名 — native <dialog> 需 aria-labelledby 指向标题元素。
+test('settings dialog is labelled', () => {
+    setup();
+    try {
+        const { api, dialog } = mount({});
+        const labelledBy = dialog.getAttribute('aria-labelledby');
+        assert.ok(labelledBy, 'dialog needs aria-labelledby');
+        assert.ok(document.getElementById(labelledBy), 'aria-labelledby must point at the header');
+        api.dispose();
+    } finally {
+        teardown();
+    }
+});
+
 test('letterSpacing slider saves float; customBg saves hex', () => {
     setup();
     try {

@@ -51,11 +51,13 @@ const PAGE_TURN_OPTIONS = [
 export function renderSettings(container) {
     const dialog = document.createElement('dialog');
     dialog.id = 'reader-settings-dialog';
+    // native <dialog> 已隐式 role=dialog,aria-labelledby 指向 header 标题(Task 4)。
+    dialog.setAttribute('aria-labelledby', 'reader-settings-title');
     // XSS-SAFE: pure-literal template; the ${[...].map(...)} blocks emit only hardcoded enum values
     dialog.innerHTML = `
         <form method="dialog">
             <header class="reader-settings__header">
-                <h3>阅读设置</h3>
+                <h3 id="reader-settings-title">阅读设置</h3>
                 <button type="submit" class="reader-settings__close" aria-label="关闭">×</button>
             </header>
             <div class="reader-settings__body">

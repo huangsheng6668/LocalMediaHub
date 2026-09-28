@@ -31,19 +31,28 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
         if (v) v.classList.remove('active');
     });
     [elements.menuDashboard, elements.menuBrowser, elements.menuBookshelf, elements.menuBookmarks, elements.menuSettings].forEach(m => {
-        if (m) m.classList.remove('active');
+        if (m) {
+            m.classList.remove('active');
+            m.removeAttribute('aria-current');
+        }
     });
 
     if (hash.startsWith('#/dashboard')) {
         state.activeTab = 'dashboard';
         if (elements.pageTitle) elements.pageTitle.textContent = '仪表盘';
-        if (elements.menuDashboard) elements.menuDashboard.classList.add('active');
+        if (elements.menuDashboard) {
+            elements.menuDashboard.classList.add('active');
+            elements.menuDashboard.setAttribute('aria-current', 'page');
+        }
         if (elements.viewDashboard) elements.viewDashboard.classList.add('active');
         renderDashboard();
     } else if (hash.startsWith('#/browser')) {
         state.activeTab = 'browser';
         if (elements.pageTitle) elements.pageTitle.textContent = '媒体共享库';
-        if (elements.menuBrowser) elements.menuBrowser.classList.add('active');
+        if (elements.menuBrowser) {
+            elements.menuBrowser.classList.add('active');
+            elements.menuBrowser.setAttribute('aria-current', 'page');
+        }
         if (elements.viewBrowser) elements.viewBrowser.classList.add('active');
 
         // Restore a deep-browsed location from the URL (written by
@@ -67,13 +76,19 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
     } else if (hash.startsWith('#/bookmarks')) {
         state.activeTab = 'bookmarks';
         if (elements.pageTitle) elements.pageTitle.textContent = '书签管理';
-        if (elements.menuBookmarks) elements.menuBookmarks.classList.add('active');
+        if (elements.menuBookmarks) {
+            elements.menuBookmarks.classList.add('active');
+            elements.menuBookmarks.setAttribute('aria-current', 'page');
+        }
         if (elements.viewBookmarks) elements.viewBookmarks.classList.add('active');
         renderBookmarks();
     } else if (hash.startsWith('#/settings')) {
         state.activeTab = 'settings';
         if (elements.pageTitle) elements.pageTitle.textContent = '系统设置';
-        if (elements.menuSettings) elements.menuSettings.classList.add('active');
+        if (elements.menuSettings) {
+            elements.menuSettings.classList.add('active');
+            elements.menuSettings.setAttribute('aria-current', 'page');
+        }
         if (elements.viewSettings) elements.viewSettings.classList.add('active');
         renderSettings();
     } else if (hash.startsWith('#/read')) {
@@ -96,7 +111,10 @@ export function handleRoute(elements, renderDashboard, loadRoots, browsePath, re
         // #view-reader section that #/read uses.
         state.activeTab = 'bookshelf';
         if (elements.pageTitle) elements.pageTitle.textContent = '书架';
-        if (elements.menuBookshelf) elements.menuBookshelf.classList.add('active');
+        if (elements.menuBookshelf) {
+            elements.menuBookshelf.classList.add('active');
+            elements.menuBookshelf.setAttribute('aria-current', 'page');
+        }
         if (elements.viewReader) {
             elements.viewReader.classList.add('active');
             renderBookshelf(elements.viewReader);

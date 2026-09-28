@@ -120,6 +120,7 @@ export function renderBookmarks() {
         delBtn.style.transition = 'color 0.2s';
         delBtn.textContent = '✕';
         delBtn.title = '删除书签';
+        delBtn.setAttribute('aria-label', '删除书签');
         
         delBtn.addEventListener('mouseenter', () => delBtn.style.color = 'var(--error)');
         delBtn.addEventListener('mouseleave', () => delBtn.style.color = 'var(--text-muted)');

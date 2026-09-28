@@ -294,8 +294,8 @@ export function renderBrowserList() {
                     <span class="card-preview-icon">${ICONS.folder()}</span>
                 </div>
                 <div class="card-actions-overlay">
-                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" data-action="delete-folder" data-path="${safePath}" data-index="${index}">${ICONS.trash()}</button>` : ''}
-                    <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(folder.path)}" data-is-dir="1" data-title="${safeName}" data-media-type="folder">${ICONS.heart()}</button>
+                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" aria-label="删除文件夹" data-action="delete-folder" data-path="${safePath}" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                    <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏" data-action="fav-toggle" data-path="${escapeHtml(folder.path)}" data-is-dir="1" data-title="${safeName}" data-media-type="folder">${ICONS.heart()}</button>
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>
@@ -342,9 +342,9 @@ export function renderBrowserList() {
                         <span class="card-preview-icon">${docIcon}</span>
                     </div>
                     <div class="card-actions-overlay">
-                        <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="text">${ICONS.heart()}</button>
-                        <button class="card-action-btn dots-btn" title="阅读状态" data-action="status-menu" data-path="${escapeHtml(file.path)}">${ICONS.dots()}</button>
-                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                        <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="text">${ICONS.heart()}</button>
+                        <button class="card-action-btn dots-btn" title="阅读状态" aria-label="阅读状态" data-action="status-menu" data-path="${escapeHtml(file.path)}">${ICONS.dots()}</button>
+                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" aria-label="删除文件" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
                     </div>
                     <div class="card-details">
                         <div class="card-title" title="${safeName}">${safeName}</div>
@@ -397,8 +397,8 @@ export function renderBrowserList() {
                     ${playOverlay}
                 </div>
                 <div class="card-actions-overlay">
-                    <button class="card-action-btn fav-btn" title="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="${isVideo ? 'video' : 'image'}">${ICONS.heart()}</button>
-                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                    <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="${isVideo ? 'video' : 'image'}">${ICONS.heart()}</button>
+                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" aria-label="删除文件" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>

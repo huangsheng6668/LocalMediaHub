@@ -181,3 +181,23 @@ test('renderScrubber: dispose removes listeners + clears host', () => {
     api.dispose();
     assert.equal(host.children.length, 0);
 });
+
+// Task 4: progressbar 语义 — root 需暴露 role/aria-* 且 valuenow 随 update() 同步。
+test('scrubber exposes progressbar semantics', () => {
+    const host = setupDom();
+    const api = renderScrubber({
+        containerEl: host,
+        getProgress: () => 0.5,
+        getChapterCount: () => 10,
+        onSeekStart: () => {}, onSeek: () => {}, onSeekEnd: () => {},
+        formatLabel: () => '',
+    });
+    const root = host.querySelector('.text-reader__scrubber');
+    assert.equal(root.getAttribute('role'), 'progressbar');
+    assert.equal(root.getAttribute('aria-label'), '阅读进度');
+    assert.equal(root.getAttribute('aria-valuemin'), '0');
+    assert.equal(root.getAttribute('aria-valuemax'), '100');
+    assert.match(root.getAttribute('aria-valuenow') || '', /^\d+$/);
+    assert.equal(root.getAttribute('aria-valuenow'), '50');  // update() 同步 0.5 → 50
+    api.dispose();
+});

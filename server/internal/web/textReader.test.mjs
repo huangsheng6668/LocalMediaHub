@@ -588,6 +588,27 @@ test('renderTextReader does NOT merge server progress if URL specifies chapter o
     }
 });
 
+// ============================================================================
+// 7. Accessibility: autoscroll panel buttons (Task 4)
+// ============================================================================
+
+test('autoscroll buttons have aria-labels', async () => {
+    setupJsdom();
+    try {
+        installEnv();
+        const { renderTextReader } = await import('./textReader.js');
+        const container = viewContainer();
+        await renderTextReader(container, '/test/book.txt', 0, null);
+        await new Promise((r) => setTimeout(r, 50));
+        assert.equal(document.getElementById('autoscroll-panel-minus')?.getAttribute('aria-label'), '减速');
+        assert.equal(document.getElementById('autoscroll-panel-plus')?.getAttribute('aria-label'), '加速');
+        container._cleanupReader?.();
+    } finally {
+        delete global.fetch;
+        teardownJsdom();
+    }
+});
+
 test('renderTextReader does NOT merge server progress if server last_read_at <= local.lastReadAt', async () => {
     setupJsdom();
     try {
