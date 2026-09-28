@@ -90,7 +90,8 @@ Web `day_bright` 是纯白变体。新建 scheme（其余字段抄 Light）：
    `../../../android/app/src/main/java/com/juziss/localmediahub/data/ReaderSettings.kt` 的
    `Color(0xFFxxxxxx)` 字面量。解析失败（enum 项数/字段数不符预期）→ fail，不 skip。
 2. **chrome token 对称**：解析 `themes.css` 各 `[data-theme]` 块的 `--token: #hex` ↔
-   正则解析 `Theme.kt` 各 scheme 的 `Color(0xFFxxxxxx)`，按 §2.1 映射表断言 8 字段 × 7 主题。
+   正则解析 `Theme.kt` 各 scheme 的 `Color(0xFFxxxxxx)`，按 §2.1 映射表断言 8 字段 × 7 主题；
+   `ColorTokens.kt` 的 `PrimaryText.*` ↔ `--accent-text` 断言一并在本组。
 3. **label 对称**：§4。
 4. **无 inline style 守护**：扫描 `server/internal/web/`（排除 `.test.mjs` 与 `vendor/`）断言
    不出现 `style="` HTML 属性（CSSOM 动态赋值 `el.style.prop =` 不在此列）。
@@ -106,7 +107,7 @@ Android 侧不新增跨端测试；现有 `ThemeColorSchemeTest` 等断言本轮
 
 | 类别 | 要求 |
 |---|---|
-| icon-only 按钮 | `aria-label`（中文文案与可见 tooltip 一致） |
+| icon-only 按钮 | `aria-label`（有 `title`/可见文本时与其一致，无则新拟简明中文） |
 | dialog | `role="dialog"` + `aria-modal="true"` + `aria-labelledby` 指向标题元素 |
 | 进度条 | `role="progressbar"` + `aria-valuenow`（可行时补 min/max） |
 | 侧栏导航 | 活动项 `aria-current="page"` |
