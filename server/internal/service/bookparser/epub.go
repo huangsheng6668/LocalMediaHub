@@ -72,7 +72,7 @@ func parseEpub(path string, info os.FileInfo) (*Book, error) {
 	}
 
 	opfDir := filepath.ToSlash(filepath.Dir(opfPath))
-	toc, _ := readToc(&zr.Reader, opfData.tocID, opfData.manifest, opfDir)
+	toc, _ := readToc(&zr.Reader, opfData.navID, opfData.tocID, opfData.manifest, opfDir)
 	for href, title := range toc {
 		for i := range chapters {
 			idref := chapters[i].ManifestID
@@ -158,6 +158,7 @@ type opfParsed struct {
 	manifest map[string]string
 	spine    []string
 	tocID    string
+	navID    string
 }
 
 func parseOpf(data []byte) (*opfParsed, error) {
@@ -174,17 +175,29 @@ func parseOpf(data []byte) (*opfParsed, error) {
 		if se, ok := t.(xml.StartElement); ok {
 			switch se.Name.Local {
 			case "item":
-				var id, href string
+				var id, href, props, mediaType string
 				for _, a := range se.Attr {
-					if a.Name.Local == "id" {
+					switch a.Name.Local {
+					case "id":
 						id = a.Value
-					}
-					if a.Name.Local == "href" {
+					case "href":
 						href = a.Value
+					case "properties":
+						props = a.Value
+					case "media-type":
+						mediaType = a.Value
 					}
 				}
 				if id != "" {
 					out.manifest[id] = href
+					for _, tok := range strings.Fields(props) {
+						if tok == "nav" {
+							out.navID = id
+						}
+					}
+					if out.tocID == "" && mediaType == "application/x-dtbncx+xml" {
+						out.tocID = id
+					}
 				}
 			case "itemref":
 				for _, a := range se.Attr {
@@ -223,14 +236,16 @@ func extractDcTitle(data []byte) string {
 	}
 }
 
-func readToc(zr *zip.Reader, ncxID string, manifest map[string]string, opfDir string) (map[string]string, error) {
-	for _, href := range manifest {
-		full := JoinZipPath(opfDir, href)
-		if f, err := zr.Open(full); err == nil {
-			data, _ := ReadCapped(f, MaxEpubEntrySize)
-			f.Close()
-			if toc := parseNavToc(data); len(toc) > 0 {
-				return toc, nil
+func readToc(zr *zip.Reader, navID, ncxID string, manifest map[string]string, opfDir string) (map[string]string, error) {
+	if navID != "" {
+		if href, ok := manifest[navID]; ok {
+			full := JoinZipPath(opfDir, href)
+			if f, err := zr.Open(full); err == nil {
+				data, _ := ReadCapped(f, MaxEpubEntrySize)
+				f.Close()
+				if toc := parseNavToc(data); len(toc) > 0 {
+					return toc, nil
+				}
 			}
 		}
 	}
@@ -240,7 +255,9 @@ func readToc(zr *zip.Reader, ncxID string, manifest map[string]string, opfDir st
 			if f, err := zr.Open(full); err == nil {
 				data, _ := ReadCapped(f, MaxEpubEntrySize)
 				f.Close()
-				return parseNcx(data), nil
+				if toc := parseNcx(data); len(toc) > 0 {
+					return toc, nil
+				}
 			}
 		}
 	}
@@ -296,8 +313,43 @@ func parseNavToc(data []byte) map[string]string {
 			walk(c)
 		}
 	}
-	walk(doc)
+
+	target := findNavNode(doc)
+	if target == nil {
+		target = doc
+	}
+	walk(target)
 	return out
+}
+
+func findNavNode(doc *html.Node) *html.Node {
+	var firstNav *html.Node
+	var tocNav *html.Node
+	var search func(*html.Node)
+	search = func(curr *html.Node) {
+		if curr.Type == html.ElementNode && strings.EqualFold(curr.Data, "nav") {
+			if firstNav == nil {
+				firstNav = curr
+			}
+			for _, a := range curr.Attr {
+				if (strings.EqualFold(a.Key, "epub:type") || strings.EqualFold(a.Key, "type")) && strings.Contains(strings.ToLower(a.Val), "toc") {
+					tocNav = curr
+					return
+				}
+			}
+		}
+		for c := curr.FirstChild; c != nil; c = c.NextSibling {
+			search(c)
+			if tocNav != nil {
+				return
+			}
+		}
+	}
+	search(doc)
+	if tocNav != nil {
+		return tocNav
+	}
+	return firstNav
 }
 
 func textOf(n *html.Node) string {

@@ -104,7 +104,7 @@ func (h *Handler) GetBookChapter(c echo.Context) error {
 	if idx >= len(b.Chapters) {
 		return respondError(c, http.StatusBadRequest, "index out of range")
 	}
-	blocks, err := h.books.GetChapterBlocks(c.Request().Context(), resolved, idx, c.RealIP())
+	blocks, err := h.books.GetChapterBlocksForBook(b, resolved, idx, c.RealIP())
 	if err != nil {
 		return mapBookError(c, err)
 	}

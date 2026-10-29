@@ -2,6 +2,7 @@ package service
 
 import (
 	"archive/zip"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -342,4 +343,49 @@ func TestReadImageBytes(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, bookparser.ErrUnsupported)
 	})
+}
+
+
+func TestBookServiceCacheCappedAtMaxEntries(t *testing.T) {
+	dir := t.TempDir()
+	s := NewBookService()
+	// Create and load 70 files (exceeding maxBookCacheEntries = 64)
+	var paths []string
+	for i := 0; i < 70; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("book_%03d.txt", i))
+		require.NoError(t, os.WriteFile(p, []byte(fmt.Sprintf("content %d", i)), 0644))
+		paths = append(paths, p)
+		_, err := s.GetBook(p)
+		require.NoError(t, err)
+	}
+
+	s.mu.RLock()
+	cacheLen := len(s.cache)
+	keysLen := len(s.keys)
+	_, firstPresent := s.cache[paths[0]]
+	_, lastPresent := s.cache[paths[69]]
+	s.mu.RUnlock()
+
+	assert.Equal(t, maxBookCacheEntries, cacheLen, "cache length should be capped at maxBookCacheEntries")
+	assert.Equal(t, maxBookCacheEntries, keysLen, "keys tracking length should equal maxBookCacheEntries")
+	assert.False(t, firstPresent, "oldest book should have been evicted")
+	assert.True(t, lastPresent, "newest book should be present in cache")
+}
+
+func TestBookServiceGetChapterBlocksForBook(t *testing.T) {
+	p := buildEpubWithImage(t, "images/cover.jpg", "cover", "images/cover.jpg")
+	svc := NewBookService()
+	b, err := svc.GetBook(p)
+	require.NoError(t, err)
+
+	blocksForBook, err := svc.GetChapterBlocksForBook(b, p, 0, "127.0.0.1")
+	require.NoError(t, err)
+	blocksDirect, err := svc.GetChapterBlocks(t.Context(), p, 0, "127.0.0.1")
+	require.NoError(t, err)
+
+	assert.Equal(t, blocksDirect, blocksForBook)
+
+	// nil book returns error
+	_, err = svc.GetChapterBlocksForBook(nil, p, 0, "127.0.0.1")
+	assert.Error(t, err)
 }

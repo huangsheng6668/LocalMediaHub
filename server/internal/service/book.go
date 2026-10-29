@@ -27,18 +27,24 @@ import (
 	"github.com/localmediahub/server/internal/service/bookparser"
 )
 
+const maxBookCacheEntries = 64
+
 // BookService parses books and caches the result keyed by (path, mtime).
 // The zero value is not usable — construct via NewBookService.
 type BookService struct {
 	mu     sync.RWMutex
 	cache  map[string]*bookparser.Book
+	keys   []string
 	sf     singleflight.Group
 	signer *BookSigner
 }
 
 // NewBookService returns a BookService ready to serve GetBook calls.
 func NewBookService() *BookService {
-	return &BookService{cache: make(map[string]*bookparser.Book)}
+	return &BookService{
+		cache: make(map[string]*bookparser.Book),
+		keys:  make([]string, 0, maxBookCacheEntries),
+	}
 }
 
 // SetSigner injects the per-process BookSigner used to sign rewritten
@@ -79,6 +85,14 @@ func (s *BookService) GetBook(path string) (*bookparser.Book, error) {
 			return nil, perr
 		}
 		s.mu.Lock()
+		if _, exists := s.cache[path]; !exists {
+			for len(s.cache) >= maxBookCacheEntries && len(s.keys) > 0 {
+				evict := s.keys[0]
+				s.keys = s.keys[1:]
+				delete(s.cache, evict)
+			}
+			s.keys = append(s.keys, path)
+		}
 		s.cache[path] = b
 		s.mu.Unlock()
 		return b, nil
@@ -116,6 +130,33 @@ func (s *BookService) GetChapterBlocks(ctx context.Context, path string, idx int
 	b, err := s.GetBook(path)
 	if err != nil {
 		return nil, err
+	}
+	return s.GetChapterBlocksForBook(b, path, idx, clientIP)
+}
+
+// GetChapterBlocksForBook returns the ordered content blocks for chapter idx of the
+// given parsed book. Image blocks' Src is rewritten to a
+// /api/v1/books/image?path=...&manifest=... URL that the client can fetch
+// through the authenticated book-image endpoint, unless the original Src is
+// empty or a data: URI — data: URIs are passed through unchanged (epub-spec
+// legal and allowed by CSP img-src). Absolute http(s):// URLs are stripped to
+// "" (Phase 9 / L-11): CSP blocks the external fetch anyway, so blanking the
+// src makes the client render a placeholder instead of a silently broken
+// image. If no manifest entry matches the Src, the Src is set to "" so
+// clients can render a placeholder (e.g. "[本图片无法显示]").
+//
+// When a BookSigner has been injected via SetSigner (production), the
+// rewritten URL also carries &sig=<hmac> bound to (clientIP, path,
+// manifestID); the /books/image endpoint verifies this signature instead of
+// reading the Bearer token from the query string. When the signer is nil
+// (open mode), the legacy unsigned URL is produced and the endpoint falls
+// back to the deprecated ?token= query parameter.
+//
+// The returned slice is a fresh copy; callers may mutate it. The
+// underlying *Book remains shared and must not be mutated.
+func (s *BookService) GetChapterBlocksForBook(b *bookparser.Book, path string, idx int, clientIP string) ([]bookparser.Block, error) {
+	if b == nil {
+		return nil, fmt.Errorf("book is nil")
 	}
 	blocks, err := b.ChapterBlocks(idx)
 	if err != nil {

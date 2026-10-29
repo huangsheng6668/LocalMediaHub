@@ -286,3 +286,41 @@ func TestExtractBlocksImageOnlyChapter(t *testing.T) {
 		assert.NotEqual(t, "text", b.Type)
 	}
 }
+
+
+func TestReadTocUsesNavPropertyNotRandomChapterLinks(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	writeEntry := func(name, body string) {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(body))
+	}
+	writeEntry("META-INF/container.xml", `<?xml version="1.0"?><container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>`)
+	writeEntry("OEBPS/content.opf", `<?xml version="1.0"?><package><metadata><dc:title>Test</dc:title></metadata><manifest><item id="ch1" href="ch1.xhtml"/><item id="ch2" href="ch2.xhtml"/><item id="nav" href="nav.xhtml" properties="nav"/></manifest><spine><itemref idref="ch1"/><itemref idref="ch2"/></spine></package>`)
+	// Chapter 1 contains an anchor link that used to trick readToc when visited before nav.xhtml
+	writeEntry("OEBPS/ch1.xhtml", `<html><body><p>Body <a href="ch2.xhtml">Footnote Link</a></p></body></html>`)
+	writeEntry("OEBPS/ch2.xhtml", `<html><body><p>Body 2</p></body></html>`)
+	writeEntry("OEBPS/nav.xhtml", `<html><body><nav epub:type="toc"><ol><li><a href="ch1.xhtml">Real Chapter 1</a></li><li><a href="ch2.xhtml">Real Chapter 2</a></li></ol></nav></body></html>`)
+	_ = zw.Close()
+
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opf, err := parseOpf([]byte(`<?xml version="1.0"?><package><metadata><dc:title>Test</dc:title></metadata><manifest><item id="ch1" href="ch1.xhtml"/><item id="ch2" href="ch2.xhtml"/><item id="nav" href="nav.xhtml" properties="nav"/></manifest><spine><itemref idref="ch1"/><itemref idref="ch2"/></spine></package>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 30; i++ {
+		toc, err := readToc(zr, opf.navID, opf.tocID, opf.manifest, "OEBPS")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if toc["ch2.xhtml"] != "Real Chapter 2" {
+			t.Fatalf("iteration %d: expected 'Real Chapter 2', got %q (map=%v)", i, toc["ch2.xhtml"], toc)
+		}
+	}
+}
