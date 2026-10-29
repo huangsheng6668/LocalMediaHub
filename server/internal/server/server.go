@@ -226,14 +226,15 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// Redact ?token= from access log while caching query params for AuthMw
 	s.Echo.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			_ = c.QueryParams() // 触发 QueryParams() 解析并缓存到 context
 			req := c.Request()
-			q := req.URL.Query()
-			if q.Get("token") != "" {
-				q.Set("token", "REDACTED")
-				req.URL.RawQuery = q.Encode()
-				// Echo Logger 打印 req.RequestURI（请求行原文，不随 URL 同步），必须一并改写
-				req.RequestURI = req.URL.Path + "?" + req.URL.RawQuery
+			if strings.Contains(req.URL.RawQuery, "token=") {
+				_ = c.QueryParams()
+				q := req.URL.Query()
+				if q.Get("token") != "" {
+					q.Set("token", "REDACTED")
+					req.URL.RawQuery = q.Encode()
+					req.RequestURI = req.URL.Path + "?" + req.URL.RawQuery
+				}
 			}
 			return next(c)
 		}
@@ -252,10 +253,15 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 		Level: 5,
 		Skipper: func(c echo.Context) bool {
 			path := c.Request().URL.Path
+			if !strings.HasPrefix(path, "/api/") {
+				return true // static assets handle pre-compressed gzip directly
+			}
 			if strings.Contains(path, "/stream") ||
 				strings.Contains(path, "/thumbnail") ||
 				strings.Contains(path, "/original") ||
-				strings.Contains(path, "/download") {
+				strings.Contains(path, "/download") ||
+				strings.Contains(path, "/hls/segment") ||
+				strings.Contains(path, "/books/image") {
 				return true
 			}
 			return false
