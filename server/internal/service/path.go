@@ -347,3 +347,14 @@ func ResolveBrowsePath(pathStr string, roots []string) (string, error) {
 func IsLinkEntry(mode fs.FileMode) bool {
 	return mode&(fs.ModeSymlink|fs.ModeIrregular) != 0
 }
+
+// PathKey returns a canonical map lookup key for path p: cleaned, and
+// lower-cased on Windows where NTFS/ReFS paths are case-insensitive.
+func PathKey(p string) string {
+	clean := filepath.Clean(p)
+	if runtime.GOOS == "windows" {
+		return strings.ToLower(clean)
+	}
+	return clean
+}
+

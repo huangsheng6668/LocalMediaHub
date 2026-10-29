@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -127,17 +126,27 @@ func (h *Handler) PostDecorations(c echo.Context) error {
 	if len(req.Paths) > maxDecorationPaths {
 		return respondError(c, http.StatusBadRequest, "too many paths")
 	}
-	normalizedToOriginal := map[string]string{} // normalized -> 首个原始形态
+	keyToOriginals := make(map[string][]string, len(req.Paths))
 	normalizedList := make([]string, 0, len(req.Paths))
-	seen := map[string]bool{}
 	for _, raw := range req.Paths {
 		norm, ok := h.validateAnyEntryPath(raw)
-		if !ok || seen[norm] {
-			continue // 无效/重复：静默跳过
+		if !ok {
+			continue
 		}
-		seen[norm] = true
-		normalizedToOriginal[norm] = raw
-		normalizedList = append(normalizedList, norm)
+		k := service.PathKey(norm)
+		if _, seen := keyToOriginals[k]; !seen {
+			normalizedList = append(normalizedList, norm)
+		}
+		found := false
+		for _, o := range keyToOriginals[k] {
+			if o == raw {
+				found = true
+				break
+			}
+		}
+		if !found {
+			keyToOriginals[k] = append(keyToOriginals[k], raw)
+		}
 	}
 	res, err := h.library.BatchDecorations(normalizedList)
 	if err != nil {
@@ -146,37 +155,22 @@ func (h *Handler) PostDecorations(c echo.Context) error {
 	// key 保真：DB 形态 → 调用方原始字符串
 	states := make(map[string]models.ReadingStateBadge, len(res.States))
 	for dbPath, badge := range res.States {
-		orig, ok := normalizedToOriginal[dbPath]
-		if !ok {
-			for n, o := range normalizedToOriginal {
-				if strings.EqualFold(n, dbPath) {
-					orig = o
-					ok = true
-					break
-				}
+		origs := keyToOriginals[service.PathKey(dbPath)]
+		if len(origs) == 0 {
+			states[dbPath] = badge
+		} else {
+			for _, orig := range origs {
+				states[orig] = badge
 			}
 		}
-		if !ok {
-			orig = dbPath
-		}
-		states[orig] = badge
 	}
 	favs := make([]string, 0, len(res.Favorites))
 	for _, p := range res.Favorites {
-		if orig, ok := normalizedToOriginal[p]; ok {
-			favs = append(favs, orig)
+		origs := keyToOriginals[service.PathKey(p)]
+		if len(origs) == 0 {
+			favs = append(favs, p)
 		} else {
-			matched := false
-			for n, o := range normalizedToOriginal {
-				if strings.EqualFold(n, p) {
-					favs = append(favs, o)
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				favs = append(favs, p)
-			}
+			favs = append(favs, origs...)
 		}
 	}
 	return c.JSON(http.StatusOK, models.DecorationsResult{States: states, Favorites: favs})

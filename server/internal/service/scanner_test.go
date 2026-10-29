@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -405,15 +407,15 @@ func TestScan_PopulatesCacheByDir(t *testing.T) {
 	dirAsub := filepath.Join(tempDir, "A", "sub")
 	dirB := filepath.Join(tempDir, "B")
 
-	files, ok := scanner.cacheByDir[dirA]
+	files, ok := scanner.cacheByDir[PathKey(dirA)]
 	assert.True(t, ok, "dirA should be in cacheByDir")
 	assert.Len(t, files, 2) // v1.mp4 + i1.jpg
 
-	files, ok = scanner.cacheByDir[dirAsub]
+	files, ok = scanner.cacheByDir[PathKey(dirAsub)]
 	assert.True(t, ok, "dirAsub should be in cacheByDir")
 	assert.Len(t, files, 1) // v2.mp4
 
-	files, ok = scanner.cacheByDir[dirB]
+	files, ok = scanner.cacheByDir[PathKey(dirB)]
 	assert.True(t, ok, "dirB should be in cacheByDir")
 	assert.Len(t, files, 1) // v3.mp4
 }
@@ -907,3 +909,49 @@ func TestScannerStartWatchingReentrant(t *testing.T) {
 		t.Fatalf("second StartWatching failed: %v", err)
 	}
 }
+
+func TestGetCachedByDirCaseInsensitiveOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("case-insensitive path key test applies to Windows")
+	}
+	root := t.TempDir()
+	sub := filepath.Join(root, "SubFolder")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "clip.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sc := NewScanner([]string{".mp4"}, nil, nil)
+	if _, err := sc.Scan(context.Background(), []string{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	lowerQuery := strings.ToLower(sub)
+	files, err := sc.GetCachedByDir(context.Background(), []string{root}, lowerQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Name != "clip.mp4" {
+		t.Fatalf("expected 1 file for differently-cased dir query %q, got %v", lowerQuery, files)
+	}
+}
+
+func TestPathKey(t *testing.T) {
+	input := filepath.Join("Foo", "Bar", "..", "Bar", "Baz.TXT")
+	key := PathKey(input)
+	clean := filepath.Clean(input)
+	if runtime.GOOS == "windows" {
+		expected := strings.ToLower(clean)
+		if key != expected {
+			t.Fatalf("expected %q, got %q", expected, key)
+		}
+	} else {
+		if key != clean {
+			t.Fatalf("expected %q, got %q", clean, key)
+		}
+	}
+}
+
+

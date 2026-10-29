@@ -82,7 +82,9 @@ func (h *Handler) searchFiles(files []models.MediaFile, scopedPath, query string
 	// scopedPath 已在 handler 归一化；预算前缀（仅当无尾分隔符才补，正确处理盘根 D:\），
 	// 逐文件 HasPrefix 替代每文件 IsPathWithinRoots（消除双 NormalizePath + Rel）。
 	var scopePrefix string
+	var scopeClean string
 	if scopedPath != "" {
+		scopeClean = filepath.Clean(scopedPath)
 		scopePrefix = scopedPath
 		if !strings.HasSuffix(scopePrefix, string(filepath.Separator)) {
 			scopePrefix += string(filepath.Separator)
@@ -90,8 +92,15 @@ func (h *Handler) searchFiles(files []models.MediaFile, scopedPath, query string
 	}
 
 	for _, file := range files {
-		if scopePrefix != "" && !strings.HasPrefix(file.Path, scopePrefix) {
-			continue
+		if scopePrefix != "" {
+			if runtime.GOOS == "windows" {
+				if !strings.EqualFold(file.Path, scopeClean) &&
+					(len(file.Path) < len(scopePrefix) || !strings.EqualFold(file.Path[:len(scopePrefix)], scopePrefix)) {
+					continue
+				}
+			} else if file.Path != scopeClean && !strings.HasPrefix(file.Path, scopePrefix) {
+				continue
+			}
 		}
 
 		if !strings.Contains(strings.ToLower(file.Name), lowerQuery) {

@@ -386,7 +386,7 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	byDir := make(map[string][]models.MediaFile)
 	for _, subList := range results {
 		for _, f := range subList {
-			dir := filepath.Clean(filepath.Dir(f.Path))
+			dir := PathKey(filepath.Dir(f.Path))
 			byDir[dir] = append(byDir[dir], f)
 		}
 	}
@@ -539,7 +539,7 @@ func (s *Scanner) cachedDirSnapshot(cleanDir string) (files []models.MediaFile, 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	fresh = time.Since(s.cacheTime) < s.cacheTTL
-	if files, ok = s.cacheByDir[cleanDir]; ok {
+	if files, ok = s.cacheByDir[PathKey(cleanDir)]; ok {
 		out := make([]models.MediaFile, len(files))
 		copy(out, files)
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -784,7 +784,7 @@ func (s *Scanner) hydrateFromSnapshotLocked(roots []string) {
 		case "text":
 			textFiles = append(textFiles, f)
 		}
-		dir := filepath.Clean(filepath.Dir(f.Path))
+		dir := PathKey(filepath.Dir(f.Path))
 		byDir[dir] = append(byDir[dir], f)
 	}
 	cacheDirs := make([]string, 0, len(snap.Dirs))
