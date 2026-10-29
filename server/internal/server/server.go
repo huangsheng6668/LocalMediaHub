@@ -32,6 +32,7 @@ type Server struct {
 	Library      *service.LibraryService
 	Streaming    *service.StreamingService
 	Thumbnail    *service.ThumbnailService
+	Handler      *handler.Handler
 	httpServer   *http.Server
 	preGenCtx    context.Context
 	preGenCancel context.CancelFunc
@@ -132,6 +133,7 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// books: BookService wired in Task 8 — drives /api/v1/books/info|chapter.
 	h := handler.New(cfg, scanner, tagsService, streamingService, thumbnailService, libraryService, bookService, bookSigner)
+	s.Handler = h
 
 	// BLE GATT wiring Task 4: construct the BLE Central non-fatally. If no
 	// Bluetooth adapter is present, NewCentralScanner returns (nil, err) and we
@@ -203,6 +205,7 @@ func New(cfg *config.Config) (*Server, error) {
 }
 
 func (s *Server) registerRoutes(h *handler.Handler) {
+	s.Handler = h
 	// Recover must be first so panics in any handler are caught and converted
 	// to a 500 instead of crashing the whole process.
 	s.Echo.Use(echoMw.Recover())
@@ -275,6 +278,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// Declared before the pprof block so the /debug/pprof group can share it
 	// (Phase 9 L-2).
 	authFailLimiter := middleware.NewAuthFailureLimiter(10, time.Minute)
+	s.Handler.SetAuthFailureLimiter(authFailLimiter)
 	authMw := middleware.BearerToken(s.Config.Server.Token, authFailLimiter)
 
 	// pprof endpoints for live profiling. Round 32 S3: routes are OFF by

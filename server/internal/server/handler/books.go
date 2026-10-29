@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -138,45 +139,59 @@ func (h *Handler) GetBookImage(c echo.Context) error {
 	if manifestID == "" {
 		return respondError(c, http.StatusBadRequest, "manifest required")
 	}
+
+	now := time.Now()
+	clientIP := c.RealIP()
+	if h.authFailLimiter != nil && h.authFailLimiter.Blocked(clientIP, now) {
+		return respondError(c, http.StatusTooManyRequests, "Too many auth failures")
+	}
+
+	normalizedPath, err := service.NormalizePath(pathStr)
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid path")
+	}
+
+	if h.bookSigner != nil {
+		sig := c.QueryParam("sig")
+		switch {
+		case sig != "":
+			if !h.bookSigner.VerifyImage(clientIP, normalizedPath, manifestID, sig) {
+				if h.authFailLimiter != nil {
+					h.authFailLimiter.RecordFailure(clientIP, now)
+				}
+				return respondError(c, http.StatusUnauthorized, "invalid signature")
+			}
+		case c.QueryParam("token") != "":
+			if !tokenMatches(c.QueryParam("token"), h.cfg.Server.Token) {
+				if h.authFailLimiter != nil {
+					h.authFailLimiter.RecordFailure(clientIP, now)
+				}
+				return respondError(c, http.StatusUnauthorized, "invalid token")
+			}
+			slog.Warn("[DEPRECATED] /books/image called with ?token=",
+				"path", normalizedPath,
+				"manifest", manifestID,
+			)
+		default:
+			if h.authFailLimiter != nil {
+				h.authFailLimiter.RecordFailure(clientIP, now)
+			}
+			return respondError(c, http.StatusUnauthorized, "signature required")
+		}
+		if h.authFailLimiter != nil {
+			h.authFailLimiter.Reset(clientIP)
+		}
+	}
+
 	allowedExts := append([]string{}, h.cfg.Scan.TextExtensions...)
 	resolved, err := service.ValidateAccessibleMediaPath(
-		pathStr,
+		normalizedPath,
 		h.cfg.Scan.GetRoots(),
 		h.cfg.GetSystemAllowedRoots(),
 		allowedExts,
 	)
 	if err != nil {
 		return respondError(c, http.StatusForbidden, "access denied")
-	}
-	// Signature gate. The ?sig= path is preferred because it does not leak
-	// the bearer token into logs/history/referer. The ?token= path is the
-	// pre-Round-32 fallback kept for migration; it is logged so operators
-	// can see when all clients have moved over.
-	//
-	// NOTE: /api/v1/books/image is registered OUTSIDE the authMw group (see
-	// server.go) because <img> tags cannot send Authorization headers — so
-	// the middleware would 401 every sig-only request before this handler
-	// could run, making the signing mechanism dead code in token mode. The
-	// ?token= fallback therefore verifies the bearer value HERE (constant
-	// time) instead of relying on the middleware.
-	if h.bookSigner != nil {
-		sig := c.QueryParam("sig")
-		switch {
-		case sig != "":
-			if !h.bookSigner.VerifyImage(c.RealIP(), resolved, manifestID, sig) {
-				return respondError(c, http.StatusUnauthorized, "invalid signature")
-			}
-		case c.QueryParam("token") != "":
-			if !tokenMatches(c.QueryParam("token"), h.cfg.Server.Token) {
-				return respondError(c, http.StatusUnauthorized, "invalid token")
-			}
-			slog.Warn("[DEPRECATED] /books/image called with ?token=",
-				"path", resolved,
-				"manifest", manifestID,
-			)
-		default:
-			return respondError(c, http.StatusUnauthorized, "signature required")
-		}
 	}
 	if h.books == nil {
 		return respondInternalError(c, errors.New("book service unavailable"))

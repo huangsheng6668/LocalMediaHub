@@ -34,16 +34,24 @@ import (
 // nil pointer wrapped in a non-nil interface) so the handlers' `== nil` checks
 // correctly route to the "ble unavailable" responses. server.New handles the
 // conditional assignment (Gotcha 1 in the BLE GATT wiring plan).
+// AuthFailureRecorder tracks per-IP authentication failures.
+type AuthFailureRecorder interface {
+	Blocked(ip string, now time.Time) bool
+	RecordFailure(ip string, now time.Time)
+	Reset(ip string)
+}
+
 type Handler struct {
-	cfg        *config.Config
-	scanner    *service.Scanner
-	tags       *service.TagsService
-	streaming  *service.StreamingService
-	thumbnail  *service.ThumbnailService
-	library    *service.LibraryService
-	books      *service.BookService
-	bookSigner *service.BookSigner
-	BLECentral BLECentralBackend
+	cfg             *config.Config
+	scanner         *service.Scanner
+	tags            *service.TagsService
+	streaming       *service.StreamingService
+	thumbnail       *service.ThumbnailService
+	library         *service.LibraryService
+	books           *service.BookService
+	bookSigner      *service.BookSigner
+	BLECentral      BLECentralBackend
+	authFailLimiter AuthFailureRecorder
 }
 
 // New creates a Handler with all required service dependencies.
@@ -69,6 +77,12 @@ func New(
 		library:    library,
 		books:      books,
 		bookSigner: bookSigner,
+	}
+}
+
+func (h *Handler) SetAuthFailureLimiter(l AuthFailureRecorder) {
+	if h != nil {
+		h.authFailLimiter = l
 	}
 }
 

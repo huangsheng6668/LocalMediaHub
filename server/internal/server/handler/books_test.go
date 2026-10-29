@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/localmediahub/server/internal/config"
+	"github.com/localmediahub/server/internal/server/middleware"
 	"github.com/localmediahub/server/internal/service"
 )
 
@@ -444,4 +446,48 @@ func TestSignImageNoSignerReturnsUnsignedSrc(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.NotContains(t, resp.Src, "&sig=")
 	assert.Contains(t, resp.Src, "manifest=cover")
+}
+
+func TestGetBookImageAuthBeforeStatAndRateLimited(t *testing.T) {
+	root := t.TempDir()
+	cfg := &config.Config{
+		Server: config.ServerConfig{Token: "secret-token"},
+		Scan:   config.ScanConfig{Roots: []string{root}, TextExtensions: []string{".epub"}},
+	}
+	signer, err := service.NewBookSigner()
+	require.NoError(t, err)
+	bs := service.NewBookService()
+	bs.SetSigner(signer)
+	h := New(cfg, nil, nil, nil, nil, nil, bs, signer)
+	limiter := middleware.NewAuthFailureLimiter(2, time.Minute)
+	h.SetAuthFailureLimiter(limiter)
+
+	e := echo.New()
+	missingPath := filepath.Join(root, "nonexistent.epub")
+
+	// 1. Unauthenticated request for non-existent file must return 401 (NOT 403 file-existence oracle)
+	req1 := httptest.NewRequest(http.MethodGet, "/api/v1/books/image?path="+url.QueryEscape(missingPath)+"&manifest=img1", nil)
+	rec1 := httptest.NewRecorder()
+	if err := h.GetBookImage(e.NewContext(req1, rec1)); err != nil {
+		t.Fatal(err)
+	}
+	if rec1.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated nonexistent file, got %d", rec1.Code)
+	}
+
+	// 2. Second invalid token attempt hits threshold (2)
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/books/image?path="+url.QueryEscape(missingPath)+"&manifest=img1&token=wrong", nil)
+	rec2 := httptest.NewRecorder()
+	_ = h.GetBookImage(e.NewContext(req2, rec2))
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec2.Code)
+	}
+
+	// 3. Third attempt must be blocked with 429
+	req3 := httptest.NewRequest(http.MethodGet, "/api/v1/books/image?path="+url.QueryEscape(missingPath)+"&manifest=img1&token=wrong2", nil)
+	rec3 := httptest.NewRecorder()
+	_ = h.GetBookImage(e.NewContext(req3, rec3))
+	if rec3.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after exceeding auth failure limit, got %d", rec3.Code)
+	}
 }
