@@ -750,6 +750,11 @@ func TestScannerWritesSnapshotAfterScan(t *testing.T) {
 	_, err := sc.Scan(context.Background(), []string{media})
 	require.NoError(t, err)
 
+	// The write is asynchronous by design — it carries a multi-MB json.Marshal
+	// plus an fsync, and Scan runs on the request goroutine whenever the cache
+	// is cold. Wait for it before reading the file back.
+	sc.snapshotWG.Wait()
+
 	snap, ok, err := loadScanSnapshot(snapPath, buildScanIdentity([]string{media}, []string{".mp4"}, nil, nil))
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -828,6 +833,9 @@ func TestScannerSnapshotWriteThrottle(t *testing.T) {
 	sc := NewScannerWithSnapshot([]string{".mp4"}, nil, nil, snapPath)
 	_, err := sc.Scan(context.Background(), []string{media})
 	require.NoError(t, err)
+	// Snapshot writes are asynchronous — wait for the first one to land so the
+	// throttle assertion below reads a settled file.
+	sc.snapshotWG.Wait()
 
 	// Second file appears; the immediate rescan refreshes the in-memory cache
 	// but the snapshot write is throttled (well under the 30s min interval).
@@ -835,9 +843,52 @@ func TestScannerSnapshotWriteThrottle(t *testing.T) {
 	files, err := sc.Scan(context.Background(), []string{media})
 	require.NoError(t, err)
 	assert.Len(t, files, 2)
+	sc.snapshotWG.Wait() // no-op: the throttled path never starts a writer
 
 	snap, ok, err := loadScanSnapshot(snapPath, buildScanIdentity([]string{media}, []string{".mp4"}, nil, nil))
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Len(t, snap.Files, 1, "throttled snapshot must still hold the first scan result")
+}
+
+// TestSoftInvalidateKeepsCacheReadable pins the contract the fsnotify loop
+// depends on. A hard wipe (InvalidateCache) makes cachedSnapshot report
+// ok=false, which sends GetCached into its synchronous scan branch — during an
+// event storm (copying a large file into the library) that blocks every browse
+// request on a full-tree walk. softInvalidate must therefore mark the cache
+// stale while keeping every structure readable, so readers take the
+// stale-while-revalidate path instead.
+func TestSoftInvalidateKeepsCacheReadable(t *testing.T) {
+	tmp := t.TempDir()
+	media := filepath.Join(tmp, "media")
+	require.NoError(t, os.MkdirAll(media, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(media, "a.mp4"), []byte("x"), 0o644))
+
+	sc := NewScanner([]string{".mp4"}, nil, nil)
+	defer sc.Shutdown()
+
+	files, err := sc.GetCached(context.Background(), []string{media})
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	sc.softInvalidate()
+
+	files, ok, fresh := sc.cachedSnapshot("all")
+	assert.True(t, ok, "soft invalidate must keep the cache readable")
+	assert.False(t, fresh, "soft invalidate must mark the cache stale")
+	assert.Len(t, files, 1)
+
+	// The per-directory index must survive too: GetCachedByDir treats a missing
+	// entry as "directory is empty" only while cacheByDir is populated. Losing
+	// it would turn every /files request into a cache-miss scan.
+	assert.True(t, sc.hasDirIndex(), "soft invalidate must keep cacheByDir populated")
+	dirFiles, err := sc.GetCachedByDir(context.Background(), []string{media}, media)
+	require.NoError(t, err)
+	assert.Len(t, dirFiles, 1)
+
+	// The hard wipe is still available, and still clears everything.
+	sc.InvalidateCache()
+	_, ok, _ = sc.cachedSnapshot("all")
+	assert.False(t, ok, "InvalidateCache must still clear the cache")
+	assert.False(t, sc.hasDirIndex(), "InvalidateCache must still clear cacheByDir")
 }

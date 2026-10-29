@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -412,4 +415,122 @@ func TestBrowseFolderSortAndPagination(t *testing.T) {
 	require.Len(t, pageDesc.Files, 2)
 	require.Equal(t, "c.mp4", pageDesc.Files[0].Name)
 	require.Equal(t, "b.mp4", pageDesc.Files[1].Name)
+}
+
+
+// TestDownloadFolderZipSkipsSymlinkEntry verifies that symlinks inside a zipped
+// folder are skipped (spec §1.1) to prevent path traversal or leaking out-of-library
+// files via zip download.
+func TestDownloadFolderZipSkipsSymlinkEntry(t *testing.T) {
+	root := t.TempDir()
+	zipDir := filepath.Join(root, "photos")
+	require.NoError(t, os.MkdirAll(zipDir, 0o755))
+
+	realFile := filepath.Join(zipDir, "real.mp4")
+	require.NoError(t, os.WriteFile(realFile, []byte("real-media-data"), 0o644))
+
+	targetFile := filepath.Join(root, "outside.mp4")
+	require.NoError(t, os.WriteFile(targetFile, []byte("secret-media-data"), 0o644))
+
+	linkFile := filepath.Join(zipDir, "link.mp4")
+	if err := os.Symlink(targetFile, linkFile); err != nil {
+		t.Skip("symlinks not supported on this environment: " + err.Error())
+	}
+
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{root},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+	}
+
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil, nil)
+	e := echo.New()
+	encodedPath := strings.ReplaceAll(url.PathEscape(filepath.ToSlash(zipDir)), "%2F", "/")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders/"+encodedPath+"/download", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("*")
+	ctx.SetParamValues(filepath.ToSlash(zipDir) + "/download")
+
+	err := h.DownloadFolderZip(ctx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	zipReader, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	require.NoError(t, err)
+
+	var foundReal, foundLink bool
+	for _, f := range zipReader.File {
+		if strings.Contains(f.Name, "real.mp4") {
+			foundReal = true
+		}
+		if strings.Contains(f.Name, "link.mp4") {
+			foundLink = true
+		}
+	}
+
+	require.True(t, foundReal, "real file must be present in the zip")
+	require.False(t, foundLink, "symlink entry must not be present in the zip")
+}
+
+// TestDownloadFolderZipSkipsJunctionEntry guards against Windows directory junctions
+// inside a zipped folder escaping the library roots (spec §1.1).
+func TestDownloadFolderZipSkipsJunctionEntry(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junction test is Windows-specific")
+	}
+	root := t.TempDir()
+	zipDir := filepath.Join(root, "photos")
+	require.NoError(t, os.MkdirAll(zipDir, 0o755))
+
+	realFile := filepath.Join(zipDir, "real.mp4")
+	require.NoError(t, os.WriteFile(realFile, []byte("real-media-data"), 0o644))
+
+	outside := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.mp4"), []byte("secret-media-data"), 0o644))
+
+	linkDir := filepath.Join(zipDir, "junction")
+	cmd := exec.Command("cmd", "/c", "mklink", "/J", linkDir, outside)
+	if err := cmd.Run(); err != nil {
+		t.Skipf("mklink /J failed: %v", err)
+	}
+
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{root},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+	}
+
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil, nil)
+	e := echo.New()
+	encodedPath := strings.ReplaceAll(url.PathEscape(filepath.ToSlash(zipDir)), "%2F", "/")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders/"+encodedPath+"/download", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("*")
+	ctx.SetParamValues(filepath.ToSlash(zipDir) + "/download")
+
+	err := h.DownloadFolderZip(ctx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	zipReader, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	require.NoError(t, err)
+
+	var foundReal, foundJunction bool
+	for _, f := range zipReader.File {
+		if strings.Contains(f.Name, "real.mp4") {
+			foundReal = true
+		}
+		if strings.Contains(f.Name, "secret.mp4") {
+			foundJunction = true
+		}
+	}
+
+	require.True(t, foundReal, "real file must be present in the zip")
+	require.False(t, foundJunction, "junction files must not be present in the zip")
 }
