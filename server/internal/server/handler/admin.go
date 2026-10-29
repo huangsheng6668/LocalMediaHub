@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"github.com/localmediahub/server/internal/config"
 	"github.com/localmediahub/server/internal/service"
 )
 
@@ -39,20 +40,31 @@ func (h *Handler) UpdateConfig(c echo.Context) error {
 		}
 	}
 
-	oldRoots := h.cfg.Scan.Roots
-	h.cfg.Scan.Roots = req.Roots
-	if err := h.cfg.Validate(false); err != nil {
-		h.cfg.Scan.Roots = oldRoots
+	if len(req.Roots) > config.MaxScanRoots {
+		return respondError(c, http.StatusBadRequest, fmt.Sprintf("too many scan roots (max %d)", config.MaxScanRoots))
+	}
+	// Validate on a shallow copy before mutating live state.
+	candidate := &config.Config{
+		Server:    h.cfg.Server,
+		Scan:      config.ScanConfig{Roots: req.Roots, AutoDetectRoots: h.cfg.Scan.AutoDetectRoots},
+		Thumbnail: h.cfg.Thumbnail,
+		System:    h.cfg.System,
+		Transcode: h.cfg.Transcode,
+		Debug:     h.cfg.Debug,
+		BLE:       h.cfg.BLE,
+	}
+	if err := candidate.Validate(false); err != nil {
 		return respondError(c, http.StatusBadRequest, fmt.Sprintf("invalid configuration: %v", err))
 	}
-	// Roots changed: drop any cached auto-detected drive list so subsequent
-	// GetRoots calls reflect the new configuration immediately.
-	h.cfg.Scan.InvalidateRootsCache()
+	if err := h.cfg.Scan.SetRoots(req.Roots); err != nil {
+		return respondError(c, http.StatusBadRequest, err.Error())
+	}
 	if err := h.cfg.Save("config.yaml"); err != nil {
 		return respondInternalError(c, err)
 	}
 
 	h.scanner.InvalidateCache()
+	_ = h.scanner.StartWatching(h.cfg.Scan.GetRoots())
 
 	return c.JSON(http.StatusOK, h.cfg.Public())
 }

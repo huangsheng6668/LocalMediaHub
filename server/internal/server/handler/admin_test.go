@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -143,5 +144,77 @@ func TestUpdateConfigAcceptsValidRoot(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("valid root %q: status = %d, want 200; body=%s",
 			validRoot, rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateConfigRejectsTooManyRoots(t *testing.T) {
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{t.TempDir()},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: filepath.Join(t.TempDir(), "thumb"),
+			MaxSize:  64,
+			Format:   "jpeg",
+		},
+	}
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil, nil)
+
+	var roots []string
+	for i := 0; i < config.MaxScanRoots+1; i++ {
+		roots = append(roots, fmt.Sprintf("C:\\Media%d", i))
+	}
+
+	e := echo.New()
+	body, _ := json.Marshal(map[string][]string{"roots": roots})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/config", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.UpdateConfig(c); err != nil {
+		t.Fatalf("UpdateConfig returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateConfigValidationFailurePreservesLiveState(t *testing.T) {
+	initialRoot := t.TempDir()
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{initialRoot},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+		Thumbnail: config.ThumbnailConfig{
+			CacheDir: filepath.Join(t.TempDir(), "thumb"),
+			MaxSize:  64,
+			Format:   "jpeg",
+		},
+	}
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil, nil)
+
+	e := echo.New()
+	// An empty roots list with no allowed roots and auto_detect false should fail Validate(false)
+	body, _ := json.Marshal(map[string][]string{"roots": {}})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/config", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.UpdateConfig(c); err != nil {
+		t.Fatalf("UpdateConfig returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	// Verify live config roots were NOT wiped out
+	liveRoots := h.cfg.Scan.GetRoots()
+	if len(liveRoots) != 1 || liveRoots[0] != initialRoot {
+		t.Errorf("expected live roots to remain %v, got %v", []string{initialRoot}, liveRoots)
 	}
 }

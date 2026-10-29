@@ -868,12 +868,15 @@ func (s *Scanner) StartWatching(roots []string) error {
 	s.hydrateFromSnapshotLocked(roots)
 
 	// Start listening to events
-	go s.watchEvents()
+	go s.watchEvents(watcher)
 
 	return nil
 }
 
-func (s *Scanner) watchEvents() {
+func (s *Scanner) watchEvents(watcher *fsnotify.Watcher) {
+	if watcher == nil {
+		return
+	}
 	// A3: per-root 独立防抖。
 	// 当前实现是全局单 scanTimer，任何事件都重置同一个 2s timer——
 	// 一个 root 持续产生事件会不断重置 timer，导致其他 root 的扫描被延迟。
@@ -891,13 +894,6 @@ func (s *Scanner) watchEvents() {
 	const debounceDuration = 2 * time.Second
 
 	for {
-		s.mu.RLock()
-		watcher := s.watcher
-		s.mu.RUnlock()
-		if watcher == nil {
-			return
-		}
-
 		select {
 		case event, ok := <-watcher.Events:
 			if !ok {
@@ -916,8 +912,8 @@ func (s *Scanner) watchEvents() {
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					s.mu.Lock()
-					if s.watcher != nil && s.watchedCount < maxWatchedDirs {
-						if s.watcher.Add(event.Name) == nil {
+					if s.watcher == watcher && s.watchedCount < maxWatchedDirs {
+						if watcher.Add(event.Name) == nil {
 							s.watchedCount++
 						}
 					}

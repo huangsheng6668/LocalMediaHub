@@ -892,3 +892,18 @@ func TestSoftInvalidateKeepsCacheReadable(t *testing.T) {
 	assert.False(t, ok, "InvalidateCache must still clear the cache")
 	assert.False(t, sc.hasDirIndex(), "InvalidateCache must still clear cacheByDir")
 }
+
+func TestScannerStartWatchingReentrant(t *testing.T) {
+	tmp1 := t.TempDir()
+	tmp2 := t.TempDir()
+
+	sc := NewScanner([]string{".mp4"}, nil, nil)
+	defer sc.Shutdown()
+
+	if err := sc.StartWatching([]string{tmp1}); err != nil {
+		t.Fatalf("first StartWatching failed: %v", err)
+	}
+	if err := sc.StartWatching([]string{tmp2}); err != nil {
+		t.Fatalf("second StartWatching failed: %v", err)
+	}
+}

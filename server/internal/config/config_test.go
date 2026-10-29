@@ -3,10 +3,12 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -516,5 +518,42 @@ func TestPublicProjectsTranscode(t *testing.T) {
 	}
 	if pub.Transcode.MaxSessions != 2 {
 		t.Fatalf("public MaxSessions = %d, want 2", pub.Transcode.MaxSessions)
+	}
+}
+
+func TestScanConfigConcurrentGetAndSetRoots(t *testing.T) {
+	sc := &ScanConfig{Roots: []string{`C:\Media`}}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				if id%2 == 0 {
+					_ = sc.SetRoots([]string{`C:\Media`, `D:\Videos`, `C:\Media`})
+				} else {
+					roots := sc.GetRoots()
+					if len(roots) == 0 {
+						t.Errorf("unexpected empty roots")
+					}
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	got := sc.GetRoots()
+	if len(got) != 2 {
+		t.Fatalf("expected deduplicated 2 roots, got %v", got)
+	}
+}
+
+func TestScanConfigMaxRootsCap(t *testing.T) {
+	sc := &ScanConfig{}
+	var tooMany []string
+	for i := 0; i < MaxScanRoots+1; i++ {
+		tooMany = append(tooMany, fmt.Sprintf("C:\\Media%d", i))
+	}
+	if err := sc.SetRoots(tooMany); err == nil {
+		t.Fatalf("expected error when setting more than %d roots", MaxScanRoots)
 	}
 }

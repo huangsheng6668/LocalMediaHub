@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -64,26 +65,36 @@ func (b BLEConfig) EffectiveToken(serverToken string) string {
 	return serverToken
 }
 
+const MaxScanRoots = 64
+
 type ScanConfig struct {
+	mu              sync.RWMutex
 	Roots           []string `yaml:"roots,omitempty" json:"roots,omitempty"`
 	VideoExtensions []string `yaml:"video_extensions" json:"video_extensions"`
 	ImageExtensions []string `yaml:"image_extensions" json:"image_extensions"`
 	TextExtensions  []string `yaml:"text_extensions,omitempty" json:"text_extensions,omitempty"`
 	AutoDetectRoots bool     `yaml:"auto_detect_roots,omitempty" json:"auto_detect_roots,omitempty"`
 
-	// Cached result of auto-detected drives (only used when Roots is empty).
-	// Detecting drives probes A-Z: with os.Stat on every call, which is called
-	// dozens of times per request across handlers; the drive set rarely changes
-	// during a run, so we compute it once and reuse it. Reset via
-	// InvalidateRootsCache (e.g. after the user edits config via the admin API).
 	autoRoots     []string
 	autoRootsOnce sync.Once
 }
 
-// GetRoots returns configured roots, or auto-detects all drives if empty.
 func (s *ScanConfig) GetRoots() []string {
+	s.mu.RLock()
 	if len(s.Roots) > 0 {
-		return s.Roots
+		out := make([]string, len(s.Roots))
+		copy(out, s.Roots)
+		s.mu.RUnlock()
+		return out
+	}
+	s.mu.RUnlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Roots) > 0 {
+		out := make([]string, len(s.Roots))
+		copy(out, s.Roots)
+		return out
 	}
 	s.autoRootsOnce.Do(func() {
 		var drives []string
@@ -95,16 +106,39 @@ func (s *ScanConfig) GetRoots() []string {
 		}
 		s.autoRoots = drives
 	})
-	return s.autoRoots
+	out := make([]string, len(s.autoRoots))
+	copy(out, s.autoRoots)
+	return out
 }
 
-// InvalidateRootsCache clears the cached auto-detected drive list so the next
-// GetRoots call re-probes. Call this whenever Roots may have changed (e.g.
-// after applying an admin config update) or when external drive topology
-// changes and a refresh is desired.
-func (s *ScanConfig) InvalidateRootsCache() {
+func (s *ScanConfig) SetRoots(roots []string) error {
+	seen := make(map[string]struct{}, len(roots))
+	deduped := make([]string, 0, len(roots))
+	for _, r := range roots {
+		clean := filepath.Clean(r)
+		key := strings.ToLower(clean)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, clean)
+	}
+	if len(deduped) > MaxScanRoots {
+		return fmt.Errorf("too many scan roots (max %d)", MaxScanRoots)
+	}
+	s.mu.Lock()
+	s.Roots = deduped
 	s.autoRoots = nil
 	s.autoRootsOnce = sync.Once{}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *ScanConfig) InvalidateRootsCache() {
+	s.mu.Lock()
+	s.autoRoots = nil
+	s.autoRootsOnce = sync.Once{}
+	s.mu.Unlock()
 }
 
 type ThumbnailConfig struct {
@@ -194,9 +228,24 @@ type SystemConfigPublic struct {
 
 // Public returns a copy of the config with sensitive operational fields removed.
 func (c *Config) Public() ConfigPublic {
+	c.Scan.mu.RLock()
+	var roots []string
+	if len(c.Scan.Roots) > 0 {
+		roots = make([]string, len(c.Scan.Roots))
+		copy(roots, c.Scan.Roots)
+	}
+	scanPub := ScanConfigPublic{
+		Roots:           roots,
+		VideoExtensions: c.Scan.VideoExtensions,
+		ImageExtensions: c.Scan.ImageExtensions,
+		TextExtensions:  c.Scan.TextExtensions,
+		AutoDetectRoots: c.Scan.AutoDetectRoots,
+	}
+	c.Scan.mu.RUnlock()
+
 	return ConfigPublic{
 		Server:    ServerConfigPublic{Host: c.Server.Host, Port: c.Server.Port},
-		Scan:      ScanConfigPublic{Roots: c.Scan.Roots, VideoExtensions: c.Scan.VideoExtensions, ImageExtensions: c.Scan.ImageExtensions, TextExtensions: c.Scan.TextExtensions, AutoDetectRoots: c.Scan.AutoDetectRoots},
+		Scan:      scanPub,
 		Thumbnail: c.Thumbnail,
 		System:    SystemConfigPublic{AllowedRoots: c.System.AllowedRoots, EnableDelete: c.System.EnableDelete},
 		Transcode: c.Transcode,
@@ -215,7 +264,12 @@ func (c *Config) Public() ConfigPublic {
 // callers who construct Config directly (tests, admin API Validate
 // before Save).
 func (c *Config) Validate(autoFromFlag bool) error {
-	if len(c.Scan.Roots) == 0 && len(c.System.AllowedRoots) == 0 && !c.Scan.AutoDetectRoots && !autoFromFlag {
+	c.Scan.mu.RLock()
+	rootsEmpty := len(c.Scan.Roots) == 0
+	autoDetect := c.Scan.AutoDetectRoots
+	c.Scan.mu.RUnlock()
+
+	if rootsEmpty && len(c.System.AllowedRoots) == 0 && !autoDetect && !autoFromFlag {
 		return fmt.Errorf(
 			"refusing to start: no scan.roots or system.allowed_roots configured and " +
 				"scan.auto_detect_roots is false.\n" +
