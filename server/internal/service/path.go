@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -338,4 +339,11 @@ func ResolveWithinRoots(pathStr string, roots []string) (string, error) {
 // roots and leak out-of-library directory listings.
 func ResolveBrowsePath(pathStr string, roots []string) (string, error) {
 	return resolveWithin(pathStr, roots)
+}
+
+
+// IsLinkEntry reports whether a directory entry is a symlink or Windows
+// reparse point (junction / mount point surface as ModeIrregular on Go 1.23+).
+func IsLinkEntry(mode fs.FileMode) bool {
+	return mode&(fs.ModeSymlink|fs.ModeIrregular) != 0
 }

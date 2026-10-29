@@ -1,6 +1,7 @@
 package service
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -376,4 +377,20 @@ func TestValidateMediaFilePathErrorClassification(t *testing.T) {
 			t.Errorf("error = %v, want %q", err, "access denied: file type not allowed")
 		}
 	})
+}
+
+
+func TestIsLinkEntry(t *testing.T) {
+	if IsLinkEntry(0) {
+		t.Fatal("regular file mode should not be link entry")
+	}
+	if IsLinkEntry(fs.ModeDir) {
+		t.Fatal("directory mode should not be link entry")
+	}
+	if !IsLinkEntry(fs.ModeSymlink) {
+		t.Fatal("symlink mode must be detected as link entry")
+	}
+	if !IsLinkEntry(fs.ModeIrregular) {
+		t.Fatal("irregular mode (Windows junction) must be detected as link entry")
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -129,6 +130,9 @@ func (h *Handler) BrowseFolder(c echo.Context) error {
 	files := make([]models.MediaFile, 0)
 
 	for _, entry := range entries {
+		if service.IsLinkEntry(entry.Type()) {
+			continue
+		}
 		fullPath := filepath.Join(pathStr, entry.Name())
 		info, err := entry.Info()
 		if err != nil {
@@ -228,16 +232,27 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 	zipWriter := zip.NewWriter(c.Response().Writer)
 	defer zipWriter.Close()
 
-	err = filepath.Walk(pathStr, func(filePath string, info os.FileInfo, err error) error {
+	err = filepath.WalkDir(pathStr, func(filePath string, d iofs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
+		if service.IsLinkEntry(d.Type()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
 			return nil
 		}
 
-		ext := strings.ToLower(filepath.Ext(info.Name()))
+		ext := strings.ToLower(filepath.Ext(d.Name()))
 		if h.classifyMediaType(ext) == "" {
+			return nil
+		}
+
+		linfo, err := d.Info()
+		if err != nil || service.IsLinkEntry(linfo.Mode()) {
 			return nil
 		}
 
@@ -247,9 +262,6 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 		}
 		relPath = filepath.ToSlash(relPath)
 
-		// Per-file anonymous scope: defer Close runs after each file's copy,
-		// not accumulated until the whole Walk ends (which exhausted FDs on
-		// large folders). Method stays Store (media is already compressed).
 		return func() error {
 			fileToZip, err := os.Open(filePath)
 			if err != nil {
@@ -257,10 +269,15 @@ func (h *Handler) DownloadFolderZip(c echo.Context) error {
 			}
 			defer fileToZip.Close()
 
+			finfo, err := fileToZip.Stat()
+			if err != nil || !os.SameFile(linfo, finfo) {
+				return nil
+			}
+
 			header := &zip.FileHeader{
 				Name:     relPath,
 				Method:   zip.Store,
-				Modified: info.ModTime(),
+				Modified: finfo.ModTime(),
 			}
 			writer, err := zipWriter.CreateHeader(header)
 			if err != nil {

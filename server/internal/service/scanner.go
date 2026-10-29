@@ -72,6 +72,11 @@ type Scanner struct {
 	// trigger fsnotify-debounced rescans every ~2s, and unthrottled writes
 	// would pound the disk with full-snapshot rewrites.
 	lastSnapWrite time.Time
+	// snapshotWG tracks in-flight asynchronous snapshot writes. maybeWriteSnapshot
+	// runs the marshal + fsync off the caller's goroutine (see its comment), so
+	// Shutdown waits here to guarantee the final snapshot reaches disk before the
+	// process exits.
+	snapshotWG sync.WaitGroup
 }
 
 // maxWatchedDirs caps the number of fsnotify directory watches. See the
@@ -173,7 +178,8 @@ func (s *Scanner) refreshInBackground(roots []string) {
 	go s.Scan(ctx, roots)
 }
 
-// Shutdown cancels any in-flight background scan and closes the file watcher.
+// Shutdown cancels any in-flight background scan, closes the file watcher, and
+// waits for a pending asynchronous snapshot write to land.
 func (s *Scanner) Shutdown() {
 	s.mu.Lock()
 	if s.bgCancel != nil {
@@ -184,6 +190,8 @@ func (s *Scanner) Shutdown() {
 		s.watcher = nil
 	}
 	s.mu.Unlock()
+	// Outside the lock: the writer goroutine never takes s.mu.
+	s.snapshotWG.Wait()
 }
 
 // Scan walks the given roots concurrently, collecting media files. The provided
@@ -199,6 +207,13 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 	// an unbounded number of walk goroutines. Limited to min(len(roots), NumCPU)
 	// because each walk is primarily I/O-bound filesystem traversal.
 	g.SetLimit(min(len(roots), runtime.NumCPU()))
+
+	// 扩展名集合在 newScanner 构造后不再变更（无 setter，admin 复用同一实例），
+	// 这里取一次局部引用即可 —— 避免 walk 热循环里每个文件 3 次带锁 map 查询
+	// （10 万文件 = 10 万次 RLock/RUnlock），也消除与 Scan 末尾写锁的争用。
+	s.mu.RLock()
+	videoExts, imageExts, textExts := s.videoExts, s.imageExts, s.textExts
+	s.mu.RUnlock()
 
 	// 共享 dirMap：walk goroutine 收集祖先目录，mutex 保护。
 	// 目录数远少于文件数，锁竞争可忽略。
@@ -224,16 +239,20 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 					return gctx.Err()
 				default:
 				}
+				if IsLinkEntry(d.Type()) {
+					if d.IsDir() {
+						return filepath.SkipDir
+					}
+					return nil
+				}
 				if d.IsDir() {
 					return nil
 				}
 				ext := strings.ToLower(filepath.Ext(path))
 				mediaType := ""
-				s.mu.RLock()
-				isVideo := s.videoExts[ext]
-				isImage := s.imageExts[ext]
-				isText := s.textExts[ext]
-				s.mu.RUnlock()
+				isVideo := videoExts[ext]
+				isImage := imageExts[ext]
+				isText := textExts[ext]
 
 				if isVideo {
 					mediaType = "video"
@@ -270,29 +289,37 @@ func (s *Scanner) Scan(ctx context.Context, roots []string) ([]models.MediaFile,
 				})
 
 				// C3：递归收集父目录及所有祖先目录到共享 dirMap
+				//
+				// os.Stat 必须放在锁外：它是阻塞系统调用，持 dirMu 会让所有 walk
+				// goroutine 在祖先链的每一次 stat 上串行化（冷扫描大目录树时
+				// 每条链都要一路 stat 到 root）。代价是可能重复 stat 同一目录
+				// （并发重复插入），换取锁内零系统调用。
 				dir := filepath.Clean(filepath.Dir(path))
 				for dir != "" && dir != cleanRoot {
 					dirMu.Lock()
 					_, exists := dirMap[dir]
-					if !exists {
-						// 首次加入时 stat 一次拿 mtime
-						var mtime time.Time
-						if statInfo, err := os.Stat(dir); err == nil {
-							mtime = statInfo.ModTime()
-						}
-						dirMap[dir] = mtime
-						dirMu.Unlock()
-
-						parent := filepath.Clean(filepath.Dir(dir))
-						if parent == dir {
-							break // 已到文件系统根节点，防死循环
-						}
-						dir = parent
-					} else {
+					dirMu.Unlock()
+					if exists {
 						// 祖先目录此前已被完整加入，提前 break 减少锁竞争
-						dirMu.Unlock()
 						break
 					}
+
+					var mtime time.Time
+					if statInfo, err := os.Stat(dir); err == nil {
+						mtime = statInfo.ModTime()
+					}
+
+					dirMu.Lock()
+					if _, dup := dirMap[dir]; !dup {
+						dirMap[dir] = mtime
+					}
+					dirMu.Unlock()
+
+					parent := filepath.Clean(filepath.Dir(dir))
+					if parent == dir {
+						break // 已到文件系统根节点，防死循环
+					}
+					dir = parent
 				}
 				return nil
 			})
@@ -622,12 +649,35 @@ func (s *Scanner) filterDirsByScope(scope string) []string {
 	return out
 }
 
+// InvalidateCache hard-wipes every cached structure, forcing the next reader to
+// run a full synchronous scan. Reserved for destructive changes where serving
+// stale data would be wrong (file/dir delete, admin config update that changes
+// the roots). For filesystem-event-driven staleness use softInvalidate instead —
+// see its comment for why a hard wipe there is a latency bug.
 func (s *Scanner) InvalidateCache() {
 	s.mu.Lock()
 	s.cache = make(map[string][]models.MediaFile)
 	s.cacheDirs = nil
 	s.cacheDirMap = nil
 	s.cacheByDir = nil
+	s.cacheTime = time.Time{}
+	s.mu.Unlock()
+}
+
+// softInvalidate marks the cache stale WITHOUT discarding it: cacheTime is
+// zeroed while cache / cacheByDir / cacheDirs stay populated. cachedSnapshot
+// then returns ok=true, fresh=false, so every reader takes the existing
+// stale-while-revalidate path — the snapshot is served immediately and exactly
+// one background refresh is scheduled.
+//
+// This is what the fsnotify loop must use. InvalidateCache makes
+// cachedSnapshot return ok=false, which sends GetCached into its *synchronous*
+// scan branch. While a large file is being copied into the library the event
+// stream fires continuously, so every browse/search request would block on a
+// full-tree walk inside the request goroutine. The 2s debounce only delays the
+// event-triggered rescan — it does not protect requests.
+func (s *Scanner) softInvalidate() {
+	s.mu.Lock()
 	s.cacheTime = time.Time{}
 	s.mu.Unlock()
 }
@@ -669,11 +719,25 @@ func (s *Scanner) maybeWriteSnapshot(roots []string, allFiles []models.MediaFile
 		Files:     allFiles,
 		Dirs:      dirs,
 	}
-	if err := saveScanSnapshot(s.snapshotPath, snap); err != nil {
-		slog.Warn("scan snapshot write failed", "path", s.snapshotPath, "error", err)
-	} else {
-		slog.Info("scan snapshot saved", "path", s.snapshotPath, "files", len(allFiles))
-	}
+
+	// 落盘包含 json.Marshal（大库可达数 MB）+ tmp.Sync()（fsync），是整个 Scan
+	// 里最慢的一段。而 Scan 在缓存 miss 时由 GetCached 在**请求线程**同步调用，
+	// 所以这里必须异步 —— 否则首个请求要多等一次 fsync。
+	//
+	// 节流判定已在上面同步完成：放进 goroutine 会让并发调用同时通过检查，
+	// 节流彻底失效。
+	//
+	// 退出时不会丢：Shutdown 通过 snapshotWG 等待在途写入落盘。
+	path := s.snapshotPath
+	s.snapshotWG.Add(1)
+	go func() {
+		defer s.snapshotWG.Done()
+		if err := saveScanSnapshot(path, snap); err != nil {
+			slog.Warn("scan snapshot write failed", "path", path, "error", err)
+		} else {
+			slog.Info("scan snapshot saved", "path", path, "files", len(snap.Files))
+		}
+	}()
 }
 
 func sortedExts(m map[string]bool) []string {
@@ -844,8 +908,10 @@ func (s *Scanner) watchEvents() {
 				continue
 			}
 
-			// A3：保留全 cache 失效语义（精确增量合并复杂度过高，YAGNI）
-			s.InvalidateCache()
+			// 软失效：只标记 stale，保留缓存内容。读请求走 stale-while-revalidate
+			// 立即返回（最多旧 2 秒），由下面的防抖 timer 合并成一次后台重扫。
+			// 硬清空会让事件风暴期间（如拷贝大文件）的每个请求都退化为同步全盘扫描。
+			s.softInvalidate()
 
 			if event.Op&fsnotify.Create == fsnotify.Create {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {

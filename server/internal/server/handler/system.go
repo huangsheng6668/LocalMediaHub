@@ -77,6 +77,9 @@ func (h *Handler) SystemBrowse(c echo.Context) error {
 	folders := make([]models.Folder, 0)
 	files := make([]models.MediaFile, 0)
 	for _, entry := range entries {
+		if service.IsLinkEntry(entry.Type()) {
+			continue
+		}
 		fullPath := filepath.Join(resolved, entry.Name())
 		if entry.IsDir() {
 			info, _ := entry.Info()
