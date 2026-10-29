@@ -1,5 +1,19 @@
 // 纯工具函数，从 app.js 抽出。
 
+// XSS Prevention: Safe HTML escaping for dynamic content.
+//
+// Lives here rather than in api.js: it is a pure string helper with no relation
+// to HTTP, and api.js is imported by modules that only need escaping.
+export function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // Utility formatting functions
 export function formatSize(bytes) {
     if (bytes === 0) return '0 B';

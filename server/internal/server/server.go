@@ -73,7 +73,7 @@ func New(cfg *config.Config) (*Server, error) {
 	// results persist to .data/scan_snapshot.json and hydrate back at boot,
 	// so the first browse after a restart walks nothing.
 	scanner := service.NewScannerWithSnapshot(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions, service.DefaultScanSnapshotPath)
-	if err := scanner.StartWatching(cfg.Scan.Roots); err != nil {
+	if err := scanner.StartWatching(cfg.Scan.GetRoots()); err != nil {
 		fmt.Printf("Warning: failed to start filesystem watcher: %v\n", err)
 	}
 	tagsService, err := service.NewTagsService(".data")
@@ -296,12 +296,24 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 		pprofGroup.Any("/*", echo.WrapHandler(http.DefaultServeMux))
 	}
 
-	// Static Web UI Assets
-	s.Echo.GET("/*", echo.WrapHandler(http.FileServer(http.FS(web.Assets))))
+	// Static Web UI Assets.
+	//
+	// web.Static replaces a bare http.FileServer: it adds strong ETags and a
+	// Cache-Control policy (embed.FS has a zero ModTime, so the FileServer
+	// emitted no validators at all and every navigation re-downloaded the full
+	// asset set), concatenates the stylesheets into one response, and emits
+	// modulepreload hints for the ES module graph. See internal/web/static.go.
+	//
+	// HEAD is registered explicitly: Echo's GET does not imply HEAD, so a HEAD
+	// probe of the UI used to answer 405 with `Allow: OPTIONS, GET`.
+	staticHandler := echo.WrapHandler(web.Static)
+	s.Echo.GET("/*", staticHandler)
+	s.Echo.HEAD("/*", staticHandler)
 
 	// Favicon: serve a procedurally-generated PNG so the browser's automatic
 	// /favicon.ico request resolves instead of 404ing through the static handler.
 	s.Echo.GET("/favicon.ico", s.serveFavicon)
+	s.Echo.HEAD("/favicon.ico", s.serveFavicon)
 
 	api := s.Echo.Group("/api/v1")
 

@@ -193,10 +193,14 @@ func (s *TagsService) GetAllTags() []models.FileTag {
 }
 
 func (s *TagsService) CreateTag(name, color string) (*models.FileTag, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// 写锁，不是读锁：下面是 COUNT → INSERT 的 check-then-act，RWMutex 的读锁
+	// 之间不互斥，两个并发 CreateTag 会同时通过预检、都执行 INSERT。
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// Check if already exists
+	// 预检保留（不能用 INSERT OR IGNORE 替代）：tags.name 的 UNIQUE 约束是
+	// BINARY collation，而这里的语义是 NOCASE —— "Tag" 与 "tag" 视为同名。
+	// OR IGNORE 只看 UNIQUE，会放行大小写不同的重名标签。
 	var count int
 	err := s.db.QueryRow("SELECT COUNT(*) FROM tags WHERE LOWER(name) = LOWER(?)", name).Scan(&count)
 	if err != nil {
@@ -220,8 +224,8 @@ func (s *TagsService) CreateTag(name, color string) (*models.FileTag, error) {
 }
 
 func (s *TagsService) DeleteTag(tagID string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -244,29 +248,30 @@ func (s *TagsService) DeleteTag(tagID string) error {
 }
 
 func (s *TagsService) AssociateFile(tagID, filePath string) (bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// Check if association exists
-	var count int
-	err := s.db.QueryRow("SELECT COUNT(*) FROM associations WHERE tag_id = ? AND file_path = ?", tagID, filePath).Scan(&count)
+	// associations 的主键是 (tag_id, file_path)，file_path 按 BINARY 比较，
+	// 与「是否已关联」的判定口径完全一致 —— 所以不需要 COUNT 预检，
+	// 直接 INSERT OR IGNORE 并用 RowsAffected 区分「新建 / 已存在」，
+	// 一次往返同时完成去重、插入与结果判定。
+	//
+	// 注意：OR IGNORE 只吞 UNIQUE / PK / NOT NULL / CHECK 冲突，不吞外键冲突，
+	// 所以 tag_id 不存在时仍会像原来一样返回错误。
+	res, err := s.db.Exec("INSERT OR IGNORE INTO associations (tag_id, file_path) VALUES (?, ?)", tagID, filePath)
 	if err != nil {
 		return false, err
 	}
-	if count > 0 {
-		return false, nil
-	}
-
-	_, err = s.db.Exec("INSERT INTO associations (tag_id, file_path) VALUES (?, ?)", tagID, filePath)
+	affected, err := res.RowsAffected()
 	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return affected > 0, nil
 }
 
 func (s *TagsService) DisassociateFile(tagID, filePath string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	_, err := s.db.Exec("DELETE FROM associations WHERE tag_id = ? AND file_path = ?", tagID, filePath)
 	return err

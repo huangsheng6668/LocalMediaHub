@@ -130,11 +130,23 @@ func deriveStatus(finished bool, manual *string, rowExists bool) string {
 }
 
 // UpsertProgress 单条原子 upsert：lastReadAt 守卫 + finished 粘滞 + manual unread 自动清除。
+//
+// 整个操作（状态 upsert + 时长累加 + 按日聚合 + 回读）跑在**一个事务**里。
+// 客户端是周期性上报进度的（几秒一次），离线补传还会分片连续提交，所以这条路径
+// 的每次调用原来要付 3~4 次独立 statement 的往返与提交开销；合并后只有一次提交，
+// 且状态回读与写入处于同一快照，不会读到并发写入的中间态。
 func (s *LibraryService) UpsertProgress(u models.ProgressUpdate) (models.ReadingState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return models.ReadingState{}, err
+	}
+	defer tx.Rollback() // Commit 成功后是 no-op
+
 	now := nowMillis()
-	_, err := s.db.Exec(`
+	if _, err := tx.Exec(`
 		INSERT INTO reading_states (path, chapter_index, para_index, percent, finished, last_read_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
@@ -146,10 +158,10 @@ func (s *LibraryService) UpsertProgress(u models.ProgressUpdate) (models.Reading
 			last_read_at = excluded.last_read_at,
 			updated_at = excluded.updated_at
 		WHERE excluded.last_read_at >= reading_states.last_read_at`,
-		u.Path, u.ChapterIndex, u.ParaIndex, u.Percent, boolToInt(u.Finished), u.LastReadAt, now)
-	if err != nil {
+		u.Path, u.ChapterIndex, u.ParaIndex, u.Percent, boolToInt(u.Finished), u.LastReadAt, now); err != nil {
 		return models.ReadingState{}, err
 	}
+
 	// 阅读时长 delta（spec 2026-09-08）：独立于上方 lastReadAt 守卫累加——离线补传时
 	// lastReadAt 可能陈旧（progress 被拒），但时长增量仍有效。负数忽略，>3600 clamp。
 	delta := u.ReadSecondsDelta
@@ -160,21 +172,25 @@ func (s *LibraryService) UpsertProgress(u models.ProgressUpdate) (models.Reading
 		delta = 3600
 	}
 	if delta > 0 {
-		if _, err = s.db.Exec(`UPDATE reading_states SET read_seconds = read_seconds + ? WHERE path = ?`, delta, u.Path); err != nil {
+		if _, err := tx.Exec(`UPDATE reading_states SET read_seconds = read_seconds + ? WHERE path = ?`, delta, u.Path); err != nil {
 			return models.ReadingState{}, err
 		}
-		if _, err = s.db.Exec(`INSERT INTO reading_daily (path, day, seconds) VALUES (?, ?, ?)
+		if _, err := tx.Exec(`INSERT INTO reading_daily (path, day, seconds) VALUES (?, ?, ?)
 			ON CONFLICT(path, day) DO UPDATE SET seconds = seconds + excluded.seconds`,
 			u.Path, time.Now().Format("2006-01-02"), delta); err != nil {
 			return models.ReadingState{}, err
 		}
 	}
-	st, err := s.getStateLocked(u.Path)
+
+	st, err := getState(tx, u.Path)
 	if err != nil {
 		return models.ReadingState{}, err
 	}
 	if st == nil {
 		return models.ReadingState{}, fmt.Errorf("failed to retrieve state after upsert: %s", u.Path)
+	}
+	if err := tx.Commit(); err != nil {
+		return models.ReadingState{}, err
 	}
 	return *st, nil
 }
@@ -248,26 +264,37 @@ func (s *LibraryService) GetState(path string) (*models.ReadingState, error) {
 
 // GetStatsSummary 汇总阅读时长（spec 2026-09-08）：今日/近7天（reading_daily 按日聚合，
 // week = day >= today-6）/ 累计（reading_states.read_seconds 求和）。
+//
+// 三条统计合成一次往返（原来是三条独立 QueryRow）：子查询仍各自扫一次索引，
+// 省下的是两次 statement 的往返与提交开销。bookshelf 页每次打开都会调用这里。
 func (s *LibraryService) GetStatsSummary() (models.StatsSummary, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var out models.StatsSummary
 	today := time.Now().Format("2006-01-02")
 	weekAgo := time.Now().AddDate(0, 0, -6).Format("2006-01-02")
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM reading_daily WHERE day = ?`, today).Scan(&out.TodaySeconds); err != nil {
-		return out, err
-	}
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(seconds),0) FROM reading_daily WHERE day >= ?`, weekAgo).Scan(&out.WeekSeconds); err != nil {
-		return out, err
-	}
-	if err := s.db.QueryRow(`SELECT COALESCE(SUM(read_seconds),0) FROM reading_states`).Scan(&out.TotalSeconds); err != nil {
-		return out, err
-	}
-	return out, nil
+	err := s.db.QueryRow(`
+		SELECT
+			COALESCE((SELECT SUM(seconds) FROM reading_daily WHERE day = ?), 0),
+			COALESCE((SELECT SUM(seconds) FROM reading_daily WHERE day >= ?), 0),
+			COALESCE((SELECT SUM(read_seconds) FROM reading_states), 0)`,
+		today, weekAgo).Scan(&out.TodaySeconds, &out.WeekSeconds, &out.TotalSeconds)
+	return out, err
+}
+
+// rowQuerier is satisfied by both *sql.DB and *sql.Tx, so the reading-state
+// read-back has a single implementation whether it runs standalone or inside a
+// transaction.
+type rowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
 }
 
 func (s *LibraryService) getStateLocked(path string) (*models.ReadingState, error) {
-	row := s.db.QueryRow(`SELECT path, chapter_index, para_index, percent, finished, manual_status, last_read_at, updated_at, read_seconds
+	return getState(s.db, path)
+}
+
+func getState(q rowQuerier, path string) (*models.ReadingState, error) {
+	row := q.QueryRow(`SELECT path, chapter_index, para_index, percent, finished, manual_status, last_read_at, updated_at, read_seconds
 		FROM reading_states WHERE path = ?`, path)
 	return scanReadingState(row)
 }

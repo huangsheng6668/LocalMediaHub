@@ -1,9 +1,9 @@
 // Dashboard feature module: extracted from app.js
 // (renderDashboard + onDashboardRecentClick + listeners).
 import { state } from './state.js';
-import { apiRequest, escapeHtml } from './api.js';
+import { apiRequest } from './api.js';
 import { elements } from './dom.js';
-import { formatSize, encodeRoutePath, formatTranscodeStatus } from './utils.js';
+import { formatSize, encodeRoutePath, formatTranscodeStatus, escapeHtml } from './utils.js';
 import { openVideoPlayer } from './videoPlayer.js';
 import { renderSection as renderBookshelfSection } from './bookshelf.js';
 
@@ -29,9 +29,12 @@ export async function renderDashboard() {
     // 1. Fetch totals + recent videos in parallel. Previously these were
     // awaited serially, so first paint waited ~4 RTTs; Promise.allSettled
     // collapses them into one round-trip batch with per-request fallbacks.
-    const [textsRes, videosRes, imagesRes, recentRes, transcodeRes] = await Promise.allSettled([
+    //
+    // 2026-09-30: /videos 此前被请求两次 —— 一次 page_size=1 只为取 total，
+    // 一次 page_size=3 取最近列表。该端点响应同时带 { total, items }，所以
+    // 一次 page_size=3 就够，请求数 5 → 4。
+    const [textsRes, imagesRes, videosRes, transcodeRes] = await Promise.allSettled([
         apiRequest(`${state.apiBase}/api/v1/texts?page=1&page_size=1`),
-        apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=1`),
         apiRequest(`${state.apiBase}/api/v1/images?page=1&page_size=1`),
         apiRequest(`${state.apiBase}/api/v1/videos?page=1&page_size=3`),
         // P4 (2026-09-03): transcode path observability (encoder chain +
@@ -40,9 +43,8 @@ export async function renderDashboard() {
     ]);
 
     if (textsRes.status === 'rejected') console.error('Fetch text count error:', textsRes.reason);
-    if (videosRes.status === 'rejected') console.error('Fetch video count error:', videosRes.reason);
     if (imagesRes.status === 'rejected') console.error('Fetch image count error:', imagesRes.reason);
-    if (recentRes.status === 'rejected') console.error('Fetch recent videos error:', recentRes.reason);
+    if (videosRes.status === 'rejected') console.error('Fetch videos (count + recent) error:', videosRes.reason);
 
     elements.statTexts.textContent = textsRes.status === 'fulfilled' ? (textsRes.value.total || 0) : 0;
     elements.statVideos.textContent = videosRes.status === 'fulfilled' ? (videosRes.value.total || 0) : 0;
@@ -55,13 +57,18 @@ export async function renderDashboard() {
         elements.infoTranscodeSessions.textContent = t.sessions;
     }
 
-    if (recentRes.status === 'fulfilled') {
-        const items = recentRes.value.items || [];
+    if (videosRes.status === 'fulfilled') {
+        const items = videosRes.value.items || [];
         state.dashboardRecentFiles = items;
 
         if (items.length === 0) {
+            // #dashboard-recent 自身即 .empty-state 载体（index.html 的初始
+            // class 也是 "recent-list empty-state"）。此前在容器加类的同时
+            // 又插入一层 <div class="empty-state">，两层 flex 居中 + 两层
+            // padding: 64px 24px 叠加，空状态被推到异常位置。改用
+            // textContent 直接落在容器上。
             elements.dashboardRecent.classList.add('empty-state');
-            elements.dashboardRecent.innerHTML = '<div class="empty-state">暂无最近媒体数据</div>'; // XSS-SAFE: hardcoded literal
+            elements.dashboardRecent.textContent = '暂无最近媒体数据';
         } else {
             elements.dashboardRecent.classList.remove('empty-state');
             // XSS-SAFE: dynamic fields (thumb url / name / size) all pass through escapeHtml()/formatSize()
@@ -77,8 +84,9 @@ export async function renderDashboard() {
             }).join('');
         }
     } else {
+        // 同上：容器承载 .empty-state，不再嵌套第二层。
         elements.dashboardRecent.classList.add('empty-state');
-        elements.dashboardRecent.innerHTML = '<div class="empty-state">连接服务端接口失败</div>'; // XSS-SAFE: hardcoded literal
+        elements.dashboardRecent.textContent = '连接服务端接口失败';
     }
 }
 

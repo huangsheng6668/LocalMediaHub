@@ -1,11 +1,11 @@
 // Lightbox (image preview) feature module: extracted from app.js
 // (openMedia + openImageLightbox + renderLightboxImage + navigateLightbox + listeners).
 import { state } from './state.js';
-import { escapeHtml } from './api.js';
 import { elements } from './dom.js';
-import { encodeRoutePath } from './utils.js';
+import { encodeRoutePath, escapeHtml } from './utils.js';
 import { openVideoPlayer } from './videoPlayer.js';
 import { showToast } from './toast.js';
+import { openModalFocus, closeModalFocus } from './modalFocus.js';
 
 // Open Video/Image assets with defense-in-depth text interceptor
 export function openMedia(file) {
@@ -27,6 +27,16 @@ export function openMedia(file) {
     }
 }
 
+// 关闭灯箱：归还焦点给打开它的卡片 + 释放图片资源 + 清空拼接视图。
+// 关闭按钮与 Escape 共用（此前两处各自重复一遍，容易改漏其中一处）。
+function closeLightbox() {
+    closeModalFocus(elements.modalImagePreview);
+    // src = '' 会让部分浏览器把当前文档 URL 当作图片来源再发一次请求；
+    // 移除属性才是真正释放。
+    elements.lightboxImg.removeAttribute('src');
+    elements.lightboxStitchView.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
+}
+
 // Image Lightbox popup
 function openImageLightbox(file) {
     // Collect all image files in the current view to allow previous/next navigation
@@ -38,7 +48,8 @@ function openImageLightbox(file) {
     state.lightboxIndex = state.lightboxFiles.findIndex(f => f.path === file.path);
 
     renderLightboxImage();
-    elements.modalImagePreview.classList.add('active');
+    // 显示 + 焦点移入关闭按钮 + 冻结背景（详见 modalFocus.js）。
+    openModalFocus(elements.modalImagePreview, '#btn-close-image-modal');
 }
 
 // Show image in lightbox
@@ -69,7 +80,7 @@ function renderLightboxImage() {
                 // server-controlled), so it needs the same escaping as file.name.
                 // XSS-SAFE: file.name and URL both wrapped in escapeHtml()
                 imgContainer.innerHTML = `
-                    <img src="${escapeHtml(url)}" alt="${escapeHtml(file.name)}" loading="lazy">
+                    <img src="${escapeHtml(url)}" alt="${escapeHtml(file.name)}" loading="lazy" decoding="async">
                     <div class="stitch-image-caption">${escapeHtml(file.name)} (${idx + 1}/${state.lightboxFiles.length})</div>
                 `;
                 elements.lightboxStitchView.appendChild(imgContainer);
@@ -120,11 +131,7 @@ function navigateLightbox(dir) {
 // All lightbox-related event listener registrations (moved from setupEventListeners).
 export function setupLightboxListeners(elements) {
     // Close Image Modal (Lightbox)
-    elements.btnCloseImageModal.addEventListener('click', () => {
-        elements.modalImagePreview.classList.remove('active');
-        elements.lightboxImg.src = '';
-        elements.lightboxStitchView.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
-    });
+    elements.btnCloseImageModal.addEventListener('click', closeLightbox);
 
     // Lightbox navigation
     elements.btnImagePrev.addEventListener('click', () => navigateLightbox(-1));
@@ -189,9 +196,7 @@ export function setupLightboxListeners(elements) {
             }
         }
         if (e.key === 'Escape') {
-            elements.modalImagePreview.classList.remove('active');
-            elements.lightboxImg.src = '';
-            elements.lightboxStitchView.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
+            closeLightbox();
         }
     });
 }

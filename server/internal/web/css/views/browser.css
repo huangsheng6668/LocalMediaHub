@@ -18,22 +18,27 @@
 
 .filter-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .filter-chip {
-    border: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.3));
-    background: transparent; color: var(--text-secondary, inherit);
+    /* 2026-09-30: 移除全部 var(--x, fallback) 的冗余 fallback —— 这些 token
+       在 themes.css 的 :root 中必然定义，fallback 永不生效；其中
+       rgba(94, 106, 210, 0.08) 还是旧紫色设计系统的残留。
+       transition 由 `all` 收窄为具体属性，避免无谓的样式重算。 */
+    border: 1px solid var(--border-subtle);
+    background: transparent; color: var(--text-secondary);
     border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
-    transition: all .15s ease;
+    transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
 .filter-chip:hover {
-    background-color: var(--surface-hover, rgba(94, 106, 210, 0.08));
-    color: var(--text-primary, inherit);
+    background-color: var(--surface-hover);
+    color: var(--text-primary);
 }
 .filter-chip[data-active="true"] {
-    /* Ink Editorial：活动筛选 = 墨黑胶囊。 */
-    background-color: var(--action-ink, #0A0A0A);
-    border-color: var(--action-ink, #0A0A0A);
-    color: var(--text-on-accent, #FFFFFF);
+    /* Ink Editorial：活动筛选 = 墨黑胶囊。--action-ink / --text-on-accent
+       在 night 主题下自动反转（浅底 + 深字），无需主题分支。 */
+    background-color: var(--action-ink);
+    border-color: var(--action-ink);
+    color: var(--text-on-accent);
 }
-.filter-chip-sep { width: 1px; height: 16px; background-color: var(--border-subtle, rgba(127, 127, 127, 0.3)); }
+.filter-chip-sep { width: 1px; height: 16px; background-color: var(--border-subtle); }
 
 .sort-box {
     display: flex;
@@ -92,7 +97,9 @@
 }
 
 .crumb::after {
-    content: "›";
+    /* `content: "›" / ""` 的第二值是替代文本：辅助技术读空串而非把分隔符
+       读成「›」。Chrome 77+ / Safari 17.4+ 支持，不支持时退化为旧行为。 */
+    content: "›" / "";
     margin: 0 8px;
     color: var(--text-muted);
 }
@@ -152,14 +159,16 @@
 
 .media-card:hover {
     transform: translateY(-2px);
-    border-color: var(--action-ink, var(--text-primary));
+    border-color: var(--action-ink);
     box-shadow: var(--shadow-sm);
 }
 
 /* Card Header/Preview Area */
 .card-preview {
     height: 120px;
-    background-color: rgba(255, 255, 255, 0.03);
+    /* 2026-09-30: 原为 rgba(255,255,255,0.03) —— 白 3% 叠在 --surface-card
+       (#FFFFFF) 上等于没有，亮色主题下预览区与卡片内容区无法区分。 */
+    background-color: var(--surface-hover);
     position: relative;
     display: flex;
     align-items: center;
@@ -171,7 +180,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: all .3s cubic-bezier(.4,0,.2,1);
+    transition: transform .3s cubic-bezier(.4,0,.2,1);
 }
 
 .media-card:hover .card-preview img {
@@ -189,7 +198,12 @@
     display: block;
 }
 
-/* Special video play icon overlay */
+/* Special video play icon overlay.
+   遮罩与按钮底是「压在缩略图上」的浮层，必须与主题无关地保持深色，
+   否则亮色主题下遮罩消失、按钮失去对比。图标色因此固定为 #FFFFFF
+   （而不是 --text-on-accent —— 后者在 night 主题是 #0F172A，压在
+   rgba(0,0,0,0.6) 深底上完全不可见）。hover 时底色切到 --action-ink，
+   图标色随之切回 --text-on-accent，两种主题下都能正确反转。 */
 .play-overlay {
     position: absolute;
     inset: 0;
@@ -198,7 +212,7 @@
     align-items: center;
     justify-content: center;
     opacity: 0.8;
-    transition: all .15s ease;
+    transition: background-color .15s ease, opacity .15s ease;
 }
 
 .media-card:hover .play-overlay {
@@ -214,15 +228,17 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-on-accent);
+    color: #FFFFFF;
     font-size: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    transition: all .15s ease;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    transition: transform .15s ease, background-color .15s ease, color .15s ease, border-color .15s ease;
 }
 
 .media-card:hover .play-button-circle {
     transform: scale(1.1);
-    background-color: var(--action-ink, #0A0A0A);
+    background-color: var(--action-ink);
+    color: var(--text-on-accent);
+    border-color: transparent;
 }
 
 /* Card Details Area */
@@ -258,15 +274,24 @@
 }
 
 .card-badge {
-    background-color: rgba(255, 255, 255, 0.08);
+    /* 2026-09-30: 原为 rgba(255,255,255,0.08) —— 白 8% 叠在 --surface-card
+       (#FFFFFF) 上等于没有，亮色主题下格式徽标（TXT / MP4）看起来没有底色。 */
+    background-color: var(--surface-hover);
     padding: 2px 6px;
     border-radius: var(--radius-sm);
     font-weight: 600;
     font-size: 10px;
 }
 
-/* Favorite and Tag icons on Cards */
+/* Favorite and Tag icons on Cards.
+   浮层按钮压在缩略图上（图片内容不可预测），底色与图标色都必须与主题无关
+   地固定：底色固定深色，图标固定浅色。此前图标用 --text-muted（night 主题
+   #74787F，压在 rgba(0,0,0,0.7) 上对比度约 3:1），hover 用 --text-on-accent
+   （night 主题 #0F172A，深底深字完全不可见）。 */
 .card-actions-overlay {
+    --overlay-btn-bg: rgba(0, 0, 0, 0.7);
+    --overlay-btn-fg: rgba(255, 255, 255, 0.86);
+    --overlay-btn-fg-strong: #FFFFFF;
     position: absolute;
     top: 8px;
     right: 8px;
@@ -274,7 +299,7 @@
     gap: 6px;
     z-index: 5;
     opacity: 0;
-    transition: all .15s ease;
+    transition: opacity .15s ease;
 }
 
 .media-card:hover .card-actions-overlay,
@@ -285,148 +310,67 @@
 .card-action-btn {
     width: 28px;
     height: 28px;
-    background-color: rgba(0, 0, 0, 0.7);
+    background-color: var(--overlay-btn-bg);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: var(--text-muted);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: var(--overlay-btn-fg);
     cursor: pointer;
-    transition: all .15s ease;
+    transition: color .15s ease, background-color .15s ease, transform .15s ease, border-color .15s ease;
 }
 
 .card-action-btn:hover {
-    color: var(--text-on-accent);
+    color: var(--overlay-btn-fg-strong);
     transform: scale(1.1);
 }
 
+/* 激活态（目前只有 .fav-btn 会加上，见 library.js decorateBrowserList）。
+   注意：这里刻意保持「淡红叠加深底」而不是实心红 —— 图标色由文件末尾的
+   .fav-btn.active (#f87171 浅红) 以同 specificity 后置覆盖提供，若把底色
+   改成浓红，浅红图标会失去对比。整组配色与主题无关，两种主题下一致。 */
 .card-action-btn.active {
-    color: var(--error);
     background-color: rgba(239, 68, 68, 0.15);
     border-color: rgba(239, 68, 68, 0.3);
 }
 
 .card-action-btn.delete-btn:hover {
-    color: var(--text-on-accent);
+    color: var(--overlay-btn-fg-strong);
     background-color: rgba(239, 68, 68, 0.85);
     border-color: rgba(239, 68, 68, 0.85);
     box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
 }
 
-/* Tag Manager & Creator Grid Layout */
-.tag-manager-container {
-    display: grid;
-    grid-template-columns: 320px 1fr;
-    gap: 24px;
-    align-items: start;
+/* 触屏设备没有 hover 状态：不兜底的话，收藏 / 阅读状态 / 删除三个按钮在
+   手机和平板上永远不显现（只有已标记 .tagged 的卡片例外），而
+   responsive.css 一直做到 767px 断点，说明移动端是目标场景。
+   @media (hover: none) 按主输入方式判定，触屏笔记本（有鼠标）不受影响。
+
+   位置很重要：本块必须排在上面所有 .card-actions-overlay / .card-action-btn
+   基础规则之后。媒体查询不提升 specificity，同权重下靠源序决胜 —— 之前放在
+   .card-action-btn { width: 28px } 之前，36px 被后置的 28px 覆盖，实际失效。 */
+@media (hover: none) {
+    .card-actions-overlay { opacity: 1; }
+    /* 触屏上 28px 的点击目标偏小，放大到 36px 便于拇指命中。 */
+    .card-action-btn { width: 36px; height: 36px; }
 }
 
-.tag-creator-card, .tag-list-card {
-    background-color: var(--surface-card);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: 24px;
-    box-shadow: var(--shadow-md);
-}
+/* 2026-09-30 删除：标签管理 UI 的整块样式在 index.html 与全部 JS 中零引用，
+   属于已下线功能的遗留 —— .tag-manager-container / .tag-creator-card /
+   .tag-list-card / .color-picker-grid / .color-dot / .tags-container /
+   .tag-chip / .btn-tag-delete。
 
-.tag-creator-card h2, .tag-list-card h2 {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 20px;
-}
+   同批删除的还有本文件里被 components.css 以更高 specificity 全面覆盖、
+   实际从未生效的 .form-group input/textarea 规则 —— components.css 用
+   `.form-group input:not([type="checkbox"]):not([type="radio"])` (0,3,1)
+   稳压 `.form-group input` (0,1,1)，而那两条规则里还带着旧设计系统的
+   紫色聚焦环 rgba(124, 58, 237, 0.2)。它们唯一真正命中的是 checkbox /
+   radio，删掉后这两类控件回落到 base.css 的 token 化背景，反而是修复。
 
-.form-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 20px;
-}
-
-.form-group label {
-    font-size: 13px;
-    color: var(--text-muted);
-    font-weight: 500;
-}
-
-.form-group input, .form-group textarea {
-    background-color: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    padding: 12px;
-    color: var(--text-primary);
-    font-family: var(--font-sans);
-    font-size: 14px;
-    outline: none;
-    transition: all .15s ease;
-}
-
-.form-group input:focus, .form-group textarea:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
-}
-
-.color-picker-grid {
-    display: flex;
-    gap: 10px;
-}
-
-.color-dot {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: all .15s ease;
-}
-
-.color-dot:hover {
-    transform: scale(1.1);
-}
-
-.color-dot.active {
-    border-color: var(--text-on-accent);
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
-}
-
-.tags-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-}
-
-.tag-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-}
-
-.btn-tag-delete {
-    background: transparent;
-    border: none;
-    color: rgba(255, 255, 255, 0.6);
-    cursor: pointer;
-    font-size: 14px;
-    transition: all .15s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    width: 18px;
-    height: 18px;
-}
-
-.btn-tag-delete:hover {
-    background-color: rgba(255, 255, 255, 0.2);
-    color: var(--text-primary);
-}
+   .form-group / .form-group label 是仍在使用的共享组件类（settings 页
+   的扫描配置区），已移到 components.css 归位。 */
 
 /* from style.css L2924-2947 (CSP-safe replacements: browser-empty-grid / browser-status-note / card-badge--unsupported) */
 /* ══ CSP-safe replacements for former inline style="" attributes ══
@@ -449,25 +393,32 @@
 }
 
 .card-badge--unsupported {
-    background-color: rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
+    /* 2026-09-30: 原 color 为 #fca5a5（浅红），压在 --surface-card (#FFFFFF)
+       上对比度约 1.9:1，亮色主题下「暂不支持」徽标基本读不出来。改用
+       --error，它在 day (#DC2626, 4.8:1) 与 night (#F87171, 7:1) 下都达标。 */
+    background-color: rgba(239, 68, 68, 0.14);
+    color: var(--error);
+    border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
 /* Ink Editorial：阅读状态徽标 —— 在读 = 苔绿软底，已读完 = 中性 hairline。 */
-.card-badge--reading { background-color: var(--accent-soft, rgba(61, 107, 79, 0.12)); color: var(--accent-text, #2F5640); }
+.card-badge--reading { background-color: var(--accent-soft); color: var(--accent-text); }
 .card-badge--finished { background-color: transparent; color: var(--text-muted); border: 1px solid var(--border-subtle); }
+/* 收藏激活态。底色是 .card-actions-overlay 的固定深色浮层（rgba(0,0,0,0.7)），
+   所以浅红 #f87171 在两种主题下都保持约 5:1 对比 —— 这里刻意不用 token：
+   --error 在 day 是 #DC2626，压在深底上会掉到约 2.6:1。 */
 .fav-btn.active { color: #f87171; }
 .fav-btn.active svg { fill: currentColor; }
 #card-status-menu {
     position: fixed; z-index: 200; min-width: 140px;
-    background-color: var(--surface-card, #1e293b); border: 1px solid var(--border-subtle, rgba(255,255,255,0.1));
-    border-radius: var(--radius-md, 8px); padding: 4px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    background-color: var(--surface-card); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md); padding: 4px; box-shadow: var(--shadow-md);
     display: none; flex-direction: column; gap: 2px;
 }
 #card-status-menu.open { display: flex; }
 #card-status-menu .status-menu__item {
-    all: unset; cursor: pointer; padding: 8px 12px; border-radius: var(--radius-sm, 6px); font-size: 13px; color: var(--text-primary, #fff);
+    all: unset; cursor: pointer; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text-primary);
 }
-#card-status-menu .status-menu__item:hover { background-color: var(--surface-hover, rgba(127, 127, 127, 0.15)); }
+#card-status-menu .status-menu__item:hover { background-color: var(--surface-hover); }
 
 

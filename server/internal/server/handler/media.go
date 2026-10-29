@@ -6,9 +6,11 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 
 	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/localmediahub/server/internal/service"
 )
@@ -17,6 +19,37 @@ import (
 // bounding both the server-side generation work and the response size
 // (thumbnails are returned as base64 JPEG).
 const maxBatchThumbnails = 64
+
+// maxBatchThumbnailConcurrency bounds how many thumbnails one batch request
+// generates at once. A video thumbnail cache miss forks ffprobe + ffmpeg and
+// decodes a full frame (tens to hundreds of ms), so generating 64 of them
+// serially pushed the response into the tens of seconds. Kept small because
+// the work is CPU/process bound: ThumbnailService.sem (capacity NumCPU) is the
+// real backstop, this just avoids releasing 64 ffmpeg processes in one burst.
+const maxBatchThumbnailConcurrency = 4
+
+func batchThumbnailConcurrency() int {
+	n := min(maxBatchThumbnailConcurrency, runtime.NumCPU())
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// thumbnailAllowedExts returns the image+video allowlist for the thumbnail
+// endpoints.
+//
+// It builds a fresh slice on every call rather than appending to
+// h.cfg.Scan.ImageExtensions: that append writes through to the config's
+// backing array whenever it has spare capacity, silently corrupting the
+// configured extension list — and now that batch generation runs in parallel,
+// concurrent requests would be writing to it simultaneously.
+func (h *Handler) thumbnailAllowedExts() []string {
+	out := make([]string, 0, len(h.cfg.Scan.ImageExtensions)+len(h.cfg.Scan.VideoExtensions))
+	out = append(out, h.cfg.Scan.ImageExtensions...)
+	out = append(out, h.cfg.Scan.VideoExtensions...)
+	return out
+}
 
 // ThumbnailsRequest is the JSON body for POST /api/v1/media/thumbnails.
 type ThumbnailsRequest struct {
@@ -36,6 +69,11 @@ type ThumbnailItem struct {
 // (each card previously fetched its own /media/thumbnail). Thumbnails are
 // returned as base64-encoded JPEG so the response stays a single JSON body.
 // Per-path validation mirrors MediaThumbnail (ValidateAccessibleMediaPath).
+//
+// Generation runs in parallel (bounded by batchThumbnailConcurrency) because a
+// single cache miss forks ffprobe + ffmpeg. Items are written by index, so the
+// response order always matches the request order, and a per-item failure is
+// reported inside its own item — it never aborts the batch.
 func (h *Handler) MediaThumbnails(c echo.Context) error {
 	var req ThumbnailsRequest
 	if err := c.Bind(&req); err != nil {
@@ -49,29 +87,47 @@ func (h *Handler) MediaThumbnails(c echo.Context) error {
 			fmt.Sprintf("at most %d paths per request", maxBatchThumbnails))
 	}
 
-	allowedExts := append(h.cfg.Scan.ImageExtensions, h.cfg.Scan.VideoExtensions...)
-	items := make([]ThumbnailItem, 0, len(req.Paths))
-	for _, p := range req.Paths {
-		resolved, err := service.ValidateAccessibleMediaPath(p, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts)
-		if err != nil {
-			items = append(items, ThumbnailItem{Path: p, Error: "access denied"})
-			continue
-		}
-		thumbBytes, err := h.thumbnail.GenerateThumbnailBytes(resolved)
-		if err != nil {
-			if os.IsNotExist(err) {
-				items = append(items, ThumbnailItem{Path: p, Error: "file not found"})
-			} else {
-				items = append(items, ThumbnailItem{Path: p, Error: "thumbnail failed"})
-			}
-			continue
-		}
-		items = append(items, ThumbnailItem{
-			Path:      p,
-			Thumbnail: base64.StdEncoding.EncodeToString(thumbBytes),
+	allowedExts := h.thumbnailAllowedExts()
+	items := make([]ThumbnailItem, len(req.Paths))
+
+	// Each goroutine writes a distinct index — distinct slice elements are
+	// distinct memory locations, so no synchronisation is needed on `items`.
+	var g errgroup.Group
+	g.SetLimit(batchThumbnailConcurrency())
+	for i, p := range req.Paths {
+		i, p := i, p
+		g.Go(func() error {
+			items[i] = h.buildThumbnailItem(p, allowedExts)
+			return nil
 		})
 	}
+	_ = g.Wait()
+
 	return c.JSON(http.StatusOK, map[string]interface{}{"items": items})
+}
+
+// buildThumbnailItem resolves and generates one batch entry. All failures are
+// encoded in the returned item rather than returned as an error, so one bad
+// path cannot fail the whole batch.
+func (h *Handler) buildThumbnailItem(pathStr string, allowedExts []string) ThumbnailItem {
+	resolved, err := service.ValidateAccessibleMediaPath(
+		pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts)
+	if err != nil {
+		return ThumbnailItem{Path: pathStr, Error: "access denied"}
+	}
+
+	thumbBytes, err := h.thumbnail.GenerateThumbnailBytes(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ThumbnailItem{Path: pathStr, Error: "file not found"}
+		}
+		return ThumbnailItem{Path: pathStr, Error: "thumbnail failed"}
+	}
+
+	return ThumbnailItem{
+		Path:      pathStr,
+		Thumbnail: base64.StdEncoding.EncodeToString(thumbBytes),
+	}
 }
 
 func (h *Handler) MediaThumbnail(c echo.Context) error {
@@ -80,7 +136,7 @@ func (h *Handler) MediaThumbnail(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "path required")
 	}
 
-	allowedExts := append(h.cfg.Scan.ImageExtensions, h.cfg.Scan.VideoExtensions...)
+	allowedExts := h.thumbnailAllowedExts()
 	resolved, err := service.ValidateAccessibleMediaPath(pathStr, h.cfg.Scan.GetRoots(), h.cfg.GetSystemAllowedRoots(), allowedExts)
 	if err != nil {
 		return respondError(c, http.StatusForbidden, "access denied")

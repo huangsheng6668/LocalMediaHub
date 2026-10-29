@@ -365,7 +365,9 @@
             <div class="lightbox-content">
                 <!-- 单张预览模式 -->
                 <div class="lightbox-single-view" id="lightbox-single-view">
-                    <img id="lightbox-img" src="" alt="预览">
+                    <!-- 无初始 src：src="" 会让部分浏览器把当前文档 URL 当作图片
+                         来源再发一次请求。实际地址由 lightbox.js 打开时赋值。 -->
+                    <img id="lightbox-img" alt="预览">
                     <div class="lightbox-caption" id="lightbox-caption">图片名称</div>
                 </div>
                 <!-- 拼图/长图模式 -->
@@ -398,12 +400,15 @@
     </div>
 
     <!-- Toast Notification System -->
-    <div class="toast-container" id="toast-container"></div>
+    <!-- role="status" + aria-live="polite" 是必需的 live region 语义：此前
+         容器没有任何无障碍声明，「文件删除成功」「扫描启动失败」等反馈对
+         屏幕阅读器用户完全静默。 -->
+    <div class="toast-container" id="toast-container" role="status" aria-live="polite"></div>
 
-    <!-- Self-hosted hls.js (spec 2026-09-03-hls-transcode-b2): CSP script-src
-     'self' forbids CDNs; defer classic scripts execute before the deferred
-     module entry, exposing the global `Hls` to app modules. -->
-<script src="vendor/hls.min.js" defer></script>
-<script type="module" src="app.js"></script>
+    <!-- hls.js 不再在此预加载（2026-09-30）。它由 videoPlayer.js 的 loadHls()
+         在首次播放视频时动态注入同源的 script 元素，符合 CSP script-src 'self'。
+         vendor/hls.min.js 是 415 KB —— 比全部业务 JS（约 265 KB）还大 ——
+         原先对所有会话无条件下载，包括只看图、读小说、不播视频的会话。 -->
+    <script type="module" src="app.js"></script>
 </body>
 </html>

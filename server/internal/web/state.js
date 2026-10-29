@@ -36,6 +36,16 @@ export const state = {
 
     apiBase: '',
 
+    // Populated by settings.js loadConfig() from GET /api/v1/admin/config.
+    // Declared here so the contract is visible and the pre-load defaults are
+    // deliberate rather than accidental `undefined`.
+    //   enableDelete defaults to false: delete buttons must stay hidden until
+    //   the server has confirmed deletion is allowed, so a slow or failed config
+    //   fetch can never expose a destructive control.
+    //   thumbMax mirrors the `|| 300` fallback used when the server omits it.
+    enableDelete: false,
+    thumbMax: 300,
+
     // Auth token for API authentication
     authToken: (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('lmh_auth_token')) || ''
 };

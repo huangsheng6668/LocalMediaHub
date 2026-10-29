@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -90,4 +91,62 @@ func names(files []models.MediaFile) []string {
 		out[i] = f.Name
 	}
 	return out
+}
+
+// benchSortFixtures builds n mixed-case names so the lowercase folding is
+// actually exercised — all-lowercase input takes strings.ToLower's
+// no-allocation fast path and would hide exactly the regression these
+// benchmarks exist to catch.
+func benchSortFixtures(n int) []models.MediaFile {
+	out := make([]models.MediaFile, n)
+	for i := 0; i < n; i++ {
+		out[i] = models.MediaFile{
+			Name:         fmt.Sprintf("Episode %d - Some Title Here.mkv", i),
+			Path:         fmt.Sprintf(`D:\Media\Show\Episode %d - Some Title Here.mkv`, i),
+			RelativePath: fmt.Sprintf(`\Media\Show\Episode %d - Some Title Here.mkv`, i),
+			Size:         int64(i) * 1024,
+			MediaType:    "video",
+			Extension:    ".mkv",
+		}
+	}
+	return out
+}
+
+// BenchmarkSortMediaFilesName is the regression guard for the
+// decorate-sort-undecorate rewrite: allocations must stay O(N), not O(N log N).
+// Before the rewrite this measured 1269 allocs / 114771 B at N=500.
+//
+// Note on B/op: each iteration copies the fixture (500 MediaFile ≈ 60 KB) so
+// that every run sorts the same input order — that copy is part of the number
+// and is not attributable to SortMediaFiles. Allocs/op is the metric to watch.
+func BenchmarkSortMediaFilesName(b *testing.B) {
+	src := benchSortFixtures(500)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		cp := make([]models.MediaFile, len(src))
+		copy(cp, src)
+		SortMediaFiles(cp, "name", "asc")
+	}
+}
+
+// BenchmarkSortMediaFilesNumeric covers the "numeric" branch, which also
+// precomputes leadingNumber per element instead of per comparison.
+func BenchmarkSortMediaFilesNumeric(b *testing.B) {
+	src := benchSortFixtures(500)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		cp := make([]models.MediaFile, len(src))
+		copy(cp, src)
+		SortMediaFiles(cp, "numeric", "asc")
+	}
+}
+
+// BenchmarkNaturalCompareLowered pins the zero-allocation property that
+// SortMediaFiles depends on. naturalCompare (the mixed-case wrapper) allocates
+// by design and is not benchmarked here.
+func BenchmarkNaturalCompareLowered(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		naturalCompareLowered("episode 12 - some title.mkv", "episode 3 - some title.mkv")
+	}
 }

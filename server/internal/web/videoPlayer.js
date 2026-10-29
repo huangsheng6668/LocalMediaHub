@@ -8,6 +8,7 @@ import { deleteMediaFile } from './delete.js';
 import { wheelToVolume } from './videoHelpers.js';
 import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoProgress.js';
 import { buildHlsPlaylistUrl, resolveHlsStrategy, needsHlsRestart } from './hlsCompat.js';
+import { openModalFocus, closeModalFocus } from './modalFocus.js';
 
 // <video> tags cannot send Authorization headers, so auth-gated stream URLs
 // (/api/v1/media/stream, /api/v1/system/stream) carry the bearer token as a
@@ -37,6 +38,42 @@ function destroyHls() {
         try { hls.destroy(); } catch (e) { /* already torn down */ }
         hls = null;
     }
+}
+
+// hls.js 惰性加载（2026-09-30）。
+//
+// vendor/hls.min.js 是 415 KB —— 比全部业务 JS（约 265 KB）还大 —— 原先由
+// index.html 的 <script defer> 对所有会话无条件加载，包括只看图、读小说、
+// 完全不播视频的会话。改为在 openVideoPlayer 里按需注入。
+//
+// resolveHlsStrategy 依赖 window.Hls 是否存在来判定 'hlsjs'，所以必须
+// 「先加载、后判定」。加载失败时 resolve 为 null（而不是 reject）：调用方
+// 无需 try/catch，resolveHlsStrategy 会自然降级到 'native'（Safari 原生
+// HLS）或 'none'（回退传统单路转码），功能零退化。
+//
+// 模块级 promise 保证同一页面会话只加载一次；失败时清空以便下次重试。
+let hlsLoaderPromise = null;
+
+function loadHls() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+        return Promise.resolve(null);
+    }
+    if (window.Hls) return Promise.resolve(window.Hls);
+    if (!hlsLoaderPromise) {
+        hlsLoaderPromise = new Promise((resolve) => {
+            const script = document.createElement('script');
+            // 同源相对路径（文档在根路径下）—— 符合 CSP script-src 'self'。
+            script.src = 'vendor/hls.min.js';
+            script.onload = () => resolve(window.Hls || null);
+            script.onerror = () => {
+                console.warn('hls.js 加载失败，回退到原生 HLS / 传统转码路径');
+                hlsLoaderPromise = null; // 允许下次打开视频时重试
+                resolve(null);
+            };
+            document.head.appendChild(script);
+        });
+    }
+    return hlsLoaderPromise;
 }
 
 // applySource wires the player to url. strategy 'hlsjs' routes through
@@ -183,6 +220,9 @@ export async function openVideoPlayer(file) {
     elements.videoTimeDisplay.textContent = '00:00 / 加载中...';
 
     // Web player uses HLS streaming for universal format support and seamless seeking.
+    // 先惰性加载 hls.js 再判定策略：resolveHlsStrategy 依据 window.Hls 是否
+    // 存在返回 'hlsjs'。加载失败时自然降级到 'native' / 'none'。
+    await loadHls();
     hlsStrategy = resolveHlsStrategy(elements.videoPlayer);
     state.useTranscode = true;
 
@@ -212,7 +252,10 @@ export async function openVideoPlayer(file) {
     elements.videoSpeedMenu.hidden = true;
     updateSpeedMenuActive(1);
 
-    elements.modalVideoPlayer.classList.add('active');
+    // 显示模态框 + 焦点移入 + 冻结背景（详见 modalFocus.js）。初始焦点给
+    // 播放/暂停按钮；Space 的默认激活会被下方 document keydown 的
+    // preventDefault 拦住，所以不会与全局播放/暂停快捷键重复触发。
+    openModalFocus(elements.modalVideoPlayer, '#btn-video-play-pause');
 
     // 立即发起 HLS 流起播，不等待 duration 接口返回（提升首屏 1~2s 响应速度）
     const url = buildHlsPlaylistUrl(state.apiBase, file.path, hlsStartSec);
@@ -252,8 +295,11 @@ export function setupVideoPlayerListeners(elements) {
                 durationMs: state.videoDuration * 1000,
             });
         }
-        elements.videoPlayer.src = '';
-        elements.modalVideoPlayer.classList.remove('active');
+        // src = '' 会让部分浏览器把当前文档 URL 当作媒体源再发一次请求；
+        // 正确做法是移除属性再 load() 以真正释放媒体资源。
+        elements.videoPlayer.removeAttribute('src');
+        elements.videoPlayer.load();
+        closeModalFocus(elements.modalVideoPlayer);
         state.playingFile = null;
         state.videoDuration = 0;
         state.transcodeStartOffset = 0;

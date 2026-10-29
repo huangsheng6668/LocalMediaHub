@@ -32,7 +32,9 @@
     bottom: 0;
     left: 0;
     right: 0;
-    background: rgba(15, 11, 25, 0.65);
+    /* 2026-09-30: 原为 rgba(15, 11, 25, 0.65) —— 带紫调，与 Ink Editorial 的
+       中性墨色体系不符。改为中性近黑并微调透明度补偿。 */
+    background: rgba(10, 10, 12, 0.68);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     padding: 12px 16px;
     display: flex;

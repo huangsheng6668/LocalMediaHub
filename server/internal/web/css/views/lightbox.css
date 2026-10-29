@@ -105,7 +105,10 @@
     background-color: var(--accent);
     border-color: transparent;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(138, 75, 243, 0.3);
+    /* 2026-09-30: 原为 rgba(138, 75, 243, 0.3) —— 紫罗兰色，是旧设计系统的
+       残留，与本按钮自身的 --accent 苔绿背景直接冲突（绿底紫影）。改为中性
+       深色，配合 lightbox 的固定深色浮层。 */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }
 
 .lightbox-toggle-mode.active {

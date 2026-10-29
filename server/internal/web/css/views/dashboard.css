@@ -20,6 +20,18 @@
     box-shadow: none;
 }
 .stat-card + .stat-card { border-left: 1px solid var(--border-soft); padding-left: var(--space-5); }
+
+/* 该分隔线只在「3 张卡同处一行」时成立。responsive.css 在 ≤1023px 把
+   .stats-grid 降为 2 列、≤767px 降为 1 列，换行后的行首卡片依然命中
+   `.stat-card + .stat-card`，于是容器最左侧出现一条悬空竖线（2 列布局下
+   是第 3 张，单列布局下是全部 3 张）。窄屏撤销分隔线与额外左内边距。 */
+@media (max-width: 1023px) {
+    .stat-card + .stat-card {
+        border-left: none;
+        padding-left: 0;
+    }
+}
+
 .stat-card__icon {
     display: grid;
     place-items: center;

@@ -3,13 +3,15 @@
 // app.js applyGlobalAppTheme consume — so the pre-paint theme always
 // matches the post-boot theme. (The legacy chrome_theme key was never
 // written by any code and ignored the user's chosen theme.)
-// Non-module script: carries a minimal copy of app.js's theme map.
+//
+// This is a non-module script so it can run synchronously before first paint.
+// It used to carry a copy of app.js's theme map; the map was pure redundancy
+// because every CSS theme name is just the lower-cased preference key
+// (NIGHT_BLACK -> night_black). Both sides now derive the name instead of
+// repeating a 7-entry table that could silently drift when a theme is added.
+// themes.css keeps `:root` on the day palette, so an unrecognised key degrades
+// to the day colours rather than leaving the page unstyled.
 (function () {
-    var MAP = {
-        DAY: 'day', DAY_BRIGHT: 'day_bright', EYE_CARE: 'eye_care',
-        EYE_CARE_GREEN: 'eye_care_green', PARCHMENT: 'parchment',
-        NIGHT: 'night', NIGHT_BLACK: 'night_black'
-    };
     function resolve() {
         try {
             var raw = localStorage.getItem('reader_settings');
@@ -17,7 +19,7 @@
             if (key === 'AUTO') {
                 key = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'NIGHT' : 'DAY';
             }
-            return MAP[key] || 'day';
+            return String(key).toLowerCase();
         } catch (_) {
             return 'day';
         }

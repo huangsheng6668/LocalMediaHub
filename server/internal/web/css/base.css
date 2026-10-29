@@ -56,8 +56,20 @@ input:focus, textarea:focus, select:focus {
     box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-/* from style.css L1666-1684 (custom scrollbar) */
-/* Custom Scrollbar */
+/* from style.css L1666-1684 (custom scrollbar) — retokenized 2026-09-30.
+   The former thumb was a hardcoded rgba(255,255,255,0.1): white 10% on
+   --surface-app #F7F7F5 is effectively zero contrast, so the scrollbar was
+   invisible on all four light themes (day / day_bright / eye_care /
+   parchment) and users lost scroll-position feedback. Now driven by
+   --text-muted, which every theme defines with adequate contrast.
+   scrollbar-color/-width cover Firefox, which ignores the -webkit- pseudo-
+   elements entirely (it previously fell back to the OS default, so Firefox
+   and Chromium looked different). */
+html {
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) transparent;
+}
+
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -68,12 +80,12 @@ input:focus, textarea:focus, select:focus {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--text-muted);
     border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--text-secondary);
 }
 
 /* Global focus ring + reduced motion (Task 5, modern-neutral shared primitives).

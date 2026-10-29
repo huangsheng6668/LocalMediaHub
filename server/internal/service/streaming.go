@@ -27,6 +27,22 @@ import (
 // responsive to client seeks and keeping transcoding startup latency low.
 const largeStreamBuffer = 128 * 1024 // 128 KiB
 
+// streamReadBufferSize is the read-ahead buffer handed to http.ServeContent for
+// direct playback. Larger than largeStreamBuffer because ServeContent issues
+// 32 KB io.CopyN reads for Range responses — with a smaller buffer each of
+// those would become its own ReadFile syscall.
+const streamReadBufferSize = 256 * 1024 // 256 KiB
+
+// streamReaderPool reuses BufferedReadSeeker instances (and their 256 KiB bufio
+// buffers) across requests. Without it every stream request — including each
+// Range request a player issues while seeking — allocated a fresh 256 KiB
+// buffer, so N concurrent viewers produced N × 256 KiB of short-lived garbage.
+var streamReaderPool = sync.Pool{
+	New: func() any {
+		return &BufferedReadSeeker{reader: bufio.NewReaderSize(nil, streamReadBufferSize)}
+	},
+}
+
 // BufferedReadSeeker wraps an os.File and a bufio.Reader to provide
 // seekable buffered reads. This reduces Windows ReadFile system call overhead
 // during range requests by http.ServeContent.
@@ -35,11 +51,27 @@ type BufferedReadSeeker struct {
 	reader *bufio.Reader
 }
 
+// NewBufferedReadSeeker allocates a standalone BufferedReadSeeker. ServeFile
+// does not use this — it takes an instance from streamReaderPool instead.
 func NewBufferedReadSeeker(f *os.File, size int) *BufferedReadSeeker {
 	return &BufferedReadSeeker{
 		file:   f,
 		reader: bufio.NewReaderSize(f, size),
 	}
+}
+
+// Reset rebinds the reader to f, discarding any data buffered from the previous
+// use. Passing nil detaches the reader entirely so a pooled instance never
+// keeps a closed *os.File (or its 256 KiB buffer) reachable — note the explicit
+// nil branch: passing a typed nil *os.File straight to bufio's io.Reader
+// parameter would box it into a non-nil interface.
+func (b *BufferedReadSeeker) Reset(f *os.File) {
+	b.file = f
+	if f == nil {
+		b.reader.Reset(nil)
+		return
+	}
+	b.reader.Reset(f)
 }
 
 func (b *BufferedReadSeeker) Read(p []byte) (int, error) {
@@ -184,14 +216,15 @@ func contentTypeFromExt(filePath string) string {
 	}
 }
 
-// ServeFile streams a file. For direct (non-transcoded) mode it uses a custom
-// Range handler with a 1 MB buffer + explicit flushing instead of
-// http.ServeContent's 32 KB default, eliminating periodic stutter on video
-// playback.
-// ServeFile streams a file. For direct (non-transcoded) mode it uses Go's highly
-// optimized, standard library http.ServeContent which handles RFC 7233 Range requests
-// (including multi-range, conditional requests) natively, has zero heap allocations,
-// and immediately exits on client disconnections.
+// ServeFile streams a file.
+//
+// Direct (non-transcoded) mode uses the standard library's http.ServeContent,
+// which handles RFC 7233 Range requests (including multi-range and conditional
+// requests) natively and returns as soon as the client disconnects. The reader
+// it is given is a pooled 256 KB BufferedReadSeeker, because ServeContent's own
+// 32 KB io.Copy buffer would otherwise turn playback into many small ReadFile
+// calls (visible as periodic stutter on Windows). Transcoded requests
+// (?transcode=true) take the separate serveTranscoded path.
 func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, filePath string) error {
 	if r.URL.Query().Get("transcode") == "true" {
 		return s.serveTranscoded(w, r, filePath)
@@ -214,10 +247,19 @@ func (s *StreamingService) ServeFile(w http.ResponseWriter, r *http.Request, fil
 	contentType := contentTypeFromExt(filePath)
 	w.Header().Set("Content-Type", contentType)
 
-	// Wrap in a 256 KB BufferedReadSeeker to minimize system calls on Windows
-	bufferedFile := NewBufferedReadSeeker(f, 256*1024)
+	// Wrap in a pooled 256 KB BufferedReadSeeker to minimize system calls on
+	// Windows. http.ServeContent only ever Seeks/Reads this reader, and Seek
+	// resets the bufio buffer, so a recycled instance is safe to hand straight
+	// in. Returned to the pool on the way out — ServeContent is synchronous, so
+	// by then nothing holds a reference to it.
+	brs := streamReaderPool.Get().(*BufferedReadSeeker)
+	defer func() {
+		brs.Reset(nil)
+		streamReaderPool.Put(brs)
+	}()
+	brs.Reset(f)
 
-	http.ServeContent(w, r, fi.Name(), fi.ModTime(), bufferedFile)
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), brs)
 	return nil
 }
 

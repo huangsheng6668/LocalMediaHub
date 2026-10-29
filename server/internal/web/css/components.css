@@ -51,7 +51,10 @@
 .btn-close:hover { background: var(--surface-hover); color: var(--text-primary); }
 
 /* Legacy button variants (not covered by the block above), retokenized to
-   canonical vars. Unused in markup today; kept per class-name contract. */
+   canonical vars.
+   2026-09-30 修正注释：此前写着「Unused in markup today」，实际
+   bookmarksView.js 的空状态「前往媒体库」一直在用（class="btn
+   btn-secondary empty-state__action"）。 */
 .btn-secondary {
     background: var(--surface-card);
     color: var(--text-primary);
@@ -62,33 +65,9 @@
     background: var(--surface-hover);
 }
 
-.btn-danger {
-    background: var(--error);
-    color: var(--text-on-accent);
-    border-color: transparent;
-}
-
-.btn-danger:hover {
-    box-shadow: var(--shadow-md);
-}
-
-/* View-owned button rules, single home since the Task 7 alias sweep
-   (css/views/video.css legacy copies removed; components.css wins by
-   being the only definition). */
-.btn-transcode {
-    background-color: rgba(255, 255, 255, 0.08);
-    color: var(--text-primary);
-    border: 1px solid var(--border-subtle);
-    padding: 6px 12px;
-    font-size: 12px;
-}
-
-.btn-transcode.active {
-    background: var(--accent);
-    color: var(--text-on-accent);
-    border-color: transparent;
-    box-shadow: 0 0 0 3px var(--accent-soft);
-}
+/* 2026-09-30 删除 .btn-danger 与 .btn-transcode（含 .btn-transcode.active）：
+   在 index.html 与全部 JS 中零引用。破坏性操作的红色语义由
+   .video-delete-btn 承担，.btn-transcode 属于已下线的旧转码切换 UI。 */
 
 .video-delete-btn {
     display: none;
@@ -101,6 +80,22 @@
 }
 
 /* ── Form primitives ── */
+/* 表单字段容器。原先定义在 css/views/browser.css（和标签管理 UI 挤在一起），
+   但它是跨视图共享的组件类 —— settings 页的「扫描配置」区一直在用 ——
+   2026-09-30 归位到组件层。 */
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
 input[type="text"], input[type="password"], select, textarea {
     font-family: var(--font-sans); font-size: 13px;
     color: var(--text-primary);
@@ -324,6 +319,15 @@ textarea { resize: vertical; line-height: 1.6; }
 
 .toast.error {
     border-left-color: var(--error);
+}
+
+/* 退场状态：原实现用内联 style.opacity/transform 赋值，现改为 class（见
+   toast.js），与项目「动态样式走 class」的约定一致。入场 animation 结束时
+   元素已回到自身样式，这里用 transition 平滑承接。 */
+.toast--leaving {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity .3s ease, transform .3s ease;
 }
 
 /* ─── Round 28 Task 12: Auth Token Modal ───

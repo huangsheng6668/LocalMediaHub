@@ -4,9 +4,9 @@
 //  triggerBrowserSearch + 5 listeners).
 import { state } from './state.js';
 import { showToast } from './toast.js';
-import { apiRequest, escapeHtml } from './api.js';
+import { apiRequest } from './api.js';
 import { elements } from './dom.js';
-import { formatSize, encodeRoutePath, safeBtoa } from './utils.js';
+import { formatSize, encodeRoutePath, safeBtoa, escapeHtml } from './utils.js';
 import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 import { refreshDecorations, decorateBrowserList, toggleFavorite, markStatus, openStatusMenu, applyListFilters, getDecorations } from './library.js';
@@ -96,7 +96,8 @@ export async function loadRoots() {
         const safePath = escapeHtml(pathStr.replace(/\\/g, '/'));
         const safeName = escapeHtml(nameStr);
         return `
-            <div class="media-card" data-action="browse" data-path="${safePath}">
+            <div class="media-card" data-action="browse" data-path="${safePath}"
+                 role="button" tabindex="0" aria-label="打开共享库目录 ${safeName}">
                 <div class="card-preview">
                     <span class="card-preview-icon">${ICONS.folder()}</span>
                 </div>
@@ -130,7 +131,8 @@ export async function loadSystemDrives() {
             elements.browserList.innerHTML = drives.map(drive => {
                 const safePath = escapeHtml(drive.replace(/\\/g, '/'));
                 return `
-                    <div class="media-card" data-action="browse" data-path="${safePath}">
+                    <div class="media-card" data-action="browse" data-path="${safePath}"
+                         role="button" tabindex="0" aria-label="打开磁盘 ${escapeHtml(drive)}">
                         <div class="card-preview">
                             <span class="card-preview-icon">${ICONS.drive()}</span>
                         </div>
@@ -289,13 +291,14 @@ export function renderBrowserList() {
         const safePath = escapeHtml(folder.path.replace(/\\/g, '/'));
         const safeName = escapeHtml(folder.name);
         html += `
-            <div class="media-card" data-action="browse" data-path="${safePath}" data-media-type="folder">
+            <div class="media-card" data-action="browse" data-path="${safePath}" data-media-type="folder"
+                 role="button" tabindex="0" aria-label="打开文件夹 ${safeName}">
                 <div class="card-preview">
                     <span class="card-preview-icon">${ICONS.folder()}</span>
                 </div>
                 <div class="card-actions-overlay">
-                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" aria-label="删除文件夹" data-action="delete-folder" data-path="${safePath}" data-index="${index}">${ICONS.trash()}</button>` : ''}
-                    <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏" data-action="fav-toggle" data-path="${escapeHtml(folder.path)}" data-is-dir="1" data-title="${safeName}" data-media-type="folder">${ICONS.heart()}</button>
+                    ${state.enableDelete && !folder.is_root ? `<button class="card-action-btn delete-btn" title="删除文件夹" aria-label="删除文件夹 ${safeName}" data-action="delete-folder" data-path="${safePath}" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                    <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏 ${safeName}" data-action="fav-toggle" data-path="${escapeHtml(folder.path)}" data-is-dir="1" data-title="${safeName}" data-media-type="folder">${ICONS.heart()}</button>
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>
@@ -337,14 +340,16 @@ export function renderBrowserList() {
                      data-action="${isUnsupportedText ? 'text-unsupported' : 'text-open'}"
                      data-path="${escapeHtml(file.path)}"
                      data-media-type="text"
-                     data-index="${index}">
+                     data-index="${index}"
+                     role="button" tabindex="0"
+                     aria-label="${isUnsupportedText ? '不支持的格式' : '阅读'} ${safeName}">
                     <div class="card-preview">
                         <span class="card-preview-icon">${docIcon}</span>
                     </div>
                     <div class="card-actions-overlay">
-                        <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="text">${ICONS.heart()}</button>
-                        <button class="card-action-btn dots-btn" title="阅读状态" aria-label="阅读状态" data-action="status-menu" data-path="${escapeHtml(file.path)}">${ICONS.dots()}</button>
-                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" aria-label="删除文件" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                        <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏 ${safeName}" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="text">${ICONS.heart()}</button>
+                        <button class="card-action-btn dots-btn" title="阅读状态" aria-label="设置阅读状态 ${safeName}" data-action="status-menu" data-path="${escapeHtml(file.path)}">${ICONS.dots()}</button>
+                        ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" aria-label="删除文件 ${safeName}" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
                     </div>
                     <div class="card-details">
                         <div class="card-title" title="${safeName}">${safeName}</div>
@@ -391,14 +396,15 @@ export function renderBrowserList() {
         const safeExt = escapeHtml(file.extension);
 
         html += `
-            <div class="${escapeHtml(cardClass)}" id="file-card-${safeBtoa(file.path).replace(/=/g, '')}" data-action="open" data-path="${escapeHtml(file.path)}" data-media-type="${isVideo ? 'video' : 'image'}" data-index="${index}">
+            <div class="${escapeHtml(cardClass)}" id="file-card-${safeBtoa(file.path).replace(/=/g, '')}" data-action="open" data-path="${escapeHtml(file.path)}" data-media-type="${isVideo ? 'video' : 'image'}" data-index="${index}"
+                 role="button" tabindex="0" aria-label="${isVideo ? '播放' : '查看'} ${safeName}">
                 <div class="card-preview" data-fallback-icon="${fallbackIcon}">
                     ${previewHtml}
                     ${playOverlay}
                 </div>
                 <div class="card-actions-overlay">
-                    <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="${isVideo ? 'video' : 'image'}">${ICONS.heart()}</button>
-                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" aria-label="删除文件" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
+                    <button class="card-action-btn fav-btn" title="收藏" aria-label="收藏 ${safeName}" data-action="fav-toggle" data-path="${escapeHtml(file.path)}" data-is-dir="0" data-title="${safeName}" data-media-type="${isVideo ? 'video' : 'image'}">${ICONS.heart()}</button>
+                    ${state.enableDelete ? `<button class="card-action-btn delete-btn" title="删除文件" aria-label="删除文件 ${safeName}" data-action="delete-file" data-path="${escapeHtml(file.path)}" data-index="${index}">${ICONS.trash()}</button>` : ''}
                 </div>
                 <div class="card-details">
                     <div class="card-title" title="${safeName}">${safeName}</div>
@@ -539,6 +545,19 @@ export function setupBrowserListeners(elements) {
 
     // Delegated click handling for browser list (folders, files, roots, drives)
     elements?.browserList?.addEventListener('click', onBrowserListClick);
+
+    // 卡片是 div（role="button" + tabindex="0"），需要显式键盘支持才能被 Tab
+    // 到达并用 Enter / Space 激活 —— 此前键盘用户完全无法操作媒体网格。
+    // 只处理落在卡片本体上的按键：卡片内部的收藏 / 删除按钮是原生 <button>，
+    // 它们自己会处理 Enter / Space，重复处理会让一次按键触发两次动作。
+    elements?.browserList?.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const card = e.target.closest('[data-action]');
+        if (!card || card !== e.target) return;
+        if (card.tagName === 'BUTTON') return;
+        e.preventDefault(); // Space 的默认行为是滚动页面
+        onBrowserListClick({ target: card });
+    });
 
     // Delegated click handling for breadcrumbs
     elements?.browserBreadcrumbs?.addEventListener('click', onBreadcrumbsClick);

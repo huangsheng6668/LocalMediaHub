@@ -369,7 +369,9 @@ func Load(path string) (*Config, error) {
 // → rename over the target. A crash mid-write therefore cannot corrupt the
 // existing config (on Windows, os.Rename uses MoveFileEx with REPLACE_EXISTING).
 func (c *Config) Save(path string) error {
+	c.Scan.mu.RLock()
 	data, err := yaml.Marshal(c)
+	c.Scan.mu.RUnlock()
 	if err != nil {
 		return err
 	}

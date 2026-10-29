@@ -1,8 +1,9 @@
 // Settings feature module: extracted from app.js (loadConfig / renderSettings + 2 button listeners).
 import { state } from './state.js';
 import { showToast } from './toast.js';
-import { apiRequest, escapeHtml } from './api.js';
+import { apiRequest } from './api.js';
 import { elements } from './dom.js';
+import { escapeHtml } from './utils.js';
 
 import * as readerPrefs from './readerPrefs.js';
 

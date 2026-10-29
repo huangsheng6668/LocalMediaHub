@@ -12,6 +12,7 @@ import { renderBookmarks } from './bookmarksView.js';
 import { AUTH_REQUIRED_EVENT } from './api.js';
 import * as readerPrefs from './readerPrefs.js';
 import { initScrollNav } from './scrollNav.js';
+import { rememberFocus, restoreFocus, freezeBackground, unfreezeBackground } from './modalFocus.js';
 
 // Auth modal — module-scoped so it persists across show/hide.
 let lastFailedUrl = null;
@@ -23,23 +24,26 @@ export function applyGlobalAppTheme() {
         const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         themeKey = isDark ? 'NIGHT' : 'DAY';
     }
-    const themeMap = {
-        'DAY': 'day',
-        'DAY_BRIGHT': 'day_bright',
-        'EYE_CARE': 'eye_care',
-        'EYE_CARE_GREEN': 'eye_care_green',
-        'PARCHMENT': 'parchment',
-        'NIGHT': 'night',
-        'NIGHT_BLACK': 'night_black'
-    };
-    const cssTheme = themeMap[themeKey] || 'day';
+    // The CSS theme name is the lower-cased preference key. boot.js (the
+    // pre-paint script that prevents FOUC) derives it the same way, so the two
+    // can no longer drift apart — they previously each held a 7-entry map that
+    // had to be kept in sync by hand. See boot.js for the graceful-degradation
+    // note on unknown keys.
+    const cssTheme = String(themeKey).toLowerCase();
     document.documentElement.dataset.theme = cssTheme;
+    // data-reader-theme is only ever matched as a presence selector in CSS
+    // (body[data-reader-theme][data-active-tab="read"] …), so the original
+    // upper-case key is kept here for readability.
     document.body.dataset.readerTheme = themeKey;
     updateThemeToggleIcon(themeKey === 'NIGHT' || themeKey === 'NIGHT_BLACK' ? 'night' : 'day');
 }
 
 function showAuthModal(url) {
     lastFailedUrl = url;
+    // 令牌弹窗用 .hidden 控制显示（overlay-modal 用的是 .active），所以这里
+    // 手动组合焦点管理原语：记录来源焦点 + 冻结背景 + 把焦点移入输入框。
+    rememberFocus();
+    freezeBackground();
     elements.authModal.classList.remove('hidden');
     elements.authTokenInput.focus();
 }
@@ -47,6 +51,8 @@ function showAuthModal(url) {
 function hideAuthModal() {
     elements.authModal.classList.add('hidden');
     elements.authTokenInput.value = '';
+    unfreezeBackground();
+    restoreFocus();
 }
 
 async function saveAuthAndRetry() {
@@ -106,30 +112,42 @@ window.addEventListener('hashchange', () => {
 
 // Set up Event Listeners
 function setupEventListeners() {
+    // 各视图模块的监听器注册互相独立：任一模块因元素缺失或异常抛错，不应中断
+    // 其余模块。此前的表现是「某些按钮完全没反应」，而控制台只有一条错误、
+    // 很难定位是哪个模块挂的（settings.js / lightbox.js / dashboard.js 里的
+    // .addEventListener 调用都不做空值检查）。这里逐个 try/catch 并标出模块名。
+    const safeSetup = (name, fn) => {
+        try {
+            fn();
+        } catch (e) {
+            console.error(`[setup] ${name} 监听器注册失败，该模块功能不可用:`, e);
+        }
+    };
+
     // Settings module listeners (Scan Trigger + Save Settings)
-    setupSettingsListeners(elements);
+    safeSetup('settings', () => setupSettingsListeners(elements));
 
     // Quick scroll navigation FAB (Top & Bottom)
-    initScrollNav();
+    safeSetup('scrollNav', () => initScrollNav());
 
     // Browser-view module listeners (search, grid clicks, breadcrumbs, thumbnail fallback)
-    setupBrowserListeners(elements);
+    safeSetup('browserView', () => setupBrowserListeners(elements));
 
     // Dashboard module listeners (recent items click)
-    setupDashboardListeners(elements);
+    safeSetup('dashboard', () => setupDashboardListeners(elements));
 
     // Video player module listeners (modal open/close, controls, keyboard shortcuts)
-    setupVideoPlayerListeners(elements);
+    safeSetup('videoPlayer', () => setupVideoPlayerListeners(elements));
 
     // Lightbox module listeners (image modal close/nav, stitch mode, keyboard shortcuts)
-    setupLightboxListeners(elements);
+    safeSetup('lightbox', () => setupLightboxListeners(elements));
 
     // Round 16 C1: Hamburger toggle for tablet/mobile sidebar drawer
-    if (elements.hamburgerBtn) {
+    if (elements.hamburgerBtn && elements.sidebar) {
         elements.hamburgerBtn.addEventListener('click', () => {
             const expanded = elements.sidebar.classList.toggle('open');
             elements.hamburgerBtn.setAttribute('aria-expanded', String(expanded));
-            elements.sidebarBackdrop.hidden = !expanded;
+            if (elements.sidebarBackdrop) elements.sidebarBackdrop.hidden = !expanded;
         });
     }
     if (elements.sidebarBackdrop) {

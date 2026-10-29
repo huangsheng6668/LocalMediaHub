@@ -69,7 +69,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 
 - **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js` / `library.js`（阅读状态与跨媒体收藏：筛选矩阵/徽章/DOM装饰/双向同步） / `readingTimer.js`（纯逻辑阅读计时器：textReader 活跃秒数累积，随 progress 上报 `read_seconds_delta` + 30s 心跳） / `scrollMemory.js`（双键 session 滚动记忆）
 - **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09-27 Ink Editorial 重设计（Slate Ink & Paper，spec `docs/superpowers/specs/2026-09-27-ink-editorial-redesign-design.md`，前身 2026-09-02 现代中性风）：7 套 `[data-theme]` chrome 主题重调为暖灰纸面 + 墨黑主操作（`--action-ink`）+ 苔绿 accent（`--accent`），阅读器 chrome 幽灵化（半透明 + backdrop-blur），阅读主题 hex 双端对称重调；emoji 图标全部为内联 SVG；`theme-parity.test.mjs` 守护双端主题 token 对称(reader hex / chrome token / label / 无 inline style)，改色值或标签需双端同步
-- **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js` / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
+- **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js`（书架：扫 `book_progress:*` 渲染卡片网格 + 仪表盘嵌入区 `renderSection`；全页路由带**本地即时搜索**（`filterBookshelf` 纯函数，匹配书名/路径、大小写不敏感，120ms 防抖，无服务端请求）与无命中空状态——注意 `[hidden]` 在 `.bookshelf-grid`/`.empty-state` 上需显式 `display:none` 守卫） / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
 - **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行）+ 子模块
   - `bus.js`（事件总线 on/emit/off/EVT，零依赖）
   - `reader-state.js`（共享状态单例 + `setCurrentIdx` 触发 `chapter:changed`）
@@ -303,6 +303,7 @@ node --test
   - 常用 scope：`reader` / `bookparser` / `web` / `android` / `security` / `server` / `thumbnail` / `scanner` / `tags` / `book`
   - 多阶段工作：附 `(Phase N)` 或 `(Round N)` 后缀
   - 示例：`feat(reader): Android immersive mode with chrome auto-hide (Phase 5)`
+- **Android 版本号提升约定**：凡涉及 Android 端改进的更新需同步提升 `android/app/build.gradle.kts` 中的版本号——大版本更新提升 0.1（如 1.5.0 → 1.6.0），较小改动按 0.0.1 递增（如 1.5.0 → 1.5.1），versionCode 同步 +1
 - 重大改动流程：
   1. 先写 spec：`docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
   2. 再用 writing-plans 技能落 plan：`docs/superpowers/plans/YYYY-MM-DD-<topic>.md`

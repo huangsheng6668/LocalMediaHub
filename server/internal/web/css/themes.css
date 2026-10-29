@@ -28,6 +28,11 @@
     --space-5: 24px; --space-6: 32px;
     --error: #DC2626;  --secondary: #3D6B4F;
     --font-display: "Noto Serif SC", "Songti SC", serif;
+    /* --font-mono was referenced by dashboard.css (.path-chip) and
+       settings.css (.settings-static / textarea) but never defined anywhere —
+       all three silently fell back to the generic `monospace`. Defined here so
+       the 7 themes share one deterministic stack. */
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Noto Sans Mono CJK SC", "Microsoft YaHei Mono", monospace;
     --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
