@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -238,6 +239,10 @@ func (h *Handler) MediaHlsPlaylist(c echo.Context) error {
 	}
 	sess, err := h.streaming.GetOrCreateHlsSession(resolved, fi.ModTime(), startSec)
 	if err != nil {
+		if errors.Is(err, service.ErrTranscodeSlotUnavailable) {
+			c.Response().Header().Set("Retry-After", "5")
+			return respondError(c, http.StatusServiceUnavailable, "transcode capacity unavailable")
+		}
 		return respondError(c, http.StatusServiceUnavailable, "transcode session unavailable", err)
 	}
 	// Serve the client-facing playlist: bare ffmpeg segment names are
@@ -285,6 +290,10 @@ func (h *Handler) MediaHlsSegment(c echo.Context) error {
 	// killing a running transcode.
 	sess, err := h.streaming.GetOrCreateHlsSession(resolved, fi.ModTime(), startSec)
 	if err != nil {
+		if errors.Is(err, service.ErrTranscodeSlotUnavailable) {
+			c.Response().Header().Set("Retry-After", "5")
+			return respondError(c, http.StatusServiceUnavailable, "transcode capacity unavailable")
+		}
 		return respondError(c, http.StatusServiceUnavailable, "transcode session unavailable", err)
 	}
 	segPath, ok := sess.SegmentPath(name)

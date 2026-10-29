@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -244,4 +245,83 @@ func TestHlsReaperKillsIdleAndEvictsOverCap(t *testing.T) {
 	_, total := s.HlsStatus()
 	assert.Equal(t, 1, total)
 	assert.NoDirExists(t, done)
+}
+
+func TestHlsQueuedSessionCancelledByCloseHLS(t *testing.T) {
+	svc := NewStreamingService("", nil, 1)
+	svc.hlsDir = t.TempDir()
+	// Occupy the single slot
+	release, ok := svc.acquireTranscodeSlot(context.Background())
+	if !ok {
+		t.Fatal("expected initial slot acquisition to succeed")
+	}
+	defer release()
+
+	tmpFile := filepath.Join(t.TempDir(), "video.mp4")
+	if err := os.WriteFile(tmpFile, []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(tmpFile)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := svc.GetOrCreateHlsSession(tmpFile, info.ModTime(), 0)
+		errCh <- err
+	}()
+
+	time.Sleep(80 * time.Millisecond)
+	svc.CloseHLS()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected error when CloseHLS cancels waiting session")
+		}
+		if !errors.Is(err, ErrTranscodeSlotUnavailable) {
+			t.Fatalf("expected ErrTranscodeSlotUnavailable, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("GetOrCreateHlsSession hung after CloseHLS while waiting for slot")
+	}
+}
+
+func TestHlsQueuedSessionCancelledBySiblingSession(t *testing.T) {
+	svc := NewStreamingService("", nil, 1)
+	svc.hlsDir = t.TempDir()
+	release, ok := svc.acquireTranscodeSlot(context.Background())
+	if !ok {
+		t.Fatal("expected initial slot acquisition to succeed")
+	}
+	defer release()
+
+	tmpFile := filepath.Join(t.TempDir(), "video.mp4")
+	if err := os.WriteFile(tmpFile, []byte("fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(tmpFile)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := svc.GetOrCreateHlsSession(tmpFile, info.ModTime(), 0)
+		errCh <- err
+	}()
+
+	time.Sleep(80 * time.Millisecond)
+
+	// A re-anchor for the same file should cancel the waiting sibling
+	go func() {
+		_, _ = svc.GetOrCreateHlsSession(tmpFile, info.ModTime(), 100)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected error when sibling cancels waiting session")
+		}
+		if !errors.Is(err, ErrTranscodeSlotUnavailable) {
+			t.Fatalf("expected ErrTranscodeSlotUnavailable, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiting session hung instead of being cancelled by sibling")
+	}
 }

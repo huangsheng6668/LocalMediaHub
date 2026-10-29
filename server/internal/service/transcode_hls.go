@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -42,6 +43,10 @@ const hlsPlaylistWait = 8 * time.Second
 
 const hlsPlaylistName = "index.m3u8"
 
+const hlsSlotWaitTimeout = 30 * time.Second
+
+var ErrTranscodeSlotUnavailable = errors.New("transcode capacity unavailable")
+
 // hlsSegmentNameRe is the strict whitelist for segment file names. ffmpeg
 // writes seg%05d.ts; anything else (traversal, extensions, case games) is
 // rejected before it ever reaches a path join.
@@ -66,6 +71,7 @@ type hlsSession struct {
 	dir      string
 	playlist string
 	done     chan struct{} // closed when ffmpeg exited
+	ctx      context.Context
 	cancel   context.CancelFunc
 
 	// srcPath/startSec pin the session identity inputs that cancelSibling
@@ -171,6 +177,7 @@ func (s *StreamingService) GetOrCreateHlsSession(path string, modTime time.Time,
 		sess.Touch()
 		return sess, nil
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	sess := &hlsSession{
 		key:        key,
 		dir:        filepath.Join(s.hlsDir, key),
@@ -180,6 +187,8 @@ func (s *StreamingService) GetOrCreateHlsSession(path string, modTime time.Time,
 		running:    true,
 		srcPath:    filepath.Clean(path),
 		startSec:   startSec,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 	s.hlsSessions[key] = sess
 	s.hlsMu.Unlock()
@@ -246,29 +255,44 @@ func buildHlsArgs(safePath string, startSec int64, enc resolvedEncoder, segDir, 
 func (s *StreamingService) startHlsFFmpeg(sess *hlsSession, path string, enc resolvedEncoder) error {
 	safePath, err := sanitizeMediaArg(path)
 	if err != nil {
+		sess.cancel()
+		sess.mu.Lock()
+		sess.running = false
+		sess.err = err
+		sess.mu.Unlock()
+		close(sess.done)
 		s.dropHlsSession(sess)
 		return err
 	}
 	if err := os.MkdirAll(sess.dir, 0o755); err != nil {
+		sess.cancel()
+		sess.mu.Lock()
+		sess.running = false
+		sess.err = err
+		sess.mu.Unlock()
+		close(sess.done)
 		s.dropHlsSession(sess)
 		return err
 	}
 
 	args := buildHlsArgs(safePath, sess.startSec, enc, sess.dir, sess.playlist)
 
-	// Occupy the shared transcode slot for the lifetime of ffmpeg; queued
-	// acquisition is not used here (session creation is already deduped and
-	// reaper-bounded, and blocking GetOrCreate on the slot would stall the
-	// HTTP handler past its own timeouts).
-	release, acquired := s.acquireTranscodeSlot(context.Background())
+	waitCtx, waitCancel := context.WithTimeout(sess.ctx, hlsSlotWaitTimeout)
+	release, acquired := s.acquireTranscodeSlot(waitCtx)
+	waitCancel()
 	if !acquired {
+		sess.cancel()
+		sess.mu.Lock()
+		sess.running = false
+		sess.err = ErrTranscodeSlotUnavailable
+		sess.mu.Unlock()
+		close(sess.done)
 		os.RemoveAll(sess.dir)
 		s.dropHlsSession(sess)
-		return fmt.Errorf("transcode capacity unavailable")
+		return ErrTranscodeSlotUnavailable
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, ffmpegBin, args...)
+	cmd := exec.CommandContext(sess.ctx, ffmpegBin, args...)
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			return cmd.Process.Kill()
@@ -276,19 +300,23 @@ func (s *StreamingService) startHlsFFmpeg(sess *hlsSession, path string, enc res
 		return os.ErrProcessDone
 	}
 	if err := cmd.Start(); err != nil {
-		cancel()
+		sess.cancel()
 		release()
+		sess.mu.Lock()
+		sess.running = false
+		sess.err = err
+		sess.mu.Unlock()
+		close(sess.done)
 		os.RemoveAll(sess.dir)
 		s.dropHlsSession(sess)
 		return err
 	}
-	sess.cancel = cancel
 	slog.Info("hls transcode session started", "key", sess.key, "encoder", enc.Name, "file", filepath.Base(path))
 
 	go func() {
 		defer close(sess.done)
 		waitErr := cmd.Wait()
-		cancel()
+		sess.cancel()
 		release()
 		sess.mu.Lock()
 		sess.running = false
@@ -330,7 +358,7 @@ func (s *StreamingService) startHlsFFmpeg(sess *hlsSession, path string, enc res
 	}
 	// Still no playlist after the deadline: kill and drop. The waiter
 	// goroutine performs the actual cleanup once cmd.Wait returns.
-	cancel()
+	sess.cancel()
 	<-sess.done
 	return fmt.Errorf("transcode session timed out waiting for playlist")
 }

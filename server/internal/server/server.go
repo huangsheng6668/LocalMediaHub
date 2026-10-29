@@ -413,14 +413,14 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	sys := api.Group("/system", authMw)
 	sys.GET("/drives", h.GetDrives)
 	sys.GET("/browse", h.SystemBrowse)
-	sys.GET("/thumbnail", h.SystemThumbnail)
+	sys.GET("/thumbnail", h.SystemThumbnail, middleware.RateLimit(60, time.Minute))
 	sys.GET("/original", h.SystemOriginal)
 	sys.GET("/stream", h.SystemStream, rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
 	sys.POST("/delete", h.DeletePath, middleware.RateLimit(5, time.Minute))
 
 	// Unified absolute-path media access
 	media := api.Group("/media", authMw)
-	media.GET("/thumbnail", h.MediaThumbnail)
+	media.GET("/thumbnail", h.MediaThumbnail, middleware.RateLimit(60, time.Minute))
 	media.GET("/original", h.MediaOriginal)
 	media.GET("/stream", h.MediaStream, rateLimitWhen(isTranscodeRequest, middleware.RateLimit(5, time.Minute)))
 	// HLS transcode (spec 2026-09-03-hls-transcode): playlist + segments for
@@ -430,7 +430,7 @@ func (s *Server) registerRoutes(h *handler.Handler) {
 	// transcode semaphore + the idle reaper instead.
 	media.GET("/hls/playlist", h.MediaHlsPlaylist)
 	media.GET("/hls/segment", h.MediaHlsSegment)
-	media.GET("/duration", h.MediaDuration)
+	media.GET("/duration", h.MediaDuration, middleware.RateLimit(60, time.Minute))
 	// Batch thumbnail endpoint (grid N+1 collapse). Rate-limited because it
 	// fans out to up to 64 thumbnail generations per request.
 	media.POST("/thumbnails", h.MediaThumbnails, middleware.RateLimit(10, time.Minute))
