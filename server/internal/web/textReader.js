@@ -562,9 +562,10 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             saveProgress(path, prog);
 
             const chapterParas = paragraphs.filter(p => p.chapterIndex === vis.chapterIndex);
+            const maxParaIdx = chapterParas[chapterParas.length - 1].paraIndex;
             const lastPara = chapterParas.length > 0
                 && chapterParas.every(p => p.bottom <= containerTop + els.content.clientHeight)
-                && vis.paraIndex === Math.max(...chapterParas.map(p => p.paraIndex));
+                && vis.paraIndex === maxParaIdx;
             const nearBottom = els.content.scrollHeight - els.content.scrollTop - els.content.clientHeight < 50;
 
             const payload = computeReportPayload({
@@ -648,6 +649,29 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         scheduleProgressSave();
     }
     els.content.addEventListener('scroll', onContentScroll);
+    function onContentClick(e) {
+        const btn = e.target && typeof e.target.closest === 'function'
+            ? e.target.closest('.text-reader__para-bookmark')
+            : null;
+        if (!btn || !els.content.contains(btn)) return;
+        e.stopPropagation();
+        const p = btn.closest('p.text-reader__p');
+        const sec = btn.closest('section.text-reader__chapter-section');
+        if (!p || !sec) return;
+        const chIdx = Number(sec.dataset.chapterIndex || 0);
+        const idx = Number(p.dataset.paraIndex || 0);
+        const rawText = (p.firstChild && p.firstChild.nodeType === 3) ? p.firstChild.nodeValue : p.textContent;
+        const ok = readerPrefs.addBookmark({
+            bookPath: path,
+            chapterIndex: chIdx,
+            paragraphIndex: idx,
+            preview: (rawText || '').slice(0, 30),
+            createdAt: Date.now(),
+        });
+        showToast(ok ? '已添加书签' : '已存在书签', ok ? 'success' : 'info');
+        syncBookmarkCount();
+    }
+    els.content.addEventListener('click', onContentClick);
     const onVisibilityChange = () => { if (document.hidden) autoscrollApi.stop(); };
     document.addEventListener('visibilitychange', onVisibilityChange);
 
@@ -681,6 +705,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
         document.removeEventListener('keydown', onKeyDown);
         document.removeEventListener('fullscreenchange', onFullscreenChange);
         els.content.removeEventListener('scroll', onContentScroll);
+        els.content.removeEventListener('click', onContentClick);
         mediaDark.removeEventListener('change', onSystemColorSchemeChange);
         delete document.body.dataset.readerTheme;
         if (immersiveEntryTimer) clearTimeout(immersiveEntryTimer);
@@ -700,13 +725,16 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
 
     // ===== Chapter rendering + scroll-mode buffering =====
 
-    // renderBlocks builds one <section> per chapter. Kept in the orchestrator
-    // because the per-paragraph "+" bookmark button needs `path` + chIdx.
+    // renderBlocks builds one <section> per chapter. Paragraph bookmark clicks
+    // are handled via event delegation on els.content.
     function renderBlocks(blocks, chapterTitle, chIdx) {
+        const prefs = readerPrefs.getSettings();
+        const indent = prefs.firstLineIndent ? 'indent-on' : 'indent-off';
+        const gap = prefs.paragraphSpacing ? 'gap-on' : 'gap-off';
         const section = document.createElement('section');
         section.className = 'text-reader__chapter-section';
         section.dataset.chapterIndex = String(chIdx);
-        if (chIdx > 0 && readerPrefs.getSettings().readingMode === 'scroll') {
+        if (chIdx > 0 && prefs.readingMode === 'scroll') {
             const hr = document.createElement('hr');
             hr.className = 'text-reader__chapter-divider';
             section.appendChild(hr);
@@ -740,8 +768,6 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             p.textContent = text;
             p.dataset.blockIndex = String(idx);
             p.dataset.paraIndex = String(idx);
-            const indent = readerPrefs.getSettings().firstLineIndent ? 'indent-on' : 'indent-off';
-            const gap = readerPrefs.getSettings().paragraphSpacing ? 'gap-on' : 'gap-off';
             const dropcap = (idx === dropCapIdx) ? 'text-reader__p--dropcap' : '';
             p.className = `text-reader__p ${indent} ${gap} ${dropcap}`.trim();
             const btn = document.createElement('button');
@@ -749,15 +775,6 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             btn.type = 'button';
             btn.textContent = '+';
             btn.title = '添加书签';
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const ok = readerPrefs.addBookmark({
-                    bookPath: path, chapterIndex: chIdx, paragraphIndex: idx,
-                    preview: text.slice(0, 30), createdAt: Date.now(),
-                });
-                showToast(ok ? '已添加书签' : '已存在书签', ok ? 'success' : 'info');
-                syncBookmarkCount();
-            });
             p.appendChild(btn);
             section.appendChild(p);
         });

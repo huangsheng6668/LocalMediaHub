@@ -656,3 +656,87 @@ test('renderTextReader does NOT merge server progress if server last_read_at <= 
         teardownJsdom();
     }
 });
+
+test('renderTextReader: delegates bookmark clicks and does not attach per-button listeners', async () => {
+    setupJsdom();
+    const origCustomEvent = global.CustomEvent;
+    const origEvent = global.Event;
+    global.CustomEvent = global.window.CustomEvent;
+    global.Event = global.window.Event;
+    try {
+        const testBook = {
+            title: '书签测试书',
+            path: '/test/bookmark-delegation.txt',
+            format: 'txt',
+            chapters: [
+                { title: '第一章 测验', index: 0 },
+            ],
+        };
+        installEnv({
+            book: testBook,
+            chapter: {
+                title: '第一章 测验',
+                blocks: [
+                    { type: 'text', value: '这是用于测试委托书签按钮点击的第一段文本内容，长度超过二十五。' },
+                    { type: 'text', value: '这是第二段正文内容，同样超过二十五个字符以供测试添加书签功能。' },
+                ],
+            },
+        });
+
+        const { clearChapterCache } = await import('./api.js');
+        clearChapterCache();
+
+        let bookmarkButtonListenerCount = 0;
+        const origBtnAddListener = window.HTMLButtonElement.prototype.addEventListener;
+        window.HTMLButtonElement.prototype.addEventListener = function(type, listener, options) {
+            if (this.classList && this.classList.contains('text-reader__para-bookmark')) {
+                bookmarkButtonListenerCount++;
+            }
+            return origBtnAddListener.call(this, type, listener, options);
+        };
+
+        try {
+            const { renderTextReader } = await import('./textReader.js');
+            const { getBookmarks } = await import('./readerPrefs.js');
+            const container = viewContainer();
+            await renderTextReader(container, '/test/bookmark-delegation.txt', null, null);
+
+            // Verify no direct listeners were attached to bookmark buttons
+            assert.equal(bookmarkButtonListenerCount, 0, 'no direct listeners on bookmark buttons');
+
+            const contentEl = container.querySelector('.text-reader__content');
+            assert.ok(contentEl, 'content container exists');
+            const btn = contentEl.querySelector('.text-reader__para-bookmark');
+            assert.ok(btn, 'bookmark button exists');
+
+            // Click the bookmark button (bubbles to contentEl)
+            btn.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+            const bookmarks = getBookmarks('/test/bookmark-delegation.txt');
+            assert.equal(bookmarks.length, 1, 'one bookmark added via delegation');
+            assert.equal(bookmarks[0].chapterIndex, 0);
+            assert.equal(bookmarks[0].paragraphIndex, 0);
+            assert.equal(bookmarks[0].preview, '这是用于测试委托书签按钮点击的第一段文本内容，长度超过二十五');
+
+            // Non-bubbling click on a bookmark button does NOT reach delegated handler
+            const secondP = contentEl.querySelectorAll('.text-reader__p')[1];
+            const secondBtn = secondP.querySelector('.text-reader__para-bookmark');
+            secondBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: false, cancelable: true }));
+            assert.equal(getBookmarks('/test/bookmark-delegation.txt').length, 1, 'bubbles: false does not reach delegated listener');
+
+            // Cleanup removes delegated listener
+            container._cleanupReader?.();
+            secondBtn.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+            assert.equal(getBookmarks('/test/bookmark-delegation.txt').length, 1, 'cleaned up reader does not handle clicks');
+        } finally {
+            window.HTMLButtonElement.prototype.addEventListener = origBtnAddListener;
+        }
+    } finally {
+        if (origCustomEvent) global.CustomEvent = origCustomEvent;
+        else delete global.CustomEvent;
+        if (origEvent) global.Event = origEvent;
+        else delete global.Event;
+        delete global.fetch;
+        teardownJsdom();
+    }
+});

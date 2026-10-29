@@ -262,3 +262,37 @@ test('initScrollNav cleanup removes container listeners and click handlers', () 
     assert.equal(clickRemoved, 2);
 });
 
+
+test('initScrollNav MutationObserver observes data-active-tab on body without subtree/childList', () => {
+    let observedTarget = null;
+    let observedOptions = null;
+    class MockMutationObserver {
+        constructor(callback) { this.callback = callback; }
+        observe(target, options) {
+            observedTarget = target;
+            observedOptions = options;
+        }
+        disconnect() {}
+    }
+    const origObs = global.MutationObserver;
+    global.MutationObserver = MockMutationObserver;
+    try {
+        const body = { dataset: { activeTab: 'browser' } };
+        const fakeDoc = {
+            body,
+            getElementById: () => null,
+            querySelector: () => null
+        };
+        const nav = initScrollNav({ root: fakeDoc });
+        assert.equal(observedTarget, body);
+        assert.deepEqual(observedOptions, {
+            childList: false,
+            subtree: false,
+            attributes: true,
+            attributeFilter: ['data-active-tab']
+        });
+        nav.cleanup();
+    } finally {
+        global.MutationObserver = origObs;
+    }
+});

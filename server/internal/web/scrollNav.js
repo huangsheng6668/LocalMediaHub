@@ -172,10 +172,10 @@ export function initScrollNav(opts = {}) {
                 }
             });
             observer.observe(bodyEl, {
-                childList: true,
-                subtree: true,
+                childList: false,
+                subtree: false,
                 attributes: true,
-                attributeFilter: ['data-active-tab', 'class', 'hidden']
+                attributeFilter: ['data-active-tab']
             });
         } catch {
             // Fallback if environment doesn't support DOM MutationObserver

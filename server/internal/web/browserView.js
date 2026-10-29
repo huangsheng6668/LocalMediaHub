@@ -6,7 +6,7 @@ import { state } from './state.js';
 import { showToast } from './toast.js';
 import { apiRequest, withMediaAuthToken } from './api.js';
 import { elements } from './dom.js';
-import { formatSize, encodeRoutePath, safeBtoa, escapeHtml } from './utils.js';
+import { formatSize, encodeRoutePath, escapeHtml } from './utils.js';
 import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 import { refreshDecorations, decorateBrowserList, toggleFavorite, markStatus, openStatusMenu, applyListFilters, getDecorations } from './library.js';
@@ -15,6 +15,8 @@ import { initScrollMemory, restoreScrollMemory, clearScrollMemory } from './scro
 // Module-level variables for currently rendered items in browser list
 let shownFolders = [];
 let shownFiles = [];
+
+const NAME_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 // ── Inline SVG icon vocabulary (mirrors index.html / Task 6 icons) ──
 // Monochrome currentColor stroke icons replace the former emoji glyphs in
@@ -258,7 +260,7 @@ function sortMediaItems(items, field, order, isFolder = false) {
         if (cmp === 0 || field === 'name') {
             const nameA = a.name || '';
             const nameB = b.name || '';
-            const nameCmp = nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+            const nameCmp = NAME_COLLATOR.compare(nameA, nameB);
             return mult * (field === 'name' ? nameCmp : (cmp !== 0 ? cmp : nameCmp));
         }
 
@@ -336,7 +338,6 @@ export function renderBrowserList() {
                 : '';
             html += `
                 <div class="media-card text-card ${isUnsupportedText ? 'text-card--unsupported' : ''}"
-                     id="file-card-${safeBtoa(file.path).replace(/=/g, '')}"
                      data-action="${isUnsupportedText ? 'text-unsupported' : 'text-open'}"
                      data-path="${escapeHtml(file.path)}"
                      data-media-type="text"
@@ -396,7 +397,7 @@ export function renderBrowserList() {
         const safeExt = escapeHtml(file.extension);
 
         html += `
-            <div class="${escapeHtml(cardClass)}" id="file-card-${safeBtoa(file.path).replace(/=/g, '')}" data-action="open" data-path="${escapeHtml(file.path)}" data-media-type="${isVideo ? 'video' : 'image'}" data-index="${index}"
+            <div class="${escapeHtml(cardClass)}" data-action="open" data-path="${escapeHtml(file.path)}" data-media-type="${isVideo ? 'video' : 'image'}" data-index="${index}"
                  role="button" tabindex="0" aria-label="${isVideo ? '播放' : '查看'} ${safeName}">
                 <div class="card-preview" data-fallback-icon="${fallbackIcon}">
                     ${previewHtml}
