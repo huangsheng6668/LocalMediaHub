@@ -67,7 +67,13 @@ export function resolveResume({ chapterParam, paraParam, saved, chapterCount }) 
 // Entry point invoked by router.js. Signature is FIXED: (container, path, chapterParam, paraParam).
 export async function renderTextReader(container, path, chapterParam, paraParam) {
     // Run prior cleanup FIRST so leaks from a previous render release before innerHTML wipe.
-    if (typeof container._cleanupReader === 'function') container._cleanupReader();
+    if (typeof container._cleanupReader === 'function') {
+        try {
+            container._cleanupReader();
+        } finally {
+            container._cleanupReader = null;
+        }
+    }
     resetState();
 
     if (!path) {
@@ -655,7 +661,10 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
     if (typeof readingHeartbeatTimer.unref === 'function') readingHeartbeatTimer.unref();
 
     // ===== Cleanup =====
+    let cleanedUp = false;
     container._cleanupReader = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
         if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
         if (cursorRafId !== null) cancelAnimationFrame(cursorRafId);
         if (progressSaveTimer) clearTimeout(progressSaveTimer);

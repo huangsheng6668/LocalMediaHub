@@ -16,6 +16,14 @@ function hashParams(hash) {
 export function handleRoute(elements, renderDashboard, loadRoots, browsePath, renderBookmarks, renderSettings) {
     const hash = window.location.hash || '#/dashboard';
 
+    if (!hash.startsWith('#/read') && elements.viewReader && typeof elements.viewReader._cleanupReader === 'function') {
+        try {
+            elements.viewReader._cleanupReader();
+        } finally {
+            elements.viewReader._cleanupReader = null;
+        }
+    }
+
     // Set active tab on body dataset for view-specific layout overrides
     let activeTab = '';
     if (hash.startsWith('#/dashboard')) activeTab = 'dashboard';

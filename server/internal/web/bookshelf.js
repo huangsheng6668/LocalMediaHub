@@ -170,6 +170,14 @@ function debounce(fn, wait) {
 // Full-page render for the #/bookshelf route. Always replaces container
 // contents so re-navigation does not stack cards.
 export function render(container) {
+    if (!container) return;
+    if (typeof container._cleanupReader === 'function') {
+        try {
+            container._cleanupReader();
+        } finally {
+            container._cleanupReader = null;
+        }
+    }
     container.innerHTML = ''; // XSS-SAFE: clearing, no dynamic content
     const list = loadAll();
     if (list.length === 0) {
