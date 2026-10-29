@@ -23,12 +23,17 @@ type TagsService struct {
 }
 
 func NewTagsService(dataDir string) (*TagsService, error) {
+	dbPath := filepath.Join(dataDir, "tags.db")
+	jsonPath := filepath.Join(dataDir, "tags.json")
+	if strings.HasSuffix(strings.ToLower(dataDir), ".db") {
+		dbPath = dataDir
+		dataDir = filepath.Dir(dataDir)
+		jsonPath = filepath.Join(dataDir, "tags.json")
+	}
+
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, err
 	}
-
-	dbPath := filepath.Join(dataDir, "tags.db")
-	jsonPath := filepath.Join(dataDir, "tags.json")
 
 	// Check if JSON exists and DB does not exist to run migration
 	jsonExists := false
@@ -114,7 +119,82 @@ func NewTagsService(dataDir string) (*TagsService, error) {
 		}
 	}
 
+	if err := s.normalizeStoredPaths(dbPath); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("tags path normalization failed: %w", err)
+	}
+
 	return s, nil
+}
+
+func (s *TagsService) normalizeStoredPaths(dbPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query("SELECT tag_id, file_path FROM associations")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type assocUpdate struct {
+		tagID   string
+		oldPath string
+		newPath string
+	}
+	var updates []assocUpdate
+
+	for rows.Next() {
+		var tagID, filePath string
+		if err := rows.Scan(&tagID, &filePath); err != nil {
+			return err
+		}
+		norm, err := NormalizePath(filePath)
+		if err == nil && norm != filePath {
+			updates = append(updates, assocUpdate{
+				tagID:   tagID,
+				oldPath: filePath,
+				newPath: norm,
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if len(updates) == 0 {
+		return nil
+	}
+
+	// Backup dbPath to dbPath + ".bak" once if not already backed up
+	bakPath := dbPath + ".bak"
+	if _, err := os.Stat(bakPath); os.IsNotExist(err) {
+		_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		data, err := os.ReadFile(dbPath)
+		if err != nil {
+			return fmt.Errorf("failed to read db file for backup: %w", err)
+		}
+		if err := os.WriteFile(bakPath, data, 0o644); err != nil {
+			return fmt.Errorf("failed to write db backup file: %w", err)
+		}
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, u := range updates {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO associations (tag_id, file_path) VALUES (?, ?)", u.tagID, u.newPath); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("DELETE FROM associations WHERE tag_id = ? AND file_path = ?", u.tagID, u.oldPath); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (s *TagsService) migrateFromJSON(jsonPath string) error {
@@ -404,8 +484,8 @@ func (s *TagsService) GetAllFileTags() map[string][]models.FileTag {
 }
 
 func (s *TagsService) CleanDeletedPath(path string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	normPath := filepath.Clean(path)
 	// Phase 9 (L-4): the prefix is a user-supplied path, so its % and _ must

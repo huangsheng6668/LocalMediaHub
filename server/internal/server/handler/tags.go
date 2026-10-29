@@ -4,13 +4,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 
 	"github.com/localmediahub/server/internal/models"
 	"github.com/localmediahub/server/internal/service"
 )
+
+var tagColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{3,8}$`)
 
 type CreateTagRequest struct {
 	Name  string `json:"name"`
@@ -25,12 +29,20 @@ func (h *Handler) GetTags(c echo.Context) error {
 func (h *Handler) CreateTag(c echo.Context) error {
 	var req CreateTagRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusBadRequest, "invalid request body", err)
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || utf8.RuneCountInString(name) > 64 {
+		return respondError(c, http.StatusBadRequest, "tag name must be 1..64 characters")
+	}
+	color := strings.TrimSpace(req.Color)
+	if color != "" && !tagColorRe.MatchString(color) {
+		return respondError(c, http.StatusBadRequest, "invalid tag color format")
 	}
 
-	tag, err := h.tags.CreateTag(req.Name, req.Color)
+	tag, err := h.tags.CreateTag(name, color)
 	if err != nil {
-		return c.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+		return respondError(c, http.StatusConflict, "tag already exists")
 	}
 	return c.JSON(http.StatusCreated, tag)
 }
@@ -42,14 +54,21 @@ func (h *Handler) DeleteTag(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "tag not found"})
 	}
 	if err := h.tags.DeleteTag(tagID); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *Handler) AssociateTag(c echo.Context) error {
 	tagIdentifier := c.Param("tag_id")
-	pathStr := c.Param("*")
+	rawPath, err := decodeWildcardPath(c.Param("*"), "")
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid file path")
+	}
+	pathStr, err := service.NormalizePath(rawPath)
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid file path")
+	}
 
 	tagID, exists := h.tags.ResolveTagID(tagIdentifier)
 	if !exists {
@@ -66,7 +85,7 @@ func (h *Handler) AssociateTag(c echo.Context) error {
 
 	associated, err := h.tags.AssociateFile(tagID, pathStr)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 
 	if associated {
@@ -77,7 +96,14 @@ func (h *Handler) AssociateTag(c echo.Context) error {
 
 func (h *Handler) DisassociateTag(c echo.Context) error {
 	tagIdentifier := c.Param("tag_id")
-	pathStr := c.Param("*")
+	rawPath, err := decodeWildcardPath(c.Param("*"), "")
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid file path")
+	}
+	pathStr, err := service.NormalizePath(rawPath)
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid file path")
+	}
 
 	tagID, exists := h.tags.ResolveTagID(tagIdentifier)
 	if !exists {
@@ -89,7 +115,7 @@ func (h *Handler) DisassociateTag(c echo.Context) error {
 	}
 
 	if err := h.tags.DisassociateFile(tagID, pathStr); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return respondInternalError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"detail": "Tag removed from file"})
 }
@@ -98,6 +124,9 @@ func (h *Handler) DisassociateTag(c echo.Context) error {
 // roots or the system allowed roots (lexical check — this is a DB-write guard,
 // not a file read, so reparse-point traversal is not applicable here).
 func (h *Handler) isPathWithinConfiguredRoots(pathStr string) bool {
+	if service.IsBlockedRoot(pathStr) {
+		return false
+	}
 	allRoots := append(append([]string{}, h.cfg.Scan.GetRoots()...), h.cfg.GetSystemAllowedRoots()...)
 	if len(allRoots) == 0 {
 		return false
@@ -175,6 +204,9 @@ func (h *Handler) GetFileTags(c echo.Context) error {
 }
 
 func (h *Handler) buildTaggedMediaFallback(pathStr string) (models.MediaFile, bool) {
+	if !h.isPathWithinConfiguredRoots(pathStr) {
+		return models.MediaFile{}, false
+	}
 	info, err := os.Stat(pathStr)
 	if err != nil || info.IsDir() {
 		return models.MediaFile{}, false

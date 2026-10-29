@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -445,4 +446,51 @@ func TestTagsConcurrentWritesNoBusy(t *testing.T) {
 	if len(all) != N {
 		t.Fatalf("got %d tags, want %d", len(all), N)
 	}
+}
+
+
+func TestNormalizeStoredPathsMigration(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewTagsService(dir)
+	assert.NoError(t, err)
+
+	tag, err := s.CreateTag("test-tag", "#112233")
+	assert.NoError(t, err)
+
+	cleanPath, err := NormalizePath(filepath.Join(dir, "video.mp4"))
+	assert.NoError(t, err)
+
+	unnormPath := filepath.ToSlash(filepath.Join(dir, "..", filepath.Base(dir), "video.mp4"))
+	assert.NotEqual(t, cleanPath, unnormPath)
+
+	// Directly insert unnormalized path into associations
+	_, err = s.db.Exec("INSERT INTO associations (tag_id, file_path) VALUES (?, ?)", tag.ID, unnormPath)
+	assert.NoError(t, err)
+
+	// Close service to prepare for reload
+	err = s.Close()
+	assert.NoError(t, err)
+
+	bakPath := filepath.Join(dir, "tags.db.bak")
+	_, err = os.Stat(bakPath)
+	assert.True(t, os.IsNotExist(err), "backup should not exist before reload")
+
+	// Reopen service -> should trigger normalizeStoredPaths
+	s2, err := NewTagsService(dir)
+	assert.NoError(t, err)
+	defer s2.Close()
+
+	// Backup file must have been created
+	_, err = os.Stat(bakPath)
+	assert.NoError(t, err, "backup file tags.db.bak must exist")
+
+	// Associations should contain the normalized path
+	files := s2.GetFilesForTag(tag.ID)
+	assert.Len(t, files, 1)
+	assert.Equal(t, cleanPath, files[0])
+
+	// Reopening again should be idempotent and not fail
+	s3, err := NewTagsService(dir)
+	assert.NoError(t, err)
+	_ = s3.Close()
 }
