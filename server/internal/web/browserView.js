@@ -4,7 +4,7 @@
 //  triggerBrowserSearch + 5 listeners).
 import { state } from './state.js';
 import { showToast } from './toast.js';
-import { apiRequest } from './api.js';
+import { apiRequest, withMediaAuthToken } from './api.js';
 import { elements } from './dom.js';
 import { formatSize, encodeRoutePath, safeBtoa, escapeHtml } from './utils.js';
 import { openMedia } from './lightbox.js';
@@ -370,13 +370,13 @@ export function renderBrowserList() {
         let previewHtml = '';
         let playOverlay = '';
 
-        let thumbUrl = `${state.apiBase}/api/v1/images/${encodeRoutePath(file.path)}/thumbnail`;
+        let thumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/images/${encodeRoutePath(file.path)}/thumbnail`);
         if (state.isSystemBrowse) {
-            thumbUrl = `${state.apiBase}/api/v1/system/thumbnail?path=${encodeURIComponent(file.path)}`;
+            thumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/system/thumbnail?path=${encodeURIComponent(file.path)}`);
         }
 
         if (isVideo) {
-            const videoThumbUrl = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/thumbnail`;
+            const videoThumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/thumbnail`);
             const videoUrl = state.isSystemBrowse ? thumbUrl : videoThumbUrl;
             // loading=lazy + decoding=async: off-screen cards defer their
             // thumbnail fetch/decode instead of storming the server with one

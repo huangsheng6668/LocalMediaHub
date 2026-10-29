@@ -1,7 +1,7 @@
 // Dashboard feature module: extracted from app.js
 // (renderDashboard + onDashboardRecentClick + listeners).
 import { state } from './state.js';
-import { apiRequest } from './api.js';
+import { apiRequest, withMediaAuthToken } from './api.js';
 import { elements } from './dom.js';
 import { formatSize, encodeRoutePath, formatTranscodeStatus, escapeHtml } from './utils.js';
 import { openVideoPlayer } from './videoPlayer.js';
@@ -73,7 +73,7 @@ export async function renderDashboard() {
             elements.dashboardRecent.classList.remove('empty-state');
             // XSS-SAFE: dynamic fields (thumb url / name / size) all pass through escapeHtml()/formatSize()
             elements.dashboardRecent.innerHTML = items.map((file, index) => {
-                const thumb = `${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/thumbnail`;
+                const thumb = withMediaAuthToken(`${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/thumbnail`);
                 return `
                     <div class="recent-item dashboard-recent-item" data-action="open-video" data-index="${index}">
                         <img class="recent-item__thumb" src="${escapeHtml(thumb)}" alt="" loading="lazy" decoding="async">

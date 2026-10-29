@@ -1,4 +1,6 @@
-import { state } from './state.js';
+import { state, setAuthToken } from './state.js';
+
+export { setAuthToken };
 
 // Event dispatched on 401 to trigger the token-input modal in app.js.
 export const AUTH_REQUIRED_EVENT = 'lmh:auth-required';
@@ -105,4 +107,16 @@ export async function getBookChapter(path, index) {
 // as a query param. Returns '' when no token is configured (open-auth mode).
 export function getAuthToken() {
     return state.authToken || '';
+}
+
+export function withMediaAuthToken(url) {
+    if (!url || typeof url !== 'string') return url;
+    const token = getAuthToken();
+    if (!token) return url;
+    if (!url.includes('/api/v1/')) return url;
+    if (/^https?:\/\//i.test(url) && typeof window !== 'undefined' && window.location?.origin) {
+        if (!url.startsWith(window.location.origin + '/')) return url;
+    }
+    if (/[?&](token|sig)=/.test(url)) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
 }

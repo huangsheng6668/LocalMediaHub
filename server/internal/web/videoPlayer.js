@@ -1,6 +1,6 @@
 // Video player feature module: extracted from app.js (openVideoPlayer + listeners).
 import { state } from './state.js';
-import { apiRequest, getAuthToken } from './api.js';
+import { apiRequest, getAuthToken, withMediaAuthToken } from './api.js';
 import { showToast } from './toast.js';
 import { elements } from './dom.js';
 import { formatTime } from './utils.js';
@@ -16,10 +16,7 @@ import { openModalFocus, closeModalFocus } from './modalFocus.js';
 // Referrer-Policy: no-referrer keeps it out of referers). The public
 // /api/v1/videos/*/stream route needs no token.
 function withVideoAuthToken(url) {
-    if (!/\/api\/v1\/(media|system)\/(stream|hls\/playlist)/.test(url)) return url;
-    const token = getAuthToken();
-    if (!token) return url;
-    return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+    return withMediaAuthToken(url);
 }
 
 // Module-scoped player state (shared across the player's internal helpers).

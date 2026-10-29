@@ -2,6 +2,7 @@
 // (openMedia + openImageLightbox + renderLightboxImage + navigateLightbox + listeners).
 import { state } from './state.js';
 import { elements } from './dom.js';
+import { withMediaAuthToken } from './api.js';
 import { encodeRoutePath, escapeHtml } from './utils.js';
 import { openVideoPlayer } from './videoPlayer.js';
 import { showToast } from './toast.js';
@@ -73,6 +74,7 @@ function renderLightboxImage() {
                 if (state.isSystemBrowse) {
                     url = `${state.apiBase}/api/v1/system/original?path=${encodeURIComponent(file.path)}`;
                 }
+                url = withMediaAuthToken(url);
                 const imgContainer = document.createElement('div');
                 imgContainer.className = 'stitch-image-item';
                 imgContainer.id = `stitch-img-${idx}`;
@@ -110,6 +112,7 @@ function renderLightboxImage() {
         if (state.isSystemBrowse) {
             url = `${state.apiBase}/api/v1/system/original?path=${encodeURIComponent(file.path)}`;
         }
+        url = withMediaAuthToken(url);
 
         elements.lightboxImg.src = url;
         elements.lightboxCaption.textContent = `${file.name} (${state.lightboxIndex + 1}/${state.lightboxFiles.length})`;
