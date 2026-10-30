@@ -12,24 +12,17 @@ use std::io::Cursor;
 pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32)> {
     let mut decoder = image_webp::WebPDecoder::new(Cursor::new(data)).ok()?;
     let (w, h) = decoder.dimensions();
-    let (iw, ih) = (w as i32, h as i32);
+    let (iw, ih, total_pixels) = crate::bitmap::validate_image_dimensions(w, h)?;
 
     // `image_webp`'s default memory limit is conservative; on a 1456x2054
     // WebP without alpha it returns `ImageTooLarge`. The decoded buffer
-    // size is bounded by `width * height * (3 or 4)` which is already
-    // small for thumbnail-grid use, so we lift the limit to 256 MiB (a
-    // deliberate ceiling that still rejects absurd inputs but accepts the
-    // test fixtures and any reasonable photo).
+    // size is already validated above (`total_pixels <= 64 MP`), so we lift
+    // the decoder limit to 256 MiB.
     decoder.set_memory_limit(256 * 1024 * 1024);
 
     let has_alpha = decoder.has_alpha();
     let bytes_per_pixel = if has_alpha { 4 } else { 3 };
-    let mut raw = vec![0u8; (w as usize) * (h as usize) * bytes_per_pixel];
-    // `read_image` decodes the (single) frame of a non-animated WebP into
-    // the supplied buffer. For animated WebPs the API is `read_frame`
-    // (per-frame); we use `read_image` here because the thumbnail grid only
-    // needs the first frame and animated thumbnails are out of scope for
-    // the Round 11 rewrite.
+    let mut raw = vec![0u8; total_pixels.checked_mul(bytes_per_pixel)?];
     decoder.read_image(&mut raw).ok()?;
 
     // Normalise to RGBA so the bitmap allocator can blindly copy it
@@ -37,7 +30,7 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
     let rgba = if has_alpha {
         raw
     } else {
-        let mut out = Vec::with_capacity(raw.len() / 3 * 4);
+        let mut out = Vec::with_capacity(total_pixels.checked_mul(4)?);
         for chunk in raw.chunks_exact(3) {
             out.push(chunk[0]);
             out.push(chunk[1]);

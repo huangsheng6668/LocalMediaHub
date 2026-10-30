@@ -1,9 +1,9 @@
-//! Android Bitmap allocation and pixel filling.
+//! Android Bitmap allocation, image dimension bounds checking, and pixel filling.
 //!
 //! Links against `libjnigraphics.so` (provided by the NDK; linked
 //! automatically when the `jnigraphics` cargo feature is set on the `jni`
 //! crate — see `Cargo.toml`). On non-Android targets these symbols don't
-//! exist; the whole module is therefore gated by `cfg(target_os = "android")`
+//! exist; the JNI bitmap creation is therefore gated by `cfg(target_os = "android")`
 //! and the host build (`cargo test` for pure-Rust unit tests) does not
 //! touch it.
 //!
@@ -16,6 +16,33 @@
 use jni::objects::{JObject, JValue};
 use jni::sys::jobject;
 use jni::JNIEnv;
+
+/// Maximum allowed single dimension (width or height) for native image decoding.
+pub const MAX_IMAGE_DIMENSION: u32 = 16_384;
+
+/// Maximum allowed total pixel count (width * height) for native image decoding (64 MP = 256 MiB RGBA).
+pub const MAX_IMAGE_PIXELS: u64 = 64 * 1024 * 1024;
+
+/// Validate image dimensions before allocating pixel buffers to prevent
+/// decompression-bomb OOMs and `u32 -> i32` sign-wrap vulnerabilities.
+///
+/// Returns `Some((width_i32, height_i32, total_pixels_usize))` if valid.
+pub fn validate_image_dimensions(width: u32, height: u32) -> Option<(i32, i32, usize)> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    if width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
+        return None;
+    }
+    let total_pixels = (width as u64).checked_mul(height as u64)?;
+    if total_pixels > MAX_IMAGE_PIXELS {
+        return None;
+    }
+    let w_i32 = i32::try_from(width).ok()?;
+    let h_i32 = i32::try_from(height).ok()?;
+    let pixels_usize = usize::try_from(total_pixels).ok()?;
+    Some((w_i32, h_i32, pixels_usize))
+}
 
 #[cfg(target_os = "android")]
 #[repr(C)]
@@ -85,9 +112,6 @@ fn create_android_bitmap_inner(
     let config_cls: JClass = env
         .find_class("android/graphics/Bitmap$Config")
         .ok()?;
-    // jni-rs 0.21: `get_static_field` takes the class and (name, signature)
-    // — the field-id lookup is performed internally. The returned `JValue`
-    // is unwrapped to a `JObject` via `.l()`.
     let config_val = env
         .get_static_field(
             &config_cls,
@@ -99,8 +123,6 @@ fn create_android_bitmap_inner(
 
     // --- Call Bitmap.createBitmap(int, int, Bitmap.Config) -------------------
     let bitmap_cls: JClass = env.find_class("android/graphics/Bitmap").ok()?;
-    // jni-rs 0.21: `call_static_method` takes the class, method name, method
-    // signature, and args — the method-id lookup happens internally.
     let bitmap_val = env
         .call_static_method(
             &bitmap_cls,
@@ -137,9 +159,14 @@ fn create_android_bitmap_inner(
     }
 
     let stride_bytes = info.stride as usize;
-    let row_bytes = (width as usize) * 4;
-    let expected = (width as usize) * (height as usize) * 4;
-    if rgba.len() < expected {
+    let row_bytes = (width as usize).checked_mul(4)?;
+    let expected = row_bytes.checked_mul(height as usize)?;
+    if pixels.is_null()
+        || info.width != width as u32
+        || info.height != height as u32
+        || stride_bytes < row_bytes
+        || rgba.len() < expected
+    {
         unsafe { AndroidBitmap_unlockPixels(raw_env, raw_bitmap) };
         return None;
     }
@@ -202,29 +229,33 @@ pub fn create_android_bitmap(
 ///
 /// Returns `(rotated_rgba, new_width, new_height)`. For orientations 1-4
 /// the output dimensions equal the input dimensions; for orientations 5-8
-/// width and height are swapped. Any orientation outside 1..=8 is treated
-/// as identity (returns a cloned buffer with the original dimensions) —
-/// this matches how the EXIF spec is meant to degrade on unknown values.
+/// width and height are swapped. Any orientation outside 1..=8 (or invalid
+/// dimensions / buffer length) is treated as identity.
 pub fn apply_exif_orientation(
     rgba: &[u8],
     w: i32,
     h: i32,
     orientation: i32,
 ) -> (Vec<u8>, i32, i32) {
+    if w <= 0 || h <= 0 {
+        return (rgba.to_vec(), w, h);
+    }
+    let expected = (w as usize)
+        .checked_mul(h as usize)
+        .and_then(|n| n.checked_mul(4));
+    match expected {
+        Some(len) if rgba.len() >= len => {}
+        _ => return (rgba.to_vec(), w, h),
+    }
+
     match orientation {
         1 => (rgba.to_vec(), w, h),
         2 => flip_horizontal(rgba, w, h),
         3 => rotate_180(rgba, w, h),
         4 => flip_vertical(rgba, w, h),
-        5 => {
-            let (t, tw, th) = transpose(rgba, w, h);
-            flip_horizontal(&t, tw, th)
-        }
+        5 => transpose(rgba, w, h),
         6 => rotate_90_cw(rgba, w, h),
-        7 => {
-            let (t, tw, th) = transpose(rgba, w, h);
-            flip_vertical(&t, tw, th)
-        }
+        7 => transverse(rgba, w, h),
         8 => rotate_90_ccw(rgba, w, h),
         _ => (rgba.to_vec(), w, h),
     }
@@ -277,34 +308,73 @@ fn rotate_180(rgba: &[u8], w: i32, h: i32) -> (Vec<u8>, i32, i32) {
     (out, w as i32, h as i32)
 }
 
-/// Transpose (swap row/column). Output is `h × w`.
+/// Transpose (swap row/column, EXIF 5). Output is `h × w`.
 fn transpose(rgba: &[u8], w: i32, h: i32) -> (Vec<u8>, i32, i32) {
     let w = w as usize;
     let h = h as usize;
     let mut out = vec![0u8; w * h * 4];
     for y in 0..h {
         for x in 0..w {
-            let si = y * w * 4 + x * 4;
-            let di = x * h * 4 + y * 4;
+            let si = (y * w + x) * 4;
+            let di = (x * h + y) * 4;
             out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
         }
     }
     (out, h as i32, w as i32)
 }
 
-/// Rotate 90° clockwise. Output is `h × w`.
-///
-/// Equivalent to `transpose` then `flip_horizontal` — the canonical
-/// decomposition used by every EXIF-orientation library.
-fn rotate_90_cw(rgba: &[u8], w: i32, h: i32) -> (Vec<u8>, i32, i32) {
-    let (transposed, tw, th) = transpose(rgba, w, h);
-    flip_horizontal(&transposed, tw, th)
+/// Transverse (anti-diagonal transpose, EXIF 7). Single-pass allocation.
+/// Maps input `(x, y)` in `w × h` to `(h - 1 - y, w - 1 - x)` in `h × w`.
+fn transverse(rgba: &[u8], w: i32, h: i32) -> (Vec<u8>, i32, i32) {
+    let w = w as usize;
+    let h = h as usize;
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        let out_x = h - 1 - y;
+        for x in 0..w {
+            let out_y = w - 1 - x;
+            let si = (y * w + x) * 4;
+            let di = (out_y * h + out_x) * 4;
+            out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+        }
+    }
+    (out, h as i32, w as i32)
 }
 
-/// Rotate 90° counter-clockwise. Output is `h × w`.
+/// Rotate 90° clockwise (EXIF 6). Single-pass allocation.
+/// Maps input `(x, y)` in `w × h` to `(h - 1 - y, x)` in `h × w`.
+fn rotate_90_cw(rgba: &[u8], w: i32, h: i32) -> (Vec<u8>, i32, i32) {
+    let w = w as usize;
+    let h = h as usize;
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        let out_x = h - 1 - y;
+        for x in 0..w {
+            let out_y = x;
+            let si = (y * w + x) * 4;
+            let di = (out_y * h + out_x) * 4;
+            out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+        }
+    }
+    (out, h as i32, w as i32)
+}
+
+/// Rotate 90° counter-clockwise (EXIF 8). Single-pass allocation.
+/// Maps input `(x, y)` in `w × h` to `(y, w - 1 - x)` in `h × w`.
 fn rotate_90_ccw(rgba: &[u8], w: i32, h: i32) -> (Vec<u8>, i32, i32) {
-    let (transposed, tw, th) = transpose(rgba, w, h);
-    flip_vertical(&transposed, tw, th)
+    let w = w as usize;
+    let h = h as usize;
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        let out_x = y;
+        for x in 0..w {
+            let out_y = w - 1 - x;
+            let si = (y * w + x) * 4;
+            let di = (out_y * h + out_x) * 4;
+            out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+        }
+    }
+    (out, h as i32, w as i32)
 }
 
 #[cfg(test)]
@@ -323,6 +393,33 @@ mod tests {
             255, 0, 0, 255, 0, 255, 0, 255, // row 0: red, green
             0, 0, 255, 255, 255, 255, 255, 255, // row 1: blue, white
         ]
+    }
+
+    #[test]
+    fn validate_image_dimensions_rejects_invalid_and_oversized() {
+        assert_eq!(validate_image_dimensions(0, 100), None);
+        assert_eq!(validate_image_dimensions(100, 0), None);
+        assert_eq!(validate_image_dimensions(MAX_IMAGE_DIMENSION + 1, 100), None);
+        assert_eq!(validate_image_dimensions(100, MAX_IMAGE_DIMENSION + 1), None);
+        // Both dimensions within 16384 individually, but product > 64 MP (e.g. 10000 * 10000 = 100 MP)
+        assert_eq!(validate_image_dimensions(10_000, 10_000), None);
+        // Valid 4K image
+        assert_eq!(
+            validate_image_dimensions(3840, 2160),
+            Some((3840, 2160, 3840 * 2160))
+        );
+    }
+
+    #[test]
+    fn orientation_guards_short_buffer_and_non_positive_dims() {
+        let short = vec![1, 2, 3];
+        let (out, w, h) = apply_exif_orientation(&short, 2, 2, 6);
+        assert_eq!(out, short);
+        assert_eq!((w, h), (2, 2));
+
+        let (out_neg, wn, hn) = apply_exif_orientation(&short, -1, 2, 6);
+        assert_eq!(out_neg, short);
+        assert_eq!((wn, hn), (-1, 2));
     }
 
     #[test]
@@ -420,17 +517,17 @@ mod tests {
     }
 
     #[test]
-    fn orientation_5_and_7_transpose_dims() {
-        // Orientations 5 and 7 also swap W↔H. We don't assert exact pixel
-        // positions exhaustively (the 90° cases above cover the
-        // decomposition primitives) — only that dims transpose and the
-        // total pixel count is preserved.
+    fn orientation_5_and_7_transpose_dims_and_invert_themselves() {
         let rgba = sample_2x2();
         let n = rgba.len();
         for o in [5, 7] {
             let (out, w, h) = apply_exif_orientation(&rgba, 2, 2, o);
             assert_eq!((w, h), (2, 2));
             assert_eq!(out.len(), n);
+            // Both transpose (5) and transverse (7) are involutions (applying twice = identity).
+            let (back, bw, bh) = apply_exif_orientation(&out, w, h, o);
+            assert_eq!((bw, bh), (2, 2));
+            assert_eq!(back, rgba);
         }
     }
 

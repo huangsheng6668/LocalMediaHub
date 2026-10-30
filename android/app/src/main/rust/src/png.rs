@@ -29,33 +29,39 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
     decoder.set_transformations(png::Transformations::STRIP_16);
 
     let mut reader = decoder.read_info().ok()?;
-    let (iw, ih) = {
+    let (header_w, header_h) = {
         let info = reader.info();
-        (info.width as i32, info.height as i32)
+        (info.width, info.height)
     };
+    crate::bitmap::validate_image_dimensions(header_w, header_h)?;
 
-    // Allocate the exact buffer the decoder wants to write into. For 8-bit
-    // sources this is `width * height * channels`; with STRIP_16 it is the
-    // same even for 16-bit sources.
-    //
-    // Skip the vec![0] zero-fill: `next_frame` overwrites every byte per
-    // png 0.17's documented contract (`OutputInfo` size matches
-    // `output_buffer_size`). Saves one memset pass on large images.
     let buf_size = reader.output_buffer_size();
-    let mut buf: Vec<u8> = Vec::with_capacity(buf_size);
-    // SAFETY: `next_frame` writes exactly `buf_size` bytes per the png 0.17
-    // contract (verified by `decode_real_png_rgb` test reading the buffer
-    // immediately after). `Vec::with_capacity` allocates without
-    // initialising; `set_len` marks the capacity as initialised without
-    // touching memory. All bytes are written before being read.
-    unsafe { buf.set_len(buf_size); }
-    let frame_info = reader.next_frame(&mut buf).ok()?;
+    if buf_size == 0 || (buf_size as u64) > crate::bitmap::MAX_IMAGE_PIXELS * 4 {
+        return None;
+    }
 
-    let n = (iw as usize) * (ih as usize);
+    // Zero-initialise the frame buffer so partial/sub-frame APNG writes can
+    // never expose uninitialised heap memory.
+    let mut buf: Vec<u8> = vec![0u8; buf_size];
+    let frame_info = reader.next_frame(&mut buf).ok()?;
+    let (iw, ih, n) =
+        crate::bitmap::validate_image_dimensions(frame_info.width, frame_info.height)?;
+
     let rgba = match frame_info.color_type {
-        ColorType::Rgba => buf,
+        ColorType::Rgba => {
+            let needed = n.checked_mul(4)?;
+            if buf.len() < needed {
+                return None;
+            }
+            buf.truncate(needed);
+            buf
+        }
         ColorType::Rgb => {
-            let mut out = Vec::with_capacity(n * 4);
+            let needed = n.checked_mul(3)?;
+            if buf.len() < needed {
+                return None;
+            }
+            let mut out = Vec::with_capacity(n.checked_mul(4)?);
             for i in 0..n {
                 let s = i * 3;
                 out.push(buf[s]);
@@ -66,7 +72,10 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
             out
         }
         ColorType::Grayscale => {
-            let mut out = Vec::with_capacity(n * 4);
+            if buf.len() < n {
+                return None;
+            }
+            let mut out = Vec::with_capacity(n.checked_mul(4)?);
             for i in 0..n {
                 let g = buf[i];
                 out.push(g);
@@ -77,7 +86,11 @@ pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32
             out
         }
         ColorType::GrayscaleAlpha => {
-            let mut out = Vec::with_capacity(n * 4);
+            let needed = n.checked_mul(2)?;
+            if buf.len() < needed {
+                return None;
+            }
+            let mut out = Vec::with_capacity(n.checked_mul(4)?);
             for i in 0..n {
                 let g = buf[i * 2];
                 let a = buf[i * 2 + 1];

@@ -22,9 +22,14 @@ use jpeg_decoder::{Decoder, PixelFormat as JpegPixelFormat};
 /// performs a NEON-accelerated bilinear resize via `fast_image_resize`.
 pub fn decode_scaled(data: &[u8], tw: i32, th: i32) -> Option<(Vec<u8>, i32, i32)> {
     let mut decoder = Decoder::new(data);
+    decoder.read_info().ok()?;
+    let header_info = decoder.info()?;
+    crate::bitmap::validate_image_dimensions(header_info.width as u32, header_info.height as u32)?;
+
     let pixels = decoder.decode().ok()?;
     let info = decoder.info()?;
-    let (iw, ih) = (info.width as i32, info.height as i32);
+    let (iw, ih, _) =
+        crate::bitmap::validate_image_dimensions(info.width as u32, info.height as u32)?;
 
     // `jpeg_decoder` emits RGB (3 bytes) or L8 (1 byte) for baseline JPEGs;
     // we normalise everything to RGBA so the bitmap allocator can blindly
@@ -116,18 +121,6 @@ fn l16_to_rgba(l: &[u8]) -> Vec<u8> {
 }
 
 fn cmyk_to_rgba(cmyk: &[u8]) -> Vec<u8> {
-    // Adobe-style inverted CMYK: all four channels (C, M, Y, K) are inverted
-    // (255 = full ink, 0 = no ink). The previous code only inverted C/M/Y
-    // and used K directly, which produced black (RGB=0) when K=0 (white paper)
-    // — a real bug masked because CMYK JPEGs are rare in mobile test data.
-    //
-    // Standard Adobe formula: rgb = (255 - channel) * (255 - k) / 255
-    //   - C=255 (full cyan) → R = 0 (no red)
-    //   - K=255 (full black) → R = G = B = 0
-    //   - C=M=Y=K=0 (white) → R = G = B = 255
-    //
-    // Verified against Adobe CMYK sample conventions; no project test fixture
-    // for CMYK JPEGs (see spec §8 limitation #1).
     let mut out = Vec::with_capacity(cmyk.len() / 4 * 4);
     for chunk in cmyk.chunks_exact(4) {
         let c = chunk[0] as u32;
@@ -170,11 +163,26 @@ mod tests {
         ))
         .expect("testdata/sample.jpg missing");
         let (rgba, w, h) = decode_scaled(&data, 200, 200).expect("decode should succeed");
-        // Aspect fit on 1456x2054 against 200x200 → ratio ≈ 0.0974 →
-        // 141x200 (height-bound).
         assert!(w <= 200 && h <= 200, "got {}x{}", w, h);
         assert!(w > 0 && h > 0);
         assert_eq!(rgba.len(), (w as usize) * (h as usize) * 4);
+    }
+
+    #[test]
+    fn decode_scaled_rejects_oversized_jpeg_header() {
+        // Minimal JPEG SOI + SOF0 header claiming 30000x30000 (900 MP > 64 MP limit).
+        let crafted_jpeg: [u8; 22] = [
+            0xFF, 0xD8, // SOI
+            0xFF, 0xC0, 0x00, 0x0B, // SOF0, length 11
+            0x08, // precision 8
+            0x75, 0x30, // height = 30000
+            0x75, 0x30, // width = 30000
+            0x01, // 1 component
+            0x01, 0x11, 0x00, // component 1
+            0xFF, 0xDA, 0x00, 0x03, 0x01, // dummy SOS
+            0xFF, 0xD9, // EOI
+        ];
+        assert!(decode_scaled(&crafted_jpeg, 200, 200).is_none());
     }
 
     #[test]

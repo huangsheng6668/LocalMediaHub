@@ -74,4 +74,4 @@ name = "localmedia_native"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
