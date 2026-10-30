@@ -77,3 +77,6 @@ localmediahub.keystore.unrecoverable.bak
 
 # Superdesign temp component templates
 .superdesign/tmp/
+
+# Local workspace assistant tooling
+.workbuddy-ai/
