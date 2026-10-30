@@ -351,9 +351,10 @@ class ConnectionViewModel @Inject constructor(
             ).filterNotNull().toIntArray()
 
             // Derive a short-timeout client that shares the singleton's connection
-            // pool. newBuilder() copies config + pool; we override only the
-            // timeouts needed for fast LAN IP probing (Round 17 C3).
+            // pool. Strip AuthInterceptor so LAN scanning never transmits any
+            // stored Bearer token to probed subnet hosts.
             val scanClient = httpClient.newBuilder()
+                .apply { interceptors().removeAll { it is com.juziss.localmediahub.network.AuthInterceptor } }
                 .connectTimeout(250, TimeUnit.MILLISECONDS)
                 .readTimeout(250, TimeUnit.MILLISECONDS)
                 .build()
@@ -418,7 +419,11 @@ class ConnectionViewModel @Inject constructor(
                     .build()
                 try {
                     client.newCall(request).execute().use { response ->
-                        val body = response.body?.string().orEmpty()
+                        val body = response.body?.source()?.let { source ->
+                            source.request(MAX_PROBE_BODY_BYTES)
+                            val toRead = minOf(source.buffer.size, MAX_PROBE_BODY_BYTES)
+                            source.buffer.clone().readString(toRead, Charsets.UTF_8)
+                        }.orEmpty()
                         if (body.contains("LocalMediaHub")) {
                             withContext(Dispatchers.Main) { onServerFound(ip, port) }
                         }
@@ -447,6 +452,7 @@ class ConnectionViewModel @Inject constructor(
 
     companion object {
         private const val SERVICE_TYPE = "_localmediahub._tcp."
+        private const val MAX_PROBE_BODY_BYTES = 4096L
     }
 }
 
