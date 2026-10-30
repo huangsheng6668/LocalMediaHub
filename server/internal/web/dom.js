@@ -80,6 +80,7 @@ export const elements = {
     btnVideoMute: document.getElementById('btn-video-mute'),
     videoVolume: document.getElementById('video-volume'),
     btnVideoFullscreen: document.getElementById('btn-video-fullscreen'),
+    btnVideoSource: document.getElementById('btn-video-source'),
     btnVideoSpeed: document.getElementById('btn-video-speed'),
     videoSpeedMenu: document.getElementById('video-speed-menu'),
 

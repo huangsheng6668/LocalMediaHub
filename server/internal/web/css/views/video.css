@@ -143,6 +143,15 @@
     transform: scale(0.95);
 }
 
+/* Text variant: icon buttons are fixed 36x36 circles, mode labels need width. */
+.video-control-btn--text {
+    width: auto;
+    min-width: 36px;
+    padding: 0 10px;
+    border-radius: 18px;
+    font-size: 12px;
+}
+
 .video-speed-wrap {
     position: relative;
 }

@@ -7,7 +7,10 @@ import { formatTime } from './utils.js';
 import { deleteMediaFile } from './delete.js';
 import { wheelToVolume } from './videoHelpers.js';
 import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoProgress.js';
-import { buildHlsPlaylistUrl, resolveHlsStrategy, needsHlsRestart } from './hlsCompat.js';
+import {
+    buildHlsPlaylistUrl, buildDirectStreamUrl, buildTranscodeStreamUrl,
+    resolveHlsStrategy, needsHlsRestart, shouldTryDirectPlay, isUnsupportedMediaError,
+} from './hlsCompat.js';
 import { openModalFocus, closeModalFocus } from './modalFocus.js';
 
 // <video> tags cannot send Authorization headers, so auth-gated stream URLs
@@ -29,6 +32,15 @@ let keyboardSeekTarget = null;
 // current video ('hlsjs' | 'native' | 'none') and the live hls.js instance.
 let hlsStrategy = 'none';
 let hls = null;
+
+// Direct-play state (spec 2026-10-30-web-direct-play): paths whose native
+// decode failed in this page session (skip the doomed direct attempt on the
+// next open), the absolute position the current direct attempt started at
+// (fallback target when the error fires before metadata), and a re-entry
+// guard for the error handler.
+const directPlayBlocked = new Set();
+let directPlayStartSec = 0;
+let directFallbackPending = false;
 
 function destroyHls() {
     if (hls) {
@@ -140,6 +152,51 @@ function applySource(url, strategy, seekSec) {
     }
 }
 
+// updateSourceButtonState mirrors the active source mode on the control
+// button: 原画 = direct HTTP Range playback, 转码 = HLS (or legacy pipe).
+function updateSourceButtonState() {
+    if (!elements.btnVideoSource) return;
+    elements.btnVideoSource.textContent = state.useTranscode ? '转码' : '原画';
+    elements.btnVideoSource.title = state.useTranscode
+        ? '当前：服务端转码（兼容所有格式），点击切回原画直连'
+        : '当前：原画直连（无转码），点击切换服务端转码';
+}
+
+// startDirectPlayback attaches the original file over HTTP Range. The browser
+// demuxes/decodes natively, so seeking is instant and no ffmpeg session is
+// created; hls.js is not even loaded on this path (spec 2026-10-30).
+function startDirectPlayback(file, seekSec) {
+    const startSec = seekSec > 0 ? seekSec : 0;
+    state.useTranscode = false;
+    state.transcodeStartOffset = 0;
+    hlsStrategy = 'none';
+    directPlayStartSec = startSec;
+    directFallbackPending = false;
+    updateSourceButtonState();
+    applySource(buildDirectStreamUrl(state.apiBase, file.path), 'direct', startSec);
+}
+
+// startHlsPlayback is the universal fallback: hls.js over MSE when available,
+// browser-native HLS on Safari, and the legacy single-pipe transcode when
+// neither exists (hls.js failed to load). startSec anchors the transcode at
+// the absolute position so playback resumes without clamping.
+async function startHlsPlayback(file, seekSec) {
+    const startSec = seekSec > 0 ? seekSec : 0;
+    await loadHls();
+    hlsStrategy = resolveHlsStrategy(elements.videoPlayer);
+    state.useTranscode = true;
+    state.transcodeStartOffset = startSec;
+    updateSourceButtonState();
+    if (hlsStrategy === 'none') {
+        // No MSE and no native HLS: the m3u8 URL is unplayable here. Use the
+        // legacy fMP4 transcode pipe instead of handing the browser a source
+        // it cannot demux.
+        applySource(buildTranscodeStreamUrl(state.apiBase, file.path, startSec), 'none', 0);
+        return;
+    }
+    applySource(buildHlsPlaylistUrl(state.apiBase, file.path, startSec), hlsStrategy, 0);
+}
+
 // 更新倍速菜单高亮项（按当前 playbackRate）
 function updateSpeedMenuActive(rate) {
     elements.videoSpeedMenu.querySelectorAll('.video-speed-item').forEach(item => {
@@ -209,6 +266,8 @@ export async function openVideoPlayer(file) {
     state.playingFile = file;
     state.transcodeStartOffset = 0;
     state.videoDuration = 0;
+    directPlayStartSec = 0;
+    directFallbackPending = false;
 
     // Initialize custom controls
     elements.videoVolume.value = elements.videoPlayer.volume;
@@ -216,28 +275,22 @@ export async function openVideoPlayer(file) {
     elements.videoProgress.max = 100;
     elements.videoTimeDisplay.textContent = '00:00 / 加载中...';
 
-    // Web player uses HLS streaming for universal format support and seamless seeking.
-    // 先惰性加载 hls.js 再判定策略：resolveHlsStrategy 依据 window.Hls 是否
-    // 存在返回 'hlsjs'。加载失败时自然降级到 'native' / 'none'。
-    await loadHls();
-    hlsStrategy = resolveHlsStrategy(elements.videoPlayer);
-    state.useTranscode = true;
-
     elements.videoModalTitle.textContent = file.name;
     elements.btnVideoDelete.style.display = state.enableDelete ? 'block' : 'none';
 
-    // 续播：读取上次进度，决定起点（优先使用本地记录中的 duration 快速展示）
+    // 续播：读取上次进度，决定起点（优先使用本地记录中的 duration 快速展示）。
+    // 直连与 HLS 共用同一个绝对时间轴；起点如何应用由 startDirectPlayback /
+    // startHlsPlayback 分别处理（原生 seek vs 转码锚点）。
     const saved = loadProgress(file.relative_path);
-    let hlsStartSec = 0;
+    let startSec = 0;
     if (saved && !isCompleted(saved.positionMs, saved.durationMs)) {
-        hlsStartSec = Math.floor(saved.positionMs / 1000);
-        state.transcodeStartOffset = hlsStartSec;
+        startSec = Math.floor(saved.positionMs / 1000);
         if (saved.durationMs > 0) {
             state.videoDuration = saved.durationMs / 1000;
             elements.videoProgress.max = state.videoDuration;
-            elements.videoTimeDisplay.textContent = `${formatTime(hlsStartSec)} / ${formatTime(state.videoDuration)}`;
+            elements.videoTimeDisplay.textContent = `${formatTime(startSec)} / ${formatTime(state.videoDuration)}`;
         }
-        showToast(`已从 ${formatTime(hlsStartSec)} 继续`, 'info');
+        showToast(`已从 ${formatTime(startSec)} 继续`, 'info');
     } else if (saved && isCompleted(saved.positionMs, saved.durationMs)) {
         // 上次看完了：清除记录，这次从头播
         clearProgress(file.relative_path);
@@ -254,9 +307,14 @@ export async function openVideoPlayer(file) {
     // preventDefault 拦住，所以不会与全局播放/暂停快捷键重复触发。
     openModalFocus(elements.modalVideoPlayer, '#btn-video-play-pause');
 
-    // 立即发起 HLS 流起播，不等待 duration 接口返回（提升首屏 1~2s 响应速度）
-    const url = buildHlsPlaylistUrl(state.apiBase, file.path, hlsStartSec);
-    applySource(url, hlsStrategy, 0);
+    // 播放源选择（spec 2026-10-30）：浏览器原生容器优先原画直连（HTTP Range，
+    // seek 即时且无转码）；解码失败由 error 监听自动回退 HLS；其余格式走 HLS。
+    // 直连路径不加载 hls.js（415 KB vendor 脚本只在需要转码时按需注入）。
+    if (shouldTryDirectPlay(file.name) && !directPlayBlocked.has(file.path)) {
+        startDirectPlayback(file, startSec);
+    } else {
+        await startHlsPlayback(file, startSec);
+    }
     elements.videoPlayer.play().catch(() => {});
 
     // 并行异步获取权威时长，完成后平滑更新进度条与时间显示
@@ -271,6 +329,29 @@ export async function openVideoPlayer(file) {
         })
         .catch(e => {
             console.error('Error fetching duration:', e);
+        });
+}
+
+// fallbackToTranscode switches an in-progress direct-play session to HLS at the
+// current absolute position and remembers the path so reopening skips direct
+// play. Shared by the error and silent-failure listeners.
+function fallbackToTranscode(message) {
+    const file = state.playingFile;
+    if (!file || directFallbackPending) return;
+    directFallbackPending = true;
+    directPlayBlocked.add(file.path);
+    const pos = Math.max(directPlayStartSec, elements.videoPlayer.currentTime || 0);
+    const seekSec = Math.max(0, Math.floor(pos));
+    showToast(message, 'info');
+    startHlsPlayback(file, seekSec)
+        .then(() => {
+            directFallbackPending = false;
+            elements.videoPlayer.play().catch(() => {});
+        })
+        .catch(err => {
+            directFallbackPending = false;
+            console.error('HLS fallback failed:', err);
+            showToast('转码回退失败，请稍后重试', 'error');
         });
 }
 
@@ -292,12 +373,16 @@ export function setupVideoPlayerListeners(elements) {
                 durationMs: state.videoDuration * 1000,
             });
         }
+        // 先清 playingFile 再卸载媒体源：removeAttribute + load() 可能派发
+        // 异步 error，避免直连回退监听把它当成播放失败。
+        state.playingFile = null;
+        directPlayStartSec = 0;
+        directFallbackPending = false;
         // src = '' 会让部分浏览器把当前文档 URL 当作媒体源再发一次请求；
         // 正确做法是移除属性再 load() 以真正释放媒体资源。
         elements.videoPlayer.removeAttribute('src');
         elements.videoPlayer.load();
         closeModalFocus(elements.modalVideoPlayer);
-        state.playingFile = null;
         state.videoDuration = 0;
         state.transcodeStartOffset = 0;
         state.isDraggingProgress = false;
@@ -338,6 +423,50 @@ export function setupVideoPlayerListeners(elements) {
         }
     });
 
+    // 原画 / 转码切换（spec 2026-10-30）：保持绝对播放位置，源切换后继续播放。
+    elements.btnVideoSource.addEventListener('click', () => {
+        const file = state.playingFile;
+        if (!file) return;
+        const wasPlaying = !elements.videoPlayer.paused;
+        const absolutePos = state.transcodeStartOffset + (elements.videoPlayer.currentTime || 0);
+        const seekSec = Math.max(0, Math.floor(absolutePos));
+        if (state.useTranscode) {
+            startDirectPlayback(file, seekSec);
+        } else {
+            startHlsPlayback(file, seekSec).catch(err => {
+                console.error('switch to transcode failed:', err);
+                showToast('切换转码失败，请稍后重试', 'error');
+            });
+        }
+        if (wasPlaying) elements.videoPlayer.play().catch(() => {});
+    });
+
+    // Direct-play fallback (spec 2026-10-30): a native <video> source the
+    // browser cannot demux/decode (e.g. HEVC-bearing MP4, ProRes MOV) surfaces
+    // as a media error. Switch to HLS at the same absolute position and remember
+    // the path so the next open skips straight to HLS. Network/abort errors are
+    // left alone — they must not mask token or connectivity problems.
+    elements.videoPlayer.addEventListener('error', () => {
+        const file = state.playingFile;
+        if (!file || state.useTranscode || directFallbackPending) return;
+        if (!elements.videoPlayer.currentSrc) return;
+        const mediaErr = elements.videoPlayer.error;
+        if (!mediaErr || !isUnsupportedMediaError(mediaErr.code)) return;
+        fallbackToTranscode('浏览器无法直连该视频，已自动切换转码');
+    });
+
+    // Silent failure: when only the audio track is decodable the browser plays
+    // sound over a black frame and never fires error. videoWidth staying 0 at
+    // loadedmetadata proves no picture was decoded, so treat it like an
+    // unsupported source instead of leaving the user on a black screen.
+    elements.videoPlayer.addEventListener('loadedmetadata', () => {
+        const file = state.playingFile;
+        if (!file || state.useTranscode || directFallbackPending) return;
+        if (!elements.videoPlayer.currentSrc) return;
+        if (elements.videoPlayer.videoWidth > 0) return;
+        fallbackToTranscode('浏览器无法解码该视频画面，已自动切换转码');
+    });
+
     // Custom controls: Progress Bar Seek (Update timeline text while dragging)
     elements.videoProgress.addEventListener('input', (e) => {
         state.isDraggingProgress = true;
@@ -348,6 +477,13 @@ export function setupVideoPlayerListeners(elements) {
     // Custom controls: Progress Bar Seek Release (Perform seek on release)
     elements.videoProgress.addEventListener('change', (e) => {
         const targetTime = parseFloat(e.target.value);
+        state.isDraggingProgress = false;
+        if (!state.playingFile) return;
+        if (!state.useTranscode) {
+            // Direct playback: the browser owns seeking over HTTP Range.
+            elements.videoPlayer.currentTime = Math.max(0, targetTime);
+            return;
+        }
         const offsetSec = state.transcodeStartOffset;
         const seekable = elements.videoPlayer.seekable;
         const seekableEnd = seekable.length ? seekable.end(seekable.length - 1) : null;
@@ -359,7 +495,6 @@ export function setupVideoPlayerListeners(elements) {
         } else {
             elements.videoPlayer.currentTime = Math.max(0, targetTime - offsetSec);
         }
-        state.isDraggingProgress = false;
     });
 
     // Custom controls: Timeupdate synchronization

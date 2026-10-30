@@ -1,5 +1,7 @@
-// HLS playback compatibility helpers (spec 2026-09-03-hls-transcode-b2).
-// Pure functions: no DOM side effects, fully unit-testable under jsdom.
+// Playback source compatibility helpers: HLS routing (spec
+// 2026-09-03-hls-transcode-b2) and native direct-play selection (spec
+// 2026-10-30-web-direct-play). Pure functions: no DOM side effects, fully
+// unit-testable under jsdom.
 
 export const HLS_MIME = 'application/vnd.apple.mpegurl';
 
@@ -11,6 +13,40 @@ export function needsTranscodeExt(fileName) {
     const dot = fileName.lastIndexOf('.');
     if (dot < 0) return false;
     return NEEDS_TRANSCODE_EXTS.includes(fileName.substring(dot).toLowerCase());
+}
+
+// Direct-play allowlist: containers browsers demux natively. These are served
+// over HTTP Range by /api/v1/media/stream, so seeking is handled by the
+// browser itself — no ffmpeg session, no re-encode. Everything else (mkv/ts/
+// avi/...) keeps the HLS transcode route.
+const DIRECT_PLAY_EXTS = ['.mp4', '.m4v', '.mov', '.webm'];
+
+export function shouldTryDirectPlay(fileName) {
+    if (!fileName) return false;
+    const dot = fileName.lastIndexOf('.');
+    if (dot < 0) return false;
+    return DIRECT_PLAY_EXTS.includes(fileName.substring(dot).toLowerCase());
+}
+
+export function buildDirectStreamUrl(apiBase, path) {
+    return `${apiBase}/api/v1/media/stream?path=${encodeURIComponent(path)}`;
+}
+
+// Legacy single-pipe transcode fallback, used only when neither hls.js nor
+// native HLS exists. startSec anchors ffmpeg input-side, mirroring the HLS
+// playlist's ?start= contract.
+export function buildTranscodeStreamUrl(apiBase, path, startSec) {
+    let url = `${apiBase}/api/v1/media/stream?path=${encodeURIComponent(path)}&transcode=true`;
+    if (Number.isFinite(startSec) && startSec > 0) {
+        url += `&start=${Math.floor(startSec)}`;
+    }
+    return url;
+}
+
+// 3 = MEDIA_ERR_DECODE, 4 = MEDIA_ERR_SRC_NOT_SUPPORTED. Network (2) and
+// abort (1) must NOT trigger the transcode fallback.
+export function isUnsupportedMediaError(code) {
+    return code === 3 || code === 4;
 }
 
 export function buildHlsPlaylistUrl(apiBase, path, startSec) {

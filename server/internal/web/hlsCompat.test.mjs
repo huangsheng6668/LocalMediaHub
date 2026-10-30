@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { needsTranscodeExt, buildHlsPlaylistUrl, resolveHlsStrategy, needsHlsRestart } from './hlsCompat.js';
+import {
+    needsTranscodeExt, buildHlsPlaylistUrl, resolveHlsStrategy, needsHlsRestart,
+    shouldTryDirectPlay, buildDirectStreamUrl, buildTranscodeStreamUrl, isUnsupportedMediaError,
+} from './hlsCompat.js';
 
 test('needsTranscodeExt matches container-unsupported extensions case-insensitively', () => {
     assert.equal(needsTranscodeExt('Movie.mkv'), true);
@@ -64,4 +67,41 @@ test('resolveHlsStrategy returns none in environments without MSE or native HLS'
     const fakeVideo = { canPlayType: () => '' };
     assert.equal(resolveHlsStrategy(fakeVideo), 'none');
     assert.equal(resolveHlsStrategy(null), 'none');
+});
+
+test('shouldTryDirectPlay allows only browser-native containers', () => {
+    assert.equal(shouldTryDirectPlay('movie.mp4'), true);
+    assert.equal(shouldTryDirectPlay('movie.MOV'), true);
+    assert.equal(shouldTryDirectPlay('movie.m4v'), true);
+    assert.equal(shouldTryDirectPlay('movie.webm'), true);
+    assert.equal(shouldTryDirectPlay('movie.mkv'), false);
+    assert.equal(shouldTryDirectPlay('movie.ts'), false);
+    assert.equal(shouldTryDirectPlay('no-extension'), false);
+    assert.equal(shouldTryDirectPlay(''), false);
+});
+
+test('buildDirectStreamUrl encodes the path', () => {
+    assert.equal(
+        buildDirectStreamUrl('http://h:1', 'D:\\Media\\a b.mp4'),
+        'http://h:1/api/v1/media/stream?path=D%3A%5CMedia%5Ca%20b.mp4'
+    );
+});
+
+test('buildTranscodeStreamUrl adds transcode and floors the start anchor', () => {
+    assert.equal(
+        buildTranscodeStreamUrl('http://h:1', 'a.mkv', 0),
+        'http://h:1/api/v1/media/stream?path=a.mkv&transcode=true'
+    );
+    assert.equal(
+        buildTranscodeStreamUrl('http://h:1', 'a.mkv', 90.9),
+        'http://h:1/api/v1/media/stream?path=a.mkv&transcode=true&start=90'
+    );
+});
+
+test('isUnsupportedMediaError matches decode and src-not-supported only', () => {
+    assert.equal(isUnsupportedMediaError(3), true);
+    assert.equal(isUnsupportedMediaError(4), true);
+    assert.equal(isUnsupportedMediaError(2), false);
+    assert.equal(isUnsupportedMediaError(1), false);
+    assert.equal(isUnsupportedMediaError(null), false);
 });
