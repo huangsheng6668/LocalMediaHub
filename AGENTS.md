@@ -52,14 +52,14 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `Models.kt`（`MediaFile` / `Folder` / `Tag` / `FavoriteEntry` / `ReadingStatus` / `LibraryDecoration` / `ServerFavorite` / `PlaybackProgressEntry` / `RecentMediaEntry` / `LastBrowseLocation`）
   - `MediaRepository.kt`（Retrofit 包装 + library 状态与收藏端点）
   - `RecentActivityStore.kt`（最近活动 + 浏览状态 + 播放进度）
-  - `FavoritesStore.kt`（DataStore 收藏，三代 Gson 兼容反序列化，支持文件与目录）
-  - `LibrarySyncManager.kt`（连线双向同步：收藏全量推拉合并 + 本地阅读进度迁移）
+  - `FavoritesStore.kt`（DataStore 收藏，三代 Gson 兼容反序列化，支持文件与目录；`readFavoriteEntriesSnapshot` 与事务级 `mergeWithServerFavorites` 防止 `StateFlow` 初始空值抹除离线收藏）
+  - `LibrarySyncManager.kt`（连线双向同步：收藏全量推拉合并 + 本地阅读进度全部成功迁移校验 + 阅读时长补传保留 `FINISHED` 状态与已有章节进度）
   - `ReadingMath.kt`（阅读百分比与已读完判定纯函数）
-  - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护）
+  - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护；500ms `NotificationThrottle` 抑制通知 IPC 风暴、重抛 `CancellationException`、HTTP 416 关闭连接、`MediaMetadataIndex` 子目录相对路径精准匹配与 `DownloadsStore` IO 调度优化）
   - `ServerConfigStore.kt`（含 `authToken` / `bleToken`，均加密存储；`bleToken` 对应 server 的 `ble.token`，为空回退 `authToken`）
-  - `ReadingSessionTimer.kt`（阅读会话计时器，Activity onResume/onPause 起停表，时钟注入可测）+ `ReadingTimeStore.kt`（阅读时长 pending 缓冲，per-path Map 持久 JSON；离线累积 / 上报失败回退 / `takePendingUpto(path, 3600)` 分片补传，由 LibrarySyncManager 连线执行）
+  - `ReadingSessionTimer.kt`（阅读会话计时器，Activity onResume/onPause 起停表，时钟注入可测；@Synchronized + 保留亚秒余数与时钟回拨保护）+ `ReadingTimeStore.kt`（阅读时长 pending 缓冲，per-path Map 持久 JSON；离线累积 / 上报失败回退 / `takePendingUpto(path, 3600)` 分片补传，由 LibrarySyncManager 连线执行）
   - `RoutePath.kt`（浏览路径与系统/库模式标记）
-- **Network**（`network/`）：Retrofit 接口 + OkHttp + `AuthInterceptor`（注入 Bearer Token）
+- **Network**（`network/`）：OkHttp + `AuthInterceptor`（仅向配置的目标 server origin 附加 Bearer Token，保护局域网扫描不外泄凭据；局域网探测响应体 4KB 有界读取防 OOM）
 - **BLE**（`ble/`，**实验性**，默认关闭，**Android=Peripheral**）：`BleProtocol`（与 server 对称的帧 codec）/ `BleConnectionStateMachine`（纯逻辑状态机，含 ADVERTISING）/ `BleController`（@Singleton 门控，开关+硬件可用性→状态机；`markConnected`/`markDisconnected` 由 HTTP 协调结果驱动）/ `BlePeripheralManager` 接口 + `AndroidBlePeripheralManager`（`BluetoothGattServer` + advertiser，Command Write + State Notify + CCCD）/ `BleToggleRule`。`data/BleApi.kt` 通过 Wi-Fi/HTTP 调 server 的 `/api/v1/ble/*` 协调连接。设置入口在 `ConnectionScreen`（开关 + 扫描列表 + 选设备连接 + 发送测试 + echo），状态经 `BleSettingsViewModel`。角色反转原因：Windows winrt Peripheral 不稳，PC 当 Central。蓝牙不可用时完全退回 Wi-Fi/HTTP（零退化）。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)
 - **Native**（`native/`）：`NativeImageDecoder.kt` / `NativeExif.kt` / `NaturalSorter.kt` / `NativeDecoderFactory.kt`（Coil 集成）
 - **Native libs**：`app/src/main/jniLibs/arm64-v8a/`（`liblocalmedia_native.so` Rust 输出 + `libffmpeg.so` 预编译）
@@ -91,6 +91,11 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **crate**：`localmedia_native` @ `android/app/src/main/rust/`
 - **依赖**：pure-Rust（`jpeg-decoder` / `image-png` / `webp` / `kamadak-exif` / `fast-image-resize`），**无 C 依赖**
 - **构建**：`cargo ndk -t arm64-v8a -o jniLibs/ build --release`，由 Gradle `buildRustNative` task 在 `preBuild` 阶段自动调用；**不要手动覆盖 jniLibs 产物**
+- **安全与稳定性（2026-10-30 加固）**：
+  - `panic = "unwind"` release 模式编译，使 JNI 边界的 `std::panic::catch_unwind` 正常生效，避免底层异常直接引发应用进程 `SIGABRT`；
+  - `validate_image_dimensions` 统一限制单边 ≤ 16384 px 且总像素 ≤ 64 MP（RGBA ≤ 256 MiB），在 JPEG/PNG/WebP 解码分配前拦截解压炸弹与符号整数溢出；
+  - PNG 解码安全零初始化 frame buffer，消除 APNG/子帧异常引发的未初始化堆内存暴露；
+  - EXIF 旋转优化：90°/270°/transverse 采用单次内存分配与单次遍历坐标映射，消除中间 Vec 转置开销。
 - **输出**：`liblocalmedia_native.so`
 - **JNI 桥**：`src/jni_bridge/`（`decoders.rs` / `exif_jni.rs` / `natural_sort_jni.rs`）
 - **通道约定**：Android `ARGB_8888` == NDK `RGBA_8888`，解码器直接 `copy_from_slice`，无需通道重排
