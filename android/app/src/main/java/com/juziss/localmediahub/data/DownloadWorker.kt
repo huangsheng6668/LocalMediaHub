@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import android.os.Environment
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -15,11 +16,86 @@ import com.juziss.localmediahub.network.NetworkResult
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipFile
+
+/**
+ * Rate-limits progress notifications so chunked downloads (`totalBytes <= 0`)
+ * and fast multi-file ZIP extractions cannot flood `NotificationManager` with
+ * hundreds of Binder IPC calls per second.
+ */
+internal class NotificationThrottle(
+    private val minIntervalMs: Long = 500L,
+    private val clock: () -> Long = SystemClock::elapsedRealtime,
+) {
+    private var lastUpdateMs: Long = Long.MIN_VALUE / 2
+    private var lastPercent: Int = -2
+
+    fun shouldNotify(percent: Int = -1): Boolean {
+        val now = clock()
+        if (percent == 100 && lastPercent != 100) {
+            lastPercent = 100
+            lastUpdateMs = now
+            return true
+        }
+        if (percent >= 0 && percent == lastPercent) {
+            return false
+        }
+        if (now - lastUpdateMs < minIntervalMs) {
+            return false
+        }
+        lastPercent = percent
+        lastUpdateMs = now
+        return true
+    }
+}
+
+/**
+ * $O(1)$ lookup table matching ZIP entry relative paths to [MediaFile] metadata,
+ * disambiguating duplicate basenames in nested subfolders (e.g. `Ch1/001.jpg` vs `Ch2/001.jpg`).
+ */
+internal class MediaMetadataIndex(
+    files: List<MediaFile>,
+    folderRelativePath: String = "",
+) {
+    private val byRelPath = HashMap<String, MediaFile>(files.size * 2)
+    private val byName = HashMap<String, MediaFile>(files.size)
+
+    init {
+        val folderPrefix = normalizePath(folderRelativePath)
+        for (file in files) {
+            val rel = normalizePath(file.relativePath)
+            if (rel.isNotEmpty()) {
+                byRelPath.putIfAbsent(rel, file)
+                if (folderPrefix.isNotEmpty() && rel.startsWith("$folderPrefix/")) {
+                    val stripped = rel.removePrefix("$folderPrefix/")
+                    if (stripped.isNotEmpty()) {
+                        byRelPath.putIfAbsent(stripped, file)
+                    }
+                }
+            }
+            val baseName = file.name.lowercase()
+            if (baseName.isNotEmpty()) {
+                byName.putIfAbsent(baseName, file)
+            }
+        }
+    }
+
+    fun match(zipEntryName: String): MediaFile? {
+        val normEntry = normalizePath(zipEntryName)
+        if (normEntry.isEmpty()) return null
+        byRelPath[normEntry]?.let { return it }
+        val baseName = normEntry.substringAfterLast('/')
+        return byName[baseName]
+    }
+
+    private fun normalizePath(raw: String): String =
+        raw.replace('\\', '/').trim('/').lowercase()
+}
 
 class DownloadWorker(
     context: Context,
@@ -44,11 +120,6 @@ class DownloadWorker(
          * (compressed) size; when nothing was declared (`declared == 0`, e.g.
          * a chunked response) a flat 64MB allowance applies instead. The
          * absolute [MAX_UNCOMPRESSED_BYTES] cap applies regardless.
-         *
-         * Note: the budget is `declared * 2` directly (NOT
-         * `maxOf(declared * 2, 64MB)`) — the tests pin the semantics that a
-         * 3x-declared overage aborts even below 64MB; the 64MB figure is the
-         * *undeclared-size fallback*, not a floor raised above `declared * 2`.
          */
         fun shouldAbortUnzip(extracted: Long, declared: Long): Boolean {
             if (extracted > MAX_UNCOMPRESSED_BYTES) return true
@@ -95,24 +166,19 @@ class DownloadWorker(
                     ?: throw SecurityException("非法文件名，已拒绝下载")
                 val partFile = File(localFile.parentFile, localFile.name + ".part")
 
-                // Resume support: already-downloaded bytes live in <name>.part
-                // and the request continues with Range: bytes=N-. A completed
-                // .part is atomically renamed into place; on failure it stays
-                // on disk so the WorkManager retry resumes instead of
-                // restarting from byte 0.
                 var offset = if (partFile.exists()) partFile.length() else 0L
                 val downloadResult = repository.downloadStreamResumable(url, offset)
                 if (downloadResult !is NetworkResult.Success) {
                     val errorMsg = (downloadResult as? NetworkResult.Error)?.message ?: "未知错误"
                     showToast("下载失败: $errorMsg")
-                    updateNotification(notificationId, "下载失败: ${file.name}", errorMsg)
+                    updateNotification(notificationId, "下载失败: ${file.name}", errorMsg, ongoing = false)
                     return@withContext Result.failure()
                 }
 
                 val dl = downloadResult.data
                 if (dl.code == 416) {
-                    // Range Not Satisfiable: the .part file already covers the
-                    // entire content (the server rejected the resume offset).
+                    // Range Not Satisfiable: close response body first to avoid connection leak.
+                    dl.body.close()
                     if (!partFile.renameTo(localFile)) {
                         localFile.delete()
                         if (!partFile.renameTo(localFile)) {
@@ -121,44 +187,39 @@ class DownloadWorker(
                     }
                     downloadsStore.addDownload(file, localFile.absolutePath)
                     showToast("${file.name} 已下载完成！")
-                    updateNotification(notificationId, "下载成功", file.name)
+                    updateNotification(notificationId, "下载成功", file.name, ongoing = false)
                     return@withContext Result.success()
                 }
                 if (dl.code == 200) {
-                    // Server ignored the Range header (or offset was 0): full
-                    // body — drop any partial data and restart from scratch.
                     offset = 0L
                     if (partFile.exists()) partFile.delete()
                 }
 
                 val responseBody = dl.body
                 val remainingBytes = responseBody.contentLength()
-                val totalBytes = offset + remainingBytes
+                val totalBytes = if (remainingBytes > 0) offset + remainingBytes else -1L
                 var bytesWritten = offset
+                val throttle = NotificationThrottle()
                 responseBody.byteStream().use { inputStream ->
                     FileOutputStream(partFile, offset > 0).use { outputStream ->
                         val buffer = ByteArray(128 * 1024)
                         var bytesRead: Int
-                        var lastProgressPercent = -1
                         while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                             outputStream.write(buffer, 0, bytesRead)
                             bytesWritten += bytesRead
                             if (totalBytes > 0) {
-                                val progressPercent = ((bytesWritten * 100) / totalBytes).toInt()
-                                if (progressPercent != lastProgressPercent) {
-                                    lastProgressPercent = progressPercent
-                                    updateNotification(notificationId, "正在下载 ${file.name}", "$progressPercent%")
+                                val progressPercent = ((bytesWritten * 100) / totalBytes).toInt().coerceIn(0, 100)
+                                if (throttle.shouldNotify(progressPercent)) {
+                                    updateNotification(notificationId, "正在下载 ${file.name}", "$progressPercent%", ongoing = true)
                                 }
-                            } else {
+                            } else if (throttle.shouldNotify()) {
                                 val mbDownloaded = String.format("%.2f MB", bytesWritten / 1024.0 / 1024.0)
-                                updateNotification(notificationId, "正在下载 ${file.name}", mbDownloaded)
+                                updateNotification(notificationId, "正在下载 ${file.name}", mbDownloaded, ongoing = true)
                             }
                         }
                     }
                 }
 
-                // Atomic promotion: only a fully-downloaded file becomes
-                // visible under its final name.
                 if (!partFile.renameTo(localFile)) {
                     localFile.delete()
                     if (!partFile.renameTo(localFile)) {
@@ -168,11 +229,6 @@ class DownloadWorker(
 
                 downloadsStore.addDownload(file, localFile.absolutePath)
 
-                // Task 14: best-effort offline sidecar. After a .txt/.epub lands
-                // on disk, also fetch /api/v1/books/info?path=<originalPath> and
-                // save the JSON next to the file as <filename>.json. Failure is
-                // tolerated — a missing sidecar only disables offline rendering
-                // and the reader falls back to the online /api/v1/books/* flow.
                 val ext = localFile.extension.lowercase()
                 if (ext == "txt" || ext == "epub") {
                     try {
@@ -188,6 +244,7 @@ class DownloadWorker(
                             }
                         }
                     } catch (e: Exception) {
+                        if (e is CancellationException) throw e
                         android.util.Log.w(
                             "DownloadWorker",
                             "sidecar fetch failed for ${file.name}: ${e.message}"
@@ -196,11 +253,12 @@ class DownloadWorker(
                 }
 
                 showToast("${file.name} 下载成功！")
-                updateNotification(notificationId, "下载成功", file.name)
+                updateNotification(notificationId, "下载成功", file.name, ongoing = false)
                 return@withContext Result.success()
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 showToast("下载失败: ${e.message}")
-                updateNotification(notificationId, "下载失败: ${file.name}", e.message ?: "未知错误")
+                updateNotification(notificationId, "下载失败: ${file.name}", e.message ?: "未知错误", ongoing = false)
                 return@withContext Result.failure()
             }
         } else if (type == "folder") {
@@ -225,23 +283,23 @@ class DownloadWorker(
                 if (metadataResult !is NetworkResult.Success) {
                     val errorMsg = (metadataResult as? NetworkResult.Error)?.message ?: "未知错误"
                     showToast("读取结构失败: $errorMsg")
-                    updateNotification(notificationId, "下载失败: ${folder.name}", "读取结构失败: $errorMsg")
+                    updateNotification(notificationId, "下载失败: ${folder.name}", "读取结构失败: $errorMsg", ongoing = false)
                     return@withContext Result.failure()
                 }
 
                 val filesMetadata = metadataResult.data
                 if (filesMetadata.isEmpty()) {
                     showToast("该目录下没有找到可下载的媒体资源")
-                    updateNotification(notificationId, "下载结束: ${folder.name}", "未找到媒体资源")
+                    updateNotification(notificationId, "下载结束: ${folder.name}", "未找到媒体资源", ongoing = false)
                     return@withContext Result.success()
                 }
 
-                updateNotification(notificationId, "正在下载目录 ${folder.name}", "下载 ZIP 包中...")
+                updateNotification(notificationId, "正在下载目录 ${folder.name}", "下载 ZIP 包中...", ongoing = true)
                 val zipResult = repository.downloadFolderZip(folder.relativePath)
                 if (zipResult !is NetworkResult.Success) {
                     val errorMsg = (zipResult as? NetworkResult.Error)?.message ?: "未知错误"
                     showToast("连接服务端失败: $errorMsg")
-                    updateNotification(notificationId, "下载失败: ${folder.name}", "连接失败: $errorMsg")
+                    updateNotification(notificationId, "下载失败: ${folder.name}", "连接失败: $errorMsg", ongoing = false)
                     return@withContext Result.failure()
                 }
 
@@ -251,53 +309,44 @@ class DownloadWorker(
                     destDirectory.mkdirs()
                 }
 
+                val metadataIndex = MediaMetadataIndex(filesMetadata, folder.relativePath)
                 val incomingEntries = mutableListOf<DownloadEntry>()
                 val tempFile = File(applicationContext.cacheDir, "download_temp_${System.currentTimeMillis()}.zip")
                 try {
                     val totalBytes = responseBody.contentLength()
                     var bytesWritten = 0L
+                    val downloadThrottle = NotificationThrottle()
                     responseBody.byteStream().use { inputStream ->
                         FileOutputStream(tempFile).use { outputStream ->
                             val buffer = ByteArray(128 * 1024)
                             var bytesRead: Int
-                            var lastProgressPercent = -1
                             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                                 outputStream.write(buffer, 0, bytesRead)
                                 bytesWritten += bytesRead
                                 if (totalBytes > 0) {
-                                    val progressPercent = ((bytesWritten * 100) / totalBytes).toInt()
-                                    if (progressPercent != lastProgressPercent) {
-                                        lastProgressPercent = progressPercent
-                                        updateNotification(notificationId, "正在下载目录 ${folder.name}", "正在下载 ZIP 包: $progressPercent%")
+                                    val progressPercent = ((bytesWritten * 100) / totalBytes).toInt().coerceIn(0, 100)
+                                    if (downloadThrottle.shouldNotify(progressPercent)) {
+                                        updateNotification(notificationId, "正在下载目录 ${folder.name}", "正在下载 ZIP 包: $progressPercent%", ongoing = true)
                                     }
-                                } else {
+                                } else if (downloadThrottle.shouldNotify()) {
                                     val mbDownloaded = String.format("%.2f MB", bytesWritten / 1024.0 / 1024.0)
-                                    updateNotification(notificationId, "正在下载目录 ${folder.name}", "正在下载 ZIP 包: $mbDownloaded")
+                                    updateNotification(notificationId, "正在下载目录 ${folder.name}", "正在下载 ZIP 包: $mbDownloaded", ongoing = true)
                                 }
                             }
                         }
                     }
 
-                    updateNotification(notificationId, "正在下载目录 ${folder.name}", "准备解压中...")
+                    updateNotification(notificationId, "正在下载目录 ${folder.name}", "准备解压中...", ongoing = true)
+                    val unzipThrottle = NotificationThrottle()
                     ZipFile(tempFile).use { zipFile ->
                         val entriesCount = zipFile.size()
                         val entries = zipFile.entries()
                         val buffer = ByteArray(64 * 1024)
                         var extractedCount = 0
 
-                        // L-7: zip-bomb guard inputs. `declared` is the
-                        // compressed size we budget the extraction against:
-                        // prefer the HTTP Content-Length; this server streams
-                        // the zip chunked (no length), so fall back to the
-                        // fully-downloaded temp zip's on-disk size — the same
-                        // quantity, exact.
                         val declaredSize = responseBody.contentLength().takeIf { it > 0 }
                             ?: tempFile.length()
                         var extractedBytes = 0L
-                        // Tracks every file THIS run created (including the
-                        // half-written one), so an abort can scrub the
-                        // half-extracted output without touching unrelated
-                        // downloads already living in destDirectory.
                         val extractedThisRun = mutableListOf<File>()
                         var budgetExceeded = false
 
@@ -317,9 +366,6 @@ class DownloadWorker(
                                         while (zipInputStream.read(buffer).also { len = it } > 0) {
                                             outputStream.write(buffer, 0, len)
                                             extractedBytes += len
-                                            // Check inside the copy loop so a
-                                            // single inflated entry cannot blow
-                                            // past the budget unchecked.
                                             if (shouldAbortUnzip(extractedBytes, declaredSize)) {
                                                 budgetExceeded = true
                                                 break
@@ -331,16 +377,16 @@ class DownloadWorker(
 
                                 extractedCount++
                                 val entryFileName = File(zipEntry.name).name
-                                updateNotification(
-                                    notificationId,
-                                    "正在解压 ${folder.name}",
-                                    "正在提取 ($extractedCount/$entriesCount): $entryFileName"
-                                )
-
-                                val matchedMetadata = filesMetadata.find {
-                                    it.name.equals(entryFileName, ignoreCase = true)
+                                if (unzipThrottle.shouldNotify()) {
+                                    updateNotification(
+                                        notificationId,
+                                        "正在解压 ${folder.name}",
+                                        "正在提取 ($extractedCount/$entriesCount): $entryFileName",
+                                        ongoing = true,
+                                    )
                                 }
 
+                                val matchedMetadata = metadataIndex.match(zipEntry.name)
                                 if (matchedMetadata != null) {
                                     incomingEntries.add(
                                         DownloadEntry(
@@ -354,8 +400,6 @@ class DownloadWorker(
                         }
 
                         if (budgetExceeded) {
-                            // Scrub the half-extracted output, then surface as
-                            // a hard failure (outer catch -> Result.failure).
                             extractedThisRun.forEach { it.deleteRecursively() }
                             throw SecurityException("unzip budget exceeded")
                         }
@@ -369,15 +413,16 @@ class DownloadWorker(
                 if (incomingEntries.isNotEmpty()) {
                     downloadsStore.addDownloads(incomingEntries)
                     showToast("成功下载并提取了 ${incomingEntries.size} 个媒体文件！")
-                    updateNotification(notificationId, "下载成功: ${folder.name}", "已下载 ${incomingEntries.size} 个文件")
+                    updateNotification(notificationId, "下载成功: ${folder.name}", "已下载 ${incomingEntries.size} 个文件", ongoing = false)
                 } else {
                     showToast("未找到有效的多媒体提取文件")
-                    updateNotification(notificationId, "下载结束: ${folder.name}", "未提取到文件")
+                    updateNotification(notificationId, "下载结束: ${folder.name}", "未提取到文件", ongoing = false)
                 }
                 return@withContext Result.success()
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 showToast("下载目录失败: ${e.message}")
-                updateNotification(notificationId, "下载失败: ${folder.name}", e.message ?: "未知错误")
+                updateNotification(notificationId, "下载失败: ${folder.name}", e.message ?: "未知错误", ongoing = false)
                 return@withContext Result.failure()
             }
         }
@@ -405,13 +450,18 @@ class DownloadWorker(
             .build()
     }
 
-    private fun updateNotification(notificationId: Int, title: String, progress: String) {
+    private fun updateNotification(
+        notificationId: Int,
+        title: String,
+        progress: String,
+        ongoing: Boolean = false,
+    ) {
         val channelId = "downloads"
         val notification = NotificationCompat.Builder(applicationContext, channelId)
             .setContentTitle(title)
             .setContentText(progress)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setOngoing(false)
+            .setOngoing(ongoing)
             .build()
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(notificationId, notification)

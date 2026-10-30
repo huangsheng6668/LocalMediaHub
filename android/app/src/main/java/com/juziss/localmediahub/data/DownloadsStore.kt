@@ -7,7 +7,9 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.io.File
 import javax.inject.Inject
@@ -26,7 +28,11 @@ class DownloadsStore @Inject constructor(@ApplicationContext private val context
 
     private val downloadsKey = stringSetPreferencesKey("download_files_json")
 
-    /** Emits all registered downloads, filtering out files that no longer exist on disk. */
+    /**
+     * Emits all registered downloads, filtering out files that no longer exist on disk.
+     * Runs JSON decoding and synchronous `File.exists()` / `isFile` checks on [Dispatchers.IO]
+     * so collecting from UI / ViewModels never triggers disk I/O on the Main thread.
+     */
     val downloadedFiles: Flow<List<DownloadEntry>> = context.downloadsDataStore.data.map { preferences ->
         val entries = preferences[downloadsKey]?.mapNotNull { json ->
             try {
@@ -36,13 +42,11 @@ class DownloadsStore @Inject constructor(@ApplicationContext private val context
             }
         } ?: emptyList()
 
-        // Dynamically check if the local file exists.
-        // This guarantees that broken/deleted files are filtered out on the fly.
         entries.filter { entry ->
             val file = File(entry.localPath)
             file.exists() && file.isFile
         }.sortedByDescending { it.addedAt }
-    }
+    }.flowOn(Dispatchers.IO)
 
     /** Add a file to downloads list. */
     suspend fun addDownload(file: MediaFile, customPath: String? = null) {
