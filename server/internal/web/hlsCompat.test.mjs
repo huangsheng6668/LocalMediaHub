@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     needsTranscodeExt, buildHlsPlaylistUrl, resolveHlsStrategy, needsHlsRestart,
     shouldTryDirectPlay, buildDirectStreamUrl, buildTranscodeStreamUrl, isUnsupportedMediaError,
+    shouldReanchorOnHlsError, HLS_AUTO_REANCHOR_COOLDOWN_MS,
 } from './hlsCompat.js';
 
 test('needsTranscodeExt matches container-unsupported extensions case-insensitively', () => {
@@ -104,4 +105,31 @@ test('isUnsupportedMediaError matches decode and src-not-supported only', () => 
     assert.equal(isUnsupportedMediaError(2), false);
     assert.equal(isUnsupportedMediaError(1), false);
     assert.equal(isUnsupportedMediaError(null), false);
+});
+
+test('shouldReanchorOnHlsError only reacts to a lost session (404 load errors)', () => {
+    const now = 1_000_000;
+    // Session reaped / segments deleted: playlist and fragment loads 404.
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 404, now, 0), true);
+    assert.equal(shouldReanchorOnHlsError('levelLoadError', 404, now, 0), true);
+    // Auth / capacity / server errors must not re-anchor (they mask token or
+    // slot problems; hls.js retry + startLoad already covers them).
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 401, now, 0), false);
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 403, now, 0), false);
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 503, now, 0), false);
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 500, now, 0), false);
+    // Network timeouts carry no status.
+    assert.equal(shouldReanchorOnHlsError('fragLoadTimeOut', undefined, now, 0), false);
+    assert.equal(shouldReanchorOnHlsError('manifestLoadError', 404, now, 0), false);
+    assert.equal(shouldReanchorOnHlsError(undefined, 404, now, 0), false);
+});
+
+test('shouldReanchorOnHlsError enforces a cooldown between automatic re-anchors', () => {
+    const now = 1_000_000;
+    assert.equal(HLS_AUTO_REANCHOR_COOLDOWN_MS, 15000);
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 404, now, now - 5000), false);
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 404, now, now - 15000), true);
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 404, now, now - 60000), true);
+    // Clock skew (last stamp in the future) stays in cooldown.
+    assert.equal(shouldReanchorOnHlsError('fragLoadError', 404, now, now + 5000), false);
 });

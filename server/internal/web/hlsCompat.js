@@ -80,6 +80,24 @@ export function needsHlsRestart(targetTime, offsetSec, seekableEnd) {
     return rel > seekableEnd;
 }
 
+// Auto-reanchor cooldown: one automatic recovery attempt per 15s so a source
+// whose sessions keep dying cannot spin ffmpeg in a tight loop.
+export const HLS_AUTO_REANCHOR_COOLDOWN_MS = 15000;
+
+// shouldReanchorOnHlsError decides whether a fatal hls.js error means "the
+// transcoded session this playlist referenced is gone" (idle reaper, disk-cap
+// eviction, server restart) rather than a problem a plain startLoad() can fix.
+// Only 404 load errors qualify: auth (401/403), capacity (503) and generic
+// server errors must not trigger a new ffmpeg session. A re-anchored request
+// starts a fresh session at the current position instead of 404-looping on
+// segments that no longer exist.
+export function shouldReanchorOnHlsError(details, status, nowMs, lastAutoReanchorAt) {
+    if (details !== 'fragLoadError' && details !== 'levelLoadError') return false;
+    if (status !== 404) return false;
+    if (!lastAutoReanchorAt) return true;
+    return nowMs - lastAutoReanchorAt >= HLS_AUTO_REANCHOR_COOLDOWN_MS;
+}
+
 // resolveHlsStrategy picks the HLS playback route:
 //   'hlsjs'  — hls.js over MSE (best: xhrSetup can inject auth headers on
 //              every request, including segments)

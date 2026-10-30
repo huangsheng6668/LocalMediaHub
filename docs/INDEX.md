@@ -67,6 +67,7 @@
 - `docs/superpowers/specs/2026-09-03-hls-transcode-design.md`（HLS 转码分段输出：随机 seek + 完成即缓存，Phase B1）
 - `docs/superpowers/plans/2026-09-03-hls-transcode.md`（对应实施 plan）
 - `docs/superpowers/specs/2026-09-03-hls-transcode-b2-web-design.md`（Phase B2：Web 端接入 HLS——自托管 hls.js 1.5.20 + 三级策略降级 + 原生 seek）
+- `docs/superpowers/specs/2026-10-30-web-direct-play-design.md`（Web 视频原画直连 + 拖动预热 + 会话丢失自愈；4s 关键帧分片）
 
 ---
 

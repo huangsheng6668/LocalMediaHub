@@ -10,6 +10,7 @@ import { saveProgress, loadProgress, clearProgress, isCompleted } from './videoP
 import {
     buildHlsPlaylistUrl, buildDirectStreamUrl, buildTranscodeStreamUrl,
     resolveHlsStrategy, needsHlsRestart, shouldTryDirectPlay, isUnsupportedMediaError,
+    shouldReanchorOnHlsError,
 } from './hlsCompat.js';
 import { openModalFocus, closeModalFocus } from './modalFocus.js';
 
@@ -49,6 +50,10 @@ let reanchorPending = false;
 let reanchorSeq = 0;
 let bufferingTimer = null;
 let prewarmController = null;
+// Timestamp of the last automatic (error-driven) re-anchor, gated by
+// HLS_AUTO_REANCHOR_COOLDOWN_MS so a persistently failing source cannot
+// restart ffmpeg in a loop.
+let lastAutoReanchorAt = 0;
 
 function abortPrewarm() {
     if (prewarmController) {
@@ -153,6 +158,7 @@ function applySource(url, strategy, seekSec) {
             maxBufferLength: 60,       // default 30s; LAN bandwidth is ample
             maxMaxBufferLength: 120,   // cap memory usage
             backBufferLength: 30,      // keep 30s behind playhead for native back-seek
+            maxBufferSize: 96 * 1024 * 1024, // default 60MB caps 60s at high-bitrate transcodes
             lowLatencyMode: false,     // not live streaming; avoid LL-HLS overhead
             xhrSetup: (xhr) => {
                 if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
@@ -172,8 +178,26 @@ function applySource(url, strategy, seekSec) {
                 if (!data || !data.fatal) return;
                 switch (data.type) {
                     case window.Hls.ErrorTypes.NETWORK_ERROR:
+                        // A 404 on a fragment or playlist means the session
+                        // this playlist referenced is gone (idle reaper, disk
+                        // cap, server restart). hls.js would retry the same
+                        // dead segment names forever, so re-anchor at the
+                        // current position to mint a fresh session instead.
+                        if (state.playingFile && shouldReanchorOnHlsError(
+                            data.details,
+                            data.response && data.response.code,
+                            Date.now(),
+                            lastAutoReanchorAt,
+                        )) {
+                            const absPos = state.transcodeStartOffset + (elements.videoPlayer.currentTime || 0);
+                            lastAutoReanchorAt = Date.now();
+                            console.warn('HLS session lost, re-anchoring at', absPos, data.details);
+                            reanchorHls(state.playingFile, absPos);
+                            break;
+                        }
                         console.warn('HLS fatal network error, recovering...', data.details);
-                        hls.startLoad();
+                        if (reanchorPending) break;
+                        if (hls) hls.startLoad();
                         break;
                     case window.Hls.ErrorTypes.MEDIA_ERROR:
                         console.warn('HLS fatal media error, recovering...', data.details);
@@ -377,6 +401,7 @@ export async function openVideoPlayer(file) {
     directFallbackPending = false;
     reanchorSeq++;
     reanchorPending = false;
+    lastAutoReanchorAt = 0;
     abortPrewarm();
     clearBufferingTimer();
     hideVideoStatus();
@@ -492,6 +517,7 @@ export function setupVideoPlayerListeners(elements) {
         directFallbackPending = false;
         reanchorSeq++;
         reanchorPending = false;
+        lastAutoReanchorAt = 0;
         abortPrewarm();
         clearBufferingTimer();
         hideVideoStatus();

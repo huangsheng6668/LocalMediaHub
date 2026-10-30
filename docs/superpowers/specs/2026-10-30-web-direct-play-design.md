@@ -75,12 +75,41 @@ ffmpeg 当前未设置关键帧间隔，默认 GOP=250 帧（~8.3s），`-hls_ti
   「缓冲中」由 `waiting` 300ms 防抖触发、`playing/canplay/seeked` 收起；
   直连模式不受影响（拖动 53ms、无 overlay）
 
+## Phase 3 进展（播放中间歇卡顿）
+
+基线测量（2026-10-30，回环 1280x720 / 3 Mbps 源，浏览器 Qoder Chromium）：
+
+- 原画直连 49.4s：0 次 `waiting`、0 次 `timeupdate` 断档、0 丢帧
+  （`buffered` 领先 68s）
+- HLS 转码 57.1s：0 次 `waiting`、0 断档、0 丢帧；30 个分片下载 8–31ms
+  （`buffered` 领先 58s）
+- 后台 10 分钟源全速转码时并发原画直连 30s：0 断档、0 丢帧
+- ffmpeg 重写 playlist 期间对 playlist 端点采样 1200 次：0 次空/半截响应
+  → 本机管线不存在系统性卡顿，剩余卡顿归因于弱网/弱主机
+
+修复：
+
+- ✅ 转码会话丢失自愈：会话被空闲回收（3 min）或磁盘 LRU（4 GiB）淘汰后，
+  客户端仍持有旧 playlist，hls.js 会对已删除的 seg 名 404 重试到 fatal，
+  旧逻辑只 `startLoad()` 原地重试（永远失败）。新增
+  `shouldReanchorOnHlsError`（仅 `fragLoadError`/`levelLoadError` + HTTP 404，
+  15s 冷却；401/403/503/超时不触发），命中时按当前绝对位置走
+  `reanchorHls` 开新会话。E2E：播放中删除 `.cache/hls/*`，6.8s 内触发
+  `levelLoadError` 并在 9s 处重锚，播放继续、overlay 正常收起、时间轴正确
+  （重锚后 00:38 / 02:00）
+- ✅ 高码率前向缓冲：`maxBufferSize` 60MB → 96MB。hls.js 默认按
+  `maxBufferLength`(60s) 或 `maxBufferSize` 先到者停载，4K/高码率转码
+  （~15–25 Mbps）下 60MB 只能撑 20–30s，弱网抖动余量不足
+
 ## 影响面
 
-- `server/internal/web/hlsCompat.js`：新增 4 个纯函数
-- `server/internal/web/videoPlayer.js`：源选择、自动回退、手动切换
+- `server/internal/web/hlsCompat.js`：新增 4 个直连纯函数 + Phase 3 的
+  `shouldReanchorOnHlsError` 判定函数
+- `server/internal/web/videoPlayer.js`：源选择、自动回退、手动切换、拖动预热、
+  会话丢失自动重锚
 - `server/internal/web/index.html` / `dom.js` / `css/views/video.css`：切换按钮
-- 服务端无改动（复用既有 `/api/v1/media/stream` 的 Range 路径）
+  与状态 overlay
+- 服务端无改动（复用既有 `/api/v1/media/stream` 的 Range 路径与 HLS 会话管理）
 
 ## 验证
 
