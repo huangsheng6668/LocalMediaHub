@@ -235,6 +235,11 @@ func buildHlsArgs(safePath string, startSec int64, enc resolvedEncoder, segDir, 
 	args = append(args, "-vcodec", enc.Name)
 	args = append(args, knownEncoderArgs[enc.Name]...)
 	args = append(args,
+		// The HLS muxer only splits on keyframes; without this the encoder
+		// default GOP (~250 frames ≈ 8s) doubles hls_time and seek
+		// granularity. -g works for NVENC/QSV/AMF/libx264 alike, whereas
+		// -force_key_frames is silently ignored by NVENC (spec 2026-10-30).
+		"-g", "120",
 		"-acodec", "aac",
 		"-sn",  // discard subtitle streams (PGS/VobSub would fail HLS muxing)
 		"-dn",  // discard data streams

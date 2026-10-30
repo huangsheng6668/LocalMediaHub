@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +40,18 @@ func TestBuildHlsArgsSeekAnchor(t *testing.T) {
 		"-ss must precede -i for input-side seeking")
 	assert.Contains(t, base, "-hls_playlist_type")
 	assert.Contains(t, anchored, "-hls_playlist_type")
+}
+
+// TestBuildHlsArgsKeyframeInterval pins a fixed GOP. The HLS muxer can only
+// split on keyframes; encoder defaults (~250 frames ≈ 8s) made hls_time=4
+// produce ~8s segments, doubling startup and seek granularity
+// (spec 2026-10-30-hls-segment-tuning). -g is honored by every allowlisted
+// encoder, unlike -force_key_frames which NVENC ignores.
+func TestBuildHlsArgsKeyframeInterval(t *testing.T) {
+	enc := resolvedEncoder{Name: "h264_nvenc"}
+	args := buildHlsArgs(`D:\m.mp4`, 0, enc, `C:\seg`, `C:\seg\index.m3u8`)
+	joined := strings.Join(args, " ")
+	assert.Contains(t, joined, " -g 120 ")
 }
 
 func TestValidHlsSegmentName(t *testing.T) {

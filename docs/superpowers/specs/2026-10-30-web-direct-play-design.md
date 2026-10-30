@@ -60,11 +60,14 @@ ffmpeg 当前未设置关键帧间隔，默认 GOP=250 帧（~8.3s），`-hls_ti
 - 进度条 `change` 在直连模式下直接 `currentTime = target`，不得触发 HLS 重锚
 - 关闭弹窗时先清 `state.playingFile` 再卸载媒体，避免 `error` 误触发回退
 
-## 不做（Phase 2）
+## Phase 2 进展
 
-- ffmpeg `-g 120`（4s 关键帧）与首段产出提速
-- 拖动时保留旧画面、预热新会话后再切换
-- 「定位中 / 缓冲中」overlay
+- ✅ ffmpeg `-g 120`（2026-10-30 完成）：`hls_time 4` 只能按关键帧切分，编码器
+  默认 GOP（~250 帧 ≈ 8.3s）使分片翻倍。固定 120 帧后实测 60s/30fps 源产出
+  15 × 4.000s 分片，首个 playlist 0.89s（原 ~1.1s），锚定 seek 首个 playlist
+  0.607s；浏览器远距离拖动重锚到出画面 754ms
+- ⬜ 拖动时保留旧画面、预热新会话后再切换
+- ⬜ 「定位中 / 缓冲中」overlay
 
 ## 影响面
 
