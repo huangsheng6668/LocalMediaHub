@@ -12,8 +12,10 @@ import com.google.gson.reflect.TypeToken
 import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonWriter
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
@@ -185,34 +187,37 @@ class RecentActivityStore @Inject constructor(@ApplicationContext private val co
     private val typeMapBookProgress = object : TypeToken<MutableMap<String, BookProgress>>() {}.type
     private val typeMapBookmarks = object : TypeToken<MutableMap<String, MutableList<Bookmark>>>() {}.type
 
+    // Gson 解码放在 IO：DataStore 读盘虽已在 IO，但 map 变换默认跟随收集者
+    // （界面层为 Main），大 JSON 解码会占用主线程。
     val recentMedia: Flow<List<RecentMediaEntry>> = context.recentActivityDataStore.data.map { preferences ->
         decodeRecentMedia(preferences[recentMediaKey])
-    }
+    }.flowOn(Dispatchers.IO)
 
     val lastBrowseLocation: Flow<LastBrowseLocation?> = context.recentActivityDataStore.data.map { preferences ->
         decodeLastBrowseLocation(preferences[lastBrowseLocationKey])
-    }
+    }.flowOn(Dispatchers.IO)
 
     val playbackProgress: Flow<List<PlaybackProgressEntry>> = context.recentActivityDataStore.data.map { preferences ->
         decodePlaybackProgress(preferences[playbackProgressKey])
-    }
+    }.flowOn(Dispatchers.IO)
 
     val bookProgressFlow: Flow<Map<String, BookProgress>> = context.recentActivityDataStore.data.map { preferences ->
         decodeBookProgress(preferences[bookProgressKey])
-    }
+    }.flowOn(Dispatchers.IO)
 
     /** 以 lastReadAt 倒序返回全部阅读进度(供 HomeViewModel 书架使用)。 */
     fun getAllBookProgressFlow(): Flow<List<BookProgress>> = bookProgressFlow
         .map { map -> map.values.sortedByDescending { it.lastReadAt } }
+        .flowOn(Dispatchers.IO)
 
     val readerSettingsFlow: Flow<ReaderSettings> = context.recentActivityDataStore.data.map { preferences ->
         decodeReaderSettings(preferences[readerSettingsKey])
-    }
+    }.flowOn(Dispatchers.IO)
 
     fun getBookmarksFlow(path: String): Flow<List<Bookmark>> =
         context.recentActivityDataStore.data.map { preferences ->
             decodeBookmarks(preferences[bookBookmarksKey])[path] ?: emptyList()
-        }
+        }.flowOn(Dispatchers.IO)
 
     suspend fun addRecentMedia(
         file: MediaFile,

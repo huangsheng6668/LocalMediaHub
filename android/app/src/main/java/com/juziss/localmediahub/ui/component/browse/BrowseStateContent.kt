@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -22,6 +23,7 @@ import com.juziss.localmediahub.ui.component.SystemDrivesContent
 import com.juziss.localmediahub.ui.component.TagFilterBar
 import com.juziss.localmediahub.viewmodel.BrowseState
 import com.juziss.localmediahub.viewmodel.applyBrowseFilters
+import com.juziss.localmediahub.viewmodel.applyTagFilter
 
 @Composable
 internal fun BrowseStateContent(
@@ -41,7 +43,7 @@ internal fun BrowseStateContent(
     onBrowseFolder: (path: String, name: String) -> Unit,
     onBrowseSystemPath: (path: String, name: String) -> Unit,
     onActiveTagFilterChange: (Tag?) -> Unit,
-    filterFilesByTag: (List<MediaFile>) -> List<MediaFile>,
+    fileTags: Map<String, List<Tag>> = emptyMap(),
     onSaveScrollPosition: (String, Int) -> Unit,
     onConsumeRestoreScroll: () -> Unit,
     getScrollPosition: (String) -> Int,
@@ -93,9 +95,13 @@ internal fun BrowseStateContent(
             )
         }
         is BrowseState.RootFolders -> {
-            val (filteredFolders, _) = applyBrowseFilters(
-                browseState.folders, emptyList(), favorites, showFavoritesOnly, statusFilter, libraryStates
-            )
+            val (filteredFolders, _) = remember(
+                browseState.folders, favorites, showFavoritesOnly, statusFilter, libraryStates
+            ) {
+                applyBrowseFilters(
+                    browseState.folders, emptyList(), favorites, showFavoritesOnly, statusFilter, libraryStates
+                )
+            }
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -145,10 +151,16 @@ internal fun BrowseStateContent(
         }
         is BrowseState.SystemBrowsed -> {
             val result = browseState.result
-            val tagFiltered = filterFilesByTag(result.files)
-            val (filteredFolders, filteredFiles) = applyBrowseFilters(
-                result.folders, tagFiltered, favorites, showFavoritesOnly, statusFilter, libraryStates
-            )
+            val (filteredFolders, filteredFiles) = remember(
+                result.folders, result.files, favorites, showFavoritesOnly,
+                statusFilter, libraryStates, fileTags, activeTagFilter,
+            ) {
+                applyBrowseFilters(
+                    result.folders,
+                    applyTagFilter(result.files, fileTags, activeTagFilter),
+                    favorites, showFavoritesOnly, statusFilter, libraryStates,
+                )
+            }
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -197,10 +209,16 @@ internal fun BrowseStateContent(
         }
         is BrowseState.Browsed -> {
             val result = browseState.result
-            val tagFiltered = filterFilesByTag(result.files)
-            val (filteredFolders, filteredFiles) = applyBrowseFilters(
-                result.folders, tagFiltered, favorites, showFavoritesOnly, statusFilter, libraryStates
-            )
+            val (filteredFolders, filteredFiles) = remember(
+                result.folders, result.files, favorites, showFavoritesOnly,
+                statusFilter, libraryStates, fileTags, activeTagFilter,
+            ) {
+                applyBrowseFilters(
+                    result.folders,
+                    applyTagFilter(result.files, fileTags, activeTagFilter),
+                    favorites, showFavoritesOnly, statusFilter, libraryStates,
+                )
+            }
             Column(
                 modifier = Modifier
                     .fillMaxSize()

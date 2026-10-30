@@ -19,7 +19,6 @@ import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.LocalBookRepository
 import com.juziss.localmediahub.data.ReadingMath
 import com.juziss.localmediahub.data.BookChapterContent
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
@@ -30,7 +29,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 @HiltViewModel

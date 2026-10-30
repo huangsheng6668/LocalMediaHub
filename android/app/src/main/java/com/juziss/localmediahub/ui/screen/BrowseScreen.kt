@@ -88,6 +88,7 @@ fun BrowseScreen(
     val statusFilter by viewModel.statusFilter.collectAsState()
     val libraryStates by viewModel.libraryStates.collectAsState()
     val tags by viewModel.tags.collectAsState()
+    val fileTags by viewModel.fileTags.collectAsState()
     val activeTagFilter by viewModel.activeTagFilter.collectAsState()
     val folderSort by viewModel.folderSortOrder.collectAsState()
     val fileSort by viewModel.fileSortOrder.collectAsState()
@@ -537,7 +538,7 @@ fun BrowseScreen(
                         onBrowseFolder = viewModel::browseFolder,
                         onBrowseSystemPath = viewModel::browseSystemPath,
                         onActiveTagFilterChange = viewModel::setActiveTagFilter,
-                        filterFilesByTag = viewModel::filterFilesByTag,
+                        fileTags = fileTags,
                         onSaveScrollPosition = viewModel::saveScrollPosition,
                         onConsumeRestoreScroll = viewModel::consumeRestoreScroll,
                         getScrollPosition = viewModel::getScrollPosition,

@@ -178,12 +178,4 @@ internal class TagController(
         return sharedState.activeTagFilter.value?.takeIf { it.name == active.title }
     }
 
-    fun filterFilesByTag(files: List<MediaFile>): List<MediaFile> {
-        val activeTag = sharedState.activeTagFilter.value ?: return files
-        val taggedPaths = _fileTags.value.entries
-            .filter { (_, tags) -> tags.any { it.id == activeTag.id } }
-            .map { it.key }
-            .toSet()
-        return files.filter { it.relativePath in taggedPaths }
-    }
 }

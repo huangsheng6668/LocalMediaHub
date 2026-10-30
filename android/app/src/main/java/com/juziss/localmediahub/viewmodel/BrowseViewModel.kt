@@ -339,10 +339,6 @@ class BrowseViewModel @Inject constructor(
         tagController.openCollection(tag, viewModelScope)
     }
 
-    fun filterFilesByTag(files: List<MediaFile>): List<MediaFile> {
-        return tagController.filterFilesByTag(files)
-    }
-
     // ── Search ────────────────────────────────────────────────────
 
     fun updateSearchQuery(query: String) {

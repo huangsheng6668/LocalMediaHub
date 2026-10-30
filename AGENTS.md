@@ -39,7 +39,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **Activity**：
   - `MainActivity.kt`（singleTop + NavHost + 视频续播调度 `checkPlaybackProgress` / `playVideo` / `resumeRequest`；启动请求 `POST_NOTIFICATIONS`）
   - `VideoPlayerActivity.kt`（独立视频播放 Activity，承载 PiP 浮窗 + RemoteAction 广播接收；`exitingFromPip` 标志区分"关闭浮窗"vs"切后台"，关闭浮窗后 `onStop` 自动 `finish()` 释放 ExoPlayer）
-- **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen`（支持分章/全文滚动模式、实时百分比进度与沉浸/普通双进度条、BackHandler手势退出沉浸模式、左右触控翻页 + 右侧全书进度拖动条(松手跳章)） / `DownloadsScreen` / `BookshelfScreen`（独立书架页，`bookshelf` 路由：全量最近书籍网格 + 在读/读完/收藏筛选 + 今日/本周阅读时长统计条，首页书架区"查看全部"进入）
+- **Screen**（`ui/screen/`）：`HomeScreen` / `ConnectionScreen` / `BrowseScreen` / `VideoPlayerScreen` / `ImagePreviewScreen` / `TextReaderScreen`（支持分章/全文滚动模式、实时百分比进度与沉浸/普通双进度条、BackHandler手势退出沉浸模式、左右触控翻页 + 右侧全书进度拖动条(松手跳章)；滚动模式整体进度走 `derivedStateOf`，组合期不读 `listState.layoutInfo`） / `DownloadsScreen` / `BookshelfScreen`（独立书架页，`bookshelf` 路由：全量最近书籍网格 + 在读/读完/收藏筛选 + 今日/本周阅读时长统计条，首页书架区"查看全部"进入）
 - **Component**（`ui/component/`）：
   - `home/`（首页卡片：Hero / Library / ContinueWatching / RecentMedia / Favorite）
   - `browse/`（浏览子组件：TopBar / SortMenu / SearchView / BrowseFilterChipsRow / DeleteConfirmDialog / QuickActionsDialog 等）
@@ -48,13 +48,15 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **ViewModel**（`viewmodel/`）：
   - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel` / `BookshelfViewModel`（本地 BookProgress 全量 + decorations 合并 + `applyBookshelfFilter` 纯函数筛选）
   - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `LibraryController`（阅读装饰与状态筛选）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
+  - `BrowseListFilters.kt`：纯筛选函数 `applyBrowseFilters` / `applyTagFilter`；`BrowseStateContent` 用 `remember` 缓存结果，避免每次重组重算并产生新列表实例
 - **Data**（`data/`）：
   - `Models.kt`（`MediaFile` / `Folder` / `Tag` / `FavoriteEntry` / `ReadingStatus` / `LibraryDecoration` / `ServerFavorite` / `PlaybackProgressEntry` / `RecentMediaEntry` / `LastBrowseLocation`）
   - `MediaRepository.kt`（Retrofit 包装 + library 状态与收藏端点）
-  - `RecentActivityStore.kt`（最近活动 + 浏览状态 + 播放进度）
+  - `RecentActivityStore.kt`（最近活动 + 浏览状态 + 播放进度；Gson 解码 Flow 统一 `flowOn(Dispatchers.IO)`）
+  - `LocalBookRepository.kt`（本地 TXT/EPUB 解析：`suspend` + `Dispatchers.IO`；TXT 全文解码单条缓存按 `absolutePath + lastModified + length` 失效，逐章读取不再整本重读；分章规则见 `TxtChapterParser`）
   - `FavoritesStore.kt`（DataStore 收藏，三代 Gson 兼容反序列化，支持文件与目录；`readFavoriteEntriesSnapshot` 与事务级 `mergeWithServerFavorites` 防止 `StateFlow` 初始空值抹除离线收藏）
   - `LibrarySyncManager.kt`（连线双向同步：收藏全量推拉合并 + 本地阅读进度全部成功迁移校验 + 阅读时长补传保留 `FINISHED` 状态与已有章节进度）
-  - `ReadingMath.kt`（阅读百分比与已读完判定纯函数）
+  - `ReadingMath.kt`（阅读百分比与已读完判定纯函数）+ `ReaderScrollProgress.kt`（滚动模式整体进度 `computeOverallPercent` 纯函数）
   - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护；500ms `NotificationThrottle` 抑制通知 IPC 风暴、重抛 `CancellationException`、HTTP 416 关闭连接、`MediaMetadataIndex` 子目录相对路径精准匹配与 `DownloadsStore` IO 调度优化）
   - `ServerConfigStore.kt`（含 `authToken` / `bleToken`，均加密存储；`bleToken` 对应 server 的 `ble.token`，为空回退 `authToken`）
   - `ReadingSessionTimer.kt`（阅读会话计时器，Activity onResume/onPause 起停表，时钟注入可测；@Synchronized + 保留亚秒余数与时钟回拨保护）+ `ReadingTimeStore.kt`（阅读时长 pending 缓冲，per-path Map 持久 JSON；离线累积 / 上报失败回退 / `takePendingUpto(path, 3600)` 分片补传，由 LibrarySyncManager 连线执行）

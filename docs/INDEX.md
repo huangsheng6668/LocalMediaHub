@@ -69,6 +69,7 @@
 - `docs/superpowers/specs/2026-09-03-hls-transcode-b2-web-design.md`（Phase B2：Web 端接入 HLS——自托管 hls.js 1.5.20 + 三级策略降级 + 原生 seek）
 - `docs/superpowers/specs/2026-10-30-web-direct-play-design.md`（Web 视频原画直连 + 拖动预热 + 会话丢失自愈；4s 关键帧分片）
 - `docs/superpowers/specs/2026-10-30-web-large-dir-render-design.md`（Web 大目录增量渲染：首批 120 同步 + 400/批异步追加 + 锚点扩展 + 代际取消）
+- `docs/superpowers/specs/2026-10-30-android-browse-reader-perf-design.md`（Android 浏览筛选 remember 缓存 + 阅读整体进度派生化 + 本地书解析入 IO/解码缓存 + DataStore 解码 flowOn）
 
 ---
 

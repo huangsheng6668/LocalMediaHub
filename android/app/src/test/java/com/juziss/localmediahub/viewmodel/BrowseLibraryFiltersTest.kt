@@ -2,6 +2,7 @@ package com.juziss.localmediahub.viewmodel
 
 import com.juziss.localmediahub.data.*
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class BrowseLibraryFiltersTest {
@@ -38,5 +39,25 @@ class BrowseLibraryFiltersTest {
         val (f, l) = applyBrowseFilters(folders, files, favorites, true, ReadingStatus.FINISHED, states)
         assertEquals(0, f.size)
         assertEquals(listOf("/m/b.txt"), l.map { it.path })
+    }
+
+    @Test fun noActiveTagReturnsSameListInstance() {
+        val result = applyTagFilter(files, emptyMap(), null)
+        assertSame(files, result)
+    }
+
+    @Test fun activeTagKeepsOnlyTaggedRelativePaths() {
+        val tagA = Tag(id = "a", name = "A")
+        val fileTags = mapOf(
+            "b.txt" to listOf(tagA),
+            "v.mp4" to listOf(Tag(id = "b", name = "B")),
+        )
+        val result = applyTagFilter(files, fileTags, tagA)
+        assertEquals(listOf("b.txt"), result.map { it.relativePath })
+    }
+
+    @Test fun activeTagWithNoMatchesReturnsEmpty() {
+        val result = applyTagFilter(files, emptyMap(), Tag(id = "x", name = "X"))
+        assertEquals(0, result.size)
     }
 }

@@ -2,6 +2,8 @@ package com.juziss.localmediahub.data
 
 import com.juziss.localmediahub.network.NetworkResult
 import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 import java.nio.charset.Charset
@@ -19,65 +21,95 @@ import javax.inject.Singleton
 class LocalBookRepository @Inject constructor() {
     private val gson = Gson()
 
+    private data class DecodedTxt(
+        val absolutePath: String,
+        val lastModified: Long,
+        val length: Long,
+        val text: String,
+        val charsetName: String,
+    )
+
+    /** 单条缓存：逐章读取时避免反复整本 readBytes + 解码。 */
+    @Volatile
+    private var decodedTxt: DecodedTxt? = null
+
+    private fun readDecodedTxt(file: File): Pair<String, String> {
+        val absolutePath = file.absolutePath
+        val lastModified = file.lastModified()
+        val length = file.length()
+        val cached = decodedTxt
+        if (cached != null &&
+            cached.absolutePath == absolutePath &&
+            cached.lastModified == lastModified &&
+            cached.length == length
+        ) {
+            return cached.text to cached.charsetName
+        }
+        val (text, charsetName) = decodeTxtBytes(file.readBytes())
+        decodedTxt = DecodedTxt(absolutePath, lastModified, length, text, charsetName)
+        return text to charsetName
+    }
+
     /**
      * Reads book info from a local file path.
      * Prefers reading from <localPath>.json sidecar if present.
      */
-    fun getLocalBookInfo(localPath: String, originalPath: String): NetworkResult<Book> {
-        val file = File(localPath)
-        if (!file.exists()) {
-            return NetworkResult.Error("本地文件不存在: ${file.name}")
-        }
+    suspend fun getLocalBookInfo(localPath: String, originalPath: String): NetworkResult<Book> =
+        withContext(Dispatchers.IO) {
+            val file = File(localPath)
+            if (!file.exists()) {
+                return@withContext NetworkResult.Error("本地文件不存在: ${file.name}")
+            }
 
-        val sidecar = File(file.parentFile, "${file.name}.json")
-        if (sidecar.exists()) {
-            try {
-                val jsonStr = sidecar.readText(Charsets.UTF_8)
-                val book = gson.fromJson(jsonStr, Book::class.java)
-                if (book != null && book.chapters.isNotEmpty()) {
-                    return NetworkResult.Success(book)
+            val sidecar = File(file.parentFile, "${file.name}.json")
+            if (sidecar.exists()) {
+                try {
+                    val jsonStr = sidecar.readText(Charsets.UTF_8)
+                    val book = gson.fromJson(jsonStr, Book::class.java)
+                    if (book != null && book.chapters.isNotEmpty()) {
+                        return@withContext NetworkResult.Success(book)
+                    }
+                } catch (e: Exception) {
+                    // Fallback to manual parsing if sidecar JSON parsing fails
                 }
-            } catch (e: Exception) {
-                // Fallback to manual parsing if sidecar JSON parsing fails
+            }
+
+            val ext = file.extension.lowercase()
+            when (ext) {
+                "txt" -> parseLocalTxtInfo(file, originalPath)
+                "epub" -> parseLocalEpubInfo(file, originalPath)
+                else -> NetworkResult.Success(
+                    Book(
+                        path = originalPath,
+                        format = "unsupported",
+                        title = file.name,
+                        chapters = emptyList(),
+                        modTime = file.lastModified().toString()
+                    )
+                )
             }
         }
-
-        val ext = file.extension.lowercase()
-        return when (ext) {
-            "txt" -> parseLocalTxtInfo(file, originalPath)
-            "epub" -> parseLocalEpubInfo(file, originalPath)
-            else -> NetworkResult.Success(
-                Book(
-                    path = originalPath,
-                    format = "unsupported",
-                    title = file.name,
-                    chapters = emptyList(),
-                    modTime = file.lastModified().toString()
-                )
-            )
-        }
-    }
 
     /**
      * Loads a specific chapter content for a local book file.
      */
-    fun getLocalBookChapter(
+    suspend fun getLocalBookChapter(
         localPath: String,
         book: Book,
         index: Int
-    ): NetworkResult<BookChapterContent> {
+    ): NetworkResult<BookChapterContent> = withContext(Dispatchers.IO) {
         val file = File(localPath)
         if (!file.exists()) {
-            return NetworkResult.Error("本地文件不存在: ${file.name}")
+            return@withContext NetworkResult.Error("本地文件不存在: ${file.name}")
         }
         if (index !in book.chapters.indices) {
-            return NetworkResult.Error("章节索引超出范围")
+            return@withContext NetworkResult.Error("章节索引超出范围")
         }
 
         val chapter = book.chapters[index]
         val ext = file.extension.lowercase()
 
-        return try {
+        try {
             when (ext) {
                 "txt" -> getTxtChapterContent(file, chapter)
                 "epub" -> getEpubChapterContent(file, chapter)
@@ -90,8 +122,7 @@ class LocalBookRepository @Inject constructor() {
 
     private fun parseLocalTxtInfo(file: File, originalPath: String): NetworkResult<Book> {
         return try {
-            val bytes = file.readBytes()
-            val (text, charsetName) = decodeTxtBytes(bytes)
+            val (text, charsetName) = readDecodedTxt(file)
             val chapters = splitTxtChapters(text, file.name)
             NetworkResult.Success(
                 Book(
@@ -134,8 +165,7 @@ class LocalBookRepository @Inject constructor() {
         TxtChapterParser.splitChapters(text, fallbackTitle)
 
     private fun getTxtChapterContent(file: File, chapter: BookChapter): NetworkResult<BookChapterContent> {
-        val bytes = file.readBytes()
-        val (text, _) = decodeTxtBytes(bytes)
+        val (text, _) = readDecodedTxt(file)
 
         val start = chapter.charStart.coerceIn(0, text.length)
         val end = chapter.charEnd.coerceIn(start, text.length)

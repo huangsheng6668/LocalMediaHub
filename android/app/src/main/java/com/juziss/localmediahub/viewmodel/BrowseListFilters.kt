@@ -4,6 +4,23 @@ import com.juziss.localmediahub.data.Folder
 import com.juziss.localmediahub.data.LibraryDecoration
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.ReadingStatus
+import com.juziss.localmediahub.data.Tag
+
+/**
+ * 标签过滤纯函数。无激活标签时原样返回入参（保持列表引用稳定），
+ * 供组合层 `remember` 缓存使用。
+ */
+internal fun applyTagFilter(
+    files: List<MediaFile>,
+    fileTags: Map<String, List<Tag>>,
+    activeTag: Tag?,
+): List<MediaFile> {
+    if (activeTag == null) return files
+    val taggedPaths = fileTags.entries
+        .filter { (_, tags) -> tags.any { it.id == activeTag.id } }
+        .mapTo(HashSet()) { it.key }
+    return files.filter { it.relativePath in taggedPaths }
+}
 
 internal fun applyBrowseFilters(
     folders: List<Folder>,

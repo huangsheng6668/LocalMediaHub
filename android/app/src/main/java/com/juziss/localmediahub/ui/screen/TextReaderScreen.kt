@@ -101,6 +101,7 @@ import com.juziss.localmediahub.data.PageTurnStyle
 import com.juziss.localmediahub.data.ReaderListLayout
 import com.juziss.localmediahub.data.ReadingMode
 import com.juziss.localmediahub.data.ScrollModeChapter
+import com.juziss.localmediahub.data.computeOverallPercent
 import com.juziss.localmediahub.ui.component.reader.ReaderScrollbar
 import com.juziss.localmediahub.ui.component.ScrollFabGroup
 import com.juziss.localmediahub.ui.component.calculateScrollFabVisibility
@@ -574,38 +575,22 @@ fun TextReaderScreen(
                 }
             }.value
 
-            // 滚动模式：全书连续进度。按 listState.firstVisibleItemIndex 匹配当前所在的章节与章内位置。
-            val overallPercent = remember(idx, chapterPercent, totalChaptersCount, scrollChapters, isScrollMode) {
-                if (isScrollMode) {
-                    if (scrollChapters.isEmpty() || totalChaptersCount <= 0) {
-                        0
+            // 滚动模式：全书连续进度。按首个可见 item 匹配章节与章内位置。
+            // 布局状态只在 derivedStateOf 内读取：百分比整数不变时不触发重组。
+            val overallPercent by remember(idx, totalChaptersCount, scrollChapters, isScrollMode) {
+                derivedStateOf {
+                    if (isScrollMode) {
+                        computeOverallPercent(
+                            firstVisibleIndex = listState.firstVisibleItemIndex,
+                            firstVisibleScrollOffset = listState.firstVisibleItemScrollOffset,
+                            firstVisibleItemHeight = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.size ?: 1,
+                            scrollChapters = scrollChapters,
+                            totalChaptersCount = totalChaptersCount,
+                            fallbackChapterIndex = idx,
+                        )
                     } else {
-                        val info = listState.layoutInfo
-                        val visItems = info.visibleItemsInfo
-                        val firstIdx = listState.firstVisibleItemIndex
-
-                        var accumulatedItems = 0
-                        var currentChIdx = idx
-                        var chFraction = 0f
-
-                        for (ch in scrollChapters) {
-                            val itemsInCh = ch.blocks.size + 2
-                            if (firstIdx < accumulatedItems + itemsInCh) {
-                                currentChIdx = ch.chapterIndex
-                                val itemInCh = firstIdx - accumulatedItems
-                                // 用当前可见 item 的实际高度计算亚 item 偏移
-                                val firstItemH = visItems.firstOrNull()?.size?.toFloat() ?: 1f
-                                val subItemFrac = (listState.firstVisibleItemScrollOffset.toFloat() / firstItemH.coerceAtLeast(1f)).coerceIn(0f, 1f)
-                                chFraction = (itemInCh.toFloat() + subItemFrac) / itemsInCh.coerceAtLeast(1)
-                                break
-                            }
-                            accumulatedItems += itemsInCh
-                        }
-                        val continuousBookPos = currentChIdx.toFloat() + chFraction.coerceIn(0f, 1f)
-                        ((continuousBookPos / totalChaptersCount.coerceAtLeast(1)) * 100).toInt().coerceIn(0, 100)
+                        0
                     }
-                } else {
-                    0
                 }
             }
 

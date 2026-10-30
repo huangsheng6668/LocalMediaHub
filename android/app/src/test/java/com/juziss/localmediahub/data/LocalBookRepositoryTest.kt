@@ -2,6 +2,7 @@ package com.juziss.localmediahub.data
 
 import com.juziss.localmediahub.network.NetworkResult
 import com.google.gson.Gson
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -24,7 +25,7 @@ class LocalBookRepositoryTest {
     }
 
     @Test
-    fun testParseTxtFile_withChapters() {
+    fun testParseTxtFile_withChapters() = runTest {
         val txtContent = """
             前言
             这是前言的内容。
@@ -58,7 +59,7 @@ class LocalBookRepositoryTest {
     }
 
     @Test
-    fun testParseTxtFile_crlfOffsetsStayAligned() {
+    fun testParseTxtFile_crlfOffsetsStayAligned() = runTest {
         // CRLF 文件：decodeTxtBytes 统一换行符后，章节偏移不得随行数漂移
         val content = "第一章 A\r\nline1\r\nline2\r\nline3\r\nline4\r\nline5\r\n" +
             "line6\r\nline7\r\nline8\r\nline9\r\nline10\r\n第二章 B\r\n这是第二章的正文内容"
@@ -77,12 +78,32 @@ class LocalBookRepositoryTest {
         assertEquals("第二章 B", blocks.first().value)
     }
 
+    @Test
+    fun testTxtCacheInvalidatedWhenFileChanges() = runTest {
+        val txtFile = tempFolder.newFile("cache_novel.txt")
+        txtFile.writeText("第一章 甲\n内容一", Charsets.UTF_8)
+
+        val book1 = (repo.getLocalBookInfo(txtFile.absolutePath, "books/cache_novel.txt")
+            as NetworkResult.Success<Book>).data
+        val blocks1 = (repo.getLocalBookChapter(txtFile.absolutePath, book1, 0)
+            as NetworkResult.Success<BookChapterContent>).data.blocks
+        assertEquals("第一章 甲", blocks1.first().value)
+
+        // 文件被替换（length 变化）后缓存键失效，必须读到新文本
+        txtFile.writeText("第一章 乙\n新内容\n更多内容", Charsets.UTF_8)
+        val book2 = (repo.getLocalBookInfo(txtFile.absolutePath, "books/cache_novel.txt")
+            as NetworkResult.Success<Book>).data
+        val blocks2 = (repo.getLocalBookChapter(txtFile.absolutePath, book2, 0)
+            as NetworkResult.Success<BookChapterContent>).data.blocks
+        assertEquals("第一章 乙", blocks2.first().value)
+    }
+
     private fun chapter11Content(res: NetworkResult<BookChapterContent>): BookChapterContent {
         return (res as NetworkResult.Success<BookChapterContent>).data
     }
 
     @Test
-    fun testParseTxtFile_withSidecarJson() {
+    fun testParseTxtFile_withSidecarJson() = runTest {
         val txtFile = tempFolder.newFile("sidecar_novel.txt")
         txtFile.writeText("这是任意内容", Charsets.UTF_8)
 

@@ -38,7 +38,6 @@ class BrowseStateContentTest {
                 onBrowseFolder = { _, _ -> },
                 onBrowseSystemPath = { _, _ -> },
                 onActiveTagFilterChange = {},
-                filterFilesByTag = { it },
                 onSaveScrollPosition = { _, _ -> },
                 onConsumeRestoreScroll = {},
                 getScrollPosition = { 0 },
