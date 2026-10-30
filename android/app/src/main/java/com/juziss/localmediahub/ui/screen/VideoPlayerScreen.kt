@@ -47,10 +47,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.res.stringResource
@@ -90,6 +92,24 @@ internal fun buildStreamUrl(baseUrl: String, transcode: Boolean): String {
 
     if (!transcode) return clean
     return clean.replace(Regex("/stream(\\?|$)"), "/hls/playlist$1")
+}
+
+/**
+ * Builds the ExoPlayer MediaItem for [streamUrl]. Transcode URLs are
+ * rewritten to the server's HLS playlist and tagged with the HLS mime
+ * type: the playlist path has no `.m3u8` suffix, so without the explicit
+ * mime `DefaultMediaSourceFactory` would infer CONTENT_TYPE_OTHER and use
+ * ProgressiveMediaSource on an m3u8 payload.
+ */
+internal fun buildPlaybackMediaItem(
+    streamUrl: String,
+    transcode: Boolean = streamUrl.contains("transcode=true"),
+): MediaItem {
+    if (!transcode) return MediaItem.fromUri(streamUrl)
+    return MediaItem.Builder()
+        .setUri(buildStreamUrl(streamUrl, true))
+        .setMimeType(MimeTypes.APPLICATION_M3U8)
+        .build()
 }
 
 /**
@@ -173,12 +193,16 @@ fun VideoPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val loadControl = DefaultLoadControl.Builder()
+            // LAN playback: buffer further ahead to ride out Wi-Fi jitter,
+            // and keep 15s of back buffer so rewinds within that window
+            // replay from memory instead of re-requesting ranges.
             .setBufferDurationsMs(
-                5000,   // minBufferMs — keeps ~5s buffered; prevents aggressive prefetching from saturating network on seek.
-                30000,  // maxBufferMs — prefetches up to 30s ahead to save bandwidth and queue.
-                250,    // bufferForPlaybackMs — start playing instantly after seek (250ms).
-                300,    // bufferForPlaybackAfterRebufferMs — quick recovery after rebuffering (300ms).
+                10000,  // minBufferMs
+                45000,  // maxBufferMs
+                250,    // bufferForPlaybackMs — start playing instantly after seek.
+                500,    // bufferForPlaybackAfterRebufferMs
             )
+            .setBackBuffer(15000, /* retainBackBufferFromKeyframe = */ true)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
@@ -210,19 +234,19 @@ fun VideoPlayerScreen(
         // HLS era: a transcode=true URL is normalized to the HLS playlist
         // form; both direct and HLS streams restore position via plain
         // seekTo below (HLS supports random access natively).
-        val finalUrl = if (streamUrl.contains("transcode=true")) {
-            buildStreamUrl(streamUrl, true)
-        } else {
-            streamUrl
-        }
+        // Decoder fallback: when the hardware decoder cannot be initialized
+        // for a track, let ExoPlayer retry with the next (software) decoder
+        // instead of failing playback outright.
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setEnableDecoderFallback(true)
 
         ExoPlayer.Builder(context)
+            .setRenderersFactory(renderersFactory)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(mediaSource)
             .build().apply {
                 setSeekParameters(androidx.media3.exoplayer.SeekParameters.DEFAULT)
-                val mediaItem = MediaItem.fromUri(finalUrl)
-                setMediaItem(mediaItem)
+                setMediaItem(buildPlaybackMediaItem(streamUrl))
                 // Sync seek before prepare — valid for direct streams AND
                 // HLS playlists (ExoPlayer clamps to the seekable range
                 // once the manifest loads).
@@ -327,14 +351,11 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Whether the current stream is transcoded. Declared as an explicit
-    // MutableState (+ `by` alias for normal reads) because the
-    // Player.Listener inner class below writes it when the auto transcode
-    // fallback fires — same convention as isBufferingState above. Moved
-    // above the listener (was at the seek LaunchedEffect) so the listener
-    // can capture it.
+    // Whether the current stream is transcoded. Explicit MutableState (no
+    // delegate) because the Player.Listener inner class below writes it when
+    // the auto transcode fallback fires — same convention as
+    // isBufferingState above.
     val transcodeEnabledState = remember { mutableStateOf(streamUrl.contains("transcode=true")) }
-    var isTranscodingEnabled by transcodeEnabledState
 
     // Phase C (spec 2026-09-03-android-transcode-fallback): one-shot flag,
     // keyed on streamUrl so switching videos resets it. Explicit state for
@@ -408,8 +429,7 @@ fun VideoPlayerScreen(
                 transcodeEnabledState.value = true
                 // HLS playlist URL (native random seeking) — resume right
                 // at the failure position.
-                val fallbackUrl = buildStreamUrl(streamUrl, true)
-                exoPlayer.setMediaItem(MediaItem.fromUri(fallbackUrl))
+                exoPlayer.setMediaItem(buildPlaybackMediaItem(streamUrl, transcode = true))
                 exoPlayer.prepare()
                 exoPlayer.seekTo(posMs)
                 exoPlayer.play()
@@ -548,6 +568,10 @@ fun VideoPlayerScreen(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
+                    // Keep the display awake for the whole player session;
+                    // the flag dies with view detachment, so backgrounding
+                    // still lets the system sleep.
+                    keepScreenOn = true
                     useController = !isInPipMode
                     layoutParams = LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,

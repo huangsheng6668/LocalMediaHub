@@ -82,8 +82,8 @@ android {
         applicationId = "com.juziss.localmediahub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.5.3"
+        versionCode = 11
+        versionName = "1.5.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -393,6 +393,10 @@ dependencies {
 
     // Video player
     implementation("androidx.media3:media3-exoplayer:1.2.0")
+    // HLS transcode fallback (spec 2026-10-30-android-video-playback-perf):
+    // DefaultMediaSourceFactory loads the HLS factory reflectively; without
+    // this artifact transcode URLs fail with "No suitable media source factory".
+    implementation("androidx.media3:media3-exoplayer-hls:1.2.0")
     implementation("androidx.media3:media3-ui:1.2.0")
     implementation("androidx.media3:media3-datasource-okhttp:1.2.0")
     implementation("androidx.media3:media3-session:1.2.0")
