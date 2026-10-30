@@ -251,5 +251,14 @@ func (h *Handler) DeletePath(c echo.Context) error {
 	_ = h.tags.CleanDeletedPath(resolved)
 	h.scanner.InvalidateCache()
 
+	// Don't wait for a parent-directory timestamp change to expire the cached
+	// listing: NTFS stamps directory mtimes from the ~15.6ms clock tick, so a
+	// delete in the same tick as the cached stat would keep serving the removed
+	// entry until the TTL runs out.
+	if fi.IsDir() {
+		h.browseCache.InvalidateTree(resolved)
+	}
+	h.browseCache.InvalidateDir(filepath.Dir(resolved))
+
 	return c.JSON(http.StatusOK, map[string]string{"message": "deleted successfully"})
 }

@@ -115,3 +115,21 @@ func TestMediaThumbnailsRejectsEmptyAndOversizedBatches(t *testing.T) {
 	rec = postThumbnails(t, h, thumbnailsBody(t, paths))
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
+
+func TestIsVideoThumbnailPathClassifiesByExtension(t *testing.T) {
+	h := newMediaThumbnailsHandler(t, t.TempDir())
+	require.True(t, h.isVideoThumbnailPath(`C:\media\a.MP4`))
+	require.False(t, h.isVideoThumbnailPath(`C:\media\a.jpg`))
+	require.False(t, h.isVideoThumbnailPath(`C:\media\noextension`))
+}
+
+func TestBatchThumbnailConcurrencyLimits(t *testing.T) {
+	image := batchImageConcurrency()
+	video := batchVideoConcurrency()
+
+	require.GreaterOrEqual(t, image, 1)
+	require.LessOrEqual(t, image, maxBatchImageConcurrency)
+	require.GreaterOrEqual(t, video, 1)
+	require.LessOrEqual(t, video, maxBatchVideoConcurrency)
+	require.GreaterOrEqual(t, image, video, "image decode is CPU-bound and may run wider than the ffmpeg pool")
+}

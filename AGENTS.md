@@ -10,7 +10,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 
 - **入口**：`server/cmd/server/main.go`（`--headless` 切无窗口）
 - **路由**：`server/internal/server/server.go`（`Server` struct 持有所有 service 引用；`Server.Stop` 关闭 scanner + tags DB）
-- **Handler**：`server/internal/server/handler/*.go`（只做参数解析与响应，不写业务逻辑；通过 `Handler` struct 持有 service 依赖，**不使用全局变量**）
+- **Handler**：`server/internal/server/handler/*.go`（只做参数解析与响应，不写业务逻辑；通过 `Handler` struct 持有 service 依赖，**不使用全局变量**）；`browse_cache.go` — `BrowseFolder` 目录列表缓存（键 `PathKey(dir)|sort|order`，LRU 128 目录 / 100k 文件条目，命中需「目录 mtime 相同 && < 5s TTL」+ singleflight 合并并发 miss；`DeletePath` 成功后 `InvalidateTree`/`InvalidateDir` 显式失效。NTFS 目录 mtime 取自 ~15.6ms 时钟 tick，TTL 是硬性陈旧上限）；`media.go` 批量缩略图按类型分组并发（图片 `min(16, NumCPU)`，视频固定 4——每次 miss 要 fork ffprobe+ffmpeg）
 - **Service**：`server/internal/service/*.go`
   - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + per-root 防抖 + `cacheByDir` 每目录索引 + per-root 并发 `g.SetLimit` + 输出按路径排序）；快照持久化（2026-09-03）：`scanner_snapshot.go` Scan 后原子落盘 `.data/scan_snapshot.json`（30s 写节流）+ `StartWatching` 启动 hydrate（`cacheTime=SavedAt` 复用 stale-while-revalidate，roots/扩展名身份键不匹配即弃用），`NewScannerWithSnapshot` 为生产构造、`NewScanner` 保留给测试；`ScanConfig` 并发读写锁保护 + 64 根上限；`PathKey` Windows 大小写不敏感目录索引归一；`IsLinkEntry` 扫描与目录遍历跳过符号链接与 NTFS Junction；`StartWatching` 热更新优雅退出与事件协程生命周期重入安全
   - `tags.go` — 标签系统（SQLite WAL + busy_timeout + `SetMaxOpenConns(max(4,NumCPU))` + 索引 + 批量 IN 查询 + JSON→SQLite 自动迁移，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）；路径 URL 解码与归一化 + `IsBlockedRoot` 敏感根拦截 + 失效根 fallback 校验 + `CleanDeletedPath` 写锁修正 + 标签名与颜色校验

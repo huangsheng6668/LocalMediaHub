@@ -7,8 +7,10 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/sync/errgroup"
@@ -21,16 +23,30 @@ import (
 // (thumbnails are returned as base64 JPEG).
 const maxBatchThumbnails = 64
 
-// maxBatchThumbnailConcurrency bounds how many thumbnails one batch request
-// generates at once. A video thumbnail cache miss forks ffprobe + ffmpeg and
-// decodes a full frame (tens to hundreds of ms), so generating 64 of them
-// serially pushed the response into the tens of seconds. Kept small because
-// the work is CPU/process bound: ThumbnailService.sem (capacity NumCPU) is the
-// real backstop, this just avoids releasing 64 ffmpeg processes in one burst.
-const maxBatchThumbnailConcurrency = 4
+// maxBatchVideoConcurrency bounds how many video thumbnails one batch request
+// generates at once. A video cache miss forks ffprobe + ffmpeg and decodes a
+// full frame (tens to hundreds of ms), so generating 64 of them serially
+// pushed the response into the tens of seconds. Kept small because the work is
+// process bound: this avoids releasing 64 ffmpeg processes in one burst.
+const maxBatchVideoConcurrency = 4
 
-func batchThumbnailConcurrency() int {
-	n := min(maxBatchThumbnailConcurrency, runtime.NumCPU())
+// maxBatchImageConcurrency applies to still images, which are pure Go
+// CPU-bound decode+resize. A cold 30-image batch at the old shared limit of 4
+// took ~340ms on a 24-core host; image work scales with cores, so the limit
+// follows NumCPU up to this cap. ThumbnailService.sem (capacity NumCPU) stays
+// the global backstop.
+const maxBatchImageConcurrency = 16
+
+func batchVideoConcurrency() int {
+	n := min(maxBatchVideoConcurrency, runtime.NumCPU())
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+func batchImageConcurrency() int {
+	n := min(maxBatchImageConcurrency, runtime.NumCPU())
 	if n < 1 {
 		n = 1
 	}
@@ -52,6 +68,22 @@ func (h *Handler) thumbnailAllowedExts() []string {
 	return out
 }
 
+// isVideoThumbnailPath routes a batch item to the video pool. Classification
+// uses the scanner's extension maps (same source of truth as browse), falling
+// back to config for handlers built without a scanner.
+func (h *Handler) isVideoThumbnailPath(pathStr string) bool {
+	ext := strings.ToLower(filepath.Ext(pathStr))
+	if h.scanner != nil {
+		return h.scanner.VideoExts()[ext]
+	}
+	for _, e := range h.cfg.Scan.VideoExtensions {
+		if strings.EqualFold(ext, e) {
+			return true
+		}
+	}
+	return false
+}
+
 // ThumbnailsRequest is the JSON body for POST /api/v1/media/thumbnails.
 type ThumbnailsRequest struct {
 	Paths []string `json:"paths"`
@@ -71,8 +103,9 @@ type ThumbnailItem struct {
 // returned as base64-encoded JPEG so the response stays a single JSON body.
 // Per-path validation mirrors MediaThumbnail (ValidateAccessibleMediaPath).
 //
-// Generation runs in parallel (bounded by batchThumbnailConcurrency) because a
-// single cache miss forks ffprobe + ffmpeg. Items are written by index, so the
+// Generation runs in two parallel pools: images are CPU-bound decode+resize
+// (bounded by batchImageConcurrency) while videos fork ffprobe + ffmpeg and
+// stay at the lower batchVideoConcurrency. Items are written by index, so the
 // response order always matches the request order, and a per-item failure is
 // reported inside its own item — it never aborts the batch.
 func (h *Handler) MediaThumbnails(c echo.Context) error {
@@ -93,16 +126,22 @@ func (h *Handler) MediaThumbnails(c echo.Context) error {
 
 	// Each goroutine writes a distinct index — distinct slice elements are
 	// distinct memory locations, so no synchronisation is needed on `items`.
-	var g errgroup.Group
-	g.SetLimit(batchThumbnailConcurrency())
+	var imageGroup, videoGroup errgroup.Group
+	imageGroup.SetLimit(batchImageConcurrency())
+	videoGroup.SetLimit(batchVideoConcurrency())
 	for i, p := range req.Paths {
 		i, p := i, p
-		g.Go(func() error {
+		group := &imageGroup
+		if h.isVideoThumbnailPath(p) {
+			group = &videoGroup
+		}
+		group.Go(func() error {
 			items[i] = h.buildThumbnailItem(p, allowedExts)
 			return nil
 		})
 	}
-	_ = g.Wait()
+	_ = imageGroup.Wait()
+	_ = videoGroup.Wait()
 
 	return c.JSON(http.StatusOK, map[string]interface{}{"items": items})
 }

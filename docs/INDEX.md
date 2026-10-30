@@ -70,6 +70,7 @@
 - `docs/superpowers/specs/2026-10-30-web-direct-play-design.md`（Web 视频原画直连 + 拖动预热 + 会话丢失自愈；4s 关键帧分片）
 - `docs/superpowers/specs/2026-10-30-web-large-dir-render-design.md`（Web 大目录增量渲染：首批 120 同步 + 400/批异步追加 + 锚点扩展 + 代际取消）
 - `docs/superpowers/specs/2026-10-30-android-browse-reader-perf-design.md`（Android 浏览筛选 remember 缓存 + 阅读整体进度派生化 + 本地书解析入 IO/解码缓存 + DataStore 解码 flowOn）
+- `docs/superpowers/specs/2026-10-30-server-browse-thumbnail-perf-design.md`（服务端目录浏览 LRU 缓存 + 批量缩略图按类型分组并发）
 
 ---
 

@@ -7,13 +7,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
-	"net/url"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
@@ -417,7 +419,6 @@ func TestBrowseFolderSortAndPagination(t *testing.T) {
 	require.Equal(t, "b.mp4", pageDesc.Files[1].Name)
 }
 
-
 // TestDownloadFolderZipSkipsSymlinkEntry verifies that symlinks inside a zipped
 // folder are skipped (spec §1.1) to prevent path traversal or leaking out-of-library
 // files via zip download.
@@ -533,4 +534,109 @@ func TestDownloadFolderZipSkipsJunctionEntry(t *testing.T) {
 
 	require.True(t, foundReal, "real file must be present in the zip")
 	require.False(t, foundJunction, "junction files must not be present in the zip")
+}
+
+func newBrowseFolderHandler(t *testing.T, root string) *Handler {
+	t.Helper()
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{root},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+	}
+	return New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), nil, nil, nil, nil, nil, nil)
+}
+
+func browseFolder(t *testing.T, h *Handler, dir string) models.BrowseResult {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/folders/"+filepath.ToSlash(dir)+"/browse", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("*")
+	ctx.SetParamValues(filepath.ToSlash(dir))
+	require.NoError(t, h.BrowseFolder(ctx))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var result models.BrowseResult
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	return result
+}
+
+func TestBrowseFolderSeesNewFileAfterDirChange(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.mp4"), []byte("a"), 0o644))
+
+	h := newBrowseFolderHandler(t, root)
+	first := browseFolder(t, h, root)
+	require.Len(t, first.Files, 1)
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "b.mp4"), []byte("b"), 0o644))
+
+	// Windows stamps directory mtimes from the system clock tick (~15.6ms), so
+	// a create landing in the same tick as the cached stat leaves ModTime
+	// unchanged and the entry is (correctly) still served until the TTL runs
+	// out. Force a distinct mtime so this asserts the invalidation path
+	// deterministically; the TTL bound is covered in browse_cache_test.go.
+	stamp := time.Now().Add(2 * time.Second)
+	require.NoError(t, os.Chtimes(root, stamp, stamp))
+
+	second := browseFolder(t, h, root)
+	require.Len(t, second.Files, 2, "new file must appear after the directory changes")
+	require.Equal(t, "a.mp4", second.Files[0].Name)
+	require.Equal(t, "b.mp4", second.Files[1].Name)
+}
+
+func TestBrowseFolderRepeatRequestServesCachedListing(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "a.mp4"), []byte("a"), 0o644))
+
+	h := newBrowseFolderHandler(t, root)
+	first := browseFolder(t, h, root)
+	second := browseFolder(t, h, root)
+
+	require.Equal(t, first.Files, second.Files)
+	require.Equal(t, 1, h.browseCache.len())
+}
+
+func TestDeletePathInvalidatesCachedBrowseListing(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "sample.mp4")
+	require.NoError(t, os.WriteFile(filePath, []byte("video"), 0o644))
+
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			Roots:           []string{root},
+			VideoExtensions: []string{".mp4"},
+			ImageExtensions: []string{".jpg"},
+		},
+		System: config.SystemConfig{EnableDelete: true},
+	}
+	tagsService, err := service.NewTagsService(t.TempDir())
+	require.NoError(t, err)
+	defer tagsService.Close()
+
+	h := New(cfg, service.NewScanner(cfg.Scan.VideoExtensions, cfg.Scan.ImageExtensions, cfg.Scan.TextExtensions), tagsService, nil, nil, nil, nil, nil)
+
+	before := browseFolder(t, h, root)
+	require.Len(t, before.Files, 1)
+	info, err := os.Stat(root)
+	require.NoError(t, err)
+	cachedDirTime := info.ModTime()
+
+	deleteBody := strings.NewReader(`{"path":` + strconv.Quote(filePath) + `}`)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/system/delete", deleteBody)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.DeletePath(e.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	// Restore the pre-delete directory mtime so only explicit invalidation can
+	// save the cache from serving the removed file.
+	require.NoError(t, os.Chtimes(root, cachedDirTime, cachedDirTime))
+
+	after := browseFolder(t, h, root)
+	require.Empty(t, after.Files, "deleted file must not be served from the browse cache")
 }

@@ -52,6 +52,7 @@ type Handler struct {
 	bookSigner      *service.BookSigner
 	BLECentral      BLECentralBackend
 	authFailLimiter AuthFailureRecorder
+	browseCache     *browseCache
 }
 
 // New creates a Handler with all required service dependencies.
@@ -69,14 +70,15 @@ func New(
 	bookSigner *service.BookSigner,
 ) *Handler {
 	return &Handler{
-		cfg:        cfg,
-		scanner:    scanner,
-		tags:       tags,
-		streaming:  streaming,
-		thumbnail:  thumbnail,
-		library:    library,
-		books:      books,
-		bookSigner: bookSigner,
+		cfg:         cfg,
+		scanner:     scanner,
+		tags:        tags,
+		streaming:   streaming,
+		thumbnail:   thumbnail,
+		library:     library,
+		books:       books,
+		bookSigner:  bookSigner,
+		browseCache: newBrowseCache(),
 	}
 }
 
