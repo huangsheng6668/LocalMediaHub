@@ -19,16 +19,18 @@ import com.juziss.localmediahub.data.DownloadsStore
 import com.juziss.localmediahub.data.LocalBookRepository
 import com.juziss.localmediahub.data.ReadingMath
 import com.juziss.localmediahub.data.BookChapterContent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 @HiltViewModel
@@ -43,6 +45,7 @@ class TextReaderViewModel @Inject constructor(
 
     private var isLocalMode = false
     private var activeLocalPath: String? = null
+    private var bookmarksJob: Job? = null
 
     private val chapterCache = object : LinkedHashMap<String, BookChapterContent>(50, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, BookChapterContent>?): Boolean {
@@ -91,6 +94,28 @@ class TextReaderViewModel @Inject constructor(
             if (local == null || serverLastReadAt > local.lastReadAt) return server
             return local
         }
+
+        /**
+         * Preserves the pending mid-chapter `blockIndex` and `scrollOffsetPx`
+         * when `loadChapter` loads the exact chapter scheduled for resume,
+         * preventing `loadChapter` from clobbering saved mid-chapter progress
+         * with `(0, 0)` before the UI scroll restoration effect runs.
+         */
+        internal fun resolveInitialChapterProgress(
+            bookPath: String,
+            chapterIndex: Int,
+            pendingResume: BookProgress?,
+            nowMs: Long,
+        ): BookProgress {
+            val resumeMatch = pendingResume?.takeIf { it.chapterIndex == chapterIndex }
+            return BookProgress(
+                path = bookPath,
+                chapterIndex = chapterIndex,
+                blockIndex = resumeMatch?.blockIndex ?: 0,
+                scrollOffsetPx = resumeMatch?.scrollOffsetPx ?: 0,
+                lastReadAt = nowMs,
+            )
+        }
     }
     val chapterBlocks: StateFlow<List<Block>> = _chapterBlocks.asStateFlow()
 
@@ -103,29 +128,16 @@ class TextReaderViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // Task 3: BLE degradation signal forwarded from MediaRepository. True when
-    // the most recent chapter was served via the BLE fallback path. The UI
-    // shows a 3-second auto-dismissing chip while this is true.
     val isBleDegraded: StateFlow<Boolean> = repo.isBleDegraded
 
-    // I2: one-shot BLE-degradation event stream. Emits once PER BLE-served
-    // chapter so the UI can re-show + re-arm the 3-second auto-dismiss timer
-    // on every delivery, not just the first emission after the sticky boolean
-    // flips true. The boolean above is kept for any consumer that wants the
-    // current degradation state; the badge trigger comes from this flow.
     val bleDegradedEvents: kotlinx.coroutines.flow.SharedFlow<Unit> = repo.bleDegradedEvents
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    // Task 5 (text-reader C-phase): reader settings, auto-scroll, bookmarks.
-
     private val _readerSettings = MutableStateFlow(ReaderSettings())
     val readerSettings: StateFlow<ReaderSettings> = _readerSettings.asStateFlow()
 
-    // Phase 5: 沉浸模式 — TopAppBar/BottomAppBar 可见性。当用户启用 immersiveMode
-    // 时，loadBook 成功后 1.5s 自动隐藏；中区域点击切换。immersiveMode 关闭时
-    // toggleChrome/hideChrome 为 no-op（栏始终可见）。
     private val _chromeVisible = MutableStateFlow(true)
     val chromeVisible: StateFlow<Boolean> = _chromeVisible.asStateFlow()
 
@@ -135,14 +147,9 @@ class TextReaderViewModel @Inject constructor(
     private val _bookmarks = MutableStateFlow<List<Bookmark>>(emptyList())
     val bookmarks: StateFlow<List<Bookmark>> = _bookmarks.asStateFlow()
 
-    // One-shot toast channel for bookmark add feedback. Non-null means a toast
-    // should be shown; the UI calls [consumeBookmarkToast] after presenting it.
-    // Success path stays silent (the bookmarks list simply refreshes).
     private val _bookmarkToast = MutableStateFlow<String?>(null)
     val bookmarkToast: StateFlow<String?> = _bookmarkToast.asStateFlow()
 
-    // 开书时的一次性恢复目标：processBookLoaded 写入，Screen 定位后 consume。
-    // 只在打开书时存在——阅读模式切换触发的 reload 不再恢复。
     private val _pendingResume = MutableStateFlow<BookProgress?>(null)
     val pendingResume: StateFlow<BookProgress?> = _pendingResume.asStateFlow()
 
@@ -151,14 +158,10 @@ class TextReaderViewModel @Inject constructor(
     }
 
     init {
-        // Bootstrap reader settings from DataStore so the UI starts with the
-        // persisted font/line-height/theme instead of the default on every cold start.
         viewModelScope.launch {
             store.readerSettingsFlow.collect { incoming ->
                 val previous = _readerSettings.value
                 _readerSettings.value = incoming
-                // 设置首次从 DataStore 加载完成（从默认 false 变为持久化的 true）时，
-                // 若当前书已加载但 chrome 仍为可见，立即同步隐藏，避免用户需要再操作开关。
                 if (!previous.immersiveMode && incoming.immersiveMode && _book.value != null) {
                     _chromeVisible.value = false
                 }
@@ -219,26 +222,15 @@ class TextReaderViewModel @Inject constructor(
             _isLoading.value = false
             return
         }
-        // 等设置首次从 DataStore 加载完成，保证 Screen 依据 readingMode 分派恢复分支时
-        // 模式已定型（默认值 CHAPTER 与用户持久化的 SCROLL 之间的竞态窗口关闭）。
         store.readerSettingsFlow.first()
-        // 进度 key 统一为服务端规范化路径 b.path：保存点全部用 b.path，
-        // 恢复查询也必须用 b.path，否则请求 path 与规范化 path 不一致时永远查不到。
         val saved = store.getBookProgress(b.path)
         val lastValid = b.chapters.lastIndex.coerceAtLeast(0)
         val idx = saved?.chapterIndex?.coerceIn(0, lastValid) ?: 0
-        // 章 0 同样可能有段级进度（新书首章读到一半）；门闩只需排除
-        // "完全无段级信息的旧格式记录"（blockIndex/offset 均为 0）。
         if (saved != null && (idx > 0 || saved.blockIndex > 0 || saved.scrollOffsetPx > 0)) {
             _pendingResume.value = saved.copy(chapterIndex = idx)
         }
         loadChapter(idx)
-        // 若全局已启用沉浸模式，打开书即立即隐藏 chrome（Activity 据此同步隐藏系统栏）；
-        // 否则保持 chrome 可见。去掉旧的 1.5s 延迟，避免打开时短暂闪现顶/底栏。
         _chromeVisible.value = !_readerSettings.value.immersiveMode
-        // 服务端进度择新：并行异步校正，不阻塞开书（server 不可达时静默降级本地阅读）。
-        // 先设 pendingResume 再 loadChapter：分章模式恢复 effect 以 idx 为 key，
-        // 切章触发重启后读到的才是校正后的值。
         viewModelScope.launch {
             val srvState = withTimeoutOrNull(2_000) {
                 (repo.getReadingState(b.path) as? NetworkResult.Success)?.data?.state
@@ -279,11 +271,6 @@ class TextReaderViewModel @Inject constructor(
                 }
             }
         }
-        // Segmented BLE degraded reading: appendScope ties the background
-        // segment loop to viewModelScope (chapter switch / VM clear cancels
-        // it); onAppend updates BOTH render states below, guarded by the
-        // chapter index so a stale in-flight segment cannot pollute the
-        // next chapter.
         val r = repo.getBookChapter(path, index, onAppend = onAppend, appendScope = viewModelScope)
         if (r is NetworkResult.Success<BookChapterContent>) {
             synchronized(chapterCache) { chapterCache[cacheKey] = r.data }
@@ -299,11 +286,6 @@ class TextReaderViewModel @Inject constructor(
         return r
     }
 
-    /**
-     * Appends a late-arriving BLE chapter segment to both render states
-     * (chapter mode's block list and scroll mode's chapter entry). Called
-     * from the repository's background segment loop.
-     */
     private fun appendChapterBlocks(index: Int, more: List<com.juziss.localmediahub.data.Block>) {
         if (_currentIndex.value != index || more.isEmpty()) return
         _chapterBlocks.value = _chapterBlocks.value + more
@@ -349,12 +331,11 @@ class TextReaderViewModel @Inject constructor(
                     }
                 }
                 store.saveBookProgress(
-                    BookProgress(
-                        path = b.path,
+                    resolveInitialChapterProgress(
+                        bookPath = b.path,
                         chapterIndex = index,
-                        blockIndex = 0,
-                        scrollOffsetPx = 0,
-                        lastReadAt = System.currentTimeMillis(),
+                        pendingResume = _pendingResume.value,
+                        nowMs = System.currentTimeMillis(),
                     )
                 )
                 _isAutoScrolling.value = false
@@ -367,9 +348,6 @@ class TextReaderViewModel @Inject constructor(
         return success
     }
 
-    /**
-     * 将 [_scrollChapters] 中尚未包含的下一章追加进来（滚动模式尾部选管用）。
-     */
     fun loadNextChapterForScroll() {
         val b = _book.value ?: return
         val currentList = _scrollChapters.value
@@ -395,9 +373,6 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 滚动模式初始化：顶多预加载 [preloadCount] 章。
-     */
     fun preloadScrollChapters(preloadCount: Int) {
         val b = _book.value ?: return
         viewModelScope.launch {
@@ -422,9 +397,6 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 向前预加载 [preloadCount] 章。
-     */
     suspend fun preloadPreviousScrollChapters(preloadCount: Int): Int {
         val b = _book.value ?: return 0
         var totalNewItems = 0
@@ -450,15 +422,7 @@ class TextReaderViewModel @Inject constructor(
         return totalNewItems
     }
 
-    /**
-     * 向前加载单章（顶部触发用）。
-     */
     suspend fun loadPreviousChapterForScroll(): Int {
-        // Navigation-reset suppression (see lastScrollChaptersResetAtMs): a
-        // chapter switch collapses the list and parks firstVisibleItemIndex
-        // at 0 — that is NOT backward reading, and prepending the chapter the
-        // user just left (then compensating the scroll) is exactly the
-        // "next chapter opens at the previous position" bug.
         if (System.currentTimeMillis() - lastScrollChaptersResetAtMs <
             SCROLL_PRELOAD_SUPPRESS_MS
         ) {
@@ -483,7 +447,6 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
-    /** Updates the current active chapter index when scrolling in SCROLL mode. */
     fun updateCurrentIndex(index: Int) {
         val b = _book.value ?: return
         if (index in b.chapters.indices && _currentIndex.value != index) {
@@ -502,7 +465,6 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
-    /** Advances to the next chapter when one exists. */
     fun nextChapter() {
         val b = _book.value ?: return
         if (_currentIndex.value < b.chapters.lastIndex) {
@@ -512,7 +474,6 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
-    /** Returns to the previous chapter when not already at the start. */
     fun prevChapter() {
         if (_currentIndex.value > 0) {
             viewModelScope.launch {
@@ -522,19 +483,11 @@ class TextReaderViewModel @Inject constructor(
     }
 
     private var lastPushKey = ""
-
-    /** 单次上报的时长 delta 上限（与服务端 clamp 3600 对齐）。 */
     private val MAX_REPORT_DELTA_SECONDS = 3600L
-
-    // ---- 阅读时长计时（spec 2026-09-08-reading-stats-and-android-bookshelf）----
-    // Activity onResume/onPause 驱动起停表；内存值沉入 ReadingTimeStore 的
-    // pending 缓冲（离线安全），上报失败回退到缓冲，连线由 LibrarySyncManager 分片补传。
     private val readingTimer = ReadingSessionTimer()
 
-    /** Activity onResume：开始累计活跃阅读秒数。 */
     fun startReadingSession() { readingTimer.start() }
 
-    /** Activity onPause：停表并把累积秒数沉入 pending 缓冲（离线安全）。 */
     fun stopReadingSession() {
         readingTimer.stop()
         val b = _book.value ?: return
@@ -542,12 +495,6 @@ class TextReaderViewModel @Inject constructor(
         if (d > 0) viewModelScope.launch { readingTimeStore.addPending(b.path, d) }
     }
 
-    /**
-     * Called by the UI layer (throttled via snapshotFlow + debounce) to persist
-     * the within-chapter reading position: first visible block + its px offset.
-     * Does NOT re-fetch chapter content — only writes progress so the next
-     * session can resume mid-chapter.
-     */
     fun persistScrollProgress(
         chapterIndex: Int,
         blockIndex: Int,
@@ -571,8 +518,6 @@ class TextReaderViewModel @Inject constructor(
                 )
             )
             val key = "$chapterIndex:$blockIndex:$finished"
-            // 计时器内存值先沉入 pending 缓冲（离线安全），再取 ≤3600 一片随载荷上报；
-            // 上报失败回退到缓冲，下次上报或连线补传重试。delta>0 时绕过 pushKey 去重。
             val liveDelta = readingTimer.takeDelta()
             if (liveDelta > 0) readingTimeStore.addPending(b.path, liveDelta)
             val delta = readingTimeStore.takePendingUpto(b.path, MAX_REPORT_DELTA_SECONDS)
@@ -586,9 +531,6 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
-    // ---- Task 5: reader settings, auto-scroll, bookmarks ------------------
-
-    /** Updates and persists reader settings. */
     fun updateSettings(settings: ReaderSettings) {
         val oldMode = _readerSettings.value.readingMode
         val oldImmersive = _readerSettings.value.immersiveMode
@@ -599,41 +541,27 @@ class TextReaderViewModel @Inject constructor(
                 loadChapter(_currentIndex.value, resetScroll = true)
             }
         }
-        // 沉浸开关切换时立即同步 chrome 可见性：
-        // - 开启：立即隐藏 chrome（Activity 据此隐藏 systemBars），用户进入沉浸
-        // - 关闭：立即还原 chrome，让顶/底栏重新可用
         if (oldImmersive != settings.immersiveMode) {
             _chromeVisible.value = !settings.immersiveMode
         }
     }
 
-    // ---- Phase 5: 沉浸模式 chrome 可见性 --------------------------------
-
-    /**
-     * Toggles TopAppBar/BottomAppBar visibility — but only when the user has
-     * enabled immersiveMode. When immersiveMode is off, chrome is always
-     * visible and this call is a no-op (avoids surprising the user with a
-     * hidden bar they cannot reach).
-     */
     fun toggleChrome() {
         if (_readerSettings.value.immersiveMode) {
             _chromeVisible.value = !_chromeVisible.value
         }
     }
 
-    /** Force-shows chrome (e.g. when opening settings). */
     fun showChrome() {
         _chromeVisible.value = true
     }
 
-    /** Hides chrome — only effective when immersiveMode is enabled. */
     fun hideChrome() {
         if (_readerSettings.value.immersiveMode) {
             _chromeVisible.value = false
         }
     }
 
-    /** Exits immersive mode, shows chrome, and updates settings. */
     fun exitImmersiveMode() {
         _chromeVisible.value = true
         if (_readerSettings.value.immersiveMode) {
@@ -641,29 +569,22 @@ class TextReaderViewModel @Inject constructor(
         }
     }
 
-    /** Toggles auto-scroll on/off. UI runs the scroll loop via LaunchedEffect. */
     fun toggleAutoScroll() {
         _isAutoScrolling.value = !_isAutoScrolling.value
     }
 
-    /**
-     * Stops auto-scroll. Called by UI on manual scroll, chapter change, or
-     * any user-initiated navigation that would conflict with auto-scroll.
-     */
     fun stopAutoScroll() {
         _isAutoScrolling.value = false
     }
 
-    /** Reloads the bookmark list for [path] from DataStore into [_bookmarks]. */
+    /** Reloads the bookmark list for [path] from DataStore into [_bookmarks], cancelling any prior collector. */
     fun loadBookmarksFor(path: String) {
-        viewModelScope.launch {
+        bookmarksJob?.cancel()
+        bookmarksJob = viewModelScope.launch {
             store.getBookmarksFlow(path).collect { _bookmarks.value = it }
         }
     }
 
-    /**
-     * Adds a bookmark for the specified chapter + given block.
-     */
     fun addBookmarkFromParagraph(blockIndex: Int, chapterIndex: Int = _currentIndex.value): Boolean {
         val b = _book.value ?: return false
         val blocks = if (_readerSettings.value.readingMode == com.juziss.localmediahub.data.ReadingMode.SCROLL) {
@@ -673,12 +594,12 @@ class TextReaderViewModel @Inject constructor(
         }
         if (blockIndex !in blocks.indices) return false
         val block = blocks[blockIndex]
-        if (block.type != "text") return false  // bookmarks only on text blocks
+        if (block.type != "text") return false
         val preview = block.value?.take(30) ?: ""
         val bm = Bookmark(
             bookPath = b.path,
             chapterIndex = chapterIndex,
-            paragraphIndex = blockIndex,  // field name retained per spec
+            paragraphIndex = blockIndex,
             preview = preview,
             createdAt = System.currentTimeMillis(),
         )
@@ -689,15 +610,10 @@ class TextReaderViewModel @Inject constructor(
         return true
     }
 
-    /**
-     * Clears [bookmarkToast] once the UI has shown it. Idempotent — calling
-     * when the value is already null is a no-op.
-     */
     fun consumeBookmarkToast() {
         _bookmarkToast.value = null
     }
 
-    /** Deletes a bookmark from DataStore. Flow collection refreshes [bookmarks]. */
     fun deleteBookmark(bm: Bookmark) {
         viewModelScope.launch {
             store.deleteBookmark(bm)
