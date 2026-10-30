@@ -3,8 +3,13 @@ package com.juziss.localmediahub.data
 import com.juziss.localmediahub.di.ApplicationScope
 import com.juziss.localmediahub.network.NetworkResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -32,6 +37,9 @@ class LibrarySyncManager @Inject constructor(
     private companion object {
         /** 补传分片上限（与服务端 read_seconds_delta clamp 3600 对齐）。 */
         const val MAX_SYNC_DELTA_SECONDS = 3600L
+
+        /** 同步请求的在途并发上限（局域网单次往返 10-50ms，4 路已足以摊平延迟）。 */
+        const val SYNC_CONCURRENCY = 4
     }
 
     /**
@@ -47,9 +55,8 @@ class LibrarySyncManager @Inject constructor(
         // ── 1. 进度一次性迁移上报 ─────────────────────────────────────────
         if (!favoritesStore.isProgressMigrationDone()) {
             val all = recentActivityStore.getAllBookProgressFlow().first()
-            var allSuccess = true
-            for (p in all) {
-                val result = repository.reportReadingState(
+            val results = all.mapBounded(SYNC_CONCURRENCY) { p ->
+                repository.reportReadingState(
                     path = p.path,
                     chapterIndex = p.chapterIndex,
                     paraIndex = p.blockIndex,
@@ -57,16 +64,15 @@ class LibrarySyncManager @Inject constructor(
                     finished = false,
                     lastReadAt = p.lastReadAt,
                 )
-                if (result !is NetworkResult.Success) {
-                    allSuccess = false
-                }
             }
-            if (allSuccess) favoritesStore.setProgressMigrationDone()
+            if (results.all { it is NetworkResult.Success }) {
+                favoritesStore.setProgressMigrationDone()
+            }
         }
 
         // ── 2. 收藏：全量推送（幂等）+ 拉取事务合并 ──────────────────────
         val local = favoritesStore.readFavoriteEntriesSnapshot()
-        local.forEach { entry ->
+        local.mapBounded(SYNC_CONCURRENCY) { entry ->
             repository.pushServerFavorite(buildFavoriteBody(entry))
         }
         val remote = repository.listServerFavorites()
@@ -75,36 +81,58 @@ class LibrarySyncManager @Inject constructor(
         }
 
         // ── 3. 阅读时长 pending 补传：逐书按 ≤3600 分片，规避服务端 clamp 截断 ──
-        for (bookPath in readingTimeStore.pendingPaths()) {
-            val remoteState = repository.getReadingState(bookPath)
-            if (remoteState !is NetworkResult.Success) {
-                continue
-            }
-            val localProg = recentActivityStore.getBookProgress(bookPath)
-            val flushState = resolveReadingTimeFlushState(
-                serverState = remoteState.data.state,
-                localProgress = localProg,
-                nowMs = System.currentTimeMillis(),
+        readingTimeStore.pendingPaths().mapBounded(SYNC_CONCURRENCY) { bookPath ->
+            flushReadingTimeForBook(bookPath)
+        }
+    }
+
+    /**
+     * 同一本书的分片必须串行（[ReadingTimeStore.takePendingUpto] 是消费式的），
+     * 不同书之间并行由调用方负责。
+     */
+    private suspend fun flushReadingTimeForBook(bookPath: String) {
+        val remoteState = repository.getReadingState(bookPath)
+        if (remoteState !is NetworkResult.Success) {
+            return
+        }
+        val localProg = recentActivityStore.getBookProgress(bookPath)
+        val flushState = resolveReadingTimeFlushState(
+            serverState = remoteState.data.state,
+            localProgress = localProg,
+            nowMs = System.currentTimeMillis(),
+        )
+        while (true) {
+            val chunk = readingTimeStore.takePendingUpto(bookPath, MAX_SYNC_DELTA_SECONDS)
+            if (chunk <= 0) break
+            val result = repository.reportReadingState(
+                path = bookPath,
+                chapterIndex = flushState.chapterIndex,
+                paraIndex = flushState.paraIndex,
+                percent = flushState.percent,
+                finished = flushState.finished,
+                lastReadAt = flushState.lastReadAt,
+                readSecondsDelta = chunk,
             )
-            while (true) {
-                val chunk = readingTimeStore.takePendingUpto(bookPath, MAX_SYNC_DELTA_SECONDS)
-                if (chunk <= 0) break
-                val result = repository.reportReadingState(
-                    path = bookPath,
-                    chapterIndex = flushState.chapterIndex,
-                    paraIndex = flushState.paraIndex,
-                    percent = flushState.percent,
-                    finished = flushState.finished,
-                    lastReadAt = flushState.lastReadAt,
-                    readSecondsDelta = chunk,
-                )
-                if (result !is NetworkResult.Success) {
-                    readingTimeStore.addPending(bookPath, chunk)
-                    break // 该书剩余片下轮再试
-                }
+            if (result !is NetworkResult.Success) {
+                readingTimeStore.addPending(bookPath, chunk)
+                break // 该书剩余片下轮再试
             }
         }
     }
+}
+
+/**
+ * 有界并发 map：最多 [limit] 个 [block] 同时在途，结果顺序与输入一致。
+ * 任一 block 抛异常时沿结构化并发取消其余任务（与 [coroutineScope] 语义一致）。
+ */
+internal suspend fun <T, R> Iterable<T>.mapBounded(
+    limit: Int,
+    block: suspend (T) -> R,
+): List<R> = coroutineScope {
+    val semaphore = Semaphore(limit)
+    map { item ->
+        async { semaphore.withPermit { block(item) } }
+    }.awaitAll()
 }
 
 internal data class ReadingTimeFlushState(

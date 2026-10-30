@@ -291,9 +291,7 @@ fun BrowseScreen(
                             }
                             Button(
                                 onClick = {
-                                    selectedFiles.forEach { file ->
-                                        viewModel.downloadFile(file)
-                                    }
+                                    viewModel.downloadFiles(selectedFiles.toList())
                                     selectionMode = false
                                     selectedFiles.clear()
                                 },

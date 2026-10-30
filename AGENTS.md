@@ -46,8 +46,8 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `reader/`（`ReaderSettingsSheet`（带可滚动与1400dp最大宽度） / `ReaderThemeWrapper` / `ReaderFontFamily`）
   - 通用：`ResumePlaybackDialog` / `PlayerGestureDetector` / `PlayerGestureHud`（音量/亮度 Pill HUD + seek ripple）/ `BrowseContent` / `GridContainers` / `MediaItems` / `TagComponents` / `VerticalScrollbar` / `theme/NoRippleIndication`（`ui/theme/` 色值与 web themes.css 对称，由 `server/internal/web/theme-parity.test.mjs` 守护(node --test)）
 - **ViewModel**（`viewmodel/`）：
-  - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel` / `BookshelfViewModel`（本地 BookProgress 全量 + decorations 合并 + `applyBookshelfFilter` 纯函数筛选）
-  - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `LibraryController`（阅读装饰与状态筛选）/ `DownloadController`（下载）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
+  - `HomeViewModel` / `BrowseViewModel` / `ConnectionViewModel` / `VideoPlayerViewModel` / `TextReaderViewModel` / `BookshelfViewModel`（本地 BookProgress 全量 + decorations 合并 + `applyBookshelfFilter` 纯函数筛选）；`HomeViewModel.refresh()` 三条独立请求 `async` 并发 + `refreshJob` 取消旧刷新，`serverUrl` 走 `distinctUntilChanged()`（DataStore 重写同值时不再触发第二次全量刷新）
+  - Browse 通过 delegate 分发：`BrowseNavigator`（导航）/ `BrowseSorter`（排序）/ `SearchController`（搜索）/ `TagController`（标签）/ `FavoritesController`（收藏）/ `LibraryController`（阅读装饰与状态筛选）/ `DownloadController`（下载，单文件 + `downloadFiles` 批量）/ `DeleteController`（删除，`deletePath` + `deletePaths`）/ `BrowseSharedState`（共享状态）
   - `BrowseListFilters.kt`：纯筛选函数 `applyBrowseFilters` / `applyTagFilter`；`BrowseStateContent` 用 `remember` 缓存结果，避免每次重组重算并产生新列表实例
 - **Data**（`data/`）：
   - `Models.kt`（`MediaFile` / `Folder` / `Tag` / `FavoriteEntry` / `ReadingStatus` / `LibraryDecoration` / `ServerFavorite` / `PlaybackProgressEntry` / `RecentMediaEntry` / `LastBrowseLocation`）
@@ -55,9 +55,9 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `RecentActivityStore.kt`（最近活动 + 浏览状态 + 播放进度；Gson 解码 Flow 统一 `flowOn(Dispatchers.IO)`）
   - `LocalBookRepository.kt`（本地 TXT/EPUB 解析：`suspend` + `Dispatchers.IO`；TXT 全文解码单条缓存按 `absolutePath + lastModified + length` 失效，逐章读取不再整本重读；分章规则见 `TxtChapterParser`）
   - `FavoritesStore.kt`（DataStore 收藏，三代 Gson 兼容反序列化，支持文件与目录；`readFavoriteEntriesSnapshot` 与事务级 `mergeWithServerFavorites` 防止 `StateFlow` 初始空值抹除离线收藏）
-  - `LibrarySyncManager.kt`（连线双向同步：收藏全量推拉合并 + 本地阅读进度全部成功迁移校验 + 阅读时长补传保留 `FINISHED` 状态与已有章节进度）
+  - `LibrarySyncManager.kt`（连线双向同步：收藏全量推拉合并 + 本地阅读进度全部成功迁移校验 + 阅读时长补传保留 `FINISHED` 状态与已有章节进度；进度迁移 / 收藏推送 / 按书时长补传走 `mapBounded(SYNC_CONCURRENCY = 4)` 有界并发，同一本书的分片仍串行）
   - `ReadingMath.kt`（阅读百分比与已读完判定纯函数）+ `ReaderScrollProgress.kt`（滚动模式整体进度 `computeOverallPercent` 纯函数）
-  - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护；500ms `NotificationThrottle` 抑制通知 IPC 风暴、重抛 `CancellationException`、HTTP 416 关闭连接、`MediaMetadataIndex` 子目录相对路径精准匹配与 `DownloadsStore` IO 调度优化）
+  - `DownloadsStore.kt` + `DownloadManager.kt` + `DownloadWorker.kt`（CoroutineWorker 前台服务下载 + Zip Slip 防护；500ms `NotificationThrottle` 抑制通知 IPC 风暴、重抛 `CancellationException`、HTTP 416 关闭连接、`MediaMetadataIndex` 子目录相对路径精准匹配与 `DownloadsStore` IO 调度优化；批量下载 `downloadFiles` 在 `Dispatchers.IO` 一次完成全部入队、只回一条提示）
   - `ServerConfigStore.kt`（含 `authToken` / `bleToken`，均加密存储；`bleToken` 对应 server 的 `ble.token`，为空回退 `authToken`）
   - `ReadingSessionTimer.kt`（阅读会话计时器，Activity onResume/onPause 起停表，时钟注入可测；@Synchronized + 保留亚秒余数与时钟回拨保护）+ `ReadingTimeStore.kt`（阅读时长 pending 缓冲，per-path Map 持久 JSON；离线累积 / 上报失败回退 / `takePendingUpto(path, 3600)` 分片补传，由 LibrarySyncManager 连线执行）
   - `RoutePath.kt`（浏览路径与系统/库模式标记）

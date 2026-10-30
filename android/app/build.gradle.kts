@@ -82,8 +82,8 @@ android {
         applicationId = "com.juziss.localmediahub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "1.5.2"
+        versionCode = 10
+        versionName = "1.5.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

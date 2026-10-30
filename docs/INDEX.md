@@ -71,6 +71,7 @@
 - `docs/superpowers/specs/2026-10-30-web-large-dir-render-design.md`（Web 大目录增量渲染：首批 120 同步 + 400/批异步追加 + 锚点扩展 + 代际取消）
 - `docs/superpowers/specs/2026-10-30-android-browse-reader-perf-design.md`（Android 浏览筛选 remember 缓存 + 阅读整体进度派生化 + 本地书解析入 IO/解码缓存 + DataStore 解码 flowOn）
 - `docs/superpowers/specs/2026-10-30-server-browse-thumbnail-perf-design.md`（服务端目录浏览 LRU 缓存 + 批量缩略图按类型分组并发）
+- `docs/superpowers/specs/2026-10-30-android-startup-sync-download-perf-design.md`（Android 首屏请求并发 + serverUrl 去重 + 库同步有界并发 + 批量下载一次入队）
 
 ---
 

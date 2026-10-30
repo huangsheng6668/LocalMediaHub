@@ -16,11 +16,15 @@ import com.juziss.localmediahub.data.Tag
 import com.juziss.localmediahub.network.NetworkResult
 import com.juziss.localmediahub.network.ServerConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -143,21 +147,32 @@ class HomeViewModel @Inject constructor(
     // the combine collector above so the data projection and the refresh side
     // effect are independent. Using collect (not drop) preserves the original
     // behavior where the first non-blank url also triggers refresh.
+    //
+    // distinctUntilChanged matters here because saveServerConfig() rewrites
+    // the whole preference set (known_servers carries a fresh lastConnected
+    // timestamp), so DataStore re-emits even when the URL itself is unchanged.
+    // Without it, connecting to the already-saved server fires a second
+    // complete refresh chain and a redundant ensureStarted().
     init {
         viewModelScope.launch {
-            serverConfigStore.serverUrl.collect { url ->
-                if (url.isBlank()) {
-                    return@collect
+            serverConfigStore.serverUrl
+                .distinctUntilChanged()
+                .collect { url ->
+                    if (url.isBlank()) {
+                        return@collect
+                    }
+                    ensureClientInitialized(url)
+                    librarySyncManager.ensureStarted()
+                    refresh()
                 }
-                ensureClientInitialized(url)
-                librarySyncManager.ensureStarted()
-                refresh()
-            }
         }
     }
 
+    private var refreshJob: Job? = null
+
     fun refresh() {
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             val serverUrl = _uiState.value.serverLabel
             if (!ensureClientInitialized(serverUrl)) {
                 _uiState.value = _uiState.value.copy(
@@ -169,9 +184,14 @@ class HomeViewModel @Inject constructor(
 
             _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
 
-            val librariesResult = repository.getFolders()
-            val tagsResult = repository.getTags()
-            val fileTagsResult = repository.getFileTags()
+            // The three endpoints are independent; issuing them concurrently
+            // turns three LAN round trips (~25-50ms each) into one.
+            val (librariesResult, tagsResult, fileTagsResult) = coroutineScope {
+                val libraries = async { repository.getFolders() }
+                val tags = async { repository.getTags() }
+                val fileTags = async { repository.getFileTags() }
+                Triple(libraries.await(), tags.await(), fileTags.await())
+            }
 
             val libraries = when (librariesResult) {
                 is NetworkResult.Success -> librariesResult.data.map { folder ->

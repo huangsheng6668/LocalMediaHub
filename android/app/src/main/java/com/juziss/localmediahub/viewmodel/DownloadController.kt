@@ -75,4 +75,22 @@ internal class DownloadController(
             )
         }
     }
+
+    /**
+     * 批量下载入口：一次 IO 线程完成 N 个文件的入队，只回一条提示，
+     * 避免每个文件各弹一次 "已加入后台下载队列"。
+     */
+    fun downloadFiles(
+        files: List<MediaFile>,
+        videoStreamUrl: (MediaFile) -> String,
+        imageUrl: (MediaFile) -> String,
+        onMessage: (String) -> Unit,
+        scope: CoroutineScope
+    ) {
+        if (files.isEmpty()) return
+        scope.launch {
+            val count = downloadManager.downloadFiles(files, videoStreamUrl, imageUrl)
+            onMessage("已加入后台下载队列（$count 项）")
+        }
+    }
 }

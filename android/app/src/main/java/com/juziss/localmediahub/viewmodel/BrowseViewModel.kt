@@ -297,6 +297,16 @@ class BrowseViewModel @Inject constructor(
         )
     }
 
+    fun downloadFiles(files: List<MediaFile>) {
+        downloadController.downloadFiles(
+            files = files,
+            videoStreamUrl = ::getVideoStreamUrl,
+            imageUrl = ::getOriginalImageUrl,
+            onMessage = ::showToast,
+            scope = viewModelScope
+        )
+    }
+
     fun downloadFolder(folder: Folder) {
         downloadController.downloadFolder(
             folder = folder,

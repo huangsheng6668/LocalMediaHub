@@ -8,8 +8,10 @@ import com.juziss.localmediahub.network.ServerConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -23,6 +25,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.atomic.AtomicInteger
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -143,5 +146,31 @@ class LibrarySyncManagerTest {
         assertEquals(5, state2.chapterIndex)
         assertEquals(18, state2.paraIndex)
         assertEquals(25_000L, state2.lastReadAt)
+    }
+
+    @Test
+    fun mapBoundedRunsConcurrentUpToLimitAndPreservesOrder() = runTest(dispatcher) {
+        val inFlight = AtomicInteger(0)
+        val maxInFlight = AtomicInteger(0)
+        val start = currentTime
+
+        val result = (1..20).toList().mapBounded(limit = 4) { item ->
+            maxInFlight.updateAndGet { maxOf(it, inFlight.incrementAndGet()) }
+            delay(20)
+            inFlight.decrementAndGet()
+            item * 2
+        }
+
+        val elapsed = currentTime - start
+        // 20 items at 4 concurrent / 20ms each = 5 waves = 100ms (serial would be 400ms)
+        assertEquals(100L, elapsed)
+        assertEquals(4, maxInFlight.get())
+        assertEquals((1..20).map { it * 2 }, result)
+    }
+
+    @Test
+    fun mapBoundedHandlesEmptyInput() = runTest(dispatcher) {
+        val result = emptyList<Int>().mapBounded(limit = 4) { it * 2 }
+        assertEquals(emptyList<Int>(), result)
     }
 }
