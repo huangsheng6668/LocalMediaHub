@@ -106,6 +106,30 @@ class FavoritesStore @Inject constructor(
     val favoriteEntries: Flow<List<FavoriteEntry>> =
         decoded.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /**
+     * 直接从底层 DataStore 读取已持久化的收藏快照，规避 [favoriteEntries] 作为
+     * 懒启动 `StateFlow` 在尚无活跃订阅者时 `.first()` 立即返回初始 `emptyList()`
+     * 导致同步逻辑误判“本地无收藏”的问题。
+     */
+    suspend fun readFavoriteEntriesSnapshot(): List<FavoriteEntry> = decoded.first()
+
+    /**
+     * 在单个 DataStore 事务中将当前磁盘上的本地收藏与服务端列表合并落盘，
+     * 防止网络请求期间发生的本地收藏变更被覆盖，也避免未预热 StateFlow 造成的数据丢失。
+     */
+    suspend fun mergeWithServerFavorites(server: List<ServerFavorite>): List<FavoriteEntry> {
+        var mergedResult: List<FavoriteEntry> = emptyList()
+        context.favoritesDataStore.edit { preferences ->
+            val currentLocal = preferences[favoritesKey]?.mapNotNull { json ->
+                decodeFavoriteEntryV2(gson, json)
+            } ?: emptyList()
+            val merged = mergeFavoriteEntries(currentLocal, server)
+            preferences[favoritesKey] = merged.map { toJson(it) }.toSet()
+            mergedResult = merged
+        }
+        return mergedResult
+    }
+
     /** 派生：路径/identity 集（文件用 relativePath，目录用 path）。 */
     val favorites: Flow<Set<String>> =
         favoriteEntries.map(::favoriteEntriesToPaths)

@@ -14,10 +14,10 @@ import javax.inject.Singleton
  *
  * 职责：
  * 1. 一次性本地进度迁移上报：将 [RecentActivityStore] 中的 BookProgress 行上报到服务端，
- *    任一成功即置位迁移完成 flag（服务端 lastReadAt 守卫幂等）。
- * 2. 全量收藏双向同步：将本地收藏推送到服务端（幂等），再拉取服务端收藏合并落盘。
- *
- * 任何上报失败均静默降级（[runCatching]）。
+ *    全部成功才置位迁移完成 flag（服务端 lastReadAt 守卫幂等）。
+ * 2. 全量收藏双向同步：直接从 DataStore 读取本地收藏快照推送到服务端（幂等），
+ *    再拉取服务端收藏并在事务内原子合并落盘（防 `StateFlow` 初始空列表抹除离线收藏）。
+ * 3. 阅读时长 pending 补传：保留服务端已读完状态与已有阅读位置。
  */
 @Singleton
 class LibrarySyncManager @Inject constructor(
@@ -47,8 +47,8 @@ class LibrarySyncManager @Inject constructor(
         // ── 1. 进度一次性迁移上报 ─────────────────────────────────────────
         if (!favoritesStore.isProgressMigrationDone()) {
             val all = recentActivityStore.getAllBookProgressFlow().first()
-            var anySuccess = all.isEmpty() // 空列表视为成功（无需迁移）
-            all.forEach { p ->
+            var allSuccess = true
+            for (p in all) {
                 val result = repository.reportReadingState(
                     path = p.path,
                     chapterIndex = p.chapterIndex,
@@ -57,52 +57,89 @@ class LibrarySyncManager @Inject constructor(
                     finished = false,
                     lastReadAt = p.lastReadAt,
                 )
-                if (result is NetworkResult.Success) anySuccess = true
+                if (result !is NetworkResult.Success) {
+                    allSuccess = false
+                }
             }
-            if (anySuccess) favoritesStore.setProgressMigrationDone()
+            if (allSuccess) favoritesStore.setProgressMigrationDone()
         }
 
-        // ── 2. 收藏：全量推送（幂等）+ 拉取合并 ──────────────────────────
-        val local = favoritesStore.favoriteEntries.first()
+        // ── 2. 收藏：全量推送（幂等）+ 拉取事务合并 ──────────────────────
+        val local = favoritesStore.readFavoriteEntriesSnapshot()
         local.forEach { entry ->
             repository.pushServerFavorite(buildFavoriteBody(entry))
         }
         val remote = repository.listServerFavorites()
         if (remote is NetworkResult.Success) {
-            val merged = mergeFavoriteEntries(local, remote.data)
-            favoritesStore.replaceAll(merged)
+            favoritesStore.mergeWithServerFavorites(remote.data)
         }
 
         // ── 3. 阅读时长 pending 补传：逐书按 ≤3600 分片，规避服务端 clamp 截断 ──
         for (bookPath in readingTimeStore.pendingPaths()) {
-            // 防进度回退：先用服务端当前进度回传（等值 upsert no-op），仅叠加 delta；
-            // 拉不到服务端状态视为网络不可用，整段补传下轮再试（pending 未扣减）。
-            var ch = 0; var para = 0; var pct = 0.0
-            when (val remoteState = repository.getReadingState(bookPath)) {
-                is NetworkResult.Success -> remoteState.data.state?.let { st ->
-                    ch = st.chapterIndex; para = st.paraIndex; pct = st.percent
-                }
-                else -> return
+            val remoteState = repository.getReadingState(bookPath)
+            if (remoteState !is NetworkResult.Success) {
+                continue
             }
+            val localProg = recentActivityStore.getBookProgress(bookPath)
+            val flushState = resolveReadingTimeFlushState(
+                serverState = remoteState.data.state,
+                localProgress = localProg,
+                nowMs = System.currentTimeMillis(),
+            )
             while (true) {
                 val chunk = readingTimeStore.takePendingUpto(bookPath, MAX_SYNC_DELTA_SECONDS)
                 if (chunk <= 0) break
                 val result = repository.reportReadingState(
                     path = bookPath,
-                    chapterIndex = ch,
-                    paraIndex = para,
-                    percent = pct,
-                    finished = false,
-                    lastReadAt = System.currentTimeMillis(),
+                    chapterIndex = flushState.chapterIndex,
+                    paraIndex = flushState.paraIndex,
+                    percent = flushState.percent,
+                    finished = flushState.finished,
+                    lastReadAt = flushState.lastReadAt,
                     readSecondsDelta = chunk,
                 )
                 if (result !is NetworkResult.Success) {
                     readingTimeStore.addPending(bookPath, chunk)
-                    break // 该书剩余片与后续书下轮再试
+                    break // 该书剩余片下轮再试
                 }
             }
         }
     }
+}
+
+internal data class ReadingTimeFlushState(
+    val chapterIndex: Int,
+    val paraIndex: Int,
+    val percent: Double,
+    val finished: Boolean,
+    val lastReadAt: Long,
+)
+
+/**
+ * 推导阅读时长补传时携带的进度参数：
+ * - 优先沿用服务端已有进度，若服务端尚无记录则回退本地 [BookProgress]，避免把离线已读章节重置为 0；
+ * - 若服务端已处于 `finished`（或手动标记 `finished`），保持 `finished = true`，防止补传阅读时长冲掉已读完状态；
+ * - 保持真实的 `lastReadAt` 时间戳，避免伪造当前系统时间覆盖其他设备的更新进度。
+ */
+internal fun resolveReadingTimeFlushState(
+    serverState: ReadingStateFull?,
+    localProgress: BookProgress?,
+    nowMs: Long,
+): ReadingTimeFlushState {
+    val ch = serverState?.chapterIndex ?: localProgress?.chapterIndex ?: 0
+    val para = serverState?.paraIndex ?: localProgress?.blockIndex ?: 0
+    val pct = serverState?.percent ?: 0.0
+    val finished = serverState?.finished == true ||
+        ReadingStatus.fromRaw(serverState?.manualStatus) == ReadingStatus.FINISHED
+    val lastReadAt = maxOf(serverState?.lastReadAt ?: 0L, localProgress?.lastReadAt ?: 0L)
+        .takeIf { it > 0L } ?: nowMs
+    return ReadingTimeFlushState(
+        chapterIndex = ch,
+        paraIndex = para,
+        percent = pct,
+        finished = finished,
+        lastReadAt = lastReadAt,
+    )
 }
 
 /** 收藏上报表体（toggle 即时推送与启动全量同步共用；snapshot 为完整 FavoriteEntry）。 */

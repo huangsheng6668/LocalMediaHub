@@ -15,7 +15,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import okhttp3.OkHttpClient
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,7 +38,6 @@ class LibrarySyncManagerTest {
     fun setUp() {
         Dispatchers.setMain(dispatcher)
         context = ApplicationProvider.getApplicationContext()
-        // Clean datastore between tests
         try {
             context.filesDir.resolve("datastore").takeIf { it.exists() }?.deleteRecursively()
         } catch (_: Exception) {}
@@ -68,5 +69,79 @@ class LibrarySyncManagerTest {
         advanceUntilIdle()
         // 无网络：上报失败，迁移未完成，但不崩溃
         assertFalse(favoritesStore.isProgressMigrationDone())
+    }
+
+    @Test
+    fun mergeWithServerFavoritesPreservesOfflineFavoritesWithoutSubscribedStateFlow() = runTest(dispatcher) {
+        val localFile = MediaFile("offline.txt", "/m/offline.txt", "offline.txt", 10L, "2026-01-01", "text", ".txt")
+        val remoteFile = MediaFile("remote.txt", "/m/remote.txt", "remote.txt", 20L, "2026-01-02", "text", ".txt")
+
+        // User adds a favorite while offline; no UI collector is subscribed to favoriteEntries.
+        favoritesStore.addFavorite(localFile, isSystemBrowse = false)
+
+        val snapshotBeforeMerge = favoritesStore.readFavoriteEntriesSnapshot()
+        assertEquals(1, snapshotBeforeMerge.size)
+        assertEquals("offline.txt", snapshotBeforeMerge[0].identity)
+
+        // Server returns its own favorite list that doesn't yet know about offline.txt
+        val merged = favoritesStore.mergeWithServerFavorites(
+            listOf(
+                ServerFavorite(
+                    path = "/m/remote.txt",
+                    isDir = false,
+                    isSystem = false,
+                    title = "remote.txt",
+                    mediaType = "text",
+                    snapshot = FavoriteEntry(file = remoteFile, addedAt = 500L),
+                    addedAt = 500L,
+                )
+            )
+        )
+
+        val identities = merged.map { it.identity }.toSet()
+        assertEquals(setOf("offline.txt", "remote.txt"), identities)
+        assertEquals(
+            setOf("offline.txt", "remote.txt"),
+            favoritesStore.readFavoriteEntriesSnapshot().map { it.identity }.toSet()
+        )
+    }
+
+    @Test
+    fun resolveReadingTimeFlushStatePreservesFinishedAndLocalProgressFallback() {
+        val finishedServer = ReadingStateFull(
+            chapterIndex = 12,
+            paraIndex = 34,
+            percent = 1.0,
+            finished = true,
+            manualStatus = "finished",
+            lastReadAt = 10_000L,
+        )
+        val state1 = resolveReadingTimeFlushState(
+            serverState = finishedServer,
+            localProgress = null,
+            nowMs = 99_000L,
+        )
+        assertTrue("finished status on server must be preserved when flushing reading time", state1.finished)
+        assertEquals(12, state1.chapterIndex)
+        assertEquals(34, state1.paraIndex)
+        assertEquals(10_000L, state1.lastReadAt)
+
+        // When server has no state yet, fall back to local BookProgress instead of resetting to chapter 0
+        val localProg = BookProgress(
+            path = "/m/book.txt",
+            chapterIndex = 5,
+            blockIndex = 18,
+            scrollOffsetPx = 120,
+            lastReadAt = 25_000L,
+        )
+        val state2 = resolveReadingTimeFlushState(
+            serverState = null,
+            localProgress = localProg,
+            nowMs = 99_000L,
+        )
+        assertFalse(state2.finished)
+        assertEquals(5, state2.chapterIndex)
+        assertEquals(18, state2.paraIndex)
+        assertEquals(25_000L, state2.lastReadAt)
     }
 }
