@@ -562,7 +562,7 @@ export async function renderTextReader(container, path, chapterParam, paraParam)
             saveProgress(path, prog);
 
             const chapterParas = paragraphs.filter(p => p.chapterIndex === vis.chapterIndex);
-            const maxParaIdx = chapterParas[chapterParas.length - 1].paraIndex;
+            const maxParaIdx = chapterParas.length > 0 ? chapterParas[chapterParas.length - 1].paraIndex : -1;
             const lastPara = chapterParas.length > 0
                 && chapterParas.every(p => p.bottom <= containerTop + els.content.clientHeight)
                 && vis.paraIndex === maxParaIdx;
