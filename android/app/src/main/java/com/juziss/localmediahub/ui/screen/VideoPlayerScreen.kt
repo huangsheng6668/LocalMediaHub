@@ -63,6 +63,7 @@ import com.juziss.localmediahub.pip.PipControllerStore
 import com.juziss.localmediahub.viewmodel.VideoPlayerViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 
 
@@ -178,16 +179,22 @@ fun VideoPlayerScreen(
     val pausedText = stringResource(R.string.video_paused)
     val playingText = stringResource(R.string.video_playing)
 
-    // Tracks the current playback position across configuration changes (rotation)
-    // so the new ExoPlayer can seek to the correct spot.
+    // Tracks the current playback position across configuration changes
+    // (rotation / process death) so a rebuilt ExoPlayer can seek back.
     // Round 20: key on streamUrl so switching videos resets position.
-    var savedPositionMs by rememberSaveable(streamUrl) { mutableLongStateOf(initialPositionMs) }
+    // The holder is plain state on purpose — see PlaybackProgressPolicy.kt.
+    val positionHolder = rememberSaveable(streamUrl, saver = PlaybackPositionHolderSaver) {
+        PlaybackPositionHolder(initialPositionMs)
+    }
+
+    // Last position written to the store; gates the periodic persistence.
+    val lastPersistedPositionMs = remember(streamUrl) { AtomicLong(initialPositionMs) }
 
     // Wrap the caller's onProgress so this screen also tracks the position
-    // for rememberSaveable (rotation survival). Both the periodic 5s timer
-    // and the dispose-time flush update this.
+    // for process-death survival. The periodic timer, the pause flush and
+    // the dispose-time flush all go through this.
     val wrappedOnProgress: (Long, Long) -> Unit = { positionMs, durationMs ->
-        savedPositionMs = positionMs
+        positionHolder.value = positionMs
         onProgress(positionMs, durationMs)
     }
 
@@ -250,8 +257,8 @@ fun VideoPlayerScreen(
                 // Sync seek before prepare — valid for direct streams AND
                 // HLS playlists (ExoPlayer clamps to the seekable range
                 // once the manifest loads).
-                if (savedPositionMs > 0L) {
-                    seekTo(savedPositionMs)
+                if (positionHolder.value > 0L) {
+                    seekTo(positionHolder.value)
                 }
                 // Hand off audio focus to ExoPlayer so playback pauses other
                 // media apps and resumes when focus returns (Task 5 Step 2).
@@ -306,7 +313,6 @@ fun VideoPlayerScreen(
     // (not `by` delegate) so the anonymous Player.Listener inner class can
     // write `.value` — Kotlin forbids writing delegated vars from inner classes.
     val isBufferingState = remember { mutableStateOf(false) }
-    val isBuffering: Boolean by isBufferingState
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -343,7 +349,15 @@ fun VideoPlayerScreen(
         // 让进程级 PipControllerStore 能拿到 ExoPlayer 实例
         PipControllerStore.bind(exoPlayer)
         onDispose {
-            wrappedOnProgress(exoPlayer.currentPosition, exoPlayer.duration)
+            // Guarded: savePlaybackProgress treats an unknown duration or a
+            // zero position as "no progress" and DELETES the stored entry.
+            // Flushing before the player is ready (or before the resume seek
+            // is applied) would wipe the resume point.
+            val duration = exoPlayer.duration
+            val position = exoPlayer.currentPosition
+            if (duration > 0L && position > 0L) {
+                wrappedOnProgress(position, duration)
+            }
             exoPlayer.release()
             PipControllerStore.unbind()
             (context as? Activity)?.requestedOrientation =
@@ -368,7 +382,9 @@ fun VideoPlayerScreen(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 isBufferingState.value = playbackState == Player.STATE_BUFFERING
                 if (playbackState == Player.STATE_ENDED) {
-                    wrappedOnProgress(exoPlayer.duration, exoPlayer.duration)
+                    if (exoPlayer.duration > 0L) {
+                        wrappedOnProgress(exoPlayer.duration, exoPlayer.duration)
+                    }
                     // Spec §4.3: 视频在 PiP 中自然结束 → 退出 PiP 回全屏结束画面
                     // Android 没有直接 exitPictureInPictureMode() API；通过启动自己 + REORDER_TO_FRONT
                     // 把 Activity 拉回前台，触发 onPictureInPictureModeChanged(false)。
@@ -395,15 +411,30 @@ fun VideoPlayerScreen(
                 }
             }
 
-            // Round 20: update savedPositionMs immediately on any user-initiated
-            // seek (scrubber drag, gesture). Without this, a rotation or process
-            // kill within 5s of a seek would lose the new position.
+            // Round 20: update the in-memory position immediately on any
+            // user-initiated seek (scrubber drag, gesture). Without this, a
+            // rotation within one save tick of a seek would lose the new
+            // position. The store write stays gated (see the progress loop).
             override fun onPositionDiscontinuity(
                 oldPosition: Player.PositionInfo,
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                savedPositionMs = exoPlayer.currentPosition
+                positionHolder.value = exoPlayer.currentPosition
+            }
+
+            // Pausing is the moment a user most often leaves the player, so
+            // persist the exact stop point instead of waiting for the next
+            // tick. STATE_ENDED already persisted the duration above.
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (isPlaying) return
+                if (exoPlayer.playbackState == Player.STATE_ENDED) return
+                val duration = exoPlayer.duration
+                if (duration <= 0L) return
+                val position = exoPlayer.currentPosition
+                if (position <= 0L) return
+                lastPersistedPositionMs.set(position)
+                wrappedOnProgress(position, duration)
             }
 
             // Phase C (spec 2026-09-03-android-transcode-fallback): when the
@@ -425,7 +456,7 @@ fun VideoPlayerScreen(
                     return
                 }
                 autoFallbackAttemptedState.value = true
-                savedPositionMs = posMs
+                positionHolder.value = posMs
                 transcodeEnabledState.value = true
                 // HLS playlist URL (native random seeking) — resume right
                 // at the failure position.
@@ -444,11 +475,19 @@ fun VideoPlayerScreen(
         onDispose { exoPlayer.removeListener(listener) }
     }
 
+    // Refresh the in-memory holder every tick (cheap, unobservable) while
+    // writing the store only when the position actually moved — writing on a
+    // fixed 5 s cadence bumped `updatedAt` even for a paused player.
     LaunchedEffect(exoPlayer) {
         while (true) {
-            delay(5_000)
-            if (exoPlayer.duration > 0L) {
-                wrappedOnProgress(exoPlayer.currentPosition, exoPlayer.duration)
+            delay(PROGRESS_PERSIST_INTERVAL_MS)
+            val duration = exoPlayer.duration
+            if (duration <= 0L) continue
+            val position = exoPlayer.currentPosition
+            positionHolder.value = position
+            if (shouldPersistPlaybackProgress(position, duration, lastPersistedPositionMs.get())) {
+                lastPersistedPositionMs.set(position)
+                onProgress(position, duration)
             }
         }
     }
@@ -459,101 +498,37 @@ fun VideoPlayerScreen(
         BackHandler(onBack = onBack)
     }
 
-    // ---- Gesture state ----
-    var seekState by remember { mutableStateOf(SeekState()) }
-    var playPauseIndicator by remember { mutableStateOf(GestureIndicator()) }
-    var brightnessIndicator by remember { mutableStateOf(GestureIndicator()) }
-    var volumeIndicator by remember { mutableStateOf(GestureIndicator()) }
-
-    // Double-tap seek state
-    var rewindSeekSeconds by remember { mutableIntStateOf(0) }
-    var isRewindRippleVisible by remember { mutableStateOf(false) }
-    var forwardSeekSeconds by remember { mutableIntStateOf(0) }
-    var isForwardRippleVisible by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isRewindRippleVisible) {
-        if (isRewindRippleVisible) {
-            delay(600)
-            isRewindRippleVisible = false
-        }
-    }
-
-    LaunchedEffect(isForwardRippleVisible) {
-        if (isForwardRippleVisible) {
-            delay(600)
-            isForwardRippleVisible = false
-        }
-    }
-
-    // Auto-hide play/pause indicator
-    LaunchedEffect(playPauseIndicator.visible) {
-        if (playPauseIndicator.visible) {
-            delay(800)
-            playPauseIndicator = playPauseIndicator.copy(visible = false)
-        }
-    }
-    LaunchedEffect(brightnessIndicator.visible) {
-        if (brightnessIndicator.visible) {
-            delay(1000)
-            brightnessIndicator = brightnessIndicator.copy(visible = false)
-        }
-    }
-    LaunchedEffect(volumeIndicator.visible) {
-        if (volumeIndicator.visible) {
-            delay(1000)
-            volumeIndicator = volumeIndicator.copy(visible = false)
-        }
-    }
-
-    // Round 22: when resuming from a non-zero position, show a temporary
-    // "restart from beginning" affordance at the bottom-right for 3 seconds.
-    // Gives users a one-tap escape if they actually wanted to start over.
-    var showRestartChip by remember {
-        mutableStateOf(initialPositionMs > 0L)
-    }
-    LaunchedEffect(showRestartChip) {
-        if (showRestartChip) {
-            delay(3_000)
-            showRestartChip = false
-        }
-    }
-
-    // Apply seek on gesture end
-    LaunchedEffect(seekState.isSeeking) {
-        if (!seekState.isSeeking && seekState.offsetMs != 0L) {
-            // Use the base position recorded at gesture start — NOT the
-            // continuously-advancing currentPosition — so the final seek
-            // target matches what the user saw in the overlay indicator.
-            val basePos = seekState.basePositionMs
-            val maxPos = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
-            val newPos = (basePos + seekState.offsetMs).coerceIn(0L, maxPos)
-            // HLS era: both direct and transcoded (HLS) streams seek
-            // natively — the URL-rebuild workaround is gone.
-            exoPlayer.seekTo(newPos)
-            seekState = SeekState()
-        }
+    // ---- Gesture overlay state ----
+    // Plain @Stable holder: the touch listener writes these dozens of times
+    // per drag, and every overlay reads its own slice in PlayerOverlays below.
+    // Reading any of it in this body would recompose the whole player screen
+    // (AndroidView update included) once per touch move.
+    val overlay = remember {
+        PlayerOverlayState(initialShowRestartChip = initialPositionMs > 0L)
     }
 
     val gestureListener = rememberPlayerGestureListener(
         exoPlayer = exoPlayer,
         pausedText = pausedText,
         playingText = playingText,
-        onSeekStateChange = { seekState = it },
-        onBrightnessIndicatorChange = { brightnessIndicator = it },
-        onVolumeIndicatorChange = { volumeIndicator = it },
-        onPlayPauseIndicatorChange = { playPauseIndicator = it },
+        onSeekStateChange = { overlay.seekState = it },
+        onBrightnessIndicatorChange = { overlay.brightnessIndicator = it },
+        onVolumeIndicatorChange = { overlay.volumeIndicator = it },
+        onPlayPauseIndicatorChange = { overlay.playPauseIndicator = it },
         onDoubleTapSeek = { isForward, seconds ->
             if (isForward) {
                 val duration = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
                 val target = (exoPlayer.currentPosition + seconds * 1000L).coerceAtMost(duration)
                 exoPlayer.seekTo(target)
-                forwardSeekSeconds = if (isForwardRippleVisible) forwardSeekSeconds + seconds else seconds
-                isForwardRippleVisible = true
+                overlay.forwardSeekSeconds =
+                    if (overlay.isForwardRippleVisible) overlay.forwardSeekSeconds + seconds else seconds
+                overlay.isForwardRippleVisible = true
             } else {
                 val target = (exoPlayer.currentPosition - seconds * 1000L).coerceAtLeast(0L)
                 exoPlayer.seekTo(target)
-                rewindSeekSeconds = if (isRewindRippleVisible) rewindSeekSeconds + seconds else seconds
-                isRewindRippleVisible = true
+                overlay.rewindSeekSeconds =
+                    if (overlay.isRewindRippleVisible) overlay.rewindSeekSeconds + seconds else seconds
+                overlay.isRewindRippleVisible = true
             }
         }
     )
@@ -593,151 +568,15 @@ fun VideoPlayerScreen(
 
         // ---- Gesture indicator overlays (non-interactive, pass-through) ----
         if (!isInPipMode) {
-            // Seek indicator
-            AnimatedVisibility(
-                visible = seekState.isSeeking,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        painter = painterResource(if (seekState.offsetMs >= 0) R.drawable.ic_fast_forward else R.drawable.ic_fast_rewind),
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = formatSeekOffset(
-                            seekState.offsetMs,
-                            stringResource(R.string.video_seek_min),
-                            stringResource(R.string.video_seek_sec),
-                        ),
-                        color = Color.White,
-                        fontSize = 16.sp
-                    )
-                }
-            }
-
-            // Play/Pause indicator
-            AnimatedVisibility(
-                visible = playPauseIndicator.visible,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                ) {
-                    val iconResId = playPauseIndicator.iconResId
-                    val iconVector = playPauseIndicator.icon
-                    val playPausePainter = when {
-                        iconResId != null -> painterResource(iconResId)
-                        iconVector != null -> rememberVectorPainter(iconVector)
-                        else -> rememberVectorPainter(Icons.Default.PlayArrow)
-                    }
-                    Icon(
-                        painter = playPausePainter,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(36.dp)
-                    )
-                }
-            }
-
-            // Top Center Volume / Brightness Pill HUD
-            val isPillVisible = brightnessIndicator.visible || volumeIndicator.visible
-            val pillIcon = ImageVector.vectorResource(if (volumeIndicator.visible) R.drawable.ic_volume_up else R.drawable.ic_brightness_6)
-            val pillText = if (volumeIndicator.visible) volumeIndicator.text else brightnessIndicator.text
-            val pillProgress = if (volumeIndicator.visible) volumeIndicator.progress else brightnessIndicator.progress
-
-            VolumeBrightnessPillHud(
-                icon = pillIcon,
-                text = pillText,
-                progress = pillProgress,
-                visible = isPillVisible,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 16.dp)
+            PlayerOverlays(
+                exoPlayer = exoPlayer,
+                overlay = overlay,
+                isBuffering = isBufferingState,
+                onRestart = {
+                    exoPlayer.seekTo(0L)
+                    positionHolder.value = 0L
+                },
             )
-
-            // Double-Tap Seek Ripples
-            DoubleTapSeekRippleOverlay(
-                isForward = false,
-                seekSeconds = rewindSeekSeconds,
-                visible = isRewindRippleVisible,
-                modifier = Modifier.align(Alignment.CenterStart)
-            )
-
-            DoubleTapSeekRippleOverlay(
-                isForward = true,
-                seekSeconds = forwardSeekSeconds,
-                visible = isForwardRippleVisible,
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
-
-            // Round 22: "restart from beginning" chip — shown for 3s after resuming
-            // a non-zero position. Tap to seek back to 0 without reloading.
-            AnimatedVisibility(
-                visible = showRestartChip,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.BottomEnd)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier
-                        .padding(end = 16.dp, bottom = 24.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
-                        .clickable {
-                            exoPlayer.seekTo(0L)
-                            savedPositionMs = 0L
-                            showRestartChip = false
-                        }
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_fast_rewind),
-                        contentDescription = stringResource(R.string.video_restart_from_beginning),
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.resume_dialog_btn_restart),
-                        color = Color.White,
-                        fontSize = 13.sp,
-                    )
-                }
-            }
-
-            // Buffering indicator
-            AnimatedVisibility(
-                visible = isBuffering,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(72.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                ) {
-                    CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
-                }
-            }
 
             // PiP 按钮（只在非 PiP 全屏模式下显示）
             IconButton(
@@ -793,5 +632,271 @@ private fun formatSeekOffset(offsetMs: Long, minUnit: String, secUnit: String): 
         "$sign${min}$minUnit${sec}$secUnit"
     } else {
         "$sign${seconds}$secUnit"
+    }
+}
+
+/**
+ * Gesture overlay state, written by the touch listener dozens of times per
+ * drag. Kept as a plain holder whose fields are snapshot states so that only
+ * the overlay that reads a given field recomposes — never the player screen
+ * (and therefore never the PlayerView `AndroidView`).
+ */
+@Stable
+private class PlayerOverlayState(initialShowRestartChip: Boolean = false) {
+    var seekState by mutableStateOf(SeekState())
+    var playPauseIndicator by mutableStateOf(GestureIndicator())
+    var brightnessIndicator by mutableStateOf(GestureIndicator())
+    var volumeIndicator by mutableStateOf(GestureIndicator())
+
+    var rewindSeekSeconds by mutableIntStateOf(0)
+    var isRewindRippleVisible by mutableStateOf(false)
+    var forwardSeekSeconds by mutableIntStateOf(0)
+    var isForwardRippleVisible by mutableStateOf(false)
+
+    // Round 22: "restart from beginning" chip, shown for 3s after resuming
+    // from a non-zero position.
+    var showRestartChip by mutableStateOf(initialShowRestartChip)
+}
+
+/**
+ * Non-interactive gesture chrome. Each leaf reads only its own slice of
+ * [PlayerOverlayState]; the container itself reads none, so a seek drag
+ * recomposes [SeekIndicator] alone and a volume drag only
+ * [VolumeBrightnessPill].
+ */
+@Composable
+private fun BoxScope.PlayerOverlays(
+    exoPlayer: Player,
+    overlay: PlayerOverlayState,
+    isBuffering: State<Boolean>,
+    onRestart: () -> Unit,
+) {
+    SeekIndicator(exoPlayer, overlay)
+    PlayPauseIndicator(overlay)
+    VolumeBrightnessPill(overlay)
+    DoubleTapRipples(overlay)
+    RestartChip(overlay, onRestart)
+    BufferingIndicator(isBuffering)
+}
+
+@Composable
+private fun BoxScope.SeekIndicator(exoPlayer: Player, overlay: PlayerOverlayState) {
+    val seekState = overlay.seekState
+
+    // Apply seek on gesture end
+    LaunchedEffect(seekState.isSeeking) {
+        if (!seekState.isSeeking && seekState.offsetMs != 0L) {
+            // Use the base position recorded at gesture start — NOT the
+            // continuously-advancing currentPosition — so the final seek
+            // target matches what the user saw in the overlay indicator.
+            val basePos = seekState.basePositionMs
+            val maxPos = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
+            val newPos = (basePos + seekState.offsetMs).coerceIn(0L, maxPos)
+            // HLS era: both direct and transcoded (HLS) streams seek
+            // natively — the URL-rebuild workaround is gone.
+            exoPlayer.seekTo(newPos)
+            overlay.seekState = SeekState()
+        }
+    }
+
+    AnimatedVisibility(
+        visible = seekState.isSeeking,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier.align(Alignment.Center)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Icon(
+                painter = painterResource(if (seekState.offsetMs >= 0) R.drawable.ic_fast_forward else R.drawable.ic_fast_rewind),
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = formatSeekOffset(
+                    seekState.offsetMs,
+                    stringResource(R.string.video_seek_min),
+                    stringResource(R.string.video_seek_sec),
+                ),
+                color = Color.White,
+                fontSize = 16.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.PlayPauseIndicator(overlay: PlayerOverlayState) {
+    val indicator = overlay.playPauseIndicator
+
+    LaunchedEffect(indicator.visible) {
+        if (indicator.visible) {
+            delay(800)
+            overlay.playPauseIndicator = overlay.playPauseIndicator.copy(visible = false)
+        }
+    }
+
+    AnimatedVisibility(
+        visible = indicator.visible,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier.align(Alignment.Center)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(64.dp)
+                .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+        ) {
+            val iconResId = indicator.iconResId
+            val iconVector = indicator.icon
+            val playPausePainter = when {
+                iconResId != null -> painterResource(iconResId)
+                iconVector != null -> rememberVectorPainter(iconVector)
+                else -> rememberVectorPainter(Icons.Default.PlayArrow)
+            }
+            Icon(
+                painter = playPausePainter,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(36.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.VolumeBrightnessPill(overlay: PlayerOverlayState) {
+    LaunchedEffect(overlay.brightnessIndicator.visible) {
+        if (overlay.brightnessIndicator.visible) {
+            delay(1000)
+            overlay.brightnessIndicator = overlay.brightnessIndicator.copy(visible = false)
+        }
+    }
+    LaunchedEffect(overlay.volumeIndicator.visible) {
+        if (overlay.volumeIndicator.visible) {
+            delay(1000)
+            overlay.volumeIndicator = overlay.volumeIndicator.copy(visible = false)
+        }
+    }
+
+    val brightness = overlay.brightnessIndicator
+    val volume = overlay.volumeIndicator
+    val isPillVisible = brightness.visible || volume.visible
+    val pillIcon = ImageVector.vectorResource(
+        if (volume.visible) R.drawable.ic_volume_up else R.drawable.ic_brightness_6
+    )
+    val pillText = if (volume.visible) volume.text else brightness.text
+    val pillProgress = if (volume.visible) volume.progress else brightness.progress
+
+    VolumeBrightnessPillHud(
+        icon = pillIcon,
+        text = pillText,
+        progress = pillProgress,
+        visible = isPillVisible,
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .statusBarsPadding()
+            .padding(top = 16.dp)
+    )
+}
+
+@Composable
+private fun BoxScope.DoubleTapRipples(overlay: PlayerOverlayState) {
+    LaunchedEffect(overlay.isRewindRippleVisible) {
+        if (overlay.isRewindRippleVisible) {
+            delay(600)
+            overlay.isRewindRippleVisible = false
+        }
+    }
+    LaunchedEffect(overlay.isForwardRippleVisible) {
+        if (overlay.isForwardRippleVisible) {
+            delay(600)
+            overlay.isForwardRippleVisible = false
+        }
+    }
+
+    DoubleTapSeekRippleOverlay(
+        isForward = false,
+        seekSeconds = overlay.rewindSeekSeconds,
+        visible = overlay.isRewindRippleVisible,
+        modifier = Modifier.align(Alignment.CenterStart)
+    )
+
+    DoubleTapSeekRippleOverlay(
+        isForward = true,
+        seekSeconds = overlay.forwardSeekSeconds,
+        visible = overlay.isForwardRippleVisible,
+        modifier = Modifier.align(Alignment.CenterEnd)
+    )
+}
+
+@Composable
+private fun BoxScope.RestartChip(overlay: PlayerOverlayState, onRestart: () -> Unit) {
+    LaunchedEffect(overlay.showRestartChip) {
+        if (overlay.showRestartChip) {
+            delay(3_000)
+            overlay.showRestartChip = false
+        }
+    }
+
+    AnimatedVisibility(
+        visible = overlay.showRestartChip,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier.align(Alignment.BottomEnd)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .padding(end = 16.dp, bottom = 24.dp)
+                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                .clickable {
+                    overlay.showRestartChip = false
+                    onRestart()
+                }
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_fast_rewind),
+                contentDescription = stringResource(R.string.video_restart_from_beginning),
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(
+                text = stringResource(R.string.resume_dialog_btn_restart),
+                color = Color.White,
+                fontSize = 13.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.BufferingIndicator(isBuffering: State<Boolean>) {
+    val buffering by isBuffering
+
+    AnimatedVisibility(
+        visible = buffering,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier.align(Alignment.Center)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(72.dp)
+                .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+        ) {
+            CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
+        }
     }
 }

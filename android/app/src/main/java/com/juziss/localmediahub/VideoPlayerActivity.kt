@@ -10,14 +10,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.core.content.ContextCompat
 import com.juziss.localmediahub.data.MediaFile
 import com.juziss.localmediahub.data.RecentActivityStore
+import com.juziss.localmediahub.di.ApplicationScope
 import com.juziss.localmediahub.pip.PipController
 import com.juziss.localmediahub.ui.screen.VideoPlayerScreen
 import com.juziss.localmediahub.ui.theme.LocalMediaHubTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -41,6 +42,13 @@ class VideoPlayerActivity : ComponentActivity() {
 
     @Inject
     lateinit var recentActivityStore: RecentActivityStore
+
+    // Outlives the composition: the dispose-time progress flush fires after
+    // VideoPlayerScreen leaves composition, and a rememberCoroutineScope()
+    // there would be cancelled before the DataStore write runs.
+    @Inject
+    @ApplicationScope
+    lateinit var appScope: CoroutineScope
 
     val pipController = PipController()
     val isInPipMode: StateFlow<Boolean> get() = pipController.isInPipMode
@@ -86,7 +94,6 @@ class VideoPlayerActivity : ComponentActivity() {
 
         setContent {
             LocalMediaHubTheme {
-                val appScope = rememberCoroutineScope()
                 VideoPlayerScreen(
                     streamUrl = streamUrl,
                     initialPositionMs = initialPositionMs,

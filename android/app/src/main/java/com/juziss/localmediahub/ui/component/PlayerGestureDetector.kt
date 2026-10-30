@@ -30,6 +30,31 @@ data class GestureIndicator(
     val progress: Float = 0f,
 )
 
+/** Integer percent used by the volume/brightness HUD (`"45%"`). */
+internal fun quantizeGesturePercent(fraction: Float): Int =
+    (fraction * 100f).toInt().coerceIn(0, 100)
+
+/**
+ * Suppresses repeated indicator updates for an unchanged integer percent.
+ *
+ * ACTION_MOVE fires far more often than the displayed percent changes, and
+ * every emission costs a system call (AudioManager / WindowManager) plus a
+ * snapshot write.
+ */
+internal class GesturePercentGate {
+    private var lastPercent = Int.MIN_VALUE
+
+    fun shouldEmit(percent: Int): Boolean {
+        if (percent == lastPercent) return false
+        lastPercent = percent
+        return true
+    }
+
+    fun reset() {
+        lastPercent = Int.MIN_VALUE
+    }
+}
+
 @Composable
 fun rememberPlayerGestureListener(
     exoPlayer: Player,
@@ -65,6 +90,13 @@ fun rememberPlayerGestureListener(
         var gestureActive = false
         var lastSeekTargetPosition = -1L
         var currentSeekState = SeekState()
+        // AudioManager + its max volume are cached for the duration of one
+        // gesture: querying them per ACTION_MOVE meant 2–3 binder calls per
+        // touch event.
+        var audioManager: AudioManager? = null
+        var maxVolume = 0
+        val brightnessGate = GesturePercentGate()
+        val volumeGate = GesturePercentGate()
 
         fun getBrightness(context: Context): Float {
             val activity = context as? Activity ?: return 0.5f
@@ -78,22 +110,6 @@ fun rememberPlayerGestureListener(
             val params = activity.window.attributes
             params.screenBrightness = clamped
             activity.window.attributes = params
-        }
-
-        fun getVolume(context: Context): Int {
-            val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            return am.getStreamVolume(AudioManager.STREAM_MUSIC)
-        }
-
-        fun getMaxVolume(context: Context): Int {
-            val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            return am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        }
-
-        fun setVolume(context: Context, vol: Int) {
-            val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            am.setStreamVolume(AudioManager.STREAM_MUSIC, vol.coerceIn(0, max), 0)
         }
 
         View.OnTouchListener { view, event ->
@@ -132,8 +148,13 @@ fun rememberPlayerGestureListener(
 
                     isDragging = false
                     isHorizontal = null
+                    val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    audioManager = am
+                    maxVolume = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     brightnessStart = getBrightness(ctx)
-                    volumeStart = getVolume(ctx)
+                    volumeStart = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    brightnessGate.reset()
+                    volumeGate.reset()
                     currentSeekState = SeekState()
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -180,29 +201,38 @@ fun rememberPlayerGestureListener(
 
                             if (isLeftHalf) {
                                 val newBrightness = (brightnessStart + progress).coerceIn(0f, 1f)
-                                setBrightness(ctx, newBrightness)
-                                currentOnBrightnessIndicatorChange.value(
-                                    GestureIndicator(
-                                        visible = true,
-                                        iconResId = R.drawable.ic_brightness_6,
-                                        text = "${(newBrightness * 100).toInt()}%",
-                                        progress = newBrightness,
+                                val percent = quantizeGesturePercent(newBrightness)
+                                if (brightnessGate.shouldEmit(percent)) {
+                                    setBrightness(ctx, newBrightness)
+                                    currentOnBrightnessIndicatorChange.value(
+                                        GestureIndicator(
+                                            visible = true,
+                                            iconResId = R.drawable.ic_brightness_6,
+                                            text = "$percent%",
+                                            progress = newBrightness,
+                                        )
                                     )
-                                )
+                                }
                             } else {
-                                val maxVol = getMaxVolume(ctx)
-                                val delta = (progress * maxVol).toInt()
-                                val newVol = (volumeStart + delta).coerceIn(0, maxVol)
-                                setVolume(ctx, newVol)
-                                val volProgress = if (maxVol > 0) newVol.toFloat() / maxVol else 0f
-                                currentOnVolumeIndicatorChange.value(
-                                    GestureIndicator(
-                                        visible = true,
-                                        iconResId = R.drawable.ic_volume_up,
-                                        text = "${(volProgress * 100).toInt()}%",
-                                        progress = volProgress,
+                                val delta = (progress * maxVolume).toInt()
+                                val newVol = (volumeStart + delta).coerceIn(0, maxVolume)
+                                val volProgress = if (maxVolume > 0) newVol.toFloat() / maxVolume else 0f
+                                val percent = quantizeGesturePercent(volProgress)
+                                if (volumeGate.shouldEmit(percent)) {
+                                    audioManager?.setStreamVolume(
+                                        AudioManager.STREAM_MUSIC,
+                                        newVol,
+                                        0,
                                     )
-                                )
+                                    currentOnVolumeIndicatorChange.value(
+                                        GestureIndicator(
+                                            visible = true,
+                                            iconResId = R.drawable.ic_volume_up,
+                                            text = "$percent%",
+                                            progress = volProgress,
+                                        )
+                                    )
+                                }
                             }
                         }
                     }
