@@ -6,17 +6,40 @@ import { state } from './state.js';
 import { showToast } from './toast.js';
 import { apiRequest, withMediaAuthToken } from './api.js';
 import { elements } from './dom.js';
-import { formatSize, encodeRoutePath, escapeHtml } from './utils.js';
+import { formatSize, encodeRoutePath, escapeHtml, computeInitialRenderCount } from './utils.js';
 import { openMedia } from './lightbox.js';
 import { deleteMediaFile, deleteFolder } from './delete.js';
 import { refreshDecorations, decorateBrowserList, toggleFavorite, markStatus, openStatusMenu, applyListFilters, getDecorations } from './library.js';
-import { initScrollMemory, restoreScrollMemory, clearScrollMemory } from './scrollMemory.js';
+import { initScrollMemory, restoreScrollMemory, clearScrollMemory, recallScroll } from './scrollMemory.js';
 
 // Module-level variables for currently rendered items in browser list
 let shownFolders = [];
 let shownFiles = [];
 
 const NAME_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+// Large directories (spec 2026-10-30-web-large-dir-render): all card HTML is
+// built up front (data stays fully in memory so filters/sort/search keep
+// working on the complete arrays), but only the first chunk is injected
+// synchronously — the remainder is appended in idle ticks so the first paint
+// is not blocked by a multi-thousand-card innerHTML parse.
+const RENDER_FIRST_CHUNK = 120;
+const RENDER_CHUNK_SIZE = 400;
+const RENDER_CHUNK_DELAY_MS = 16;
+
+let renderGeneration = 0;
+let renderChunkTimer = 0;
+
+// Invalidates any in-flight chunk chain. Must run before any code replaces
+// the grid wholesale (renderBrowserList, loading notes, roots/drives lists),
+// otherwise a stale append lands in the new content.
+function cancelChunkRendering() {
+    renderGeneration++;
+    if (renderChunkTimer) {
+        clearTimeout(renderChunkTimer);
+        renderChunkTimer = 0;
+    }
+}
 
 // ── Inline SVG icon vocabulary (mirrors index.html / Task 6 icons) ──
 // Monochrome currentColor stroke icons replace the former emoji glyphs in
@@ -55,6 +78,7 @@ function syncBrowserHash() {
 
 // Load Root directories in file browser
 export async function loadRoots() {
+    cancelChunkRendering();
     state.currentPath = '';
     state.pathHistory = [];
     state.isSystemBrowse = false;
@@ -116,6 +140,7 @@ export async function loadRoots() {
 
 // Browse arbitrary absolute paths (System folders)
 export async function loadSystemDrives() {
+    cancelChunkRendering();
     state.isSystemBrowse = true;
     state.currentPath = '/system';
     shownFiles = [];
@@ -161,6 +186,7 @@ export async function loadSystemDrives() {
 // response. Required because server-side JSON list endpoints are served with
 // Cache-Control: max-age=N for bandwidth savings.
 export async function browsePath(path, bypassCache = false) {
+    cancelChunkRendering();
     state.currentPath = path;
     syncBrowserHash();
 
@@ -269,30 +295,10 @@ function sortMediaItems(items, field, order, isFolder = false) {
 }
 
 // Render folder & file cards in browser grid
-export function renderBrowserList() {
-    state.currentFolders = sortMediaItems(state.currentFolders, state.sortField, state.sortOrder, true);
-    state.currentFiles = sortMediaItems(state.currentFiles, state.sortField, state.sortOrder, false);
-
-    const filtered = applyListFilters(state.currentFolders, state.currentFiles, getDecorations(),
-        { favoritesOnly: state.favoritesOnly, statusFilter: state.statusFilter });
-    shownFolders = filtered.folders;
-    shownFiles = filtered.files;
-
-    if (shownFolders.length === 0 && shownFiles.length === 0) {
-        const msg = (state.favoritesOnly || state.statusFilter != null)
-            ? '当前筛选下无匹配内容'
-            : '当前目录为空（无媒体文件）';
-        elements.browserList.innerHTML = `<div class="browser-empty-grid">${msg}</div>`; // XSS-SAFE: hardcoded literal
-        return;
-    }
-
-    let html = '';
-
-    // 1. Folders
-    shownFolders.forEach((folder, index) => {
-        const safePath = escapeHtml(folder.path.replace(/\\/g, '/'));
-        const safeName = escapeHtml(folder.name);
-        html += `
+function buildFolderCardHtml(folder, index) {
+    const safePath = escapeHtml(folder.path.replace(/\\/g, '/'));
+    const safeName = escapeHtml(folder.name);
+    return `
             <div class="media-card" data-action="browse" data-path="${safePath}" data-media-type="folder"
                  role="button" tabindex="0" aria-label="打开文件夹 ${safeName}">
                 <div class="card-preview">
@@ -310,33 +316,32 @@ export function renderBrowserList() {
                 </div>
             </div>
         `;
-    });
+}
 
-    // 2. Media Files
-    shownFiles.forEach((file, index) => {
-        const rawExt = (file.extension || (file.path ? file.path.slice(file.path.lastIndexOf('.')) : '')).toLowerCase();
-        const ext = rawExt.startsWith('.') ? rawExt : (rawExt ? '.' + rawExt : '');
-        const isTextExt = ['.txt', '.epub', '.mobi', '.azw3'].includes(ext);
-        const isText = file.media_type === 'text' || isTextExt;
-        const isVideo = file.media_type === 'video' && !isTextExt;
+function buildFileCardHtml(file, index) {
+    const rawExt = (file.extension || (file.path ? file.path.slice(file.path.lastIndexOf('.')) : '')).toLowerCase();
+    const ext = rawExt.startsWith('.') ? rawExt : (rawExt ? '.' + rawExt : '');
+    const isTextExt = ['.txt', '.epub', '.mobi', '.azw3'].includes(ext);
+    const isText = file.media_type === 'text' || isTextExt;
+    const isVideo = file.media_type === 'video' && !isTextExt;
 
-        // Text / ebook files (Task 15): render as a "document card" with a doc
-        // icon instead of a thumbnail. .txt and .epub open the reader at
-        // #/read?path=...; other text extensions (mobi/azw3) are surfaced by
-        // the scanner under media_type=text but cannot be opened by the reader
-        // — show a "暂不支持" badge and a toast on click so the user knows why
-        // nothing happens.
-        if (isText) {
-            const isUnsupportedText = !['.txt', '.epub'].includes(ext);
-            // Both .txt and .epub use the doc icon; the extension badge
-            // (TXT/EPUB) in card-meta distinguishes the two formats.
-            const docIcon = ICONS.doc();
-            const safeName = escapeHtml(file.name);
-            const safeExt = escapeHtml(file.extension || ext);
-            const unsupportedBadge = isUnsupportedText
-                ? '<span class="card-badge card-badge--unsupported">暂不支持</span>'
-                : '';
-            html += `
+    // Text / ebook files (Task 15): render as a "document card" with a doc
+    // icon instead of a thumbnail. .txt and .epub open the reader at
+    // #/read?path=...; other text extensions (mobi/azw3) are surfaced by
+    // the scanner under media_type=text but cannot be opened by the reader
+    // — show a "暂不支持" badge and a toast on click so the user knows why
+    // nothing happens.
+    if (isText) {
+        const isUnsupportedText = !['.txt', '.epub'].includes(ext);
+        // Both .txt and .epub use the doc icon; the extension badge
+        // (TXT/EPUB) in card-meta distinguishes the two formats.
+        const docIcon = ICONS.doc();
+        const safeName = escapeHtml(file.name);
+        const safeExt = escapeHtml(file.extension || ext);
+        const unsupportedBadge = isUnsupportedText
+            ? '<span class="card-badge card-badge--unsupported">暂不支持</span>'
+            : '';
+        return `
                 <div class="media-card text-card ${isUnsupportedText ? 'text-card--unsupported' : ''}"
                      data-action="${isUnsupportedText ? 'text-unsupported' : 'text-open'}"
                      data-path="${escapeHtml(file.path)}"
@@ -362,41 +367,40 @@ export function renderBrowserList() {
                     </div>
                 </div>
             `;
-            return;
-        }
+    }
 
-        // Keyword consumed by the thumbnail error handler below (maps to the
-        // SVG vocabulary — never interpolated raw into the DOM).
-        const fallbackIcon = isVideo ? 'video' : 'image';
-        let previewHtml = '';
-        let playOverlay = '';
+    // Keyword consumed by the thumbnail error handler below (maps to the
+    // SVG vocabulary — never interpolated raw into the DOM).
+    const fallbackIcon = isVideo ? 'video' : 'image';
+    let previewHtml = '';
+    let playOverlay = '';
 
-        let thumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/images/${encodeRoutePath(file.path)}/thumbnail`);
-        if (state.isSystemBrowse) {
-            thumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/system/thumbnail?path=${encodeURIComponent(file.path)}`);
-        }
+    let thumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/images/${encodeRoutePath(file.path)}/thumbnail`);
+    if (state.isSystemBrowse) {
+        thumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/system/thumbnail?path=${encodeURIComponent(file.path)}`);
+    }
 
-        if (isVideo) {
-            const videoThumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/thumbnail`);
-            const videoUrl = state.isSystemBrowse ? thumbUrl : videoThumbUrl;
-            // loading=lazy + decoding=async: off-screen cards defer their
-            // thumbnail fetch/decode instead of storming the server with one
-            // request per card the moment the grid is injected.
-            previewHtml = `<img src="${escapeHtml(videoUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}" loading="lazy" decoding="async">`;
-            playOverlay = `
+    if (isVideo) {
+        const videoThumbUrl = withMediaAuthToken(`${state.apiBase}/api/v1/videos/${encodeRoutePath(file.path)}/thumbnail`);
+        const videoUrl = state.isSystemBrowse ? thumbUrl : videoThumbUrl;
+        // loading=lazy + decoding=async: off-screen cards defer their
+        // thumbnail fetch/decode instead of storming the server with one
+        // request per card the moment the grid is injected.
+        previewHtml = `<img src="${escapeHtml(videoUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}" loading="lazy" decoding="async">`;
+        playOverlay = `
                 <div class="play-overlay">
                     <div class="play-button-circle">${ICONS.play()}</div>
                 </div>
             `;
-        } else {
-            previewHtml = `<img src="${escapeHtml(thumbUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}" loading="lazy" decoding="async">`;
-        }
+    } else {
+        previewHtml = `<img src="${escapeHtml(thumbUrl)}" class="card-thumb" alt="${escapeHtml(file.name)}" loading="lazy" decoding="async">`;
+    }
 
-        const cardClass = 'media-card';
-        const safeName = escapeHtml(file.name);
-        const safeExt = escapeHtml(file.extension);
+    const cardClass = 'media-card';
+    const safeName = escapeHtml(file.name);
+    const safeExt = escapeHtml(file.extension);
 
-        html += `
+    return `
             <div class="${escapeHtml(cardClass)}" data-action="open" data-path="${escapeHtml(file.path)}" data-media-type="${isVideo ? 'video' : 'image'}" data-index="${index}"
                  role="button" tabindex="0" aria-label="${isVideo ? '播放' : '查看'} ${safeName}">
                 <div class="card-preview" data-fallback-icon="${fallbackIcon}">
@@ -416,12 +420,78 @@ export function renderBrowserList() {
                 </div>
             </div>
         `;
+}
+
+// Appends the remaining cards in RENDER_CHUNK_SIZE batches, one per idle tick.
+// Every batch is decorated immediately so favourites/reading badges appear as
+// cards arrive. The generation check drops the chain when a newer render (or a
+// navigation that replaced the grid) has superseded this one.
+function scheduleChunkAppend(cards, nextIndex, generation) {
+    renderChunkTimer = setTimeout(() => {
+        renderChunkTimer = 0;
+        if (generation !== renderGeneration) return;
+        const end = Math.min(cards.length, nextIndex + RENDER_CHUNK_SIZE);
+        const chunk = cards.slice(nextIndex, end).map(c => c.html).join('');
+        // XSS-SAFE: card HTML comes from build*CardHtml, which escapeHtml-wraps every dynamic field.
+        elements.browserList.insertAdjacentHTML('beforeend', chunk);
+        decorateBrowserList(elements.browserList);
+        if (end < cards.length) {
+            scheduleChunkAppend(cards, end, generation);
+        } else {
+            restoreScrollMemory(document.querySelector('.view-container'), state.currentPath);
+        }
+    }, RENDER_CHUNK_DELAY_MS);
+}
+
+export function renderBrowserList() {
+    cancelChunkRendering();
+    const generation = renderGeneration;
+
+    state.currentFolders = sortMediaItems(state.currentFolders, state.sortField, state.sortOrder, true);
+    state.currentFiles = sortMediaItems(state.currentFiles, state.sortField, state.sortOrder, false);
+
+    const filtered = applyListFilters(state.currentFolders, state.currentFiles, getDecorations(),
+        { favoritesOnly: state.favoritesOnly, statusFilter: state.statusFilter });
+    shownFolders = filtered.folders;
+    shownFiles = filtered.files;
+
+    if (shownFolders.length === 0 && shownFiles.length === 0) {
+        const msg = (state.favoritesOnly || state.statusFilter != null)
+            ? '当前筛选下无匹配内容'
+            : '当前目录为空（无媒体文件）';
+        elements.browserList.innerHTML = `<div class="browser-empty-grid">${msg}</div>`; // XSS-SAFE: hardcoded literal
+        return;
+    }
+
+    // Folder cards carry a forward-slash path in data-path (pre-existing
+    // rendering contract), so the anchor key must mirror the DOM value —
+    // scroll memory captures el.dataset.path.
+    const cards = [];
+    shownFolders.forEach((folder, index) => {
+        cards.push({ path: folder.path.replace(/\\/g, '/'), html: buildFolderCardHtml(folder, index) });
+    });
+    shownFiles.forEach((file, index) => {
+        cards.push({ path: file.path, html: buildFileCardHtml(file, index) });
     });
 
-    elements.browserList.innerHTML = html; // XSS-SAFE: html built entirely from escapeHtml-wrapped folder/file fields above
+    // A remembered scroll anchor below the first chunk extends the synchronous
+    // batch: restoreScrollMemory resolves the anchor by selector and silently
+    // gives up when its card is not in the DOM yet.
+    const anchor = recallScroll(state.currentPath);
+    const anchorIndex = anchor && anchor.anchorPath
+        ? cards.findIndex(c => c.path === anchor.anchorPath)
+        : -1;
+    const initialCount = computeInitialRenderCount(cards.length, RENDER_FIRST_CHUNK, anchorIndex);
+
+    // XSS-SAFE: card HTML comes from build*CardHtml, which escapeHtml-wraps every dynamic field.
+    elements.browserList.innerHTML = cards.slice(0, initialCount).map(c => c.html).join('');
     decorateBrowserList(elements.browserList);
-    refreshDecorations(() => renderBrowserList());
     restoreScrollMemory(document.querySelector('.view-container'), state.currentPath);
+    refreshDecorations(() => renderBrowserList());
+
+    if (initialCount < cards.length) {
+        scheduleChunkAppend(cards, initialCount, generation);
+    }
 }
 
 // Delegated click dispatcher for breadcrumbs
@@ -471,6 +541,7 @@ async function triggerBrowserSearch() {
         return;
     }
 
+    cancelChunkRendering();
     elements.browserList.innerHTML = '<div class="browser-status-note">全局模糊匹配检索中...</div>'; // XSS-SAFE: hardcoded literal
 
     try {

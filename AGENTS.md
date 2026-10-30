@@ -88,6 +88,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **播放源选择（spec 2026-10-30-web-direct-play）**：`.mp4/.m4v/.mov/.webm` 优先「原画」直连 `/api/v1/media/stream`（HTTP Range，拖动即时、不启动 ffmpeg、不加载 hls.js），按钮「原画/转码」可手动切换并保持播放位置；直连失败自动回退 HLS——`error`（MEDIA_ERR_DECODE/SRC_NOT_SUPPORTED）与「音轨可播但视频轨解不出」的静默黑屏（`loadedmetadata` 时 `videoWidth === 0`）两条路径都覆盖，失败路径记入 `directPlayBlocked`，重开直接走转码
 - **拖动预热与状态提示（spec 2026-10-30 Phase 2）**：HLS 远距离拖动先 `fetch` 锚定 playlist（服务端阻塞到首片就绪）再切换源，预热期间暂停旧画面并显示 `#video-status-overlay`「定位中…」；`reanchorSeq` 代际 + `AbortController` 作废过期预热（最后一次拖动生效）；`waiting` 持续 300ms 才显示「缓冲中…」，`playing/canplay/seeked` 收起
 - **转码会话自愈（spec 2026-10-30 Phase 3）**：hls.js fatal network error 且 `fragLoadError`/`levelLoadError` + HTTP 404（会话被空闲回收或磁盘 LRU 淘汰）时按当前绝对位置自动重锚新会话（`shouldReanchorOnHlsError`，15s 冷却；401/403/503 不触发），不再对已删除分片无限重试；`maxBufferSize` 60MB → 96MB 保高码率源前向缓冲
+- **大目录增量渲染（spec 2026-10-30-web-large-dir-render）**：浏览目录不再一次性注入全部卡片——`renderBrowserList` 先同步渲染首批 120 张（若滚动锚点更深则扩展到覆盖锚点，`computeInitialRenderCount`），其余按 400 张 / `setTimeout 16ms` 异步追加，每批后 `decorateBrowserList`；`cancelChunkRendering` 代际取消覆盖 `browsePath` / `loadRoots` / `loadSystemDrives` / 搜索加载态，防过期批次写入新内容。数据仍全量在内存，筛选/排序/搜索/点击分发契约不变；2000 文件目录首批渲染 188ms → 23ms，Long Task 243ms → 0
 
 ### Rust 原生解码
 

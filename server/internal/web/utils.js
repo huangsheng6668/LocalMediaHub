@@ -76,3 +76,16 @@ export function formatTranscodeStatus(payload) {
     const sessions = max < 0 ? `${active} / 不限` : `${active} / ${max}`;
     return { encoder, sessions };
 }
+
+// Large-directory incremental rendering (spec 2026-10-30-web-large-dir-render).
+// Returns how many cards to render synchronously before the first paint: the
+// first chunk, extended (never shortened) so a scroll-memory anchor card is
+// present in the initial DOM — scroll restoration resolves the anchor by
+// selector and would otherwise silently no-op.
+export function computeInitialRenderCount(total, firstChunk, anchorIndex) {
+    const n = Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
+    if (n === 0) return 0;
+    const base = Number.isFinite(firstChunk) && firstChunk > 0 ? Math.floor(firstChunk) : 0;
+    const anchorCount = Number.isFinite(anchorIndex) && anchorIndex >= 0 ? Math.floor(anchorIndex) + 1 : 0;
+    return Math.min(n, Math.max(base, anchorCount));
+}
