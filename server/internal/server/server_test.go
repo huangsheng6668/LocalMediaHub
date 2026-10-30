@@ -111,7 +111,7 @@ func TestServerStartAndStopGracefulShutdown(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "thumb")
 	cfg := &config.Config{
 		Server: config.ServerConfig{Host: "127.0.0.1", Port: port},
-		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Scan:   config.ScanConfig{Roots: []string{t.TempDir()}, VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
 		Thumbnail: config.ThumbnailConfig{
 			CacheDir: cacheDir, MaxSize: 64, Format: "jpeg",
 		},
@@ -209,7 +209,7 @@ func TestPprofRoute_RegisteredUnderDebugPrefix(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "thumb")
 	cfg := &config.Config{
 		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0},
-		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Scan:   config.ScanConfig{Roots: []string{t.TempDir()}, VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
 		Thumbnail: config.ThumbnailConfig{
 			CacheDir: cacheDir, MaxSize: 64, Format: "jpeg",
 		},
@@ -272,7 +272,7 @@ func newGzipTestServer(t *testing.T) *Server {
 	t.Helper()
 	cfg := &config.Config{
 		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0},
-		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Scan:   config.ScanConfig{Roots: []string{t.TempDir()}, VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
 		Thumbnail: config.ThumbnailConfig{
 			CacheDir: filepath.Join(t.TempDir(), "thumb"), MaxSize: 64, Format: "jpeg",
 		},
@@ -875,7 +875,7 @@ func TestBodyLimitRejectsOversizedPayload(t *testing.T) {
 func TestTokenRedactRewritesRequestURI(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{Host: "127.0.0.1", Port: 0},
-		Scan:   config.ScanConfig{VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
+		Scan:   config.ScanConfig{Roots: []string{t.TempDir()}, VideoExtensions: []string{".mp4"}, ImageExtensions: []string{".jpg"}},
 		Thumbnail: config.ThumbnailConfig{
 			CacheDir: filepath.Join(t.TempDir(), "thumb"), MaxSize: 64, Format: "jpeg",
 		},

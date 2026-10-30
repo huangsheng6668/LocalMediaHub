@@ -12,22 +12,24 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **路由**：`server/internal/server/server.go`（`Server` struct 持有所有 service 引用；`Server.Stop` 关闭 scanner + tags DB）
 - **Handler**：`server/internal/server/handler/*.go`（只做参数解析与响应，不写业务逻辑；通过 `Handler` struct 持有 service 依赖，**不使用全局变量**）
 - **Service**：`server/internal/service/*.go`
-  - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + per-root 防抖 + `cacheByDir` 每目录索引 + per-root 并发 `g.SetLimit` + 输出按路径排序）；快照持久化（2026-09-03）：`scanner_snapshot.go` Scan 后原子落盘 `.data/scan_snapshot.json`（30s 写节流）+ `StartWatching` 启动 hydrate（`cacheTime=SavedAt` 复用 stale-while-revalidate，roots/扩展名身份键不匹配即弃用），`NewScannerWithSnapshot` 为生产构造、`NewScanner` 保留给测试
-  - `tags.go` — 标签系统（SQLite WAL + busy_timeout + `SetMaxOpenConns(max(4,NumCPU))` + 索引 + 批量 IN 查询 + JSON→SQLite 自动迁移，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）
-  - `library.go` — 阅读状态与跨媒体收藏（SQLite WAL + busy_timeout + 状态自动派生（unread/reading/finished）+ 批量 decorations 查询 + 收藏快照 8KB 上限，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）；阅读时长统计（2026-09-08）：`reading_states.read_seconds` 累计列 + `reading_daily` 按日聚合表 + `GET /api/v1/library/stats/summary`（今日/近7天/累计），progress upsert 携带 `read_seconds_delta`（负数忽略、>3600 clamp，累加独立于 lastReadAt 守卫）
-  - `streaming.go` — 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`（修正 SeekCurrent 偏移），原生 Range）；转码路径（2026-09-03）：`transcode_encoder.go` 两级编码器探测（静态 `-encoders` + 运行时 testsrc 微编码，NVENC→QSV→AMF→libx264 兜底）+ `vcodec` allowlist 查表（客户端值永不进 argv）+ 会话并发信号量（`transcode.max_sessions`，缺省 3 / -1 不限），状态端点 `GET /api/v1/admin/transcode/status`；HLS 化（2026-09-03 Phase B）：`transcode_hls.go` 会话管理（`/api/v1/media/hls/playlist|segment`，会话键去重 + 空闲回收 + 4GiB LRU 缓存），Android 转码走 HLS 原生 seek（`VideoPlayerScreen` 的 URL-rebuild 特殊分支已删）；seek 锚定重转码（2026-09-06）：playlist/segment 接受 `?start=`，ffmpeg 输入端 `-ss` 秒起新会话 + 同源 running 会话自动取消（spec `2026-09-06-hls-seek-restart-design.md`），web 拖动到未转码区域即时重锚（`needsHlsRestart`），`transcodeStartOffset` 统一为**秒**
-  - `thumbnail.go` — 缩略图（LANCZOS→Linear + MD5 缓存 + sync.Pool + hot path priority + `durations.json` ffprobe 缓存 + per-file `hotTracker`）
+  - `scanner.go` — 文件扫描（TTL 缓存 + fsnotify 递归监听 `StartWatching` + per-root 防抖 + `cacheByDir` 每目录索引 + per-root 并发 `g.SetLimit` + 输出按路径排序）；快照持久化（2026-09-03）：`scanner_snapshot.go` Scan 后原子落盘 `.data/scan_snapshot.json`（30s 写节流）+ `StartWatching` 启动 hydrate（`cacheTime=SavedAt` 复用 stale-while-revalidate，roots/扩展名身份键不匹配即弃用），`NewScannerWithSnapshot` 为生产构造、`NewScanner` 保留给测试；`ScanConfig` 并发读写锁保护 + 64 根上限；`PathKey` Windows 大小写不敏感目录索引归一；`IsLinkEntry` 扫描与目录遍历跳过符号链接与 NTFS Junction；`StartWatching` 热更新优雅退出与事件协程生命周期重入安全
+  - `tags.go` — 标签系统（SQLite WAL + busy_timeout + `SetMaxOpenConns(max(4,NumCPU))` + 索引 + 批量 IN 查询 + JSON→SQLite 自动迁移，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）；路径 URL 解码与归一化 + `IsBlockedRoot` 敏感根拦截 + 失效根 fallback 校验 + `CleanDeletedPath` 写锁修正 + 标签名与颜色校验
+  - `library.go` — 阅读状态与跨媒体收藏（SQLite WAL + busy_timeout + 状态自动派生（unread/reading/finished）+ 批量 decorations 查询 + 收藏快照 8KB 上限，CRUD 走 `s.mu.RLock`，`Close()` 关闭 DB）；阅读时长统计（2026-09-08）：`reading_states.read_seconds` 累计列 + `reading_daily` 按日聚合表 + `GET /api/v1/library/stats/summary`（今日/近7天/累计），progress upsert 携带 `read_seconds_delta`（负数忽略、>3600 clamp，累加独立于 lastReadAt 守卫）；`PostDecorations` 使用 `PathKey` 字典 $O(1)$ 匹配
+  - `streaming.go` — 视频流（`http.ServeContent` + 256KB `BufferedReadSeeker`（修正 SeekCurrent 偏移），原生 Range）；转码路径（2026-09-03）：`transcode_encoder.go` 两级编码器探测（静态 `-encoders` + 运行时 testsrc 微编码，NVENC→QSV→AMF→libx264 兜底）+ `vcodec` allowlist 查表（客户端值永不进 argv）+ 会话并发信号量（`transcode.max_sessions`，缺省 3 / -1 不限），状态端点 `GET /api/v1/admin/transcode/status`；HLS 化（2026-09-03 Phase B）：`transcode_hls.go` 会话管理（`/api/v1/media/hls/playlist|segment`，会话键去重 + 空闲回收 + 4GiB LRU 缓存），Android 转码走 HLS 原生 seek（`VideoPlayerScreen` 的 URL-rebuild 特殊分支已删）；seek 锚定重转码（2026-09-06）：playlist/segment 接受 `?start=`，ffmpeg 输入端 `-ss` 秒起新会话 + 同源 running 会话自动取消（spec `2026-09-06-hls-seek-restart-design.md`），web 拖动到未转码区域即时重锚（`needsHlsRestart`），`transcodeStartOffset` 统一为**秒**；槽位等待支持 `CloseHLS` 与同源 sibling 取消排队，30s 超时返回 503 `Retry-After: 5`；`GetVideoDuration` 带 10s ffprobe 超时守护
+  - `thumbnail.go` — 缩略图（LANCZOS→Linear + MD5 缓存 + sync.Pool + hot path priority + `durations.json` ffprobe 缓存 + per-file `hotTracker`）；单图缩略图与时长端点挂载 `RateLimit(60, time.Minute)` 限流
   - `hot_dirs.go` — per-directory 访问计数 LRU（容量 256，5min flush + Shutdown 原子落盘到 `hot_directories.json`），驱动冷启动分层预热（Tier1 hot 目录 → Tier2 根目录 → Tier3 懒生成）
-  - `book.go` — BookService（章节解析、epub 图片字节读取、`GetChapterBlocks` 注入签名 `<img src>`）
+  - `book.go` — BookService（章节解析、epub 图片字节读取、`GetChapterBlocks` 注入签名 `<img src>`）；`cache` 上限 64 本 LRU 淘汰；`GetBookChapter` 消除重复 `GetBook` 反序列化
   - `book_signing.go` — `BookSigner`（HMAC-SHA256 签名，绑定 clientIP + path + manifestID，无 expire，进程重启失效）
-  - `bookparser/` 子包 — `parser.go` / `txt.go` / `txt_cache.go`（LRU 文本缓存 + 字节/字符偏移映射）/ `rules.go`（章节+卷规则）/ `epub.go` / `unsupported.go`
-  - `path.go` — 路径校验三件套（见 [安全约定](#安全约定触碰前必读)）
+  - `bookparser/` 子包 — `parser.go` / `txt.go` / `txt_cache.go`（LRU 文本缓存 + 字节/字符偏移映射）/ `rules.go`（章节+卷规则）/ `epub.go`（定向 `properties="nav"` 与 NCX 目录解析，`<nav>` 容器限定，防 manifest 全量解压炸弹与目录错判）/ `unsupported.go`
+  - `path.go` — 路径校验三件套（见 [安全约定](#安全约定触碰前必读)）；`IsLinkEntry` 判定符号链接与 NTFS Junction，`PathKey` 归一化 Windows 路径不敏感匹配
 - **Middleware**：`server/internal/server/middleware/*.go`
   - `cors.go` — CORS
   - `auth.go` — Bearer Token（header + query fallback，**SHA256 + constant-time 比较**）
   - `security_headers.go` — CSP / XFO / nosniff / Referrer-Policy（**必须在 CORS 之前挂载**）
-  - `ratelimit.go` — per-route rate limit（挂在 scan trigger + delete）+ **LRU 容量上限**（默认 4096，防伪造 `X-Forwarded-For` 内存膨胀；确定性淘汰：expired-first → oldest lastSeen → insertion seq）
+  - `ratelimit.go` — per-route rate limit（挂在 scan trigger + delete + 单图缩略图/时长）+ **LRU 容量上限**（默认 4096，防伪造 `X-Forwarded-For` 内存膨胀；确定性淘汰：expired-first → oldest lastSeen → insertion seq）
   - `private_net.go` — 私网/loopback 限制（pprof 用）
+  - Gzip Skipper（`server.go`）— 二进制媒体端点（stream/thumbnail/original/download/hls/books-image）与非 API 静态资源跳过运行时 gzip；静态资产由 `web/static.go` 预压缩并派生 `-gz` ETag
+  - 日志脱敏（`server.go`）— URL query 包含 `token=` 时执行脱敏，增加快速判断规避无 token 请求的字符串开销
 - **周边**：`server/internal/mdns/`（mDNS 注册）/ `server/internal/systray/`（系统托盘）/ `server/internal/gui/`（GUI 模式入口）/ `server/internal/web/`（前端静态资源，详见 [Web 管理界面](#web-管理界面)）/ `server/internal/ble/`（**实验性** BLE GATT 控制通道，**server=Central**：`protocol.go` 帧 codec + `central.go`（Scan/Connect/Send 状态机）+ `central_adapter.go`（tinygo bluetooth 栈适配，**默认编入单一 server 构建**，运行时无蓝牙适配器则非致命降级）+ `ble_health.go`（BleHealthMonitor 连续 Connect 失败卡死检测）与 `restart_windows.go`（`LMH_BLE_RESTART_TS` 冷却自重启清 WinRT 残留 GATT 状态，接线在 `internal/server/ble_autorestart_windows.go`）。`/api/v1/ble/scan|connect|send` HTTP handler 在 `internal/server/handler/ble.go`（`/api/v1/ble/*` 鉴权跟随路由组：有 `server.token` 走 Bearer，开放模式透传；GATT 数据链路 Phase 9 起为 v2 帧认证，密钥源 `ble.token` 优先、`server.token` 回退，**两者皆空 = 开放模式**——跳过握手、v1 无认证帧（2026-08-30），见 [安全约定](#安全约定触碰前必读)）。非致命启动，BLE 不可用 server 继续 Wi-Fi/HTTP。详见 [spec §11](docs/superpowers/specs/2026-07-26-ble-gatt-wiring-design.md)）
 - **配置**：`server/config.yaml`（运行时）/ `server/config.example.yaml`（模板）
 
@@ -67,10 +69,10 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 
 服务端内置 SPA，浏览器访问 server 地址（如 `http://localhost:8000`）即可。
 
-- **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js` / `toast.js` / `utils.js` / `library.js`（阅读状态与跨媒体收藏：筛选矩阵/徽章/DOM装饰/双向同步） / `readingTimer.js`（纯逻辑阅读计时器：textReader 活跃秒数累积，随 progress 上报 `read_seconds_delta` + 30s 心跳） / `scrollMemory.js`（双键 session 滚动记忆）
+- **公共层**：`server/internal/web/` 下 `app.js` / `boot.js` / `router.js` / `state.js` / `dom.js` / `api.js`（含 `withMediaAuthToken(url)` 媒体 URL 统一 Token 注入） / `toast.js` / `utils.js` / `library.js`（阅读状态与跨媒体收藏：筛选矩阵/徽章/DOM装饰/双向同步） / `readingTimer.js`（纯逻辑阅读计时器：textReader 活跃秒数累积，随 progress 上报 `read_seconds_delta` + 30s 心跳） / `scrollMemory.js`（双键 session 滚动记忆）
 - **样式层**：`css/` 分层模块（加载顺序 `base` → `themes` → `layout` → `components` → `views/*`，`responsive.css` 必须最后加载以在层叠上压过视图规则）——2026-09-27 Ink Editorial 重设计（Slate Ink & Paper，spec `docs/superpowers/specs/2026-09-27-ink-editorial-redesign-design.md`，前身 2026-09-02 现代中性风）：7 套 `[data-theme]` chrome 主题重调为暖灰纸面 + 墨黑主操作（`--action-ink`）+ 苔绿 accent（`--accent`），阅读器 chrome 幽灵化（半透明 + backdrop-blur），阅读主题 hex 双端对称重调；emoji 图标全部为内联 SVG；`theme-parity.test.mjs` 守护双端主题 token 对称(reader hex / chrome token / label / 无 inline style)，改色值或标签需双端同步
-- **视图层**：`dashboard.js` / `browserView.js` / `bookshelf.js`（书架：扫 `book_progress:*` 渲染卡片网格 + 仪表盘嵌入区 `renderSection`；全页路由带**本地即时搜索**（`filterBookshelf` 纯函数，匹配书名/路径、大小写不敏感，120ms 防抖，无服务端请求）与无命中空状态——注意 `[hidden]` 在 `.bookshelf-grid`/`.empty-state` 上需显式 `display:none` 守卫） / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
-- **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行）+ 子模块
+- **视图层**：`dashboard.js` / `browserView.js`（模块级 `Intl.Collator` 复用自然排序） / `bookshelf.js`（书架：扫 `book_progress:*` 渲染卡片网格 + 仪表盘嵌入区 `renderSection`；全页路由带**本地即时搜索**（`filterBookshelf` 纯函数，匹配书名/路径、大小写不敏感，120ms 防抖，无服务端请求）与无命中空状态——注意 `[hidden]` 在 `.bookshelf-grid`/`.empty-state` 上需显式 `display:none` 守卫） / `bookmarksView.js` / `settings.js` / `videoPlayer.js` / `lightbox.js` / `delete.js` / `readerPrefs.js`
+- **阅读器（Round 33 拆分，bus 解耦架构）**：`textReader.js`（编排主模块 ~577 行，章节渲染提升偏好设置缓存，书签点击事件委托，`collectVisibleParagraphs` 尾部索引优化，路由退出由 `router.js` / `bookshelf.js` 统一触发 `_cleanupReader()` 彻底销毁心跳定时器、自动滚动 rAF 与 DOM 监听；`scrollNav` MutationObserver 范围收敛于 body `data-active-tab` 属性）+ 子模块
   - `bus.js`（事件总线 on/emit/off/EVT，零依赖）
   - `reader-state.js`（共享状态单例 + `setCurrentIdx` 触发 `chapter:changed`）
   - `progress.js`（进度计算 + 滚动章节推断，纯函数 + 阈值 120px）
@@ -80,7 +82,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
   - `reader-settings.js`（阅读设置 dialog，emit `settings:changed`；light dismiss：document capture click + rAF 延迟挂载，遮罩/外部点击自动关闭，`×`/Esc 走原生 `close` 事件解绑）
   - **注意**：`state.js` / `settings.js` 是全局 app 模块，**勿与** `reader-state.js` / `reader-settings.js` 混淆
 - **测试**：`node --test`（用 `.test.mjs` 扩展名 + jsdom，详见 [测试与验证](#测试与验证)）
-- **Token 集成**：`api.js` 的 `apiRequest()` 自动注入 Bearer header + 401 事件 → `app.js` 弹 token modal；sessionStorage 持久化
+- **Token 集成**：`api.js` 的 `apiRequest()` 自动注入 Bearer header + 401 事件 → `app.js` 弹 token modal；sessionStorage 持久化；`withMediaAuthToken(url)` 为 DOM 媒体（`<img>` / `<video>`）自动附加 token 参数，避免 token 模式下 401 失败导致触发 429 自锁定
 - **CSP 兼容**：无 inline `<script>`、无 inline `style="..."` 属性（已全量迁移为 CSS 类，`style-src 'self'` 不含 `'unsafe-inline'`；动态样式走 CSSOM 属性赋值）
 - **无构建步骤**，跟随 server 静态服务；**vendor 第三方库**：`vendor/hls.min.js`（hls.js 1.5.20 + `.sha256` 校验，embed 于 `web.go`，spec 2026-09-03-hls-transcode-b2）——转码播放走 HLS（`hlsCompat.js` 三级策略：hls.js → 原生 → 旧 fMP4 管道兜底），`videoPlayer.js` 的 URL-rebuild seek 已删除
 
@@ -194,6 +196,7 @@ node --test
 - `ValidatePath` —— 常规媒体扫描根目录校验
 - `ValidateSystemMediaAccess` —— `/api/v1/system/*` 端点专用，强制 `system.allowed_roots` 边界
 - `ValidateAccessibleMediaPath` —— `/api/v1/media/*` 统一媒体端点专用，覆盖扫描根目录与 `system.allowed_roots`
+- `IsLinkEntry` —— `mode&(fs.ModeSymlink|fs.ModeIrregular) != 0`，扫描、浏览与目录 Zip 打包跳过符号链接与 Windows NTFS Junction，打包同时校验 `os.SameFile` 防 TOCTOU
 
 任何路径相关改动先确认是否调用上述三者；新增端点必须显式选择其一。
 
@@ -224,6 +227,7 @@ node --test
 - `<img src="/api/v1/books/image?path=...&manifest=...&sig=...">`，sig = HMAC-SHA256(serverSecret, clientIP + "|" + path + "|" + manifestID)
 - 绑定 clientIP + path + manifestID，无 expire；进程重启 serverSecret 重生成，旧 sig 全部失效
 - `/api/v1/books/image` 优先认 `?sig=`；`?token=` 作为 deprecated fallback（打 `[DEPRECATED]` warn）
+- 鉴权验证在 `os.Stat` 之前前置执行，未授权或签名失效统一返回 401（防止根据 404/403/401 差异探测文件存在性 oracle）；鉴权失败受 `AuthFailureLimiter` 约束，连续失败触发 429 访问回退
 - 新增 `/api/v1/books/sign-image` endpoint 供动态场景（lightbox）
 - access log redact：`?token=` 替换为 `REDACTED`（redact 中间件挂在 Logger 之后 = 请求侧先执行）
 
