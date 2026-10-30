@@ -86,6 +86,7 @@ LocalMediaHub 是 PC ↔ Android 局域网媒体串流系统：服务端扫描�
 - **CSP 兼容**：无 inline `<script>`、无 inline `style="..."` 属性（已全量迁移为 CSS 类，`style-src 'self'` 不含 `'unsafe-inline'`；动态样式走 CSSOM 属性赋值）
 - **无构建步骤**，跟随 server 静态服务；**vendor 第三方库**：`vendor/hls.min.js`（hls.js 1.5.20 + `.sha256` 校验，embed 于 `web.go`，spec 2026-09-03-hls-transcode-b2）——转码播放走 HLS（`hlsCompat.js` 三级策略：hls.js → 原生 → 旧 fMP4 管道兜底），`videoPlayer.js` 的 URL-rebuild seek 已删除
 - **播放源选择（spec 2026-10-30-web-direct-play）**：`.mp4/.m4v/.mov/.webm` 优先「原画」直连 `/api/v1/media/stream`（HTTP Range，拖动即时、不启动 ffmpeg、不加载 hls.js），按钮「原画/转码」可手动切换并保持播放位置；直连失败自动回退 HLS——`error`（MEDIA_ERR_DECODE/SRC_NOT_SUPPORTED）与「音轨可播但视频轨解不出」的静默黑屏（`loadedmetadata` 时 `videoWidth === 0`）两条路径都覆盖，失败路径记入 `directPlayBlocked`，重开直接走转码
+- **拖动预热与状态提示（spec 2026-10-30 Phase 2）**：HLS 远距离拖动先 `fetch` 锚定 playlist（服务端阻塞到首片就绪）再切换源，预热期间暂停旧画面并显示 `#video-status-overlay`「定位中…」；`reanchorSeq` 代际 + `AbortController` 作废过期预热（最后一次拖动生效）；`waiting` 持续 300ms 才显示「缓冲中…」，`playing/canplay/seeked` 收起
 
 ### Rust 原生解码
 

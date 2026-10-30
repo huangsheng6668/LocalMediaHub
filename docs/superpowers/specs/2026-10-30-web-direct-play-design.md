@@ -66,8 +66,14 @@ ffmpeg 当前未设置关键帧间隔，默认 GOP=250 帧（~8.3s），`-hls_ti
   默认 GOP（~250 帧 ≈ 8.3s）使分片翻倍。固定 120 帧后实测 60s/30fps 源产出
   15 × 4.000s 分片，首个 playlist 0.89s（原 ~1.1s），锚定 seek 首个 playlist
   0.607s；浏览器远距离拖动重锚到出画面 754ms
-- ⬜ 拖动时保留旧画面、预热新会话后再切换
-- ⬜ 「定位中 / 缓冲中」overlay
+- ✅ 拖动时保留旧画面、预热新会话后再切换：`reanchorHls` 先 `fetch` 锚定 playlist
+  （服务端阻塞到首片就绪）再 `applySource`；预热期间 `pause()` 保留当前解码帧并
+  显示「定位中…」；`reanchorSeq` 代际保护（再次拖动 / 关闭弹窗作废旧预热）+
+  `AbortController` 取消在途请求；预热超时或失败回退到旧行为。E2E：远距离拖动
+  到出画面 748ms，快速二次拖动 840ms 且以最后一次为准
+- ✅ 「定位中 / 缓冲中」overlay：`#video-status-overlay`；「定位中」即时显示，
+  「缓冲中」由 `waiting` 300ms 防抖触发、`playing/canplay/seeked` 收起；
+  直连模式不受影响（拖动 53ms、无 overlay）
 
 ## 影响面
 

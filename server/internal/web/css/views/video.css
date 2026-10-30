@@ -26,6 +26,56 @@
     overflow: hidden;
 }
 
+/* Seek/buffer status overlay (spec 2026-10-30): keeps the last decoded frame
+   visible while a new HLS anchor warms up, instead of tearing the decoder down
+   and leaving a black rectangle for the whole session startup. */
+.video-status-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.18);
+    pointer-events: none;
+    z-index: 5;
+}
+
+.video-status-overlay[hidden] {
+    display: none;
+}
+
+.video-status-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(10, 10, 12, 0.72);
+    color: var(--text-primary);
+    font-size: 13px;
+    letter-spacing: 0.02em;
+}
+
+.video-status-label::before {
+    content: "";
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.28);
+    border-top-color: var(--text-primary);
+    border-radius: 50%;
+    animation: video-status-spin 0.8s linear infinite;
+}
+
+@keyframes video-status-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .video-status-label::before {
+        animation: none;
+    }
+}
+
 /* Custom Controls Overlay */
 .video-controls-overlay {
     position: absolute;

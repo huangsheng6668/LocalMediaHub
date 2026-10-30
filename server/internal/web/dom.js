@@ -72,6 +72,9 @@ export const elements = {
     btnVideoDelete: document.getElementById('btn-video-delete'),
     btnCloseVideoModal: document.getElementById('btn-close-video-modal'),
 
+    videoStatusOverlay: document.getElementById('video-status-overlay'),
+    videoStatusLabel: document.getElementById('video-status-label'),
+
     // Custom controls
     videoControlsOverlay: document.getElementById('video-controls-overlay'),
     videoProgress: document.getElementById('video-progress'),

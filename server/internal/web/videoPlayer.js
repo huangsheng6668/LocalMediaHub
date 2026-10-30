@@ -42,11 +42,56 @@ const directPlayBlocked = new Set();
 let directPlayStartSec = 0;
 let directFallbackPending = false;
 
+// Seek prewarm state (spec 2026-10-30 Phase 2): reanchorSeq invalidates an
+// in-flight prewarm when the user seeks again or closes the modal, and
+// reanchorPending keeps buffering listeners from clearing the 定位中 overlay.
+let reanchorPending = false;
+let reanchorSeq = 0;
+let bufferingTimer = null;
+let prewarmController = null;
+
+function abortPrewarm() {
+    if (prewarmController) {
+        prewarmController.abort();
+        prewarmController = null;
+    }
+}
+
 function destroyHls() {
     if (hls) {
         try { hls.destroy(); } catch (e) { /* already torn down */ }
         hls = null;
     }
+}
+
+// Status overlay: "定位中…" while an anchored HLS session warms up and
+// "缓冲中…" when playback stalls. Re-anchoring pauses the element instead of
+// destroying it, so the last decoded frame stays on screen underneath.
+function showVideoStatus(text) {
+    if (!elements.videoStatusOverlay) return;
+    elements.videoStatusLabel.textContent = text;
+    elements.videoStatusOverlay.hidden = false;
+}
+
+function hideVideoStatus() {
+    if (!elements.videoStatusOverlay) return;
+    elements.videoStatusOverlay.hidden = true;
+}
+
+function clearBufferingTimer() {
+    clearTimeout(bufferingTimer);
+    bufferingTimer = null;
+}
+
+function scheduleBufferingOverlay() {
+    if (!state.playingFile || reanchorPending) return;
+    clearBufferingTimer();
+    bufferingTimer = setTimeout(() => {
+        bufferingTimer = null;
+        if (state.playingFile && !reanchorPending && elements.videoPlayer.readyState < 3) {
+            showVideoStatus('缓冲中…');
+        }
+    }, 300);
 }
 
 // hls.js 惰性加载（2026-09-30）。
@@ -137,6 +182,7 @@ function applySource(url, strategy, seekSec) {
                     default:
                         console.error('HLS unrecoverable error:', data);
                         destroyHls();
+                        hideVideoStatus();
                         break;
                 }
             });
@@ -195,6 +241,67 @@ async function startHlsPlayback(file, seekSec) {
         return;
     }
     applySource(buildHlsPlaylistUrl(state.apiBase, file.path, startSec), hlsStrategy, 0);
+}
+
+// prewarmHlsPlaylist blocks until the anchored session has its first segment
+// ready (the server holds the playlist request until ffmpeg publishes it).
+// Resolving here means the subsequent hls.js attach starts with data already
+// on disk, so the old frame only disappears for the MSE handover instead of
+// for the whole transcode startup.
+async function prewarmHlsPlaylist(file, startSec) {
+    const token = getAuthToken();
+    const controller = new AbortController();
+    prewarmController = controller;
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+        const res = await fetch(buildHlsPlaylistUrl(state.apiBase, file.path, startSec), {
+            headers: token ? { Authorization: 'Bearer ' + token } : {},
+            cache: 'no-store',
+            signal: controller.signal,
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        await res.text();
+    } finally {
+        clearTimeout(timer);
+        if (prewarmController === controller) prewarmController = null;
+    }
+}
+
+// reanchorHls moves an HLS session to a new absolute position. The current
+// frame keeps showing while the anchored session warms up; a newer seek or a
+// modal close invalidates the in-flight pass via reanchorSeq.
+async function reanchorHls(file, targetTime) {
+    const startSec = Math.max(0, Math.floor(targetTime));
+    const seq = ++reanchorSeq;
+    const isStale = () => seq !== reanchorSeq || state.playingFile !== file;
+    abortPrewarm();
+    reanchorPending = true;
+    clearBufferingTimer();
+    elements.videoPlayer.pause();
+    showVideoStatus('定位中…');
+
+    const swap = () => {
+        state.transcodeStartOffset = startSec;
+        applySource(buildHlsPlaylistUrl(state.apiBase, file.path, startSec), hlsStrategy, 0);
+        showVideoStatus('缓冲中…');
+        elements.videoPlayer.play().catch(() => {});
+    };
+
+    try {
+        if (hlsStrategy === 'hlsjs') {
+            await prewarmHlsPlaylist(file, startSec);
+        }
+        if (isStale()) return;
+        swap();
+    } catch (err) {
+        if (isStale()) return;
+        // Prewarm timed out or the server refused a slot: fall back to the old
+        // behaviour and let hls.js retry the source itself.
+        console.warn('HLS prewarm failed, switching source anyway:', err);
+        swap();
+    } finally {
+        if (seq === reanchorSeq) reanchorPending = false;
+    }
 }
 
 // 更新倍速菜单高亮项（按当前 playbackRate）
@@ -268,6 +375,11 @@ export async function openVideoPlayer(file) {
     state.videoDuration = 0;
     directPlayStartSec = 0;
     directFallbackPending = false;
+    reanchorSeq++;
+    reanchorPending = false;
+    abortPrewarm();
+    clearBufferingTimer();
+    hideVideoStatus();
 
     // Initialize custom controls
     elements.videoVolume.value = elements.videoPlayer.volume;
@@ -378,6 +490,11 @@ export function setupVideoPlayerListeners(elements) {
         state.playingFile = null;
         directPlayStartSec = 0;
         directFallbackPending = false;
+        reanchorSeq++;
+        reanchorPending = false;
+        abortPrewarm();
+        clearBufferingTimer();
+        hideVideoStatus();
         // src = '' 会让部分浏览器把当前文档 URL 当作媒体源再发一次请求；
         // 正确做法是移除属性再 load() 以真正释放媒体资源。
         elements.videoPlayer.removeAttribute('src');
@@ -426,7 +543,7 @@ export function setupVideoPlayerListeners(elements) {
     // 原画 / 转码切换（spec 2026-10-30）：保持绝对播放位置，源切换后继续播放。
     elements.btnVideoSource.addEventListener('click', () => {
         const file = state.playingFile;
-        if (!file) return;
+        if (!file || reanchorPending) return;
         const wasPlaying = !elements.videoPlayer.paused;
         const absolutePos = state.transcodeStartOffset + (elements.videoPlayer.currentTime || 0);
         const seekSec = Math.max(0, Math.floor(absolutePos));
@@ -488,13 +605,32 @@ export function setupVideoPlayerListeners(elements) {
         const seekable = elements.videoPlayer.seekable;
         const seekableEnd = seekable.length ? seekable.end(seekable.length - 1) : null;
         if (needsHlsRestart(targetTime, offsetSec, seekableEnd)) {
-            const startSec = Math.max(0, Math.floor(targetTime));
-            state.transcodeStartOffset = startSec;
-            applySource(buildHlsPlaylistUrl(state.apiBase, state.playingFile.path, startSec), hlsStrategy, 0);
-            elements.videoPlayer.play().catch(() => {});
+            reanchorHls(state.playingFile, targetTime);
         } else {
             elements.videoPlayer.currentTime = Math.max(0, targetTime - offsetSec);
         }
+    });
+
+    // Buffering feedback: only surface stalls longer than 300ms so ordinary
+    // short seeks do not flash the overlay.
+    elements.videoPlayer.addEventListener('waiting', scheduleBufferingOverlay);
+    elements.videoPlayer.addEventListener('playing', () => {
+        clearBufferingTimer();
+        hideVideoStatus();
+    });
+    elements.videoPlayer.addEventListener('canplay', () => {
+        if (reanchorPending) return;
+        clearBufferingTimer();
+        hideVideoStatus();
+    });
+    elements.videoPlayer.addEventListener('seeked', () => {
+        if (reanchorPending) return;
+        clearBufferingTimer();
+        hideVideoStatus();
+    });
+    elements.videoPlayer.addEventListener('pause', () => {
+        if (reanchorPending) return;
+        hideVideoStatus();
     });
 
     // Custom controls: Timeupdate synchronization
