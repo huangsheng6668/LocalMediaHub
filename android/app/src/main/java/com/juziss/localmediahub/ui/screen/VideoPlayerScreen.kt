@@ -46,6 +46,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -127,10 +128,17 @@ internal fun isLocalStreamUri(url: String): Boolean {
 /**
  * Decides whether a playback error should trigger an automatic ONE-SHOT
  * retry with server-side transcode (spec 2026-09-03-android-transcode-
- * fallback, Phase C). Only codec-level failures qualify: the device
- * lacking a decoder or the container being unsupported is exactly what
- * transcoding to H.264/fMP4 fixes. Network/IO/remote errors do not —
- * transcoding cannot help those, and retrying would just mask them.
+ * fallback, Phase C). Only decoder/container-level failures qualify: the
+ * device lacking a decoder, the decoder failing to initialize, or the
+ * container being unsupported is exactly what transcoding to H.264/AAC
+ * fixes. Network/IO/remote errors do not — transcoding cannot help those,
+ * and retrying would just mask them.
+ *
+ * Decoder init/query/decoding failures (4001/4002/4003) are included
+ * because `DefaultRenderersFactory.setEnableDecoderFallback` has already
+ * exhausted the software decoders by the time they surface, and the real-
+ * device H.264 High 10 sample failed with 4001 while not matching the
+ * 4004/4005 capability codes.
  *
  * Guards: already-transcoding streams never retry (a failing transcode
  * means the problem is not the codec); the retry happens at most once
@@ -144,12 +152,47 @@ internal fun shouldAutoFallbackToTranscode(
 ): Boolean {
     if (isTranscoding || alreadyAttempted || isLocalUri) return false
     return when (errorCode) {
+        PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+        PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+        PlaybackException.ERROR_CODE_DECODING_FAILED,
         PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
         PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
         PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
         -> true
         else -> false
     }
+}
+
+/**
+ * A video that plays this long without rendering a single frame is treated
+ * as a silent decode failure (decoder reports support but outputs nothing).
+ * The first frame normally arrives well under a second on LAN; 6s leaves
+ * room for slow seeks without making the user stare at a black screen.
+ */
+internal const val FIRST_FRAME_FALLBACK_TIMEOUT_MS: Long = 6_000L
+
+internal const val FIRST_FRAME_WATCHDOG_TICK_MS: Long = 500L
+
+/**
+ * Whether the first-frame watchdog should trigger the one-shot transcode
+ * fallback. Only counts time while actually playing a ready stream that
+ * has a video track; buffering, pausing or a rendered frame reset the
+ * accumulated time, so slow starts never false-positive.
+ */
+internal fun shouldFallbackForMissingFirstFrame(
+    isTranscoding: Boolean,
+    alreadyAttempted: Boolean,
+    isLocalUri: Boolean,
+    hasVideoTrack: Boolean,
+    hasRenderedFirstFrame: Boolean,
+    isPlaying: Boolean,
+    playbackState: Int,
+    unrenderedPlayingMs: Long,
+): Boolean {
+    if (isTranscoding || alreadyAttempted || isLocalUri) return false
+    if (!hasVideoTrack || hasRenderedFirstFrame) return false
+    if (!isPlaying || playbackState != Player.STATE_READY) return false
+    return unrenderedPlayingMs >= FIRST_FRAME_FALLBACK_TIMEOUT_MS
 }
 
 @Composable
@@ -376,6 +419,31 @@ fun VideoPlayerScreen(
     // the same inner-class-write reason.
     val autoFallbackAttemptedState = remember(streamUrl) { mutableStateOf(false) }
 
+    // Phase 3 (spec 2026-10-31-...-phase3): silent decode failures never
+    // raise onPlayerError, so watch for a missing first frame instead.
+    val hasRenderedFirstFrameState = remember(streamUrl) { mutableStateOf(false) }
+
+    // Shared by the error path and the first-frame watchdog so the swap
+    // logic cannot drift between them.
+    val triggerTranscodeFallback: (Long, String) -> Unit = { posMs, reason ->
+        val at = posMs.coerceAtLeast(0L)
+        autoFallbackAttemptedState.value = true
+        positionHolder.value = at
+        transcodeEnabledState.value = true
+        android.util.Log.w("VideoPlayback", "transcode fallback ($reason) at ${at}ms")
+        // HLS playlist URL (native random seeking) — resume right at the
+        // failure position.
+        exoPlayer.setMediaItem(buildPlaybackMediaItem(streamUrl, transcode = true))
+        exoPlayer.prepare()
+        exoPlayer.seekTo(at)
+        exoPlayer.play()
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.video_fallback_transcode),
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+    }
+
     // Auto-rotate based on video aspect ratio
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
@@ -445,7 +513,6 @@ fun VideoPlayerScreen(
             // seek path uses; the URL rebuild strips any stale params, so
             // later gesture seeks and the restart chip keep transcode=true.
             override fun onPlayerError(error: PlaybackException) {
-                val posMs = exoPlayer.currentPosition.coerceAtLeast(0L)
                 if (!shouldAutoFallbackToTranscode(
                         isTranscoding = transcodeEnabledState.value,
                         alreadyAttempted = autoFallbackAttemptedState.value,
@@ -455,20 +522,15 @@ fun VideoPlayerScreen(
                 ) {
                     return
                 }
-                autoFallbackAttemptedState.value = true
-                positionHolder.value = posMs
-                transcodeEnabledState.value = true
-                // HLS playlist URL (native random seeking) — resume right
-                // at the failure position.
-                exoPlayer.setMediaItem(buildPlaybackMediaItem(streamUrl, transcode = true))
-                exoPlayer.prepare()
-                exoPlayer.seekTo(posMs)
-                exoPlayer.play()
-                android.widget.Toast.makeText(
-                    context,
-                    context.getString(R.string.video_fallback_transcode),
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
+                triggerTranscodeFallback(
+                    exoPlayer.currentPosition,
+                    "error=${error.errorCode}",
+                )
+            }
+
+            // Disarms the first-frame watchdog for the current media item.
+            override fun onRenderedFirstFrame() {
+                hasRenderedFirstFrameState.value = true
             }
         }
         exoPlayer.addListener(listener)
@@ -488,6 +550,45 @@ fun VideoPlayerScreen(
             if (shouldPersistPlaybackProgress(position, duration, lastPersistedPositionMs.get())) {
                 lastPersistedPositionMs.set(position)
                 onProgress(position, duration)
+            }
+        }
+    }
+
+    // Phase 3 (spec 2026-10-31-...-phase3): some decoders report support but
+    // never output a frame (real-device H.264 High 4:4:4), leaving ExoPlayer
+    // READY/PLAYING on a black picture without ever calling onPlayerError.
+    // Count only playing-ready time so buffering or a rendered frame resets
+    // the window and slow starts cannot false-positive.
+    LaunchedEffect(exoPlayer, streamUrl) {
+        var unrenderedPlayingMs = 0L
+        while (true) {
+            delay(FIRST_FRAME_WATCHDOG_TICK_MS)
+            // Once a frame is on screen the watchdog has nothing left to
+            // watch — stop instead of ticking for the rest of the movie.
+            if (hasRenderedFirstFrameState.value) break
+            val hasVideoTrack =
+                exoPlayer.currentTracks.groups.any { it.type == C.TRACK_TYPE_VIDEO }
+            val counting = exoPlayer.isPlaying &&
+                exoPlayer.playbackState == Player.STATE_READY &&
+                hasVideoTrack && !hasRenderedFirstFrameState.value
+            unrenderedPlayingMs = if (counting) {
+                unrenderedPlayingMs + FIRST_FRAME_WATCHDOG_TICK_MS
+            } else {
+                0L
+            }
+            if (shouldFallbackForMissingFirstFrame(
+                    isTranscoding = transcodeEnabledState.value,
+                    alreadyAttempted = autoFallbackAttemptedState.value,
+                    isLocalUri = isLocalStreamUri(streamUrl),
+                    hasVideoTrack = hasVideoTrack,
+                    hasRenderedFirstFrame = hasRenderedFirstFrameState.value,
+                    isPlaying = exoPlayer.isPlaying,
+                    playbackState = exoPlayer.playbackState,
+                    unrenderedPlayingMs = unrenderedPlayingMs,
+                )
+            ) {
+                triggerTranscodeFallback(exoPlayer.currentPosition, "no-first-frame")
+                break
             }
         }
     }

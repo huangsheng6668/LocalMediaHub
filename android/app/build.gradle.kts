@@ -82,8 +82,8 @@ android {
         applicationId = "com.juziss.localmediahub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.5.5"
+        versionCode = 13
+        versionName = "1.5.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -392,14 +392,20 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.5.0")
 
     // Video player
-    implementation("androidx.media3:media3-exoplayer:1.2.0")
+    // Phase 3 (spec 2026-10-31-android-video-playback-perf-phase3): bumped
+    // 1.2.0 → 1.11.1 (latest stable; 1.12.x is still alpha). Relevant fixes:
+    // unrecognized but well-formed codec profile/level is no longer reported
+    // as supported (real-device H.264 4:4:4 silent black screen), dynamic
+    // scheduling is default, audio underrun debounce, HLS/extractor fixes.
+    // All Media3 APIs used by this app still exist in 1.11.1.
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
     // HLS transcode fallback (spec 2026-10-30-android-video-playback-perf):
     // DefaultMediaSourceFactory loads the HLS factory reflectively; without
     // this artifact transcode URLs fail with "No suitable media source factory".
-    implementation("androidx.media3:media3-exoplayer-hls:1.2.0")
-    implementation("androidx.media3:media3-ui:1.2.0")
-    implementation("androidx.media3:media3-datasource-okhttp:1.2.0")
-    implementation("androidx.media3:media3-session:1.2.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
+    implementation("androidx.media3:media3-session:1.11.1")
     // FFmpeg extension: media3-decoder-ffmpeg is not published to Maven.
     // libffmpeg.so is pre-built in jniLibs/arm64-v8a/ for future FFmpeg JNI bridge.
 

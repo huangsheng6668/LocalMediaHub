@@ -49,6 +49,65 @@ class VideoPlayerFallbackTest {
     }
 
     @Test
+    fun decoderInitFailureTriggersFallback() {
+        assertTrue(fallbackFor(PlaybackException.ERROR_CODE_DECODER_INIT_FAILED))
+    }
+
+    @Test
+    fun decoderQueryFailureTriggersFallback() {
+        assertTrue(fallbackFor(PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED))
+    }
+
+    @Test
+    fun decodingFailureTriggersFallback() {
+        assertTrue(fallbackFor(PlaybackException.ERROR_CODE_DECODING_FAILED))
+    }
+
+    @Test
+    fun audioTrackErrorsDoNotRetry() {
+        for (code in intArrayOf(
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
+        )) {
+            assertFalse(fallbackFor(code))
+        }
+    }
+
+    @Test
+    fun newDecoderCodesRespectGuards() {
+        for (code in intArrayOf(
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+        )) {
+            assertFalse(
+                shouldAutoFallbackToTranscode(
+                    isTranscoding = true,
+                    alreadyAttempted = false,
+                    isLocalUri = false,
+                    errorCode = code,
+                )
+            )
+            assertFalse(
+                shouldAutoFallbackToTranscode(
+                    isTranscoding = false,
+                    alreadyAttempted = true,
+                    isLocalUri = false,
+                    errorCode = code,
+                )
+            )
+            assertFalse(
+                shouldAutoFallbackToTranscode(
+                    isTranscoding = false,
+                    alreadyAttempted = false,
+                    isLocalUri = true,
+                    errorCode = code,
+                )
+            )
+        }
+    }
+
+    @Test
     fun alreadyTranscodingNeverRetries() {
         for (code in intArrayOf(
             PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
@@ -116,4 +175,12 @@ class VideoPlayerFallbackTest {
         assertTrue(isLocalStreamUri("android.resource://pkg/raw/x"))
         assertFalse(isLocalStreamUri("http://192.168.1.2:8000/api/v1/media/stream?path=a"))
     }
+
+    private fun fallbackFor(errorCode: Int): Boolean =
+        shouldAutoFallbackToTranscode(
+            isTranscoding = false,
+            alreadyAttempted = false,
+            isLocalUri = false,
+            errorCode = errorCode,
+        )
 }
