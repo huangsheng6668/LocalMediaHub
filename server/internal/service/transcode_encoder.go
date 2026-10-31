@@ -258,6 +258,9 @@ func buildTranscodeArgs(srcPath string, startSec float64, enc resolvedEncoder) [
 	} else {
 		args = append(args, "-vcodec", enc.Name)
 		args = append(args, knownEncoderArgs[enc.Name]...)
+		// Same 10-bit rejection as the HLS path; copy streams must keep the
+		// source pixel format, so this applies to re-encodes only.
+		args = append(args, "-pix_fmt", "yuv420p")
 	}
 	args = append(args,
 		"-acodec", "aac",

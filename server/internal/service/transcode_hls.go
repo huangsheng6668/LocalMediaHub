@@ -235,6 +235,10 @@ func buildHlsArgs(safePath string, startSec int64, enc resolvedEncoder, segDir, 
 	args = append(args, "-vcodec", enc.Name)
 	args = append(args, knownEncoderArgs[enc.Name]...)
 	args = append(args,
+		// Downconvert to 8-bit 4:2:0. Hardware encoders reject 10-bit input
+		// ("10 bit encode not supported"), failing the whole session with a
+		// 503 on H.264 High 10 sources; already-8-bit inputs are unaffected.
+		"-pix_fmt", "yuv420p",
 		// The HLS muxer only splits on keyframes; without this the encoder
 		// default GOP (~250 frames ≈ 8s) doubles hls_time and seek
 		// granularity. -g works for NVENC/QSV/AMF/libx264 alike, whereas

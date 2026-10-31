@@ -168,8 +168,8 @@ Robolectric 测试依赖，而不是降级 Media3。
 ## 非目标
 
 - 强制 `CHANGE_FRAME_RATE_ALWAYS` 或手写 `VideoFrameMetadataListener` 帧率控制。
-- 服务端转码参数、HLS 分片策略、Web 播放器。已发现的 `-pix_fmt yuv420p`
-  缺口（10-bit 源无法 NVENC 编码）留待单独授权处理。
+- 服务端转码参数、HLS 分片策略、Web 播放器。`-pix_fmt yuv420p` 缺口已作为
+  同日后继修复单独完成（见文末）。
 - 「解码器交付损坏帧」的检测（4:4:4 黑屏/花屏）：需像素级校验，无法用首帧启发式解决。
 - 手势、PiP、进度保存语义（Phase 2 已完成）。
 - Media3 `1.12.0-alpha`（alpha 不采用）。
@@ -190,7 +190,7 @@ Robolectric 测试依赖，而不是降级 Media3。
    (error=4003) at 0ms`（Phase 1 时无任何回退）。但服务端 HLS 转码 503
    `transcode session unavailable`：`buildHlsArgs` 未指定 `-pix_fmt yuv420p`，
    NVENC 对 10-bit 输入直接报 `10 bit encode not supported`（用同一 argv 手动
-   ffmpeg 复现）。属**服务端**残余，本 Phase 不动（需单独授权）。
+   ffmpeg 复现）。属**服务端**残余，已由同日后继修复解决（见文末）。
 2. **H.264 High 4:4:4**：解码器交付了帧（画面破碎/黑、播放到 00:20/00:20、
    `onVideoSizeChanged` 报 1280×720），`onRenderedFirstFrame` 已触发，看门狗
    按设计不误判。该「输出损坏」场景超出首帧检测能力，记录为残余。
@@ -200,6 +200,19 @@ Robolectric 测试依赖，而不是降级 Media3。
    「上次看到 0:12」续播弹窗（进度保存正常）。
 5. **音频 offload**：见 §4，`ENABLED` 对视频播放无效，已撤销。
 6. **AFR**：见 P3-4，Media3 发起 `60.00 ExactOrMultiple OnlySeamless` 请求。
+
+## 后续修复：10-bit 转码（2026-10-31，服务端）
+
+`buildHlsArgs` 与 `buildTranscodeArgs`（非 `copy` 分支）追加 `-pix_fmt yuv420p`：
+两条转码路径都要求 8-bit 4:2:0 输出，硬件编码器对 10-bit 输入直接拒编；源本身
+已是 yuv420p 时该参数无副作用。`copy` 流保持源像素格式，不加该参数。
+
+验证：`TestBuildHlsArgsPixelFormat` 覆盖 NVENC/QSV/AMF/libx264 四种编码器的参数
+位置；`TestBuildTranscodeArgs` 精确匹配三条重编码 argv 并确认 `copy` 分支不变。
+真机等价复现（本机 NVENC）：用 libx264 生成 `yuv420p10le` High 10 样片，
+`/api/v1/media/hls/playlist` 返回 200 并产出分片，ffprobe 分片为
+`h264 / Main / yuv420p`；`/api/v1/media/stream?transcode=true` 同样输出
+`h264 / Main / yuv420p`。样片验证后已删除。
 
 ## 版本
 

@@ -54,6 +54,20 @@ func TestBuildHlsArgsKeyframeInterval(t *testing.T) {
 	assert.Contains(t, joined, " -g 120 ")
 }
 
+// TestBuildHlsArgsPixelFormat pins 8-bit 4:2:0 output. Hardware encoders
+// reject 10-bit input outright ("10 bit encode not supported"), which made
+// the whole session fail with 503 for H.264 High 10 sources; converting to
+// yuv420p is a no-op for already-8-bit 4:2:0 inputs.
+func TestBuildHlsArgsPixelFormat(t *testing.T) {
+	for _, name := range []string{"h264_nvenc", "h264_qsv", "h264_amf", "libx264"} {
+		args := buildHlsArgs(`D:\m.mp4`, 0, resolvedEncoder{Name: name}, `C:\seg`, `C:\seg\index.m3u8`)
+		joined := strings.Join(args, " ")
+		assert.Contains(t, joined, " -pix_fmt yuv420p ", name)
+		assert.Less(t, strings.Index(joined, "-pix_fmt yuv420p"), strings.Index(joined, "-f hls"),
+			"%s: -pix_fmt must be an output option before the HLS muxer", name)
+	}
+}
+
 func TestValidHlsSegmentName(t *testing.T) {
 	valid := []string{"seg00000.ts", "seg00001.ts", "seg99999.ts"}
 	invalid := []string{
